@@ -830,6 +830,19 @@ void MainWindow::createToolBars()
   adjtb->node->setAttribute("box-anchor", vertToolbar ? "vfill" : "hfill");
   adjtb->node->addClass("main-toolbar-autoadj");
 
+  if(!vertToolbar) {
+    static const Dim floatInset = 15;
+    static const real floatCorner = 12;
+    adjtb->setMargins(floatInset, floatInset, floatInset, floatInset);
+    Widget* tbBg = tb->selectFirst(".toolbar-bg");
+    Rect bgRect = static_cast<SvgRect*>(tbBg->node)->getRect();
+    static_cast<SvgRect*>(tbBg->node)->setRect(bgRect, floatCorner, floatCorner);
+    // #main-toolbar-container is now an overlay above the page (see res_ui.cpp), so this accent
+    //  line at the top of the page would otherwise show through above the floating toolbar
+    selectFirst("#scribble-focus")->setVisible(false);
+    selectFirst("#scribble-focus-2")->setVisible(false);
+  }
+
   // although hiding of certain buttons basically breaks application (e.g. doc title, undo), we won't worry
   //  about putting on overflow menu as user may be using split screen and can adjust split width to recover
   // The motivation behind auto-adjust is mostly to automatically accommodate various screen sizes, not to

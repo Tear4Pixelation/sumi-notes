@@ -5,8 +5,6 @@ const char* mainWindowSVG = R"#(
   <!-- rect fill="white" box-anchor="fill" width="20" height="20"/ -->
   <g class="window-layout" box-anchor="fill" layout="flex" flex-direction="column">
     <rect id="ios-statusbar-bg" class="toolbar" display="none" box-anchor="hfill" width="20" height="20"/>
-    <g id="main-toolbar-container" box-anchor="hfill" layout="box">
-    </g>
     <g id="pen-toolbar-container" box-anchor="hfill" layout="box">
     </g>
 
@@ -60,6 +58,8 @@ const char* mainWindowSVG = R"#(
 
       </g>  <!-- end sub-window-layout -->
       <!-- overlay widget for dragging selection will be inserted here -->
+      <g id="main-toolbar-container" box-anchor="top hfill" layout="box">
+      </g>
     </g>  <!-- end main-container -->
     <g id="notify-toolbar-container" box-anchor="hfill" layout="box">
     </g>
