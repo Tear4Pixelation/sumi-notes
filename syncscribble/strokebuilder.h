@@ -134,6 +134,21 @@ public:
   Dim invTau;
 };
 
+// pulls the rendered point toward the raw input point once the raw point strays further than `radius`
+//  away, like a stroke tethered by a rope of that length - stronger stabilization = larger radius
+class StreamStabilizer : public InputProcessor
+{
+public:
+  StreamStabilizer(Dim _radius) : prevPt(NaN, NaN), filtPt(NaN, NaN), radius(_radius) {}
+  void addPoint(const StrokePoint& pt) override;
+  void removePoints(int n) override;
+  void finalize() override;
+
+  StrokePoint prevPt;
+  StrokePoint filtPt;
+  Dim radius;
+};
+
 class SymmetricFIR : public InputProcessor
 {
 public:

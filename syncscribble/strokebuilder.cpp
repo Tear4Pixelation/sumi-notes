@@ -530,6 +530,51 @@ void LowPassIIR::finalize()
   next->finalize();
 }
 
+// stabilizer: unlike LowPassIIR (which always chases the raw point, just with lag), the filtered point
+//  here doesn't move at all until the raw point pulls further than `radius` away, then gets dragged along
+//  behind it, staying exactly `radius` from the raw point - this is the usual "rope"/"catch-up circle"
+//  stabilizer found in drawing apps; larger radius = more aggressive smoothing, but more lag and more
+//  corner-cutting on sharp turns
+void StreamStabilizer::addPoint(const StrokePoint& pt)
+{
+  InputProcessor* last = next;
+  while(last->next) last = last->next;
+
+  if(prevPt.isNaN())
+    filtPt = pt;
+  else {
+    Dim d = pt.dist(filtPt);
+    if(d > radius) {
+      Dim a = (d - radius)/d;
+      filtPt += a*(pt - filtPt);
+      filtPt.pr += a*(pt.pr - filtPt.pr);
+    }
+  }
+
+  if(!prevPt.isNaN()) {
+    last->removePoints(1);
+    next->addPoint(filtPt);
+  }
+  last->addPoint(pt);
+  prevPt = pt;
+}
+
+void StreamStabilizer::removePoints(int n)
+{
+  next->removePoints(n);
+}
+
+void StreamStabilizer::finalize()
+{
+  InputProcessor* last = next;
+  while(last->next) last = last->next;
+
+  // snap to the exact raw pen-up position rather than leaving the stroke short by up to `radius`
+  last->removePoints(1);
+  next->addPoint(prevPt);
+  next->finalize();
+}
+
 // Savitzky-Golay seems to work better than Gaussian - e.g., shrinks loops less for given amount of overall
 //  smoothing (subjective).  But ideally, we would pass both filtertype and filterstrength parameters
 // Savitzky-Golay has the advantage of a very flat passband, so it preserves overall stroke shape very
