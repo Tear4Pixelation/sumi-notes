@@ -143,6 +143,7 @@ protected:
 
   void viewSelection();
   void freeErase(Point prevpos, Point pos);
+  void freeEraseRuled(Dim xmin, Dim xmax, int line);
   bool saveCurrPos(int newpagenum, Point newpos);
 
   Point getPageOrigin(int pagenum) const;

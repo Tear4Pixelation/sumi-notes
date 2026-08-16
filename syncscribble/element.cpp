@@ -399,6 +399,40 @@ bool Element::freeErase(const Point& prevpos, const Point& pos, Dim radius)
   return touched;
 }
 
+// like freeErase(prevpos, pos, radius) above, but erases against a fixed axis-aligned rect instead of a
+//  capsule swept between two points - used for the ruled free eraser, which erases only the portion of ink
+//  falling within the current ruled line's row (so e.g. a descender dipping into the next line is left alone)
+bool Element::freeErase(const Rect& rect)
+{
+  bool touched = false;
+
+  if(isMultiStroke()) {
+    for(Element* s : children())
+      touched = s->freeErase(rect) || touched;
+  }
+  else if(isPathElement()) {
+    Path2D eraser;
+    eraser.moveTo(Point(rect.left, rect.top));
+    eraser.lineTo(Point(rect.right, rect.top));
+    eraser.lineTo(Point(rect.right, rect.bottom));
+    eraser.lineTo(Point(rect.left, rect.bottom));
+    eraser.closeSubpath();
+    eraser.transform(node->getTransform().inverse());
+    if(polygonArea(eraser.points) > 0)
+      std::reverse(eraser.points.begin(), eraser.points.end());
+
+    if(penPoints.empty())
+      penPoints = toPenPoints();
+    if(!penPoints.empty())
+      touched = erasePenPoints(penPoints, eraser.points);
+    if(touched) {
+      fromPenPoints(penPoints);
+      node->invalidate(false);
+    }
+  }
+  return touched;
+}
+
 std::vector<Element*> Element::getEraseSubPaths()
 {
   if(isMultiStroke()) {

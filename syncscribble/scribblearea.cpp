@@ -1253,6 +1253,45 @@ void ScribbleArea::freeErase(Point prevpos, Point pos)
     scribbleDoc->updateCurrStroke(erasebox.pad(1));
 }
 
+// ruled free eraser: like freeErase() above, but instead of a capsule swept between two points, erases
+//  against the rect spanning [xmin,xmax] (padded by radius) x the current ruled line's row - so only the
+//  portion of a stroke's ink that falls within that line's row is removed (e.g. a descender dipping into
+//  the line below is left untouched), combining ruled eraser's line-sweep gesture with free eraser's
+//  partial (non-whole-stroke) removal
+void ScribbleArea::freeEraseRuled(Dim xmin, Dim xmax, int line)
+{
+  Dim radius = ERASEFREE_RADIUS/mZoom;
+  Dim ytop = currPage->getYforLine(line);
+  Dim ybottom = ytop + currPage->yruling(true);
+  Rect erasebox = Rect::ltrb(xmin - radius, ytop, xmax + radius, ybottom);
+  bool touched = false;
+  auto strokes = currPage->children();
+  for(auto ii = strokes.begin(); ii != strokes.end();) {
+    Element* s = *ii++;
+    if(!s->isSelected(tempSelection) && erasebox.intersects(s->bbox())) {
+      if(s->isSelected(freeErasePieces)) {
+        touched = s->freeErase(erasebox) || touched;
+      }
+      else {
+        Element* s2 = s->cloneNode();
+        if(s2->freeErase(erasebox)) {
+          Element* nexts = ii != strokes.end() ? *ii : NULL;
+          currPage->contentNode->addChild(s2->node, nexts ? nexts->node : NULL);
+          ii = std::find(strokes.begin(), strokes.end(), nexts);
+          freeErasePieces->addStroke(s2);
+          // hide original stroke
+          tempSelection->addStroke(s);
+          touched = true;
+        }
+        else
+          s2->deleteNode();  //delete s2;
+      }
+    }
+  }
+  if(touched)
+    scribbleDoc->updateCurrStroke(erasebox.pad(1));
+}
+
 // dispatch fn for commands
 
 void ScribbleArea::doCommand(int itemid)
@@ -1443,6 +1482,7 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
     case MODE_ERASESTROKE:
     case MODE_ERASERULED:
     case MODE_ERASEFREE:
+    case MODE_ERASEFREERULED:
     case MODE_INSSPACEVERT:
     case MODE_INSSPACEHORZ:
     case MODE_INSSPACERULED:
@@ -1552,6 +1592,16 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
     tempSelection->selMode = Selection::SELMODE_UNION;
     freeErasePieces = new Selection(selsource, Selection::STROKEDRAW_NORMAL);
     freeErase(pos, pos);
+    break;
+  case MODE_ERASEFREERULED:
+    // use tempSelection to track strokes touched by free eraser
+    tempSelection = new Selection(selsource, Selection::STROKEDRAW_NONE);
+    tempSelection->selMode = Selection::SELMODE_UNION;
+    freeErasePieces = new Selection(selsource, Selection::STROKEDRAW_NORMAL);
+    eraseCurrLine = prevLine;
+    eraseXmax = pos.x;
+    eraseXmin = pos.x;
+    freeEraseRuled(eraseXmin, eraseXmax, eraseCurrLine);
     break;
   case MODE_SELECTRECT:
     currSelection = new Selection(currPage);  // cfg->Bool("liveSelect") ? Selection::SELMODE_NONE
@@ -1713,6 +1763,18 @@ void ScribbleArea::doMoveEvent(const InputEvent& event)
     break;
   case MODE_ERASEFREE:
     freeErase(prevPos, pos);
+    break;
+  case MODE_ERASEFREERULED:
+    if(eraseCurrLine == line) {
+      eraseXmax = std::max(eraseXmax, pos.x);
+      eraseXmin = std::min(eraseXmin, pos.x);
+    }
+    else {
+      eraseCurrLine = line;
+      eraseXmax = pos.x;
+      eraseXmin = pos.x;
+    }
+    freeEraseRuled(eraseXmin, eraseXmax, eraseCurrLine);
     break;
   case MODE_SELECTRECT:
     // selection can either grow or shrink - dirty rect of union of before and after!
@@ -1987,6 +2049,7 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
     break;
   }
   case MODE_ERASEFREE:
+  case MODE_ERASEFREERULED:
   {
     auto strokes = currPage->children();
     for(auto ii = strokes.begin(); ii != strokes.end();) {
@@ -2271,6 +2334,7 @@ void ScribbleArea::doCancelAction(bool refresh)
     }
     break;
   case MODE_ERASEFREE:
+  case MODE_ERASEFREERULED:
     if(freeErasePieces)  // should never be NULL, but was in one case due to a bug
       freeErasePieces->deleteStrokes();
     delete freeErasePieces;

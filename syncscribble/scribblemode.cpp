@@ -35,6 +35,7 @@ int ScribbleMode::getModeType(int mode)
   case MODE_ERASESTROKE:
   case MODE_ERASERULED:
   case MODE_ERASEFREE:
+  case MODE_ERASEFREERULED:
     return MODE_ERASE;
   case MODE_SELECT:
   case MODE_SELECTRECT:
@@ -101,6 +102,7 @@ void ScribbleMode::setMode(int mode, bool once)
   case MODE_ERASESTROKE:
   case MODE_ERASERULED:
   case MODE_ERASEFREE:
+  case MODE_ERASEFREERULED:
     eraserMode = mode;
   case MODE_ERASE:
     newmode = MODE_ERASE;

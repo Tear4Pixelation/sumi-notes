@@ -183,6 +183,7 @@ public:
   const char* nodeId() const { return node->xmlId(); }
 
   bool freeErase(const Point& prevpos, const Point& pos, Dim radius);
+  bool freeErase(const Rect& rect);
   std::vector<Element*> getEraseSubPaths();
 
   void updateFromNode();
