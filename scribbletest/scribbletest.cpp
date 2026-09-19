@@ -261,6 +261,36 @@ int ScribbleTest::shapeInterruptTest()
   check(selected == onPage, "everything drawn must be selectable");
   scribbleArea->clearSelection();
 
+  // The other half of the same rule, and the half a user actually notices: a shape the user *finished*
+  // must be left selected with its handles up (shapeEditAfterDraw).  The fix above made finishShape()
+  // default to not selecting, so this is what stops that default from swallowing the deliberate
+  // finishes too - the side-effect paths must stay silent and these must not.
+  startShape(SHAPE_POLYLINE);
+  scribbleDoc->cfg->set("shapeEditAfterDraw", true);
+  ie(100, 500, 0, pen, press);
+  ie(0, 0, 0, pen, release);
+  ie(250, 500, 0, pen, press);
+  ie(0, 0, 0, pen, release);
+  ie(250, 620, 0, pen, press);
+  ie(0, 0, 0, pen, release);
+  ie(250, 620, 0, pen, press);   // tap the last point again: the deliberate finish
+  ie(0, 0, 0, pen, release);
+  check(scribbleArea->shapeInProgress == NULL, "tapping the last point finishes the polyline");
+  check(scribbleArea->currPage->strokeCount() == 1, "and commits exactly one element");
+  check(scribbleArea->currSelection && scribbleArea->currSelection->count() == 1,
+        "a deliberately finished shape must be left selected for editing");
+  if(scribbleArea->currSelection && scribbleArea->currSelection->count() == 1) {
+    Element* shape = scribbleArea->currSelection->strokes.front();
+    check(shape->isShape(), "and the selected element must still be a shape");
+    // the handles are the whole point of selecting it
+    std::vector<ShapeHandle> handles;
+    if(shape->isShape())
+      getShapeHandles(shape->shapeParams(), handles);
+    check(!handles.empty(), "and it must offer editing handles");
+  }
+  scribbleArea->clearSelection();
+  scribbleArea->clearSelection();
+
   scribbleDoc->newDocument();
   return nbad;
 }

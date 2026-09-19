@@ -804,7 +804,7 @@ ShapeParams ScribbleArea::newShapeParams(int shapeid, Point pos) const
     params.rx = cfg->Float("shapeCornerRadius");
     params.ry = params.rx;
   }
-  if(shapeid == SHAPE_FITPOLY)
+  if(shapeid == SHAPE_CURVE)
     params.tightness = cfg->Float("shapeCurveTightness");
   return params;
 }

@@ -169,10 +169,10 @@ unrelated to the lines in the image. The detector's Hough pass already has the d
 
 ## Shapes
 
-Parametric shapes - line, box, ellipse and three polyline flavours - drawn with `MODE_DRAWSHAPE` and
+Parametric shapes - line, box, ellipse, polyline and curve - drawn with `MODE_DRAWSHAPE` and
 edited with handles. Designed in `SHAPES_SPEC.md`; that document is the rationale, this is the summary.
 
-**Six tools, three toggles.** Arrowheads and corner rounding are flags, not shapes: an arrow is a line
+**Five tools, three toggles.** Arrowheads and corner rounding are flags, not shapes: an arrow is a line
 with `SHAPEFLAG_HEADEND`, a rounded box is a box with `SHAPEFLAG_ROUNDED`. Each toggle collapses what
 would otherwise be a pair of near-identical tools, and they compose - a rounded polyline with a head
 needs no third entry. `ShapeDef::allowsHeads`/`allowsRounding` say whether a toggle means anything for
@@ -207,50 +207,61 @@ way to change a shape, and it regenerates too. Nothing edits a shape's path dire
   were handwriting, outside the undo system.
 - `MODE_DRAWSHAPE` is appended at the end of the `scribblemode.h` enum (values are serialized to config);
   `shapeId` and `shapeFlags` are appended *after the pens* in `ScribbleMode::saveModes()` so older config
-  strings still load. `shapeId` is stored as its **string** id, not its index - shapes have been merged
-  into flags once already, and an index would have silently reassigned everyone's active tool when that
-  happened. `ShapeId`'s numeric order is therefore free.
-- `shapeIdByStringId()` accepts the ids of the shapes that became flags - `arrow`, `rbox`, `rpolyline` -
-  and returns the base shape plus the flags the old name implied, so documents written before the merge
-  still load as what they meant. They are rewritten in canonical form on the next save.
+  strings still load. `shapeId` is stored as its **string** id, not its index - shapes have twice been
+  folded into a parameter of another shape, and an index would have silently reassigned everyone's
+  active tool each time that happened. `ShapeId`'s numeric order is therefore free.
+- `shapeIdByStringId()` accepts the ids of shapes that have since been folded into a parameter -
+  `arrow`, `rbox`, `rpolyline` became flags, `splinepoly` became tightness 1 - and returns the base
+  shape plus the flags (and tightness) the old name implied, so documents written while those were
+  still shapes keep loading as what they meant. They are rewritten in canonical form on the next save.
+  This has happened twice, which is why the alias table is worth keeping rather than a one-off.
 - Multi-point (polyline) is the only gesture that outlives one press/move/release cycle. The in-progress
   element lives on `ScribbleArea::shapeInProgress` and `finishShape()` is called from every escape route:
   cancel, tool switch (`ScribbleApp::setMode`), page change, and `reset()` (document close/save).
 
 ### The polyline family
 
-Three shapes share their points, their handles and their arrowheads, and differ only in how the body
-between the points is drawn. They are separate registry entries rather than a flag because they are
-separate tools, reached for in different situations:
+Two shapes share their points, their handles and their arrowheads, and differ only in how the body
+between the points is drawn:
 
 | shape | body | overshoots? | passes through the points? |
 |---|---|---|---|
 | `polyline` | straight segments, filleted when `SHAPEFLAG_ROUNDED` | no | yes |
-| `splinepoly` | centripetal Catmull-Rom | at sharp corners | yes |
-| `fitpoly` | relaxed towards B-spline knots, then smoothed | no | only the two ends |
+| `fitpoly` ("Curve") | relaxed towards B-spline knots, then smoothed | only at tightness 1 | only at tightness 1 |
+
+**There was briefly a third, `splinepoly`, and deleting it is the point.** It was the interpolating
+curve - Catmull-Rom straight through every point - and `fitpoly` at `tightness == 1` was measured to be
+*bit-identical* to it: same point count, zero deviation, on open, closed, uneven-spacing, arrowheaded
+and many-point cases. So the two tools were one tool at its two extremes, and asking the user to choose
+between them up front was asking them to guess. `splinepoly` is now an alias that loads as a curve at
+tightness 1; the choice is a handle drag on the shape instead.
 
 - Rounding reuses `__shaperx` and adds a radius handle on the first interior corner. `rx` is the
   distance trimmed off each edge, the same thing it means for a rounded box; `filletTrim()` clamps it
   per corner to half the shorter adjacent segment, so neighbouring fillets can never overlap. `rx` is
   kept when rounding is switched off, so toggling it back on returns the radius you had.
-- `splinepoly` uses **centripetal**, not uniform, Catmull-Rom. The two are the same curve on evenly
+- `addSplineBody()` uses **centripetal**, not uniform, Catmull-Rom. The two are the same curve on evenly
   spaced points, so this is invisible on a neat rectangle; it pays off on uneven spacing, which is what
   tapped-out points look like. Measured: a 4-unit segment between neighbours of 100 and 113 overshoots
   by 10.0 units under uniform and 0.6 under centripetal. `shapetest.cpp` pins this with that exact case
   - an evenly spaced fixture would not catch a regression to uniform. It does *not* remove the bulge at
-  a sharp corner: passing smoothly through a right angle requires going outside it, and that is the
-  whole reason `fitpoly` exists alongside it.
-- `fitpoly` is built by *relaxing* each interior point towards the uniform B-spline knot
+  a sharp corner: passing smoothly through a right angle requires going outside it. That bulge is what
+  lowering tightness buys you, and is why the knob is worth having at all.
+- The curve is built by *relaxing* each interior point towards the uniform B-spline knot
   `(P[i-1] + 4P[i] + P[i+1])/6` and then running `addSplineBody()` through the relaxed points. That
-  gives one knob, `ShapeParams::tightness`: 0 is the pure B-spline (roundest), 1 relaxes nothing and so
-  reproduces `splinepoly` exactly, and in between trades roundness for fidelity. Building it this way
-  also means it inherits centripetal parameterisation rather than repeating it. The two end points are
-  never relaxed, so the ends stay put and the arrowheads stay attached.
+  gives one knob, `ShapeParams::tightness`: 0 is the pure B-spline (roundest, follows the points
+  least), 1 relaxes nothing and so *is* the interpolating curve, and in between trades roundness for
+  fidelity. Building it this way also means it inherits centripetal parameterisation rather than
+  repeating it. The two end points are never relaxed, so the ends stay put and the heads stay attached.
+- **Tightness has a handle**, not just a preference - `curveHandles()` puts it on the point with the
+  most slack (`fitLoosestPoint()`), sliding along knot -> point, so dropping it on the point gives 1
+  and on the knot gives 0. Without it, changing one curve's character would mean a trip to
+  preferences, which is what made two tools look necessary in the first place.
 - Tightness is **per shape** (`__shapetight`), not a global setting, or the same document would render
   differently on another machine. The `shapeCurveTightness` preference is only the default for newly
   drawn curves, exactly as `shapeCornerRadius` is for `rx`.
-- Open ends: `splinepoly` reflects a phantom point (`2*p0 - p1`), the B-spline relaxation leaves the end
-  points alone. Both make the curve's end tangent come out exactly along the first/last segment, which
+- Open ends: `addSplineBody()` reflects a phantom point (`2*p0 - p1`), and the B-spline relaxation
+  leaves the end points alone. Both make the curve's end tangent come out exactly along the first/last segment, which
   is what the arrowheads are oriented from, so a head can never sit skew to its own curve.
 
 ### The option toggles
@@ -388,7 +399,9 @@ unit-check count, so neither needs a reference file:
 - `ScribbleTest::shapeInterruptTest()` - interrupting a shape gesture (pen button down mid-drag, or a
   right-click between polyline taps) must leave neither an orphaned live element nor an element pointing
   at an orphaned `Selection`. Both failure modes look the same to the user: a shape that is drawn but
-  belongs to nothing, so it cannot be selected, erased or deleted.
+  belongs to nothing, so it cannot be selected, erased or deleted. It also pins the *positive* half:
+  a shape the user deliberately finished must come back selected with handles, since the fix for the
+  orphan bug made `finishShape()` default to not selecting and could otherwise silence those paths too.
 
 When adding a check here, confirm it **fails against the broken code**, not just that it passes against
 the fixed code - two assertions in this area have been written that were true either way and so tested

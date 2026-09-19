@@ -903,21 +903,6 @@ static const char* icons__ic_menu_shape_rounded_svg = R"~~~~(<?xml version="1.0"
 </svg>
 )~~~~";
 
-static const char* icons__ic_menu_shape_splinepoly_svg = R"~~~~(<?xml version="1.0" encoding="utf-8"?>
-<svg version="1.2" baseProfile="tiny" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
-  x="0px" y="0px" viewBox="0 0 24 24" xml:space="preserve">
-<!-- drawn for the shape tool; reicon has no geometric-primitive icons (see reicon_import.py) -->
-<!-- the dots sit on the curve: a smooth curve passes through every point -->
-<g class="icon" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-  <path d="M3 16 C4.8 16 5.2 8 8 8 C10.8 8 10.2 15 13 15 C15.8 15 17.8 6 21 6"/>
-  <circle cx="3" cy="16" r="1.5" fill="currentColor" stroke="none"/>
-  <circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/>
-  <circle cx="13" cy="15" r="1.5" fill="currentColor" stroke="none"/>
-  <circle cx="21" cy="6" r="1.5" fill="currentColor" stroke="none"/>
-</g>
-</svg>
-)~~~~";
-
 static const char* icons__ic_menu_shapes_svg = R"~~~~(<?xml version="1.0" encoding="utf-8"?>
 <svg version="1.2" baseProfile="tiny" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
   x="0px" y="0px" viewBox="0 0 24 24" xml:space="preserve">
@@ -1181,7 +1166,6 @@ static void LOAD_RES_FN() { addStringResources({
   {"icons/ic_menu_shape_line.svg", icons__ic_menu_shape_line_svg},
   {"icons/ic_menu_shape_polyline.svg", icons__ic_menu_shape_polyline_svg},
   {"icons/ic_menu_shape_rounded.svg", icons__ic_menu_shape_rounded_svg},
-  {"icons/ic_menu_shape_splinepoly.svg", icons__ic_menu_shape_splinepoly_svg},
   {"icons/ic_menu_shapes.svg", icons__ic_menu_shapes_svg},
   {"icons/ic_menu_share.svg", icons__ic_menu_share_svg},
   {"icons/ic_menu_split_bt.svg", icons__ic_menu_split_bt_svg},

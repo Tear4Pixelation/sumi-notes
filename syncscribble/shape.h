@@ -13,7 +13,7 @@
 // The string ids below are what goes in a document; the numeric values here are an internal detail only
 //  (ScribbleMode stores the *string* id in its config, so this enum can be reordered freely).
 enum ShapeId { SHAPE_NONE = -1, SHAPE_LINE = 0, SHAPE_BOX, SHAPE_ELLIPSE,
-    SHAPE_POLYLINE, SHAPE_SPLINEPOLY, SHAPE_FITPOLY, SHAPE_COUNT };
+    SHAPE_POLYLINE, SHAPE_CURVE, SHAPE_COUNT };
 
 enum ShapeGesture { SHAPEGESTURE_DRAG_VECTOR, SHAPEGESTURE_DRAG_BBOX, SHAPEGESTURE_MULTIPOINT };
 
@@ -34,8 +34,11 @@ struct ShapeParams
   Dim rx = 0;
   Dim ry = 0;
   int flags = 0;
-  // SHAPE_FITPOLY only: 0 gives the pure approximating B-spline, 1 makes the curve pass through the
-  //  points.  Per-shape rather than a global setting, so a document renders the same everywhere; the
+  // SHAPE_CURVE only: 0 gives the pure approximating B-spline (roundest, ignores your points the most),
+  //  1 makes the curve pass exactly through every point.  There is no second curve shape because the
+  //  two ends of this range *are* the two curves - at 1 the output is bit-identical to interpolating
+  //  Catmull-Rom - so the choice is a drag on one tool rather than a choice between two.
+  // Per-shape rather than a global setting, so a document renders the same everywhere; the
   //  "shapeCurveTightness" preference is only the default for newly drawn curves, exactly as
   //  "shapeCornerRadius" is for rx.
   Dim tightness = 0;
@@ -51,10 +54,13 @@ struct ShapeParams
 
 struct ShapeHandle
 {
-  enum Type { POINT, BOX_CORNER, RADIUS } type = POINT;
+  // RADIUS and TIGHTNESS are the "parameter" handles - they move a number rather than a point, and are
+  //  drawn red to say so (see ShapeSelector::drawBG; the shape difference does not read at handle size)
+  enum Type { POINT, BOX_CORNER, RADIUS, TIGHTNESS } type = POINT;
   Point pos;
-  // index into ShapeParams::points for POINT and for the polyline RADIUS handle (the vertex it is
-  //  anchored to); corner number (0=TL, 1=TR, 2=BR, 3=BL) for BOX_CORNER
+  // index into ShapeParams::points for POINT, for the polyline RADIUS handle (the vertex it is
+  //  anchored to) and for TIGHTNESS (the point it slides towards); corner number (0=TL, 1=TR, 2=BR,
+  //  3=BL) for BOX_CORNER
   int index = 0;
 };
 
@@ -80,7 +86,7 @@ struct ShapeDef
 const ShapeDef* shapeDef(int id);
 // SHAPE_NONE if the string id is unknown.  Also accepts the ids of the shapes that became flags
 //  ("arrow", "rbox", "rpolyline"), returning the base shape and the flags they imply in extraFlags.
-int shapeIdByStringId(const char* id, int* extraFlags = NULL);
+int shapeIdByStringId(const char* id, int* extraFlags = NULL, Dim* tightness = NULL);
 // the three multi-point shapes, which share their points, handles and arrowheads
 bool shapeIsPolylineFamily(int id);
 

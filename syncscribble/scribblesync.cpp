@@ -576,7 +576,8 @@ void ScribbleSync::processItem(pugi::xml_node& node)
   else if(nodename == "shapechanged") {
     // ShapeChangedItem (spec 7.5)
     int aliasFlags = 0;
-    int shapeid = shapeIdByStringId(node.attribute("shape").as_string(), &aliasFlags);
+    Dim aliasTight = -1;
+    int shapeid = shapeIdByStringId(node.attribute("shape").as_string(), &aliasFlags, &aliasTight);
     const ShapeDef* def = shapeDef(shapeid);
     if(mpage && def) {
       ShapeParams params;
@@ -584,7 +585,7 @@ void ScribbleSync::processItem(pugi::xml_node& node)
       parseShapePoints(node.attribute("shapepts").as_string(), params.points);
       params.rx = node.attribute("rx").as_double();
       params.ry = node.attribute("ry").as_double();
-      params.tightness = node.attribute("tight").as_double();
+      params.tightness = aliasTight >= 0 ? aliasTight : node.attribute("tight").as_double();
       params.flags = node.attribute("flags").as_int() | aliasFlags;
       if(int(params.points.size()) >= def->minPoints) {
         item = new ShapeChangedItem(mstroke, mpage, params);

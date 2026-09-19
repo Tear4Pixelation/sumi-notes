@@ -253,26 +253,49 @@ static void addSplineBody(Path2D& path, const ShapeParams& params)
 //
 // The two end points are never relaxed, so the ends stay exactly where they were put - which is what
 //  keeps the arrowheads attached.
-static void addFitBody(Path2D& path, const ShapeParams& params)
+// where the pure B-spline would put its knot for point ii - the fully-relaxed position.  The curve's
+//  actual position for that point is knot + tightness*(P - knot), so tightness 0 sits here and 1 sits
+//  on P itself.  End points of an open curve are never relaxed, so their knot is the point.
+static Point fitKnot(const ShapeParams& params, int ii)
 {
   const std::vector<Point>& pts = params.points;
   int n = int(pts.size());
   bool closed = (params.flags & SHAPEFLAG_CLOSED) != 0;
+  if(ii < 0 || ii >= n)
+    return Point(0, 0);
+  if(!closed && (ii == 0 || ii == n - 1))
+    return pts[ii];
+  return (pts[((ii - 1) % n + n) % n] + 4*pts[ii] + pts[(ii + 1) % n])/6;
+}
+
+static void addFitBody(Path2D& path, const ShapeParams& params)
+{
+  int n = int(params.points.size());
   Dim tight = std::min(Dim(1), std::max(Dim(0), params.tightness));
 
   ShapeParams relaxed = params;
   relaxed.points.resize(n);
   for(int ii = 0; ii < n; ++ii) {
-    if(!closed && (ii == 0 || ii == n - 1)) {
-      relaxed.points[ii] = pts[ii];
-      continue;
-    }
-    const Point& prev = pts[((ii - 1) % n + n) % n];
-    const Point& next = pts[(ii + 1) % n];
-    Point knot = (prev + 4*pts[ii] + next)/6;
-    relaxed.points[ii] = knot + tight*(pts[ii] - knot);
+    Point knot = fitKnot(params, ii);
+    relaxed.points[ii] = knot + tight*(params.points[ii] - knot);
   }
   addSplineBody(path, relaxed);
+}
+
+// the point whose knot is furthest from it - the one where the tightness handle has the most travel,
+//  and so the one where dragging it reads most clearly
+static int fitLoosestPoint(const ShapeParams& params)
+{
+  int best = -1;
+  Dim bestDist = 0;
+  for(int ii = 0; ii < int(params.points.size()); ++ii) {
+    Dim d = (params.points[ii] - fitKnot(params, ii)).dist();
+    if(d > bestDist) {
+      bestDist = d;
+      best = ii;
+    }
+  }
+  return bestDist > 1e-6 ? best : -1;
 }
 
 static Path2D buildPolylineFamilyPath(const ShapeParams& params)
@@ -285,8 +308,7 @@ static Path2D buildPolylineFamilyPath(const ShapeParams& params)
     return path;
   }
   switch(params.id) {
-  case SHAPE_SPLINEPOLY:  addSplineBody(path, params);  break;
-  case SHAPE_FITPOLY:     addFitBody(path, params);  break;
+  case SHAPE_CURVE:       addFitBody(path, params);  break;
   default:
     params.rounded() ? addFilletBody(path, params) : addPolylineBody(path, params);
     break;
@@ -352,6 +374,19 @@ static void polylineHandles(const ShapeParams& params, std::vector<ShapeHandle>&
   handles.push_back({ShapeHandle::RADIUS, pts[vertex] + (d/len)*trim, int(vertex)});
 }
 
+// point handles plus a tightness handle sliding between the fully-relaxed position and the point
+//  itself, so the smooth/faithful trade-off is a drag on the curve rather than a trip to preferences
+static void curveHandles(const ShapeParams& params, std::vector<ShapeHandle>& handles)
+{
+  pointHandles(params, handles);
+  int ii = fitLoosestPoint(params);
+  if(ii < 0)
+    return;
+  Point knot = fitKnot(params, ii);
+  Dim tight = std::min(Dim(1), std::max(Dim(0), params.tightness));
+  handles.push_back({ShapeHandle::TIGHTNESS, knot + tight*(params.points[ii] - knot), ii});
+}
+
 // constraints (constrain modifier held)
 
 static void constrainVector(ShapeParams& params)
@@ -400,25 +435,25 @@ static const ShapeDef shapeDefs[SHAPE_COUNT] = {
   {"polyline", "Polyline", ":/icons/ic_menu_shape_polyline.svg",
       SHAPEGESTURE_MULTIPOINT, 2, -1, true, true,
       buildPolylineFamilyPath, polylineHandles, constrainPolyline},
-  {"splinepoly", "Smooth Curve", ":/icons/ic_menu_shape_splinepoly.svg",
+  {"fitpoly", "Curve", ":/icons/ic_menu_shape_fitpoly.svg",
       SHAPEGESTURE_MULTIPOINT, 2, -1, true, false,
-      buildPolylineFamilyPath, pointHandles, constrainPolyline},
-  {"fitpoly", "Fitted Curve", ":/icons/ic_menu_shape_fitpoly.svg",
-      SHAPEGESTURE_MULTIPOINT, 2, -1, true, false,
-      buildPolylineFamilyPath, pointHandles, constrainPolyline},
+      buildPolylineFamilyPath, curveHandles, constrainPolyline},
 };
 
 // "arrow", "rbox" and "rpolyline" were shapes of their own before they became flags; documents written
 //  then still name them, and the flags are exactly what those names used to mean
-static const struct { const char* id; int shape; int flags; } shapeAliases[] = {
-  {"arrow", SHAPE_LINE, SHAPEFLAG_HEADEND},
-  {"rbox", SHAPE_BOX, SHAPEFLAG_ROUNDED},
-  {"rpolyline", SHAPE_POLYLINE, SHAPEFLAG_ROUNDED},
+// tightness < 0 means "leave it alone"; "splinepoly" was the interpolating curve, which is exactly
+//  SHAPE_CURVE at tightness 1 - verified bit-identical, which is why it is no longer a shape of its own
+static const struct { const char* id; int shape; int flags; Dim tightness; } shapeAliases[] = {
+  {"arrow", SHAPE_LINE, SHAPEFLAG_HEADEND, -1},
+  {"rbox", SHAPE_BOX, SHAPEFLAG_ROUNDED, -1},
+  {"rpolyline", SHAPE_POLYLINE, SHAPEFLAG_ROUNDED, -1},
+  {"splinepoly", SHAPE_CURVE, 0, 1},
 };
 
 bool shapeIsPolylineFamily(int id)
 {
-  return id == SHAPE_POLYLINE || id == SHAPE_SPLINEPOLY || id == SHAPE_FITPOLY;
+  return id == SHAPE_POLYLINE || id == SHAPE_CURVE;
 }
 
 const ShapeDef* shapeDef(int id)
@@ -426,10 +461,12 @@ const ShapeDef* shapeDef(int id)
   return id > SHAPE_NONE && id < SHAPE_COUNT ? &shapeDefs[id] : NULL;
 }
 
-int shapeIdByStringId(const char* id, int* extraFlags)
+int shapeIdByStringId(const char* id, int* extraFlags, Dim* tightness)
 {
   if(extraFlags)
     *extraFlags = 0;
+  if(tightness)
+    *tightness = -1;
   if(!id || !id[0])
     return SHAPE_NONE;
   for(int ii = 0; ii < SHAPE_COUNT; ++ii) {
@@ -440,6 +477,8 @@ int shapeIdByStringId(const char* id, int* extraFlags)
     if(strcmp(alias.id, id) == 0) {
       if(extraFlags)
         *extraFlags = alias.flags;
+      if(tightness)
+        *tightness = alias.tightness;
       return alias.shape;
     }
   }
@@ -488,6 +527,20 @@ void dragShapeHandle(ShapeParams& params, const ShapeHandle& handle, Point newpo
     params.points.resize(2);
     params.points[0] = Point(r.left, r.top);
     params.points[1] = Point(r.right, r.bottom);
+    break;
+  }
+  case ShapeHandle::TIGHTNESS:
+  {
+    if(handle.index < 0 || size_t(handle.index) >= params.points.size())
+      break;
+    Point knot = fitKnot(params, handle.index);
+    Point along = params.points[handle.index] - knot;
+    Dim len2 = dot(along, along);
+    if(len2 <= 0)
+      break;
+    // project the drag onto the knot->point segment: at the knot the curve is fully relaxed, at the
+    //  point it passes exactly through
+    params.tightness = std::min(Dim(1), std::max(Dim(0), dot(newpos - knot, along)/len2));
     break;
   }
   case ShapeHandle::RADIUS:

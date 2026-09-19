@@ -654,7 +654,8 @@ void Element::updateFromNode()
     m_timestamp = strtoull(ts, NULL, 0);
   // shape descriptor; when present the rendered path is regenerated from it rather than trusted
   int aliasFlags = 0;
-  int shapeid = shapeIdByStringId(node->getStringAttr("__shape"), &aliasFlags);
+  Dim aliasTight = -1;
+  int shapeid = shapeIdByStringId(node->getStringAttr("__shape"), &aliasFlags, &aliasTight);
   const ShapeDef* def = shapeDef(shapeid);
   if(def && isPathElement()) {
     m_shape.id = shapeid;
@@ -662,6 +663,8 @@ void Element::updateFromNode()
     m_shape.rx = toReal(node->getStringAttr("__shaperx"), 0);
     m_shape.ry = toReal(node->getStringAttr("__shapery"), 0);
     m_shape.tightness = toReal(node->getStringAttr("__shapetight"), 0);
+    if(aliasTight >= 0)
+      m_shape.tightness = aliasTight;
     const char* flags = node->getStringAttr("__shapeflags");
     m_shape.flags = (flags && flags[0] ? int(strtol(flags, NULL, 0)) : 0) | aliasFlags;
     if(int(m_shape.points.size()) < def->minPoints)

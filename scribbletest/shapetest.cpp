@@ -82,8 +82,12 @@ static void testRegistry()
       "the legacy \"rbox\" id is a rounded box");
   shapeCheckTrue(shapeIdByStringId("rpolyline", &extra) == SHAPE_POLYLINE && extra == SHAPEFLAG_ROUNDED,
       "the legacy \"rpolyline\" id is a rounded polyline");
-  shapeIdByStringId("box", &extra);
-  shapeCheckTrue(extra == 0, "a current id implies no extra flags");
+  // "splinepoly" was the interpolating curve; it is the one curve shape at tightness 1
+  Dim tight = -1;
+  shapeCheckTrue(shapeIdByStringId("splinepoly", &extra, &tight) == SHAPE_CURVE && tight == 1,
+      "the legacy \"splinepoly\" id is a curve at tightness 1");
+  shapeIdByStringId("box", &extra, &tight);
+  shapeCheckTrue(extra == 0 && tight < 0, "a current id implies no extra flags and no tightness");
   shapeCheckTrue(shapeDef(SHAPE_NONE) == NULL && shapeDef(SHAPE_COUNT) == NULL,
       "out-of-range shape ids give no definition");
 }
@@ -350,15 +354,18 @@ static void testFilletPolyline()
 
 static void testCurvePolylines()
 {
-  ShapeParams spline = makePoly(SHAPE_SPLINEPOLY);
+  // There is one curve shape, not two: tightness 1 is the interpolating curve (through every point)
+  // and 0 is the approximating one.  These were separate tools until it was measured that tightness 1
+  // is *bit-identical* to interpolating Catmull-Rom, at which point the second tool was only a preset.
+  ShapeParams spline = makePoly(SHAPE_CURVE);
+  spline.tightness = 1;
   Path2D splinePath = buildShapePath(spline);
-  // the defining property: a smooth curve passes through every point
   for(const Point& p : spline.points) {
     shapeCheckTrue(pathHasPoint(splinePath, p, 1e-6),
-        "the smooth curve must pass through every point");
+        "at tightness 1 the curve must pass through every point");
   }
 
-  ShapeParams fit = makePoly(SHAPE_FITPOLY);
+  ShapeParams fit = makePoly(SHAPE_CURVE);
   Path2D fitPath = buildShapePath(fit);
 
   // tightness slides the fitted curve between the two extremes: 0 is the roundest, 1 reaches the
@@ -393,6 +400,54 @@ static void testCurvePolylines()
   silly.tightness = -3;
   shapeCheckTrue(approxEq(buildShapePath(silly).getBBox(),
       buildShapePath(loose).getBBox(), 1e-6), "tightness below 0 clamps");
+
+  // The tightness handle is what makes one tool enough, so it has to actually reach both ends.  It
+  // slides along knot -> point: dropping it on the point gives 1, on the knot gives 0.
+  std::vector<ShapeHandle> handles;
+  getShapeHandles(fit, handles);
+  const ShapeHandle* tightHandle = NULL;
+  for(const ShapeHandle& handle : handles) {
+    if(handle.type == ShapeHandle::TIGHTNESS)
+      tightHandle = &handle;
+  }
+  shapeCheckTrue(tightHandle != NULL, "a curve has a tightness handle");
+  shapeCheckTrue(handles.size() == fit.points.size() + 1,
+      "a curve has one handle per point plus the tightness handle");
+  if(tightHandle) {
+    int idx = tightHandle->index;
+    ShapeParams dragged = fit;
+    dragShapeHandle(dragged, *tightHandle, fit.points[idx]);
+    shapeCheckNear(dragged.tightness, 1, 1e-6, "dropping the handle on the point gives tightness 1");
+    Path2D through = buildShapePath(dragged);
+    for(const Point& p : dragged.points)
+      shapeCheckTrue(pathHasPoint(through, p, 1e-6), "and the curve then passes through every point");
+    // far past the point clamps rather than overshooting
+    dragShapeHandle(dragged, *tightHandle, fit.points[idx] + 10*(fit.points[idx] - Point(0, 0)));
+    shapeCheckTrue(dragged.tightness <= 1 + 1e-9, "dragging past the point clamps at 1");
+
+    ShapeParams slack = fit;
+    slack.tightness = 1;
+    std::vector<ShapeHandle> h2;
+    getShapeHandles(slack, h2);
+    for(const ShapeHandle& handle : h2) {
+      if(handle.type != ShapeHandle::TIGHTNESS)
+        continue;
+      // at tightness 1 the handle sits on its point; dragging it back to the knot must relax fully
+      ShapeParams relaxed = slack;
+      dragShapeHandle(relaxed, handle, buildShapePath(fit).point(0));  // somewhere well off the segment
+      shapeCheckTrue(relaxed.tightness >= 0 && relaxed.tightness <= 1,
+          "the tightness handle always yields a value in range");
+    }
+  }
+
+  // a curve with no slack anywhere (collinear points) has no meaningful tightness handle to offer
+  ShapeParams straight;
+  straight.id = SHAPE_CURVE;
+  straight.points = {Point(0, 0), Point(50, 0), Point(100, 0)};
+  handles.clear();
+  getShapeHandles(straight, handles);
+  shapeCheckTrue(handles.size() == straight.points.size(),
+      "a straight curve offers no tightness handle");
   // the defining property of the fitted curve is the opposite: interior points are approximated
   shapeCheckTrue(!pathHasPoint(fitPath, fit.points[1], 1e-6),
       "the fitted curve must not pass through its interior points");
@@ -424,7 +479,7 @@ static void testCurvePolylines()
   //  spacing: with a 4-unit segment between neighbours of 100 and 113, uniform overshoots the points by
   //  10 units where centripetal manages 0.6.
   ShapeParams uneven;
-  uneven.id = SHAPE_SPLINEPOLY;
+  uneven.id = SHAPE_CURVE;
   uneven.points = {Point(0, 0), Point(100, 0), Point(104, 0), Point(200, 60)};
   Rect unevenHull;
   for(const Point& p : uneven.points)
@@ -446,7 +501,7 @@ static void testCurvePolylines()
 // every polyline flavour takes heads, and takes them from the same tangent - the first/last segment
 static void testPolylineFamilyHeads()
 {
-  const int ids[] = {SHAPE_POLYLINE, SHAPE_SPLINEPOLY, SHAPE_FITPOLY};
+  const int ids[] = {SHAPE_POLYLINE, SHAPE_CURVE};
   for(int id : ids) {
     shapeCheckTrue(shapeIsPolylineFamily(id), "every polyline flavour is in the polyline family");
     shapeCheckTrue(shapeDef(id)->allowsHeads, "every polyline flavour allows heads");

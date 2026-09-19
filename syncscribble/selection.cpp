@@ -1447,8 +1447,11 @@ void ShapeSelector::drawBG(Painter* painter)
   if(drawHandles) {
     painter->setAntiAlias(true);
     for(const ShapeHandle& handle : m_handles) {
-      if(handle.type == ShapeHandle::RADIUS) {
-        // the radius handle is round so it can't be mistaken for one of the square corner handles
+      if(handle.type == ShapeHandle::RADIUS || handle.type == ShapeHandle::TIGHTNESS) {
+        // Parameter handles are red so they are not mistaken for the point handles.  They are drawn as
+        //  ellipses rather than rects too, but do not rely on that to tell them apart: at the ~6 px a
+        //  handle actually occupies on screen the two shapes are indistinguishable - the colour is
+        //  what carries the distinction.
         painter->setFillBrush(Color::RED);
         painter->setStrokeBrush(Color::NONE);
         painter->drawPath(Path2D().addEllipse(handle.pos.x, handle.pos.y, a, a));
