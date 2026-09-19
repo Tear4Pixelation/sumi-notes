@@ -8,7 +8,7 @@ class ScribbleDoc;
 class BookmarkSelect;
 class TextEdit;
 
-class LinkDialog : public Dialog
+class LinkDialog : public PopupDialog
 {
 public:
   LinkDialog(ScribbleDoc* sd);

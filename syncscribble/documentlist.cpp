@@ -847,7 +847,7 @@ void DocumentList::newFolder()
 }
 
 // uses fsinfo.baseName() as initial text
-NewDocDialog::NewDocDialog(const char* title, const FSPath& fsinfo, bool newdoc) : Dialog(createDialogNode())
+NewDocDialog::NewDocDialog(const char* title, const FSPath& fsinfo, bool newdoc) : PopupDialog(createPopupDialogNode())
 {
   nameEdit = createTextEdit();
   nameEdit->setText(fsinfo.baseName().c_str());
@@ -912,9 +912,8 @@ bool DocumentList::convertDocuments(FSPath src)
   if(confirm != _("Convert"))
     return false;
 
-  std::unique_ptr<Dialog> dialog(createDialog(_("Converting Documents: XXX")));
+  std::unique_ptr<Dialog> dialog(createPopupDialog(_("Converting Documents: XXX")));
   Widget* dialogBody = dialog->selectFirst(".body-container");
-  dialogBody->setMargins(10);
   Widget* msgText = new TextBox(createTextNode(_("Converting...")));
   dialogBody->addWidget(msgText);
   dialog->addButton(_("Cancel"), [&](){ dialog->finish(Dialog::CANCELLED); });

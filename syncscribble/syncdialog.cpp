@@ -5,7 +5,7 @@
 // login dialog
 
 SyncLoginDialog::SyncLoginDialog(const char* username, bool savepw, const char* msg)
-  : Dialog(createDialogNode())
+  : PopupDialog(createPopupDialogNode())
 {
   userEdit = createTextEdit(200);
   userEdit->setText(username);
@@ -48,7 +48,7 @@ static Button* createLinkBtn()
 }
 
 SyncCreateDialog::SyncCreateDialog(const char* url, const char* title, bool showLink)
-  : Dialog(createDialogNode())
+  : PopupDialog(createPopupDialogNode())
 {
   urlEdit = createTextEdit(240);
   urlEdit->setText(url);
@@ -86,7 +86,7 @@ void SyncCreateDialog::setMessage(const char* msg)
 
 // open doc dialog
 
-SyncOpenDialog::SyncOpenDialog(bool showLink) : Dialog(createDialogNode())
+SyncOpenDialog::SyncOpenDialog(bool showLink) : PopupDialog(createPopupDialogNode())
 {
   urlEdit = createTextEdit(240);
   //nameEdit->setText(fsinfo.baseName().c_str());
@@ -117,7 +117,7 @@ void SyncOpenDialog::setMessage(const char* msg)
   msgLabel->setVisible(msg[0]);
 }
 
-SyncInfoDialog::SyncInfoDialog(const ScribbleSync* sync) : Dialog(createDialogNode())
+SyncInfoDialog::SyncInfoDialog(const ScribbleSync* sync) : PopupDialog(createPopupDialogNode())
 {
   urlEdit = createTextEdit(240);
   urlEdit->editMode = TextEdit::READ_ONLY;

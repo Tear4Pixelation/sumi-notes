@@ -6,7 +6,7 @@
 #include "scribbleapp.h"
 
 
-LinkDialog::LinkDialog(ScribbleDoc* sd) : Dialog(createDialogNode()), scribbleDoc(sd)
+LinkDialog::LinkDialog(ScribbleDoc* sd) : PopupDialog(createPopupDialogNode()), scribbleDoc(sd)
 {
   ScribbleArea* scribbleArea = scribbleDoc->activeArea;
   // need to get: color, width, type (link/bookmark), target or id

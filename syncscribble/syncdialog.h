@@ -5,7 +5,7 @@
 
 class ScribbleSync;
 
-class SyncLoginDialog : public Dialog
+class SyncLoginDialog : public PopupDialog
 {
 public:
   SyncLoginDialog(const char* username, bool savepw, const char* msg);
@@ -15,7 +15,7 @@ public:
   CheckBox* savePassword = NULL;
 };
 
-class SyncCreateDialog : public Dialog
+class SyncCreateDialog : public PopupDialog
 {
 public:
   SyncCreateDialog(const char* url, const char* title, bool showLink);
@@ -28,7 +28,7 @@ public:
   Button* linkBtn = NULL;
 };
 
-class SyncOpenDialog : public Dialog
+class SyncOpenDialog : public PopupDialog
 {
 public:
   SyncOpenDialog(bool showLink);
@@ -39,7 +39,7 @@ public:
   Button* linkBtn = NULL;
 };
 
-class SyncInfoDialog : public Dialog
+class SyncInfoDialog : public PopupDialog
 {
 public:
   SyncInfoDialog(const ScribbleSync* sync);

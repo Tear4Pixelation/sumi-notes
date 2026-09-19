@@ -30,7 +30,7 @@ Widget* createTitledColumn(const char* title, Widget* control1, Widget* control2
 
 // TODO: don't want to pass in MainWindow ... move getScreenPageDims() somewhere else?
 RulingDialog::RulingDialog(ScribbleDoc* doc, const PageProperties* initProps)
-    : Dialog(createDialogNode()), scribbleDoc(doc), newPageMode(initProps != NULL)
+    : PopupDialog(createPopupDialogNode()), scribbleDoc(doc), newPageMode(initProps != NULL)
 {
   Page* currPage = doc->activeArea->getCurrPage();
   props = newPageMode ? *initProps : currPage->getProperties();

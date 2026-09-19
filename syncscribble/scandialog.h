@@ -13,7 +13,7 @@
 class ScanCornerWidget;
 class ScanPreviewWidget;
 
-class ScanDialog : public Dialog
+class ScanDialog : public PopupDialog
 {
 public:
   explicit ScanDialog(Image photo);

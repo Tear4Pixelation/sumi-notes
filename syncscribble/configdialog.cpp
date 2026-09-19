@@ -7,7 +7,7 @@
 #include "mainwindow.h"  // only for getting bounds for insetting
 
 
-ConfigDialog::ConfigDialog(ScribbleConfig* _cfg) : Dialog(createDialogNode()), cfg(_cfg)
+ConfigDialog::ConfigDialog(ScribbleConfig* _cfg) : PopupDialog(createPopupDialogNode()), cfg(_cfg)
 {
   init();
 }
@@ -111,7 +111,9 @@ void ConfigDialog::init()
       });
       toolStack->addWidget(btn);
       toolStack->addWidget(g);
-      toolStack->addWidget(createHRule());
+      // sections are set apart by whitespace rather than a rule (an invisible rule is the simplest
+      //  fixed-height spacer the toolkit has - see .spacer in theme.cpp)
+      toolStack->addWidget(createHRule(12, NULL, "spacer"));
       g->setVisible(false);  // hide initially
       propGroups[group] = g;
     }

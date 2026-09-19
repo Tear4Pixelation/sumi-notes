@@ -7,7 +7,7 @@
 
 class ScribbleApp;
 
-class NewDocDialog : public Dialog
+class NewDocDialog : public PopupDialog
 {
 public:
   NewDocDialog(const char* title, const FSPath& fsinfo, bool newdoc = false);

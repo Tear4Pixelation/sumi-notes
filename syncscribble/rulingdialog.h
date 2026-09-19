@@ -6,7 +6,7 @@
 class ScribbleDoc;
 class ColorEditBox;
 
-class RulingDialog : public Dialog
+class RulingDialog : public PopupDialog
 {
 public:
   // initProps non-NULL puts the dialog in "new page" mode: it edits a standalone set of page

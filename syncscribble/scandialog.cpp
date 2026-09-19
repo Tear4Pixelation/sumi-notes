@@ -191,7 +191,7 @@ void ScanPreviewWidget::draw(SvgPainter* svgp) const
   painter->restore();
 }
 
-ScanDialog::ScanDialog(Image photo) : Dialog(createDialogNode()), source(std::move(photo))
+ScanDialog::ScanDialog(Image photo) : PopupDialog(createPopupDialogNode()), source(std::move(photo))
 {
   setTitle(_("Scan Document"));
   cornerWidget = new ScanCornerWidget(&source);

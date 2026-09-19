@@ -9,7 +9,7 @@ ArrowPopup* createToolSettingsPopup(const char* title, const std::vector<const c
 Button* createToolSettingsButton(const char* title, const std::vector<const char*>& prefNames,
     const std::vector<Button*>& extraItems = {});
 
-class ConfigDialog : public Dialog
+class ConfigDialog : public PopupDialog
 {
 public:
   ConfigDialog(ScribbleConfig* _cfg);

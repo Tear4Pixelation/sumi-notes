@@ -425,7 +425,7 @@ std::string ScribbleApp::messageBox(MessageType type,
     std::string title, std::string message, std::vector<std::string> buttons)
 {
   // copied from usvg/test/mainwindow.cpp ... can we deduplicate?
-  Dialog* dialog = createDialog(title.c_str());
+  Dialog* dialog = createPopupDialog(title.c_str());
   Widget* dialogBody = dialog->selectFirst(".body-container");
 
   //auto buttons = splitStr<std::vector>(buttons.c_str(), '|');
@@ -437,7 +437,6 @@ std::string ScribbleApp::messageBox(MessageType type,
       dialog->cancelBtn = btn;
   }
 
-  dialogBody->setMargins(10);
   SvgText* msgNode = createTextNode(message.c_str());
   dialogBody->addWidget(new Widget(msgNode));
   // wrap message text as needed
