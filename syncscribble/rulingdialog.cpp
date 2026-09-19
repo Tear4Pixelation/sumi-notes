@@ -1,4 +1,5 @@
 #include "rulingdialog.h"
+#include "addpagemenu.h"
 #include "ugui/textedit.h"
 #include "scribbleapp.h"
 #include "mainwindow.h"
@@ -6,6 +7,11 @@
 #include "scribbledoc.h"
 #include "page.h"
 
+
+// the page thumbnail at the top of the dialog: big enough to read the ruling off, small enough to
+//  leave the controls visible on a phone
+static const Dim PREVIEW_W = 120;
+static const Dim PREVIEW_H = 150;
 
 // move to touchwidgets.cpp if needed elsewhere
 Widget* createTitledColumn(const char* title, Widget* control1, Widget* control2 = NULL)
@@ -23,10 +29,11 @@ Widget* createTitledColumn(const char* title, Widget* control1, Widget* control2
 }
 
 // TODO: don't want to pass in MainWindow ... move getScreenPageDims() somewhere else?
-RulingDialog::RulingDialog(ScribbleDoc* doc) : Dialog(createDialogNode()), scribbleDoc(doc)
+RulingDialog::RulingDialog(ScribbleDoc* doc, const PageProperties* initProps)
+    : Dialog(createDialogNode()), scribbleDoc(doc), newPageMode(initProps != NULL)
 {
   Page* currPage = doc->activeArea->getCurrPage();
-  props = currPage->getProperties();
+  props = newPageMode ? *initProps : currPage->getProperties();
 
   Dim xruling = props.xRuling; //ruleLayer->getXRuling();
   Dim yruling = props.yRuling; //ruleLayer->getYRuling();
@@ -52,12 +59,12 @@ RulingDialog::RulingDialog(ScribbleDoc* doc) : Dialog(createDialogNode()), scrib
       {_("Current"), _("Screen"), _("Screen (landscape)"), _("Letter"), _("Letter (landscape)"), _("A4"), _("A4 (landscape)")});
   comboPaperSize->onChanged = [this](const char* s){ setPaperType(comboPaperSize->index()); };
   spinWidth = createTextSpinBox(props.width, xruling > 0 ? xruling : 50, 0, 100000);  // step by xruling
-  spinWidth->onValueChanged = [this](Dim w){ checkClipping(); };
+  spinWidth->onValueChanged = [this](Dim w){ checkClipping(); updatePreview(); };
   spinHeight = createTextSpinBox(props.height, yruling > 0 ? yruling : 50, 0, 100000);
-  spinHeight->onValueChanged = [this](Dim h){ checkClipping(); };
+  spinHeight->onValueChanged = [this](Dim h){ checkClipping(); updatePreview(); };
 
-  // custom ruling cannot be changed
-  if(currPage->isCustomRuling)
+  // custom ruling cannot be changed - but a page that does not exist yet never has one
+  if(currPage->isCustomRuling && !newPageMode)
     comboRuling = createComboBox({_("Custom")});
   else {
     comboRuling = createComboBox({_("Current"), _("Plain"), _("Wide ruled"), _("Medium ruled"),
@@ -66,8 +73,11 @@ RulingDialog::RulingDialog(ScribbleDoc* doc) : Dialog(createDialogNode()), scrib
   }
 
   spinXRuling = createTextSpinBox(xruling, 10, 0, 200);
+  spinXRuling->onValueChanged = [this](Dim x){ updatePreview(); };
   spinYRuling = createTextSpinBox(yruling, 10, 0, 200);
+  spinYRuling->onValueChanged = [this](Dim y){ updatePreview(); };
   spinLeftMargin = createTextSpinBox(marginLeft, 10, 0, 100000);
+  spinLeftMargin->onValueChanged = [this](Dim m){ updatePreview(); };
 
   cbApplyToAll = createCheckBox();
   cbDocDefault = createCheckBox();
@@ -101,6 +111,9 @@ RulingDialog::RulingDialog(ScribbleDoc* doc) : Dialog(createDialogNode()), scrib
   auto createIndentRow = [](const char* title, Widget* w)
       { Widget* row = createTitledRow(title, w); row->setMargins(5, 0, 5, 20); return row; };
   dialogBody->setMargins(0, 8);
+  rulePreview = createRow({}, "8 0", "center");
+  rulePreview->addWidget(new Widget(AddPageMenu::createPagePreviewNode(props, PREVIEW_W, PREVIEW_H)));
+  dialogBody->addWidget(rulePreview);
   dialogBody->addWidget(createTitledRow(_("Page size"), comboPaperSize));
   dialogBody->addWidget(createIndentRow(_("Width"), spinWidth));
   dialogBody->addWidget(createIndentRow(_("Height"), spinHeight));
@@ -110,25 +123,49 @@ RulingDialog::RulingDialog(ScribbleDoc* doc) : Dialog(createDialogNode()), scrib
   dialogBody->addWidget(createIndentRow(_("Y Ruling"), spinYRuling));
   dialogBody->addWidget(createIndentRow(_("Left Margin"), spinLeftMargin));
   dialogBody->addWidget(colorbtns);
-  const char* strapply = doc->numSelPages > 0 ? "Apply to selected pages" : "Apply to all existing pages";
-  dialogBody->addWidget(createTitledRow(_(strapply), cbApplyToAll));
-  dialogBody->addWidget(createTitledRow(_("Document default"), cbDocDefault));
-  dialogBody->addWidget(createTitledRow(_("Global default"), cbGlobalDefault));
+  if(!newPageMode) {
+    const char* strapply = doc->numSelPages > 0 ? "Apply to selected pages" : "Apply to all existing pages";
+    dialogBody->addWidget(createTitledRow(_(strapply), cbApplyToAll));
+    dialogBody->addWidget(createTitledRow(_("Document default"), cbDocDefault));
+    dialogBody->addWidget(createTitledRow(_("Global default"), cbGlobalDefault));
+  }
 
   // color picker has to be added to document before setColor can be called
   pageColorPicker->setColor(props.color);
   ruleColorPicker->setColor(ruleColor);
+  pageColorPicker->onColorChanged = [this](Color c){ updatePreview(); };
+  ruleColorPicker->onColorChanged = [this](Color c){ updatePreview(); };
 
-  setTitle(_("Page Setup"));
+  setTitle(newPageMode ? _("New Page") : _("Page Setup"));
   acceptBtn = addButton(_("OK"), [this](){ accept(); finish(ACCEPTED); });
   cancelBtn = addButton(_("Cancel"), [this](){ finish(CANCELLED); });
+}
+
+// the preview is rebuilt rather than mutated: it is a handful of SVG nodes, redrawn only when a
+//  control changes, so there is nothing to gain from patching attributes in place
+void RulingDialog::updatePreview()
+{
+  SvgGui* gui = window() ? window()->gui() : NULL;
+  if(!gui)
+    return;  // still being constructed - the initial preview is added directly instead
+  PageProperties preview = props;
+  preview.width = spinWidth->value();
+  preview.height = spinHeight->value();
+  preview.xRuling = spinXRuling->value();
+  preview.yRuling = spinYRuling->value();
+  preview.marginLeft = spinLeftMargin->value();
+  preview.color = pageColorPicker->color();
+  preview.ruleColor = ruleColorPicker->color();
+  gui->deleteContents(rulePreview);
+  rulePreview->addWidget(new Widget(AddPageMenu::createPagePreviewNode(preview, PREVIEW_W, PREVIEW_H)));
 }
 
 void RulingDialog::checkClipping()
 {
   props.width = spinWidth->value();
   props.height = spinHeight->value();
-  bool clip = scribbleDoc->doesClipStrokes(&props, cbApplyToAll->isChecked());
+  // a page that does not exist yet has no content to clip
+  bool clip = !newPageMode && scribbleDoc->doesClipStrokes(&props, cbApplyToAll->isChecked());
   if(clipWarning->isVisible() == clip)
     return;
   if(!scrollWidget)
@@ -148,6 +185,9 @@ void RulingDialog::accept()
   props.yRuling = spinYRuling->value();
   props.marginLeft = spinLeftMargin->value();
   props.ruleColor = ruleColorPicker->color();
+  // in new page mode props is the whole result; the page it describes does not exist yet
+  if(newPageMode)
+    return;
   bool applyall = cbApplyToAll->isChecked();
   bool docdefault = cbDocDefault->isChecked();
   bool globaldefault = cbGlobalDefault->isChecked();
@@ -178,6 +218,7 @@ void RulingDialog::setPaperType(int index)
   spinWidth->setValue(predefSizes[index][0]);
   spinHeight->setValue(predefSizes[index][1]);
   checkClipping();
+  updatePreview();
 }
 
 // {x ruling, y ruling, left margin, rule color}
@@ -200,4 +241,5 @@ void RulingDialog::setRuleType(int index)
   spinLeftMargin->setValue(predefRulings[index][2]);
   if(predefRulings[index][3] != 0)
     ruleColorPicker->setColor(predefRulings[index][3]);
+  updatePreview();
 }

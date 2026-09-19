@@ -9,12 +9,111 @@
 #include "scribbledoc.h"
 #include "pentoolbar.h"
 #include "touchwidgets.h"
+#include "addpagemenu.h"
+#include "configdialog.h"
 
 // SVG for main window, default clippings; preferences info
 #include "res_ui.cpp"
 
 // TODO: figure out why just capturing mw doesn't work
 #define SLOT(x) [=](){ app->x; }
+
+// geometry of the floating main toolbar (tools row + options row form a single panel)
+static const Dim floatInset = 27*floatUIScale;
+static const Dim floatTopInset = 15*floatUIScale;
+static const real floatCorner = 12*floatUIScale;
+// horizontal padding between a floating panel's rounded background and its first/last button:
+//  the mockup gives the editing panel more room than the page/file ops panels, and none at all
+//  to the lone overflow button
+static const Dim floatPad = 22.5*floatUIScale;
+static const Dim floatSidePad = 12*floatUIScale;
+// Buttons in the floating panels are bigger than the app-wide #toolbutton prototype (36x42 with a
+//  23px icon), per the design mockup (64x64 with a 32x32 icon).  The prototype is shared by every
+//  menu, dialog and toolbar in the app, so instead of changing it we resize the buttons of these
+//  panels (and only these) after they have been created.
+static const Dim floatBtnSize = 64*floatUIScale;
+static const Dim floatIconSize = 32*floatUIScale;
+// the page/file ops panels draw their icons larger than the editing tools
+static const Dim floatSideIconSize = 42*floatUIScale;
+// the divider between the tools row and the options row stops short of the panel's padding
+static const Dim optsDividerInset = 27.5*floatUIScale;
+// the help and settings buttons are the mockup's narrower secondary cells
+static const Dim floatSmallBtnSize = 48*floatUIScale;
+static const Dim floatSmallIconSize = 24*floatUIScale;
+
+// free eraser radii offered by the eraser options row, in screen units
+static const Dim ERASER_RADII[] = {3, 7, 12};
+// same look as the pen thickness presets (see PenToolbar): a bare line in a swatch-sized cell
+static std::string eraserWidthBtnSVG()
+{
+  return fstring(R"#(
+  <g class="toolbutton swatch-btn" layout="box">
+    <rect class="background" width="%g" height="%g"/>
+    <line class="icon width-line" x1="%g" y1="%g" x2="%g" y2="%g"
+        fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round"/>
+  </g>
+)#", 44*floatUIScale, 64*floatUIScale,
+      15.5*floatUIScale, 32*floatUIScale, 28.5*floatUIScale, 32*floatUIScale);
+}
+
+static void scaleFloatToolbutton(Widget* btn, Dim btnw, Dim iconSize)
+{
+  Widget* bg = btn->selectFirst(".background");
+  if(bg && bg->node->type() == SvgNode::RECT) {
+    // the prototype's background stretches to the button, which is sized by its icon; here it is the
+    //  other way round - the background is the mockup's cell and sets the button's size
+    bg->node->removeAttr("box-anchor");
+    static_cast<SvgRect*>(bg->node)->setRect(Rect::wh(btnw, floatBtnSize));
+  }
+  Widget* icon = btn->selectFirst(".icon");
+  if(icon && icon->node->type() == SvgNode::USE)
+    static_cast<SvgUse*>(icon->node)->setViewport(Rect::wh(iconSize, iconSize));
+}
+
+// the document title button is sized by its label rather than the grid, so its background has to
+//  keep stretching horizontally; only its height, icon and text follow the scale
+static void scaleFloatTitleBtn(Widget* btn, Dim iconSize)
+{
+  Widget* bg = btn->selectFirst(".background");
+  if(bg && bg->node->type() == SvgNode::RECT)  // width here is just the minimum, bg is hfill
+    static_cast<SvgRect*>(bg->node)->setRect(Rect::wh(36*floatUIScale, floatBtnSize));
+  Widget* icon = btn->selectFirst(".icon");
+  if(icon && icon->node->type() == SvgNode::USE)
+    static_cast<SvgUse*>(icon->node)->setViewport(Rect::wh(iconSize, iconSize));
+  Widget* title = btn->selectFirst(".title");
+  if(title) {
+    // the label shrinks with the panel, but not below the size at which the title stops being
+    //  readable - it is the one piece of text in the floating toolbars
+    title->node->setAttr<float>("font-size", std::max(Dim(11), 15*floatUIScale));
+    title->setMargins(0, 9*floatUIScale);
+  }
+  btn->setMargins(0);
+}
+
+// resize every toolbutton inside one of the floating panels; the color/thickness swatches
+//  (.swatch-btn) carry the mockup's geometry in their own prototype, so they are left alone
+static void scaleFloatPanel(Widget* panel, Dim iconSize)
+{
+  for(Widget* btn : panel->select(".toolbutton")) {
+    if(!btn || btn->node->hasClass("swatch-btn"))
+      continue;
+    // .float-wide-btn is the document title, whose cell is sized by its label rather than the grid
+    if(btn->node->hasClass("float-wide-btn")) {
+      scaleFloatTitleBtn(btn, iconSize);
+      continue;
+    }
+    bool small = btn->node->hasClass("float-small-btn");
+    scaleFloatToolbutton(btn, small ? floatSmallBtnSize : floatBtnSize,
+        small ? floatSmallIconSize : iconSize);
+    // the mockup's cells sit flush against each other - all of the spacing is inside the cell
+    btn->setMargins(0);
+  }
+  for(Widget* sep : panel->select(".toolbar-separator")) {
+    Widget* rule = sep->selectFirst(".separator");
+    if(rule && rule->node->type() == SvgNode::RECT)
+      static_cast<SvgRect*>(rule->node)->setRect(Rect::wh(2, 40*floatUIScale));
+  }
+}
 
 MainWindow* createMainWindow()
 {
@@ -180,41 +279,6 @@ void MainWindow::refreshCommonUI(ScribbleDoc* doc, const UIState* uiState)
     setWindowModified(uiState->docmodified);*/
 }
 
-void MainWindow::refreshPens(ScribbleDoc* doc)
-{
-  penDoc = doc && !doc->cfg->pens.empty() ? doc : NULL;
-  for(size_t ii = 0; ii < penPreviews.size(); ii++) {
-    Widget* previewbtn = penPreviews[ii];
-    PenPreview* penpreview = static_cast<PenPreview*>(previewbtn->selectFirst(".pen-preview"));
-    Widget* tooltip = previewbtn->selectFirst(".tooltip");
-    const ScribblePen* pen = doc ? doc->cfg->getPen(ii) : ScribbleApp::cfg->getPen(ii);
-    if(!pen || !previewbtn || !tooltip || !penpreview) continue;  // should never happen
-    penpreview->setPen(*pen);
-
-    std::string s;
-    s += "Color: " + colorToHex(pen->color);
-    s += fstring(" Width: %.3g ", pen->width);
-    s += pen->hasFlag(ScribblePen::TIP_FLAT) ? _("Flat") : pen->hasFlag(ScribblePen::TIP_ROUND) ?
-        _("Round") : pen->hasFlag(ScribblePen::TIP_CHISEL) ? _("Chisel") : "";
-    std::string s2 = pen->hasFlag(ScribblePen::DRAW_UNDER) ? " Under," : "";
-    s2 += pen->hasFlag(ScribblePen::SNAP_TO_GRID) ? " Snap," : "";
-    s2 += pen->hasFlag(ScribblePen::LINE_DRAWING) ? " Lines," : "";
-    s2 += pen->hasFlag(ScribblePen::EPHEMERAL) ? " Ephemeral," : "";
-    if(!s2.empty())
-      s += "\nSpecial:" + s2.substr(0, s2.size()-1);
-    if(pen->hasVarWidth()) {
-      s += fstring("\nVary Width %.3g", pen->wRatio);
-      s += pen->hasFlag(ScribblePen::WIDTH_PR) ? fstring(" Pressure %.2f", 1/pen->prParam) : "";
-      s += pen->hasFlag(ScribblePen::WIDTH_SPEED) ? fstring(" Speed %.2f", pen->spdMax) : "";
-      s += pen->hasFlag(ScribblePen::WIDTH_DIR) ? fstring(u8" Direction %.3g\u00B0", pen->dirAngle) : "";
-    }
-    if(pen->dash > 0 || pen->gap > 0)
-      s += fstring("\nDash: %.3g %.3g", pen->dash, pen->gap);
-
-    tooltip->setText(s.c_str());
-  }
-}
-
 // ideally, we'd avoid a full UI update on stroke finished, but lots of things can change, so let's just make
 //  sure that there is no unnecessary layout or rendering
 void MainWindow::refreshUI(ScribbleDoc* doc, int reason)
@@ -247,21 +311,22 @@ void MainWindow::refreshUI(ScribbleDoc* doc, int reason)
       ScribbleApp::cfg->savePen(app->currPen);
       if(savepen == 2)  // 2 = save to both doc and global
         doc->cfg->savePen(app->currPen);
-      refreshPens(doc);
     }
   }
-  // refresh pens if necessary
-  if((reason & (1 << UIState::SetDoc)) && penDoc != (!doc->cfg->pens.empty() ? doc : NULL))
-    refreshPens(doc);
 }
 
 Action* MainWindow::modeToAction(int mode)
 {
   switch(mode) {
     case MODE_PAN:  return actionPan;
-    case MODE_STROKE:  return actionDraw;
+    // the three draw tools share MODE_STROKE and are distinguished by the current pen
+    case MODE_STROKE:
+      return app->scribbleMode->drawTool == ScribbleMode::DRAWTOOL_HIGHLIGHT ? actionHighlight :
+          (app->scribbleMode->drawTool == ScribbleMode::DRAWTOOL_EPHEMERAL ? actionEphemeral : actionDraw);
     case MODE_BOOKMARK:  return actionAdd_Bookmark;
-    case MODE_ERASE:  return actionErase;
+    // erase submode is shown by the two toggles on the erase options row, not by the top row icon
+    case MODE_ERASE:
+    case MODE_ERASEFREERULED:  return actionErase;
     case MODE_ERASESTROKE:  return actionStroke_Eraser;
     case MODE_ERASERULED:  return actionRuled_Eraser;
     case MODE_ERASEFREE:  return actionFree_Eraser;
@@ -297,18 +362,7 @@ void MainWindow::updateMode()
     checkedMode = action;
   }
   mode != nextmode ? checkedMode->addClass("once") : checkedMode->removeClass("once");
-  if(actionTools_Menu->visible()) {
-    actionTools_Menu->setChecked(mode != MODE_STROKE && mode != MODE_BOOKMARK);
-    if(actionTools_Menu->isChecked()) {
-      toolsMenuMode = ScribbleMode::getModeType(mode);  // required for double tap to lock
-      mode != nextmode ? actionTools_Menu->addClass("once") : actionTools_Menu->removeClass("once");
-    }
-  }
 
-  if(mode == MODE_STROKE) {
-    if(action->icon() != drawIcon)
-      action->setIcon(drawIcon);
-  }
   if(subaction != action) {
     if(subaction != checkedSubMode) {
       if(checkedSubMode)
@@ -317,20 +371,77 @@ void MainWindow::updateMode()
         subaction->setChecked(true);
       checkedSubMode = subaction;
     }
-    if(action->icon() != subaction->icon())
-      action->setIcon(subaction->icon());
-    if(actionTools_Menu->visible()) {
-      if(actionTools_Menu->icon() != subaction->icon())
-        actionTools_Menu->setIcon(subaction->icon());
-    }
   }
   else {
     if(checkedSubMode)
       checkedSubMode->setChecked(false);
     checkedSubMode = NULL;
   }
+  int eraserMode = app->scribbleMode->eraserMode;
+  eraseStrokeToggle->setChecked(eraserMode == MODE_ERASESTROKE || eraserMode == MODE_ERASERULED);
+  eraseRuledToggle->setChecked(eraserMode == MODE_ERASERULED || eraserMode == MODE_ERASEFREERULED);
+  // an options row left open follows a mode change made outside the tools toolbar
+  int modeType = ScribbleMode::getModeType(mode);
+  if(openOptionsRow && openOptionsRow != modeType)
+    showOptionsRow(modeType);
   // update pen toolbar
   app->updatePenToolbar();  //penToolbar->setPen(app->getPen());
+}
+
+// showing the row for a mode without one (e.g. pan) just hides all of them
+void MainWindow::showOptionsRow(int modeType)
+{
+  openOptionsRow = modeType;
+  penToolbarAutoAdj->setVisible(modeType == MODE_STROKE);
+  eraseOptsRow->setVisible(modeType == MODE_ERASE);
+  selectOptsRow->setVisible(modeType == MODE_SELECT);
+  insSpaceOptsRow->setVisible(modeType == MODE_INSSPACE);
+  if(vertToolbar)
+    return;
+  // tools row and options rows are children of a single panel with a single background, so all we
+  //  have to do is hide the divider and the options row container when no options row is shown
+  bool rowOpen = modeType == MODE_STROKE || modeType == MODE_ERASE
+      || modeType == MODE_SELECT || modeType == MODE_INSSPACE;
+  if(optsRowDivider)
+    optsRowDivider->setVisible(rowOpen);
+  if(optsRowContainer)
+    optsRowContainer->setVisible(rowOpen);
+}
+
+// tapping the already active tool closes its options row
+void MainWindow::selectTool(int modeType)
+{
+  bool close = openOptionsRow == modeType
+      && ScribbleMode::getModeType(app->scribbleMode->getMode()) == modeType;
+  // always set the mode so that double tap to lock still works
+  app->setMode(modeType);
+  showOptionsRow(close ? 0 : modeType);
+}
+
+void MainWindow::selectDrawTool(int tool)
+{
+  ScribbleMode* scribbleMode = app->scribbleMode;
+  bool close = openOptionsRow == MODE_STROKE
+      && scribbleMode->getMode() == MODE_STROKE && scribbleMode->drawTool == tool;
+  app->setDrawTool(tool);
+  showOptionsRow(close ? 0 : MODE_STROKE);
+}
+
+void MainWindow::setEraserWidth(int idx)
+{
+  idx = std::max(0, std::min(idx, int(NELEM(ERASER_RADII)) - 1));
+  ScribbleArea::ERASEFREE_RADIUS = ERASER_RADII[idx];
+  ScribbleApp::cfg->set("eraserWidth", idx);
+  for(int ii = 0; ii < int(eraserWidthBtns.size()); ++ii)
+    eraserWidthBtns[ii]->setChecked(ii == idx);
+}
+
+void MainWindow::setEraserMode()
+{
+  bool stroke = eraseStrokeToggle->isChecked();
+  bool ruled = eraseRuledToggle->isChecked();
+  app->setMode(stroke ? (ruled ? MODE_ERASERULED : MODE_ERASESTROKE)
+      : (ruled ? MODE_ERASEFREERULED : MODE_ERASEFREE));
 }
 
 void MainWindow::toggleBookmarks()
@@ -385,11 +496,8 @@ void MainWindow::toggleInvertColors()
 
 void MainWindow::togglePenToolbar()
 {
-  bool show = !penToolbarAutoAdj->isVisible();
-  penToolbarAutoAdj->setVisible(show);
-  if(show)
-    app->updatePenToolbar();
-  ScribbleApp::cfg->set("showPenToolbar", show);
+  showOptionsRow(penToolbarAutoAdj->isVisible() ? 0 : MODE_STROKE);
+  ScribbleApp::cfg->set("showPenToolbar", penToolbarAutoAdj->isVisible());
 }
 
 void MainWindow::toggleDisableTouch()
@@ -423,6 +531,8 @@ void MainWindow::toggleSplitView(int newstate)
   actionSplitView->setIcon(SvgGui::useFile(icons[std::abs(newstate) - SPLIT_H12]));
   if(newstate < 0 && (splitState < 0 || !app->closeSplit()))
     return;  // saving of modified doc in split was canceled
+  if(newstate < 0 && splitPlaceholder)
+    splitPlaceholder->setVisible(false);
 
   if(app->scribbleAreas.size() < 2) {
     // create second ScribbleArea
@@ -430,10 +540,20 @@ void MainWindow::toggleSplitView(int newstate)
     app->scribbleAreas.push_back(area);
     ScribbleWidget* areaWidget = createScribbleAreaWidget(scribbleContainer2, area);
     areaWidget->focusIndicator = focusIndicator2;
+    // added after the ScribbleArea so it is drawn (and hit tested) on top of it
+    splitPlaceholder = createSplitPlaceholder(scribbleContainer2);
   }
 
-  if(splitState < 0)
+  if(splitState < 0) {
     app->openSplit();
+    // pane starts blank, offering a choice instead of immediately popping up the document list; set the
+    //  fill here (not in CSS) so it tracks light/dark theme and invert colors like the canvas does
+    Color canvas = ScribbleArea::BACKGROUND_COLOR;
+    if(ScribbleApp::cfg->Bool("invertColors"))
+      canvas.color ^= color_t(ScribbleApp::cfg->Int("colorXorMask"));
+    splitPlaceholder->selectFirst(".split-placeholder-bg")->node->setAttr<color_t>("fill", canvas.color);
+    splitPlaceholder->setVisible(true);
+  }
 
   Widget* layoutContainer = selectFirst("#scribble-split-layout");
   Rect layoutrect = layoutContainer->node->bounds();
@@ -586,6 +706,27 @@ ScribbleWidget* MainWindow::createScribbleAreaWidget(Widget* container, Scribble
   return areaWidget;
 }
 
+// blank second pane shown when a split is opened, offering the two things the user might want there
+Widget* MainWindow::createSplitPlaceholder(Widget* container)
+{
+  Widget* placeholder = new Widget(loadSVGFragment(splitPlaceholderSVG));
+  Widget* items = placeholder->selectFirst(".split-placeholder-items");
+
+  Button* openDocBtn = createMenuItem(_("Open Document..."), SvgGui::useFile(":/icons/ic_menu_folder.svg"));
+  openDocBtn->onClicked = [this](){
+    if(app->openSplitDoc())
+      splitPlaceholder->setVisible(false);
+  };
+  Button* thisDocBtn = createMenuItem(_("This Document"), SvgGui::useFile(":/icons/ic_menu_document.svg"));
+  thisDocBtn->onClicked = [this](){ splitPlaceholder->setVisible(false); };
+  items->addWidget(openDocBtn);
+  items->addWidget(thisDocBtn);
+
+  container->addWidget(placeholder);
+  placeholder->setVisible(false);
+  return placeholder;
+}
+
 // see Qt version of this method for theme colors
 void MainWindow::setupTheme()
 {
@@ -606,14 +747,6 @@ void MainWindow::setupUI(ScribbleApp* a)
 
   // this is set so focus is not returned to pen toolbar edit boxes if lost
   isFocusable = true;
-
-  // set initial icons for tool buttons
-  modeToAction(ScribbleMode::getModeType(app->scribbleMode->eraserMode))->setIcon(
-        modeToAction(app->scribbleMode->eraserMode)->icon());
-  modeToAction(ScribbleMode::getModeType(app->scribbleMode->selectMode))->setIcon(
-        modeToAction(app->scribbleMode->selectMode)->icon());
-  modeToAction(ScribbleMode::getModeType(app->scribbleMode->insSpaceMode))->setIcon(
-        modeToAction(app->scribbleMode->insSpaceMode)->icon());
 
   // create and populate toolbars
   createToolBars();
@@ -757,36 +890,23 @@ void MainWindow::createToolBars()
   auto tbcfg = splitStr<std::vector>(tbscfg[0].c_str(), ',', true);
 
   Toolbar* tb = vertToolbar ? createVertToolbar() : createToolbar();
-  Widget* stretch = NULL, *eraseBtn = NULL, *selectBtn = NULL, *insSpaceBtn = NULL, *toolsBtn = NULL;
+  Widget* stretch = NULL;
   Menubar* toolsToolbar = NULL;
-  auto addTBWidget = [this](Widget* w, int priority) {
+  // priority orders auto-adjust: the lowest is dropped from the toolbar first.  Any actions passed here
+  //  get a menu item in the overflow menu, shown while the widget is hidden (see adjFn below)
+  auto addTBWidget = [this](Widget* w, int priority, std::initializer_list<Action*> actions = {}) {
     w->node->setAttr<int>("ui-priority", priority);
     tbWidgets.push_back(w);
+    for(Action* action : actions) {
+      Button* item = createActionMenuItem(action);
+      setupMenuItem(item);
+      item->setVisible(false);
+      overflowHiddenGroup->addWidget(item);
+      tbOverflowItems[w].push_back(item);
+    }
   };
-  for(size_t jj = 0; jj < tbcfg.size(); ++jj) {
-    if(tbcfg[jj] == "separator") {
-      addTBWidget(tb->addSeparator(), -100);
-    }
-    else if(tbcfg[jj] == "stretch") {
-      stretch = createStretch();
-      tb->addWidget(stretch);  // not included in tbWidgets
-    }
-    else if(tbcfg[jj] == "docTitle") {
-      tb->addWidget(titleButton);
-      addTBWidget(titleButton, 2);
-    }
-    else if(tbcfg[jj] == "undoRedoBtn") {
-      tb->addWidget(undoRedoBtn);
-      addTBWidget(undoRedoBtn, 2);
-    }
-    else if(tbcfg[jj] == "seltools") {
-      if(!ScribbleApp::cfg->Bool("popupToolbar")) {
-        addTBWidget(tb->addAction(actionCut), actionCut->priority);
-        addTBWidget(tb->addAction(actionCopy), actionCopy->priority);
-      }
-      addTBWidget(tb->addAction(actionPaste), actionPaste->priority);
-    }
-    else if(tbcfg[jj] == "tools") {
+  // the six tools (plus the optional pan/IAP buttons) go into the given toolbar
+  auto addTools = [&](Toolbar* dest) {
 #ifdef SCRIBBLE_IAP
       if(!iosIsPaid()) {
         const char* iapButtonSVG = R"(<g class="toolbutton" layout="box">
@@ -797,115 +917,398 @@ void MainWindow::createToolBars()
         iapButton = new Button(loadSVGFragment(iapButtonSVG));
         iapButton->setText(_("Upgrade Write"));  // for i18n
         iapButton->onClicked = [](){ iosRequestIAP(); };  //app->openURL("https://apps.apple.com/us/app/stylus-labs-write/id1498369428"); };
-        tb->addWidget(iapButton);
+        dest->addWidget(iapButton);
         addTBWidget(iapButton, Action::NormalPriority - 10);
-        addTBWidget(tb->addSeparator(), -100);
+        addTBWidget(dest->addSeparator(), -100);
       }
 #endif
       // if touch input disabled, show pan tool (add directly main toolbar for now)
       if(ScribbleApp::cfg->Int("singleTouchMode") == 0 && ScribbleApp::cfg->Int("multiTouchMode") == 0)
-        addTBWidget(tb->addAction(actionPan), actionPan->priority);
-      // draw, erase, select, insert space as a menu bar
+        addTBWidget(dest->addAction(actionPan), actionPan->priority, {actionPan});
+      // the six tools; submodes are on the options rows below instead of in floating menus
       toolsToolbar = vertToolbar ? createVertMenubar() : createMenubar();
       toolsToolbar->autoClose = true;  //ScribbleApp::cfg->Bool("pressOpenMenus");
       toolsToolbar->addAction(actionDraw);
-      eraseBtn = toolsToolbar->addAction(actionErase);
-      selectBtn = toolsToolbar->addAction(actionSelect);
-      insSpaceBtn = toolsToolbar->addAction(actionInsert_Space);
+      toolsToolbar->addAction(actionHighlight);
+      toolsToolbar->addAction(actionEphemeral);
+      toolsToolbar->addAction(actionErase);
+      toolsToolbar->addAction(actionSelect);
+      toolsToolbar->addAction(actionInsert_Space);
       toolsToolbar->node->setAttribute("box-anchor", "");  // no stretching for this subtoolbar!
-      toolsBtn = toolsToolbar->addAction(actionTools_Menu);  // for size adjustment
-      toolsBtn->setVisible(false);
-      tb->addWidget(toolsToolbar);
-      addTBWidget(toolsToolbar, 1);
-    }
-    else {
-      Action* action = findAction(tbcfg[jj].c_str());
-      if(action)
-        addTBWidget(tb->addAction(action), action->priority);
+      dest->addWidget(toolsToolbar);
+      // the tools are the point of the app, so the row is hidden only as a last resort (see adjFn)
+      addTBWidget(toolsToolbar, 4, {actionDraw, actionHighlight, actionEphemeral,
+          actionErase, actionSelect, actionInsert_Space});
+  };
+
+  // page ops, file ops and overflow are separate floating panels on desktop (see below), so the flat
+  //  toolbar config is only used for the vertical (tablet/narrow) toolbar
+  if(vertToolbar) {
+    for(size_t jj = 0; jj < tbcfg.size(); ++jj) {
+      if(tbcfg[jj] == "separator") {
+        addTBWidget(tb->addSeparator(), -100);
+      }
+      else if(tbcfg[jj] == "stretch") {
+        stretch = createStretch();
+        tb->addWidget(stretch);  // not included in tbWidgets
+      }
+      else if(tbcfg[jj] == "docTitle") {
+        tb->addWidget(titleButton);
+        addTBWidget(titleButton, 2);
+      }
+      else if(tbcfg[jj] == "addPage") {
+        Widget* addPageBtn = AddPageMenu::createAddPageButton(actionScan_Page);
+        tb->addWidget(addPageBtn);
+        // adding a page is the one thing this button does that nothing else on a narrow toolbar does,
+        //  so it outranks everything but undo/redo and the tools themselves
+        addTBWidget(addPageBtn, 3);
+      }
+      else if(tbcfg[jj] == "undoRedoBtn") {
+        tb->addWidget(undoRedoBtn);
+        addTBWidget(undoRedoBtn, 5, {actionUndo, actionRedo});
+      }
+      else if(tbcfg[jj] == "seltools") {
+        if(!ScribbleApp::cfg->Bool("popupToolbar")) {
+          addTBWidget(tb->addAction(actionCut), actionCut->priority, {actionCut});
+          addTBWidget(tb->addAction(actionCopy), actionCopy->priority, {actionCopy});
+        }
+        addTBWidget(tb->addAction(actionPaste), actionPaste->priority, {actionPaste});
+      }
+      else if(tbcfg[jj] == "tools") {
+        addTools(tb);
+      }
+      else {
+        Action* action = findAction(tbcfg[jj].c_str());
+        if(action)
+          addTBWidget(tb->addAction(action), action->priority, {action});
+      }
     }
   }
+  else
+    addTools(tb);  // main toolbar holds only the editing tools
 
   // container to hide/show toolbar items depending on width, using adjFn
   AutoAdjContainer* adjtb = new AutoAdjContainer(new SvgG(), tb);
   adjtb->node->setAttribute("box-anchor", vertToolbar ? "vfill" : "hfill");
   adjtb->node->addClass("main-toolbar-autoadj");
 
+  // the other three floating panels of the desktop toolbar row
+  Toolbar* pageopsRow = NULL, *fileopsRow = NULL, *overflowRow = NULL;
+  Widget* stretch2 = NULL;
+
+  // each panel sizes to its contents and gets a rounded floating background inset from its contents
+  auto floatBox = [](Widget* box, Dim rmargin, Dim pad) {
+    box->node->setAttribute("box-anchor", "top");  // no stretching - panel hugs its contents
+    box->setMargins(floatTopInset, rmargin, floatTopInset, floatInset);
+    SvgRect* bg = static_cast<SvgRect*>(box->selectFirst(".toolbar-bg")->node);
+    bg->setRect(bg->getRect(), floatCorner, floatCorner);
+    // breathing room between the rounded background and the first/last button
+    box->selectFirst(".child-container")->setMargins(0, pad, 0, pad);
+  };
+
   if(!vertToolbar) {
-    static const Dim floatInset = 15;
-    static const real floatCorner = 12;
-    adjtb->setMargins(floatInset, floatInset, floatInset, floatInset);
-    Widget* tbBg = tb->selectFirst(".toolbar-bg");
-    Rect bgRect = static_cast<SvgRect*>(tbBg->node)->getRect();
-    static_cast<SvgRect*>(tbBg->node)->setRect(bgRect, floatCorner, floatCorner);
+    // the tools row sets the width of the Editing panel: it reports its measured width to layout (instead
+    //  of nothing, as a hfill widget normally would), so the panel is exactly as wide as the tools row;
+    //  the options rows below are inside a scroll viewport and do not contribute to the panel width
+    adjtb->fillReportsSize = true;
+    // the tools row is a child of the Editing panel, which supplies the single background for the panel
+    tb->selectFirst(".toolbar-bg")->setVisible(false);
     // #main-toolbar-container is now an overlay above the page (see res_ui.cpp), so this accent
     //  line at the top of the page would otherwise show through above the floating toolbar
     selectFirst("#scribble-focus")->setVisible(false);
     selectFirst("#scribble-focus-2")->setVisible(false);
+
+    // page ops: doc title, bookmarks, paste, split view
+    pageopsRow = createToolbar();
+    titleButton->node->addClass("float-wide-btn");  // sized by its label, not the button grid
+    pageopsRow->addWidget(titleButton);
+    addTBWidget(titleButton, 2);
+    addTBWidget(pageopsRow->addSeparator(), -100);
+    addTBWidget(pageopsRow->addAction(actionShow_Bookmarks), actionShow_Bookmarks->priority,
+        {actionShow_Bookmarks});
+    addTBWidget(pageopsRow->addAction(actionPaste), actionPaste->priority, {actionPaste});
+    addTBWidget(pageopsRow->addAction(actionSplitView), actionSplitView->priority, {actionSplitView});
+    floatBox(pageopsRow, floatInset, floatSidePad);
+    scaleFloatPanel(pageopsRow, floatSideIconSize);
+
+    // file ops: add page, save, clippings, undo/redo (the mockup's order)
+    fileopsRow = createToolbar();
+    // the universal "add page" button - see addpagemenu.cpp for why the ruling is chosen here
+    Widget* addPageBtn = AddPageMenu::createAddPageButton(actionScan_Page);
+    fileopsRow->addWidget(addPageBtn);
+    addTBWidget(addPageBtn, 3);
+    addTBWidget(fileopsRow->addAction(actionSave), actionSave->priority, {actionSave});
+    addTBWidget(fileopsRow->addAction(actionShow_Clippings), actionShow_Clippings->priority,
+        {actionShow_Clippings});
+    fileopsRow->addWidget(undoRedoBtn);
+    // undo/redo outranks even the tools row; the overflow button itself is never hidden
+    addTBWidget(undoRedoBtn, 5, {actionUndo, actionRedo});
+    // the overflow panel hugs the file ops panel rather than being pushed to the window edge
+    floatBox(fileopsRow, 18*floatUIScale, floatSidePad);
+    scaleFloatPanel(fileopsRow, floatSideIconSize);
+
+    // overflow menu sits alone in its own small panel at the right edge
+    overflowRow = createToolbar();
+    overflowRow->addAction(actionOverflow_Menu);  // never hidden: it holds everything that was
+    floatBox(overflowRow, floatInset, 0);
+    scaleFloatPanel(overflowRow, floatSideIconSize);
+
+    stretch = createStretch();
+    stretch2 = createStretch();
   }
 
-  // although hiding of certain buttons basically breaks application (e.g. doc title, undo), we won't worry
-  //  about putting on overflow menu as user may be using split screen and can adjust split width to recover
-  // The motivation behind auto-adjust is mostly to automatically accommodate various screen sizes, not to
-  //  support user resizing window
-  // Tools menu logic is pretty ugly, but can't think of a better way to get the desired behavior
+  // Every widget hidden here can still be reached from the overflow menu (see addTBWidget), which is why
+  //  the overflow button itself is the one thing auto-adjust never touches.
+  // tbWidgets is sorted by priority once the options rows have been added too, below
+
+  // the options rows are children of the same panel as the tools row, so they must not draw their own
+  //  background; the panel's single rounded background rect shows through instead
+  auto floatRow = [this](Widget* rowtb) {
+    if(vertToolbar) return;
+    rowtb->selectFirst(".toolbar-bg")->setVisible(false);
+  };
+
+  // help and settings get the mockup's narrower cell (see scaleFloatPanel)
+  auto smallFloatBtn = [this](Button* btn) {
+    if(!vertToolbar)
+      btn->node->addClass("float-small-btn");
+    return btn;
+  };
+
+  // the eraser size presets at the right of the eraser options row
+  auto addEraserWidths = [this](Toolbar* row) {
+    eraserWidthBtns.clear();
+    for(int ii = 0; ii < int(NELEM(ERASER_RADII)); ++ii) {
+      Button* btn = new Button(loadSVGFragment(eraserWidthBtnSVG().c_str()));
+      btn->containerNode()->selectFirst(".width-line")->setAttr("stroke-width", ERASER_RADII[ii]/2*floatUIScale);
+      btn->onClicked = [this, ii](){ setEraserWidth(ii); };
+      setupTooltip(btn, fstring(_("Eraser size: %.0f"), 2*ERASER_RADII[ii]).c_str());
+      row->addWidget(btn);
+      eraserWidthBtns.push_back(btn);
+    }
+    setEraserWidth(ScribbleApp::cfg->Int("eraserWidth"));
+  };
+
+  penToolbarAutoAdj = createPenToolbarAutoAdj(!vertToolbar);
+  if(!vertToolbar) {
+    // every options row is narrower than the six-tool row above it, so nothing ever has to collapse
+    //  (which is what the pen toolbar's adjFn does); the row is just centred under the tools
+    penToolbarAutoAdj->adjFn = [](const Rect&, const Rect&){};
+  }
+  floatRow(penToolbarAutoAdj->contents);
+
+  Toolbar* eraseRow = createToolbar();
+  eraseOptsRow = eraseRow;
+  eraseRow->addWidget(createStretch());
+  eraseStrokeToggle = createToolbutton(
+      SvgGui::useFile(":/icons/ic_menu_toggle_erase_stroke.svg"), _("Erase Whole Strokes"));
+  eraseStrokeToggle->onClicked = [this](){
+    eraseStrokeToggle->setChecked(!eraseStrokeToggle->isChecked());
+    setEraserMode();
+  };
+  setupTooltip(eraseStrokeToggle, _("Erase whole strokes"));
+  eraseRow->addWidget(eraseStrokeToggle);
+  eraseRuledToggle = createToolbutton(SvgGui::useFile(":/icons/ic_menu_toggle_ruled.svg"), _("Ruled Eraser"));
+  eraseRuledToggle->onClicked = [this](){
+    eraseRuledToggle->setChecked(!eraseRuledToggle->isChecked());
+    setEraserMode();
+  };
+  setupTooltip(eraseRuledToggle, _("Erase along ruling"));
+  eraseRow->addWidget(eraseRuledToggle);
+  eraseSwitchBackToggle = createToolbutton(
+      SvgGui::useFile(":/icons/ic_menu_switch_back.svg"), _("Switch Back"));
+  eraseSwitchBackToggle->setChecked(app->scribbleMode->eraseSwitchBack);
+  eraseSwitchBackToggle->onClicked = [this](){
+    bool on = !eraseSwitchBackToggle->isChecked();
+    eraseSwitchBackToggle->setChecked(on);
+    app->scribbleMode->eraseSwitchBack = on;
+  };
+  setupTooltip(eraseSwitchBackToggle, _("Return to previous tool after erasing"));
+  eraseRow->addWidget(eraseSwitchBackToggle);
+  eraseRow->addWidget(smallFloatBtn(createHelpButton({
+    {"ic_menu_toggle_erase_stroke.svg", "Erase Whole Strokes", "Removes an entire stroke instead of just the part you touch."},
+    {"ic_menu_toggle_ruled.svg", "Ruled Eraser", "Constrains erasing to the ruled lines; use in the margin to erase whole lines."},
+    {"ic_menu_switch_back.svg", "Switch Back", "Returns to the previous tool after one erase."},
+    {"ic_menu_settings2.svg", "Eraser Settings", "Preferences that affect erasing."} })));
+  eraseRow->addSeparator();
+  addEraserWidths(eraseRow);
+  eraseRow->addWidget(createStretch());
+  // settings sits at the very end of the row, past the stretch that centres the tools
+  eraseRow->addWidget(smallFloatBtn(createToolSettingsButton(
+      "Eraser Settings", {"eraseOnImage", "doubleTapSticky"})));
+  floatRow(eraseRow);
+
+  Toolbar* selectRow = createToolbar();
+  selectOptsRow = selectRow;
+  selectRow->addWidget(createStretch());
+  selectRow->addAction(actionLasso_Select);
+  selectRow->addAction(actionRect_Select);
+  selectRow->addAction(actionRuled_Select);
+  selectRow->addAction(actionPath_Select);
+  selectRow->addWidget(smallFloatBtn(createHelpButton({
+    {"ic_menu_select_lasso.svg", "Lasso Select", "Selects everything inside a freehand path."},
+    {"ic_menu_select.svg", "Rect Select", "Selects everything inside a rectangle you drag."},
+    {"ic_menu_select_ruled.svg", "Ruled Select", "Selects handwritten text; use in the margin to select whole lines."},
+    {"ic_menu_select_path.svg", "Path Select", "Selects the strokes crossed by a freehand path."} })));
+  selectRow->addWidget(createStretch());
+  selectRow->addWidget(smallFloatBtn(createToolSettingsButton("Selection Settings",
+      {"popupToolbar", "applyPenToSel", "columnDetectMode"})));
+  floatRow(selectRow);
+
+  Toolbar* insSpaceRow = createToolbar();
+  insSpaceOptsRow = insSpaceRow;
+  insSpaceRow->addWidget(createStretch());
+  insSpaceRow->addAction(actionInsert_Space_Vert);
+  insSpaceRow->addAction(actionRuled_Insert_Space);
+  insSpaceRow->addWidget(smallFloatBtn(createHelpButton({
+    {"ic_menu_insert_space.svg", "Insert Space", "Drags everything below the line you draw up or down."},
+    {"ic_menu_insert_space_ruled.svg", "Ruled Insert Space", "Inserts whole lines and reflows handwritten text."} })));
+  insSpaceRow->addWidget(createStretch());
+  insSpaceRow->addWidget(smallFloatBtn(createToolSettingsButton("Insert Space Settings",
+      {"reflow", "insSpaceErase", "minWordSep", "columnDetectMode", "blankYRuling"})));
+  floatRow(insSpaceRow);
+
+  // thin divider between the tools row and the open options row (both are one panel)
+  optsRowDivider = createHRule(1, NULL, "separator");
+  if(!vertToolbar)
+    optsRowDivider->setMargins(0, optsDividerInset);  // the mockup insets it well inside the panel
+
+  Widget* toolbarColumn = NULL;
+  if(vertToolbar) {
+    toolbarColumn = createColumn(
+        {adjtb, optsRowDivider, penToolbarAutoAdj, eraseRow, selectRow, insSpaceRow}, "", "", "vfill");
+  }
+  else {
+    // Only one options row is visible at a time; they are stacked directly (hfill, like the tools row)
+    //  so the options row shares the same width as the panel. A horizontally-scrolling viewport was
+    //  tried here so the panel could stay locked to the tools row's width, but ScrollWidget is built
+    //  for vertical scrolling and left visible layout artifacts when repurposed - simple stacking with
+    //  the (now-compact) options content is a safer trade for now.
+    Widget* optsStack = createColumn(
+        {penToolbarAutoAdj, eraseRow, selectRow, insSpaceRow}, "", "", "hfill");
+    optsRowContainer = optsStack;
+    // every options row should fit the mockup's six-tool width, but the palettes are user-configurable,
+    //  so let a row that has grown past it widen the panel rather than spill outside the background
+    for(Widget* w : {(Widget*)penToolbarAutoAdj, (Widget*)eraseRow, (Widget*)selectRow,
+        (Widget*)insSpaceRow, optsStack})
+      w->fillReportsSize = true;
+
+    // one panel, one background: the tools row, the divider and the options rows are all children of
+    //  this toolbar, so its background rect (rounded on all four corners, always) wraps all of them
+    Toolbar* panel = createToolbar();
+    Widget* panelContents = panel->selectFirst(".child-container");
+    panelContents->node->setAttribute("flex-direction", "column");
+    panel->addWidget(adjtb);
+    panel->addWidget(optsRowDivider);
+    panel->addWidget(optsStack);
+    floatBox(panel, floatInset, floatPad);
+    mainToolbarPanel = panel;
+    toolbarColumn = panel;
+    // an options row is as wide as the tools row, so on a narrow window it has to give way just before
+    //  the tools do - otherwise the tool options would be all that is left (with no way to switch tool)
+    addTBWidget(optsRowDivider, 3);
+    addTBWidget(optsStack, 3);
+  }
+
   std::stable_sort(tbWidgets.begin(), tbWidgets.end(), [](Widget* a, Widget* b){
     return a->node->getIntAttr("ui-priority", 0) < b->node->getIntAttr("ui-priority", 0);
   });
 
-  size_t nextAdjIdx = 0;
-  adjtb->adjFn = [=](const Rect& src, const Rect& dest) mutable {
-    if(dest.width() <= src.width() + 0.5 && stretch->node->bounds().width() >= 1)
-      return;
-    // reset
-    nextAdjIdx = 0;
+  // container to hide/show toolbar items depending on width, using adjFn; on desktop, this wraps the
+  //  whole row of floating panels, since it is the row (not any single panel) that runs out of space
+  AutoAdjContainer* adjOuter = adjtb;
+  if(!vertToolbar) {
+    // the four floating panels, pushed apart by flexible gaps (overflow hugs the file ops panel)
+    Widget* toolbarRow = createRow(
+        {pageopsRow, stretch, toolbarColumn, stretch2, fileopsRow, overflowRow}, "", "", "top hfill");
+    adjOuter = new AutoAdjContainer(new SvgG(), toolbarRow);
+    adjOuter->node->setAttribute("box-anchor", "top hfill");
+    adjtb->adjFn = [](const Rect&, const Rect&){};  // adjustment is done by adjOuter for the whole row
+    // the floating panels use bigger buttons than the rest of the app (see scaleFloatToolbutton);
+    //  the side panels were already scaled above, with their own (larger) icon size
+    scaleFloatPanel(toolbarColumn, floatIconSize);
+    selectFirst("#main-toolbar-container")->addWidget(adjOuter);
+  }
+  else
+    selectFirst("#main-toolbar-container")->addWidget(toolbarColumn);
+
+  adjOuter->adjFn = [=](const Rect& src, const Rect& dest) mutable {
+    // Width still needed with the current visibility: laying the contents out at zero size squeezes every
+    //  stretch, so what is left is the unsqueezable minimum.  We can't measure the leftover space from the
+    //  stretch widgets instead: a stretch squeezed to zero width can never be scaled back up (see
+    //  Widget::setLayoutBounds), so on the very first layout - which includes a zero-size measuring pass -
+    //  they report zero slack however much room there is, which used to collapse the whole toolbar until
+    //  the next resize.
+    auto widthNeeded = [adjOuter]() {
+      adjOuter->repeatLayout(Rect::wh(0, 0));
+      return adjOuter->contents->node->bounds().width();
+    };
+
+    // reset: everything back on the toolbar, nothing in the overflow menu's hidden-items group
     titleButton->setShowTitle(!vertToolbar);
     titleButton->setText(titleStr.c_str());
-    for(Widget* w : tbWidgets)
-      w->setVisible(true);
-    if(toolsToolbar) {
-      toolsBtn->setVisible(false);
-      eraseBtn->setVisible(true);
-      selectBtn->setVisible(true);
-      insSpaceBtn->setVisible(true);
+    for(Widget* w : tbWidgets) {
+      // the options row and its divider are shown only while a tool's options are open (showOptionsRow())
+      w->setVisible(w == optsRowContainer || w == optsRowDivider ? openOptionsRow != 0 : true);
+      for(Button* item : tbOverflowItems[w])
+        item->setVisible(false);
     }
-    adjtb->repeatLayout(dest);
-    while(stretch->node->bounds().width() < 1) {
-      if(titleButton->selectFirst(".title")->isVisible()) {
+    overflowHiddenGroup->setVisible(false);
+    overflowHiddenSep->setVisible(false);
+
+    // drop widgets in priority order (lowest first) until the toolbar fits; the doc title gives up its
+    //  text before the button itself goes, and the tools row is hidden last (see addTBWidget calls)
+    bool anyHidden = false;
+    for(size_t ii = 0; ii < tbWidgets.size() && widthNeeded() > dest.width(); ) {
+      Widget* w = tbWidgets[ii];
+      if(w == titleButton && titleButton->selectFirst(".title")->isVisible()) {
         titleButton->setShowTitle(false);
-        adjtb->repeatLayout(dest);
-        Dim w = stretch->node->bounds().width();
-        if(w > 1) {
-          SvgText* textnode = static_cast<SvgText*>(titleButton->containerNode()->selectFirst("text"));
-          if(w > 12 && textnode) {
-            titleButton->setShowTitle(true);
-            SvgPainter::elideText(textnode, w - 4);
-            adjtb->repeatLayout(dest);
-          }
-          return;
-        }
+        continue;  // retry this widget: hide the button itself only if dropping the text wasn't enough
       }
-      else if(nextAdjIdx < tbWidgets.size()) {
-        if(tbWidgets[nextAdjIdx] == toolsToolbar) {
-          toolsBtn->setVisible(true);
-          eraseBtn->setVisible(false);
-          selectBtn->setVisible(false);
-          insSpaceBtn->setVisible(false);
-        }
-        else
-          tbWidgets[nextAdjIdx]->setVisible(false);
-        ++nextAdjIdx;
+      w->setVisible(false);
+      for(Button* item : tbOverflowItems[w]) {
+        item->setVisible(true);
+        anyHidden = true;
       }
-      else
-        return;  // nothing else we can do
-      adjtb->repeatLayout(dest);
+      ++ii;
     }
+    overflowHiddenGroup->setVisible(anyHidden);
+    overflowHiddenSep->setVisible(anyHidden);
+
+    // put back as much of the doc title as the leftover space allows
+    if(titleButton->isVisible() && !titleButton->selectFirst(".title")->isVisible()) {
+      Dim slack = dest.width() - widthNeeded();
+      SvgText* textnode = static_cast<SvgText*>(titleButton->containerNode()->selectFirst("text"));
+      if(slack > 12 && textnode) {
+        titleButton->setShowTitle(true);
+        SvgPainter::elideText(textnode, slack - 4);
+      }
+    }
+    adjOuter->repeatLayout(dest);
   };
 
-  selectFirst("#main-toolbar-container")->addWidget(adjtb);
+  // the overflow button opens an ArrowPopup (created in setupActions()) instead of a Menu, so it can't be
+  //  wired up by Action::setMenu(); the popup must be a child of the button to be positioned relative to it
+  if(!actionOverflow_Menu->buttons.empty()) {
+    Button* overflowBtn = actionOverflow_Menu->buttons.front();
+    overflowBtn->addWidget(overflowPopup);
+    // open on press, like a menu; added after the Button handler, so it runs first and swallows the event
+    overflowBtn->addHandler([this, overflowBtn](SvgGui* gui, SDL_Event* event){
+      if(event->type != SDL_FINGERDOWN || event->tfinger.fingerId != SDL_BUTTON_LMASK)
+        return false;
+      // the press that closed the popup (as an outside press) must not immediately reopen it
+      if(gui->lastClosedMenu != overflowPopup) {
+        gui->closeMenus();
+        openAutoClosePopup(overflowPopup);
+        // note we must NOT setPressed() the popup: the release over this button is not over the popup, so
+        //  it would arrive as an outside press and close the popup as soon as the button is released
+        overflowBtn->node->addClass("pressed");  // cleared by closeMenus(), which unpresses popup's parent
+      }
+      return true;
+    });
+  }
 
-  penToolbarAutoAdj = createPenToolbarAutoAdj();
-  penToolbarAutoAdj->setVisible(ScribbleApp::cfg->Bool("showPenToolbar"));
-  selectFirst("#pen-toolbar-container")->addWidget(penToolbarAutoAdj);
+  showOptionsRow(ScribbleApp::cfg->Bool("showPenToolbar") ? MODE_STROKE : 0);
 }
 
 void MainWindow::setupActions()
@@ -1021,6 +1424,12 @@ void MainWindow::setupActions()
       "Page Setup...", ":/icons/ic_menu_document.svg", "", SLOT(showPageSetup()));
   actionInsert_Image = createAction("actionInsert_Image",
       "Insert Image...", ":/icons/ic_menu_add_pic.svg", "", SLOT(insertImage()));
+  // two entries rather than one plus a choice in the dialog: the destination is decided before the
+  // photo is taken, and it keeps the scan dialog to adjusting the scan itself
+  actionScan_Element = createAction("actionScan_Element",
+      "Scan Document...", ":/icons/ic_menu_add_pic.svg", "", SLOT(scanDocument(false)));
+  actionScan_Page = createAction("actionScan_Page",
+      "Scan Document as Page...", ":/icons/ic_menu_append_page.svg", "", SLOT(scanDocument(true)));
   // insert pages from another document
   actionInsertDocument = createAction("actionInsertDocument", "Insert Document...", "", "", SLOT(insertDocument()));
   actionShow_Clippings = createAction("actionShow_Clippings",
@@ -1052,6 +1461,7 @@ void MainWindow::setupActions()
   actionBookmarksPin->setChecked(!cfg->Bool("autoHideBookmarks"));
 
   actionExport_PDF = createAction("actionExport_PDF", "Export PDF...", "", "", SLOT(exportPDF()));
+  actionImport_PDF = createAction("actionImport_PDF", "Import PDF...", "", "", SLOT(importPDF()));
   // don't use direct connection for prefs because it might destroy the toolbars (which might contain menu
   //  from which it was launched)
   actionPreferences = createAction("actionPreferences",
@@ -1092,20 +1502,24 @@ void MainWindow::setupActions()
   actionSend_HTML = createAction("actionSend_HTML", "Send Document", "", "", SLOT(sendDocument()));
   actionSend_PDF = createAction("actionSend_PDF", "Send PDF", "", "", SLOT(sendPDF()));
 
-  // tool menus and actions
+  // tool actions; submodes live on the inline options rows, so these no longer have floating menus
   auto tbMenuAlign = vertToolbar ? Menu::HORZ : Menu::VERT_RIGHT;  // open to right even if more space to left
-  menuDraw = createMenu("menuDraw", "Draw", tbMenuAlign);
-  menuErase = createMenu("menuErase", "Erase", tbMenuAlign);
-  menuSelect = createMenu("menuSelect", "Select", tbMenuAlign);
-  menuInsert_Space = createMenu("menuInsert_Space", "Insert Space", tbMenuAlign);
 
   actionPan = createAction("actionPan", "&Pan", ":/icons/ic_menu_pan.svg", "", SLOT(setMode(MODE_PAN)));
   actionPan->setCheckable(true);
 
-  actionDraw = createAction("actionDraw", "Draw", ":/icons/ic_menu_draw.svg", "`", SLOT(setMode(MODE_STROKE)));
+  actionDraw = createAction("actionDraw", "Draw", ":/icons/ic_menu_draw.svg", "`",
+      [this](){ selectDrawTool(ScribbleMode::DRAWTOOL_PEN); });
   actionDraw->setCheckable(true);
-  actionDraw->setMenu(menuDraw);
-  // draw menu items; 1-8 select saved pens; 9 for pen toolbar, 0 for bookmark
+  actionHighlight = createAction("actionHighlight", "Highlight", ":/icons/ic_menu_highlight.svg", "",
+      [this](){ selectDrawTool(ScribbleMode::DRAWTOOL_HIGHLIGHT); });
+  actionHighlight->setCheckable(true);
+  actionHighlight->tooltip = _("Draw under existing strokes");
+  actionEphemeral = createAction("actionEphemeral", "Ephemeral", ":/icons/ic_menu_ephemeral.svg", "",
+      [this](){ selectDrawTool(ScribbleMode::DRAWTOOL_EPHEMERAL); });
+  actionEphemeral->setCheckable(true);
+  actionEphemeral->tooltip = _("Strokes are not saved with the document");
+  // 1-8 select saved pens; 9 for draw options row, 0 for bookmark
   actionCustom_Pen = createAction("actionCustom_Pen",
       "Pen Setup...", ":/icons/ic_menu_set_pen.svg", "9", [this](){ togglePenToolbar(); });
   actionCustom_Pen->tooltip = _("Customize and save pens");
@@ -1114,9 +1528,9 @@ void MainWindow::setupActions()
   actionAdd_Bookmark->setCheckable(true);
   actionAdd_Bookmark->tooltip = _("Drop beside text to show in bookmark pane");
 
-  actionErase = createAction("actionErase", "Erase", "", "", SLOT(setMode(MODE_ERASE)));
+  actionErase = createAction("actionErase", "Erase", ":/icons/ic_menu_erase.svg", "",
+      [this](){ selectTool(MODE_ERASE); });
   actionErase->setCheckable(true);
-  actionErase->setMenu(menuErase);
   // erase menu items
   actionStroke_Eraser = createAction("actionStroke_Eraser",
       "Stroke Eraser", ":/icons/ic_menu_erase.svg", "", SLOT(setMode(MODE_ERASESTROKE)));
@@ -1131,9 +1545,11 @@ void MainWindow::setupActions()
   actionFree_Eraser->setCheckable(true);
   actionFree_Eraser->tooltip = _("Erase parts of strokes");
 
-  actionSelect = createAction("actionSelect", "Select", "", "", SLOT(setMode(MODE_SELECT)));
+  // the tools row shows the lasso (the mockup's select glyph); the rectangle icon is the Rect Select
+  //  entry on the select options row
+  actionSelect = createAction("actionSelect", "Select", ":/icons/ic_menu_select_tool.svg", "",
+      [this](){ selectTool(MODE_SELECT); });
   actionSelect->setCheckable(true);
-  actionSelect->setMenu(menuSelect);
   // select menu items
   actionRect_Select = createAction("actionRect_Select",
       "Rect Select", ":/icons/ic_menu_select.svg", "", SLOT(setMode(MODE_SELECTRECT)));
@@ -1152,9 +1568,9 @@ void MainWindow::setupActions()
   actionPath_Select->setCheckable(true);
   actionPath_Select->tooltip = _("Select along path");
 
-  actionInsert_Space = createAction("actionInsert_Space", "Insert Space", "", "", SLOT(setMode(MODE_INSSPACE)));
+  actionInsert_Space = createAction("actionInsert_Space", "Insert Space",
+      ":/icons/ic_menu_insert_space.svg", "", [this](){ selectTool(MODE_INSSPACE); });
   actionInsert_Space->setCheckable(true);
-  actionInsert_Space->setMenu(menuInsert_Space);
   // insert space menu items
   actionInsert_Space_Vert = createAction("actionInsert_Space_Vert",
       "Insert Space", ":/icons/ic_menu_insert_space.svg", "", SLOT(setMode(MODE_INSSPACEVERT)));
@@ -1165,58 +1581,18 @@ void MainWindow::setupActions()
   actionRuled_Insert_Space->setCheckable(true);
   actionRuled_Insert_Space->tooltip = _("Insert whole lines\nReflow handwritten text");
 
-  // populate tool menus
-  // add custom pens to draw menu
-  for(size_t ii = 0; ii < cfg->pens.size(); ii++) {
-    PenPreview* penpreview = new PenPreview;  //((int)ii);
-    Button* previewbtn = createMenuItem(penpreview);
-    penpreview->node->setAttribute("box-anchor", "fill");
-    penpreview->setMargins(1, 5);
-    previewbtn->onClicked = SLOT(penSelected((int)ii));
-    penpreview->node->addClass("pen-preview");
-    penPreviews.push_back(previewbtn);
-    setupTooltip(previewbtn, "");
-    menuDraw->addItem(previewbtn);
-  }
-  menuDraw->addAction(actionCustom_Pen);
-  menuDraw->addAction(actionAdd_Bookmark);
-  menuErase->addAction(actionStroke_Eraser);
-  menuErase->addAction(actionRuled_Eraser);
-  menuErase->addAction(actionFree_Eraser);
-  menuSelect->addAction(actionRect_Select);
-  menuSelect->addAction(actionRuled_Select);
-  menuSelect->addAction(actionLasso_Select);
-  menuSelect->addAction(actionPath_Select);
-  menuInsert_Space->addAction(actionInsert_Space_Vert);
-  menuInsert_Space->addAction(actionRuled_Insert_Space);
-  // tool menus have priority over other toolbar items (except overflow menu); pan should hide before tools
+  // tools have priority over other toolbar items (except overflow menu); pan should hide before tools
   actionPan->setPriority(Action::NormalPriority + 1);
   actionDraw->setPriority(Action::NormalPriority + 2);
+  actionHighlight->setPriority(Action::NormalPriority + 2);
+  actionEphemeral->setPriority(Action::NormalPriority + 2);
   actionErase->setPriority(Action::NormalPriority + 2);
   actionSelect->setPriority(Action::NormalPriority + 2);
   actionInsert_Space->setPriority(Action::NormalPriority + 2);
   // paste is more important than copy, cut, etc. assuming popup sel menu is enabled
   actionPaste->setPriority(Action::NormalPriority + 1);
 
-  // combined tools menu (option for small screen sizes)
-  Menu* toolsmenu = createMenu("toolsMenu", "Tools", tbMenuAlign);
-  toolsmenu->addAction(actionStroke_Eraser);
-  toolsmenu->addAction(actionRuled_Eraser);
-  toolsmenu->addAction(actionFree_Eraser);
-  toolsmenu->addSeparator();
-  toolsmenu->addAction(actionRect_Select);
-  toolsmenu->addAction(actionRuled_Select);
-  toolsmenu->addAction(actionLasso_Select);
-  toolsmenu->addAction(actionPath_Select);
-  toolsmenu->addSeparator();
-  toolsmenu->addAction(actionInsert_Space_Vert);
-  toolsmenu->addAction(actionRuled_Insert_Space);
-  // action for menu
-  actionTools_Menu = createAction("actionTools_Menu", "Tools Menu", "", "", [this](){app->setMode(toolsMenuMode);});
-  // need an initial icon for tools menu to be shown by toolbar editor
-  actionTools_Menu->setIcon(actionStroke_Eraser->icon());
-  actionTools_Menu->setMenu(toolsmenu);
-  toolsMenuMode = MODE_ERASESTROKE;
+  // no combined tools menu: every submode is reachable from the tool's options row instead
   // actions menu needed even with touch UI for popup tool menu
   //menu_Actions = createMenu("menu_Actions", "&Tools");
   //menu_Actions->addAction(actionPan);  actionDraw, actionErase, actionSelect, actionInsert_Space
@@ -1232,7 +1608,8 @@ void MainWindow::setupActions()
   actionOverflow_Menu = createAction("actionOverflow_Menu", "Menu", ":/icons/ic_menu_overflow.svg", "", NULL);
   actionSelection_Menu = createAction("actionSelection_Menu", "Selection Menu", ":/icons/ic_menu_paste.svg", "", NULL);
 
-  Menu* docmenu = createMenu("documentMenu", "Document", Menu::HORZ);
+  // the overflow menu's submenus are popups too, so the whole tree shares the arrow popup styling
+  ArrowPopup* docmenu = createArrowPopup(Menu::HORZ);
   // don't rely on these actions being on toolbar when not using doc list!
   if(!cfg->Bool("useDocList")) {
     docmenu->addAction(actionNew_Document);
@@ -1254,18 +1631,20 @@ void MainWindow::setupActions()
   docmenu->addAction(actionSend_HTML);
   docmenu->addAction(actionSend_PDF);
 #else
+  docmenu->addAction(actionImport_PDF);
   docmenu->addAction(actionExport_PDF);
 #endif
 
-  Menu* pagemenu = createMenu("pageMenu", "Page", Menu::HORZ);
+  ArrowPopup* pagemenu = createArrowPopup(Menu::HORZ);
   pagemenu->addAction(actionNew_Page_Before);
   pagemenu->addAction(actionNew_Page_After);
   // would be nice if we could avoid having menu items for these expand down/right
   pagemenu->addAction(actionExpand_Down);
   pagemenu->addAction(actionExpand_Right);
   pagemenu->addAction(actionSelect_Pages);
+  pagemenu->addAction(actionScan_Page);
 
-  Menu* viewmenu = createMenu("viewMenu", "View", Menu::HORZ);
+  ArrowPopup* viewmenu = createArrowPopup(Menu::HORZ);
   viewmenu->addAction(actionPrevious_View);
   viewmenu->addAction(actionNext_View);
   // Doesn't much sense to have these buried in submenu now that we have zoom button on statusbar
@@ -1283,7 +1662,7 @@ void MainWindow::setupActions()
 
   Action* selactions[] = {actionCut, actionCopy, actionPaste, actionDupSel, actionDelete_Selection,
       actionUngroup, actionInvert_Selection, actionSelect_All, actionCreate_Link};  //actionSelect_Similar
-  Menu* selectionmenu = createMenu("selMenu", "Selection", Menu::HORZ);
+  ArrowPopup* selectionmenu = createArrowPopup(Menu::HORZ);
   for(Action* a : selactions)
     selectionmenu->addAction(a);
   // trying to share the same Menu between overflow menu and Selection Menu action causes problems
@@ -1295,37 +1674,49 @@ void MainWindow::setupActions()
   //actionSelection_Menu->setPriority(Action::NormalPriority - 2);
 
   // menu for shared whiteboard actions we want to always to be available - this is just a temp solution
-  menuWhiteboard = createMenu("swbMenu", "Whiteboard", Menu::HORZ);
+  menuWhiteboard = createArrowPopup(Menu::HORZ);
   menuWhiteboard->addAction(actionSyncInfo);
   menuWhiteboard->addAction(actionViewSync);
   menuWhiteboard->addAction(actionViewSyncMaster);
   menuWhiteboard->addAction(actionSendImmed);
 
   // Note: Nexus 4 fits 10 menu items on screen (portrait)
-  overflowMenu = createMenu("overflowMenu", "", vertToolbar ? Menu::HORZ : Menu::VERT);  //Menu::VERT_LEFT);
-  menuWhiteboardBtn = overflowMenu->addSubmenu(_("Whiteboard"), menuWhiteboard);
-  overflowMenu->addSubmenu(_("Document"), docmenu);
-  overflowMenu->addSubmenu(_("Page"), pagemenu);
-  overflowMenu->addSubmenu(_("View"), viewmenu);
-  overflowMenu->addSubmenu(_("Selection"), selectionmenu);
-  overflowMenu->addAction(actionPage_Setup);
-  overflowMenu->addAction(actionInsert_Image);  // move to Document menu?
-  overflowMenu->addAction(actionPreferences);
+  // the overflow menu uses the same arrow popup chrome as the help and pen option popups; its contents are
+  //  still menu items, so submenus and click-to-close behave as before (opened in createToolBars())
+  overflowPopup = createArrowPopup(vertToolbar ? Menu::HORZ : Menu::VERT);
+  overflowPopup->node->setXmlId("overflowMenu");
+  // toolbar items dropped by auto-adjust are mirrored into this group, added before anything else so the
+  //  items appear at the top of the menu; both it and its separator are shown only when it has visible items
+  overflowHiddenGroup = createColumn({}, "", "", "hfill");
+  overflowHiddenGroup->setVisible(false);
+  overflowPopup->addWidget(overflowHiddenGroup);
+  overflowHiddenSep = new Widget(widgetNode("#menu-separator"));
+  overflowHiddenSep->setVisible(false);
+  overflowPopup->addWidget(overflowHiddenSep);
+  menuWhiteboardBtn = overflowPopup->addSubmenu(_("Whiteboard"), menuWhiteboard);
+  overflowPopup->addSubmenu(_("Document"), docmenu);
+  overflowPopup->addSubmenu(_("Page"), pagemenu);
+  overflowPopup->addSubmenu(_("View"), viewmenu);
+  overflowPopup->addSubmenu(_("Selection"), selectionmenu);
+  overflowPopup->addAction(actionPage_Setup);
+  overflowPopup->addAction(actionInsert_Image);  // move to Document menu?
+  overflowPopup->addAction(actionScan_Element);
+  overflowPopup->addAction(actionPreferences);
 
 #ifdef SCRIBBLE_TEST
   Action* actionRunTests = createAction("actionRunTests", "Run Tests", "", "", SLOT(runTestUI("test")));
   Action* actionSyncTests = createAction("actionSyncTests", "Sync Tests", "", "", SLOT(runTestUI("synctest")));
   Action* actionPerfTests = createAction("actionPerfTests", "Performance Test", "", "", SLOT(runTestUI("perftest")));
   Action* actionInputTests = createAction("actionInputTests", "Input Test", "", "", SLOT(runTestUI("inputtest")));
-  Menu* testmenu = createMenu("testMenu", "Testing", Menu::HORZ);
+  ArrowPopup* testmenu = createArrowPopup(Menu::HORZ);
   testmenu->addAction(actionRunTests);
   testmenu->addAction(actionSyncTests);
   testmenu->addAction(actionPerfTests);
   testmenu->addAction(actionInputTests);
-  overflowMenu->addSubmenu("Testing", testmenu);
+  overflowPopup->addSubmenu("Testing", testmenu);
 #endif
 
-  actionOverflow_Menu->setMenu(overflowMenu);
+  setupAutoClosePopup(overflowPopup);
   // never hide overflow menu
   actionOverflow_Menu->setPriority(100); //Action::HighPriority);
 
@@ -1453,22 +1844,6 @@ void MainWindow::setupHelpTips()
       }
       return false;
     });
-  }
-  if(oneTimeTip("autoclose")) {
-    auto acactions = {actionDraw, actionErase, actionSelect, actionInsert_Space};
-    for(auto action : acactions) {
-      Widget* btn = action->buttons[0];
-      if(btn) {
-        btn->addHandler([=](SvgGui* gui, SDL_Event* event) {
-          if(event->type == SDL_FINGERUP) {
-            Rect b = btn->node->bounds();
-            oneTimeTip("autoclose", Point(b.left, b.bottom + 10),
-                _("Press button and drag down menu to change tool mode.\nTap button twice to lock tool."));
-          }
-          return false;
-        });
-      }
-    }
   }
 }
 #else

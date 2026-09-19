@@ -1,5 +1,7 @@
 #pragma once
 
+#include <map>
+
 #include "ugui/widgets.h"
 
 class ScribbleApp;
@@ -26,8 +28,13 @@ public:
   void refreshCommonUI(ScribbleDoc* doc, const UIState* uiState);
   void refreshUI(ScribbleDoc* doc, int reason);
   void orientationChanged();
-  void refreshPens(ScribbleDoc* doc);
   bool oneTimeTip(const char* id, Point pos = {}, const char* message = NULL);
+
+  void selectTool(int modeType);
+  void selectDrawTool(int tool);
+  void showOptionsRow(int modeType);
+  void setEraserMode();
+  void setEraserWidth(int idx);
 
   void togglePenToolbar();
   void toggleFullscreen();
@@ -43,6 +50,7 @@ public:
 
   //static ScribbleWidget* createScribbleWidget(Widget* container, ScribbleView* area);
   ScribbleWidget* createScribbleAreaWidget(Widget* container, ScribbleArea* area);
+  Widget* createSplitPlaceholder(Widget* container);
 
   std::vector<Action*> actionList;
   std::unordered_map<std::string, Action*> shortcuts;
@@ -90,12 +98,15 @@ public:
   Action* actionCustom_Pen;
   Action* actionAdd_Bookmark;
   Action* actionDraw;
+  Action* actionHighlight;
+  Action* actionEphemeral;
   Action* actionErase;
   Action* actionSelect;
   Action* actionInsert_Space;
   Action* actionLasso_Select;
   Action* actionPath_Select;
   Action* actionExport_PDF;
+  Action* actionImport_PDF;
   Action* actionPreferences;
   Action* actionCreate_Link;
   Action* actionUngroup;
@@ -106,12 +117,13 @@ public:
   Action* actionSend_HTML;
   Action* actionSend_PDF;
   Action* actionInsert_Image;
+  Action* actionScan_Element;
+  Action* actionScan_Page;
   Action* actionShare_Document;
   Action* actionOpen_Shared_Doc;
   Action* actionSendImmed;
   Action* actionOverflow_Menu;
   Action* actionSelection_Menu;
-  Action* actionTools_Menu;
   Action* actionFullscreen;
   Action* actionSplitView;
   Action* actionSelect_Pages;
@@ -128,12 +140,8 @@ public:
   Action* actionInvertColors;
 
   Menu* menuRecent_Files;
-  Menu* menuErase;
-  Menu* menuSelect;
-  Menu* menuInsert_Space;
-  Menu* menuDraw;
-  Menu* overflowMenu;
-  Menu* menuWhiteboard;
+  ArrowPopup* overflowPopup;
+  ArrowPopup* menuWhiteboard;
   Button* menuWhiteboardBtn;
   Button* undoRedoBtn;
   Button* titleButton;
@@ -141,10 +149,28 @@ public:
   Widget* toolBarStretch;
   Widget* selPopup;
   AutoAdjContainer* penToolbarAutoAdj;
+  Widget* eraseOptsRow;
+  Widget* selectOptsRow;
+  Widget* insSpaceOptsRow;
+  // the tools row, the divider and the open options row are children of one floating panel with a
+  //  single (fully rounded) background, so showing/hiding an options row is just a visibility change
+  Widget* mainToolbarPanel = NULL;
+  Widget* optsRowDivider = NULL;
+  // horizontally scrolling viewport holding the four options rows (only one is ever visible)
+  Widget* optsRowContainer = NULL;
+  std::vector<Button*> eraserWidthBtns;
+  Button* eraseStrokeToggle;
+  Button* eraseRuledToggle;
+  Button* eraseSwitchBackToggle;
+  // mode type of the options row currently shown, 0 if none
+  int openOptionsRow = 0;
   std::vector<Widget*> tbWidgets;
+  // when auto-adjust hides a toolbar widget, the menu items mirroring its action(s) are shown at the top
+  //  of the overflow menu, so nothing becomes unreachable on a narrow window
+  std::map<Widget*, std::vector<Button*>> tbOverflowItems;
+  Widget* overflowHiddenGroup = NULL;
+  Widget* overflowHiddenSep = NULL;
   std::string titleStr;
-  std::vector<Widget*> penPreviews;
-  ScribbleDoc* penDoc = NULL;
 
   const SvgNode* appIcon;
   const SvgNode* drawIcon;
@@ -163,13 +189,13 @@ public:
   Widget* scribbleFocusContainer2 = NULL;
   Splitter* scribbleSplitter = NULL;
   Widget* focusIndicator2 = NULL;
+  Widget* splitPlaceholder = NULL;
   //enum {SplitNone, SplitHorz, SplitVert, SplitNumStates};
   // splitState = +/- SPLIT_XXX : > 0 if open, < 0 if not; toggle just flips sign
   enum SplitState { SPLIT_TOGGLE=0, SPLIT_H12, SPLIT_H21, SPLIT_V12, SPLIT_V21 };
   int splitState = -SPLIT_H12;
   Point scribbleAreaStatusInset = {6, 6};
   bool vertToolbar = false;  // probably will have to become toolbarPos = top/left/right/bottom
-  int toolsMenuMode = 0;
 
 private:
   ScribbleApp* app;
