@@ -9,7 +9,13 @@
 #define SCRIBBLE_LOG PLATFORM_LOG
 
 typedef double Dim;
+
 typedef int64_t Timestamp;
+
+// Single knob for the size of the floating toolbar panels (buttons, icons, padding, insets).
+//  1.0 is the original design-mockup size; 0.5 halves the whole toolbar.
+static const Dim floatUIScale = 0.5;
+
 
 #define MIN std::min
 #define MAX std::max

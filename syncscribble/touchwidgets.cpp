@@ -1,6 +1,7 @@
 #include "touchwidgets.h"
 //#include "scribbledoc.h"
 //#include "scribbleapp.h"
+#include "resources.h"
 #include "strokebuilder.h"
 #include "ugui/textedit.h"
 #include "usvg/svgparser.h"
@@ -276,6 +277,47 @@ Button* Menubar::addAction(Action* action)
   return item;
 }
 
+Button* createHelpButton(const std::vector<HelpEntry>& entries)
+{
+  Button* btn = createToolbutton(SvgGui::useFile(":/icons/ic_menu_help.svg"), _("Help"));
+  // icon size of the row's other buttons, so a global icon resize carries over
+  SvgNode* btnIcon = btn->containerNode()->selectFirst(".icon");
+  real iconSize = btnIcon ? btnIcon->getFloatAttr("width", 24) : 24;
+
+  // cap popup width to ~2/3 of the color picker popup's ~380px design width and word-wrap the
+  //  description to fit, since ArrowPopup has no built-in max-width/word-wrap of its own
+  const real popupMaxWidth = 253;
+  real descMaxWidth = popupMaxWidth - 32 /* ArrowPopup content padding */
+      - iconSize - 0.2*iconSize /* row margin */ - 0.4*iconSize /* text column margin */;
+
+  ArrowPopup* popup = createArrowPopup(Menu::VERT_LEFT);
+  for(const HelpEntry& entry : entries) {
+    Widget* icon = new Widget(loadSVGFragment(fstring(
+        "<use class='icon' width='%g' height='%g' xlink:href=':/icons/%s'/>",
+        iconSize, iconSize, entry.iconfile).c_str()));
+    TextBox* name = createTextBox(_(entry.name));
+    name->node->addClass("arrowpopup-title");
+    name->node->setAttribute("box-anchor", "left");
+    SvgText* descNode = createTextNode(_(entry.desc));
+    descNode->addClass("arrowpopup-desc");
+    descNode->setAttribute("box-anchor", "left");
+    Widget* desc = new Widget(descNode);
+    Widget* text = createColumn({name, desc}, "", "", "left");
+    text->setMargins(0, 0, 0, 0.4*iconSize);
+    Widget* row = createRow({icon, text}, "", "", "left");
+    row->setMargins(0.2*iconSize, 0);
+    popup->addWidget(row);
+
+    std::string wrapped = SvgPainter::breakText(descNode, descMaxWidth);
+    if(wrapped != descNode->text()) {
+      descNode->clearText();
+      descNode->addText(wrapped.c_str());
+    }
+  }
+  setupPressedPopup(btn, popup);
+  return btn;
+}
+
 Menubar* createMenubar() { return new Menubar(widgetNode("#toolbar")); }
 Menubar* createVertMenubar() { return new Menubar(widgetNode("#vert-toolbar")); }
 
@@ -302,6 +344,19 @@ AutoAdjContainer::AutoAdjContainer(SvgNode* n, Widget* _contents) : Widget(n), c
   };
 
   onPrepareLayout = [this](){
+    // If our size is used by the parent's layout (fillReportsSize), we must report the *minimum* size of
+    //  our contents; contentsBBox is the size the contents were last stretched to, so reporting it would
+    //  let the size only ratchet up (contents containing a hfill child always fill whatever they're given).
+    // Laying out at zero size gives the natural (unsqueezed) size, then adjFn collapses the contents to
+    //  their minimum, which is what must fit; adjFn will expand them again when we're given our real size.
+    if(fillReportsSize) {
+      SvgGui* gui = window()->gui();
+      gui->layoutWidget(contents, Rect::wh(0, 0));
+      if(adjFn)
+        adjFn(contents->node->bounds(), Rect::wh(0, 0));
+      contentsBBox = contents->node->bounds();
+      return contentsBBox.toSize();
+    }
     // we will typically only stretch along one direction - need to get content size for other direction
     if(contentsBBox.isValid())
       return contentsBBox.toSize();

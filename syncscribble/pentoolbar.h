@@ -31,7 +31,10 @@ public:
 class PenToolbar : public Toolbar
 {
 public:
-  PenToolbar();
+  // compact: the desktop floating panel's draw options row, which follows the design mockup - saved
+  //  colors as circles, thickness presets as bare lines, and none of the hex box/overflow/help/close
+  //  buttons that the roomier phone and vertical-toolbar layouts show
+  PenToolbar(bool compact = false);
 
   ScribblePen pen;
   enum Mode { PEN_MODE, BOOKMARK_MODE, SELECTION_MODE } mode = PEN_MODE;
@@ -44,7 +47,7 @@ public:
   //void dragWidth(int delta);
 
   enum ChangedFlag { COLOR_CHANGED=1, WIDTH_CHANGED=2, PEN_CHANGED=4, YIELD_FOCUS=8,
-      UNDO_PREV=0x10000, SAVE_PEN=0x20000 };
+      UNDO_PREV=0x10000 };
   std::function<void(int)> onChanged;
 
   // access needded for auto adjust
@@ -52,44 +55,30 @@ public:
   PaletteWidget* widthPalette;
   Widget* stretch;
   Button* closeBtn;
+  ColorEditBox* colorPicker;  // secondary/advanced control - first thing dropped when space runs out
 
   const Dim penWidthPreviewMax = 22;  // was 30 for circle instead of line; static constexpr only works for int
+  const bool compact;
 
 private:
   void rebuildGrids();
-  void updateWidthPicker(bool varw, bool chisel);
+  void selectWidth(int idx);
+  void selectColor(int idx);
+  void updateSelected();
 
-  Button* cbHighlight;
   Button* cbSnaptoGrid;
   Button* cbLineDrawing;
-  Button* cbEphemeral;
   //Button* comboPressure;
-  Button* comboSavePen;
-  ColorEditBox* colorPicker;
   SpinBox* spinWidth;
-  Button* widthPreview;
+  Button* addColorBtn;
+  Button* settingsBtn;
+  ArrowPopup* widthPopup;
+  int widthPopupIdx = -1;
+  ArrowPopup* colorPopup;
+  ColorEditBox* colorPopupPicker;
+  int colorPopupIdx = -1;
   Widget* colorGroup;
   Widget* widthGroup;
-
-  // advanced pen options
-  PenPreview* penPreview;
-  ComboBox* comboPenTip;
-  SpinBox* spinRatio;
-  SpinBox* spinPrPrm;
-  SpinBox* spinMaxSp;
-  SpinBox* spinAngle;
-  SpinBox* spinDash;
-  SpinBox* spinGap;
-  CheckBox* cbRatio;
-  CheckBox* cbPrPrm;
-  CheckBox* cbMaxSp;
-  CheckBox* cbAngle;
-  Widget* rowRatio;
-  Widget* rowPrPrm;
-  Widget* rowMaxSp;
-  Widget* rowAngle;
-  Widget* rowDash;
-  Widget* rowGap;
 
   Button* overflowBtn;
   Button* selOverflowBtn;
@@ -104,8 +93,10 @@ private:
   std::vector<Color> savedColors;
   std::vector<Dim> savedWidths;
   static std::unique_ptr<SvgNode> widthBtnNode;
+  static std::unique_ptr<SvgNode> compactWidthBtnNode;
+  static std::unique_ptr<SvgNode> compactColorBtnNode;
   static const Dim PEN_WIDTHS[];
 };
 
 class AutoAdjContainer;
-AutoAdjContainer* createPenToolbarAutoAdj();
+AutoAdjContainer* createPenToolbarAutoAdj(bool compact = false);

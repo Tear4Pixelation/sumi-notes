@@ -303,9 +303,12 @@ void DocumentList::createUI()
   )";
   gridItemProto.reset(loadSVGFragment(gridItemProtoSVG));
 
-  // prepare folder and generic file icons
-  fileUseNode.reset(new SvgUse(Rect::wh(100, 100), "", SvgGui::useFile("icons/ic_file.svg")));
-  folderUseNode.reset(new SvgUse(Rect::wh(100, 100), "", SvgGui::useFile("icons/ic_folder.svg")));
+  // prepare folder and generic file icons; class=icon because these icons are drawn with currentColor,
+  //  so without it they'd inherit the list item's fill (var(--base)) and be invisible against it
+  fileUseNode.reset(new SvgUse(Rect::wh(100, 100), "", SvgGui::useFile("icons/ic_file_fill.svg")));
+  fileUseNode->addClass("icon");
+  folderUseNode.reset(new SvgUse(Rect::wh(100, 100), "", SvgGui::useFile("icons/ic_folder_fill.svg")));
+  folderUseNode->addClass("icon");
 }
 
 void DocumentList::zoomListView(int step)
@@ -385,8 +388,11 @@ void DocumentList::setCurrDir(const char* path)
   listView->node->setAttribute("flex-wrap", uselist ? "nowrap" : "wrap");
 
   Rect iconSize = uselist ? Rect::wh(30, 50) : Rect::wh(iconWidth, (5*iconWidth)/3);
-  fileUseNode->setViewport(iconSize);
-  folderUseNode->setViewport(iconSize);
+  // file/folder icons are symbols, not page previews, so they get half the box a thumbnail does - and
+  //  their cell shrinks with them, since the icon is all there is to show
+  Rect symbolSize = Rect::wh(iconSize.width()/2, iconSize.height()/2);
+  fileUseNode->setViewport(symbolSize);
+  folderUseNode->setViewport(symbolSize);
 
   auto itemRightClick = [this](SvgGui* gui, Widget* widget, Point p){
     //listView->clearSelection();
@@ -470,19 +476,31 @@ void DocumentList::setCurrDir(const char* path)
       SvgGui::setupRightClick(item, itemRightClick);
 
     SvgContainerNode* container = item->selectFirst(".image-container")->containerNode();
+    // a cell is as wide as its widest content, so a symbol icon gets a transparent box of exactly
+    //  symbolSize and its name is elided to that width; without both, cells vary with icon and name
+    //  width and the grid stops lining up (a thumbnail is already a fixed-size image)
+    real itemWidth = symbolSize.width();
+    auto addSymbol = [&](SvgUse* useNode) {
+      SvgRect* spacer = new SvgRect(symbolSize);
+      spacer->setAttribute("fill", "none");
+      container->addChild(spacer);
+      container->addChild(useNode->clone());
+    };
     // TODO: provide SvgImage::setImage() and implement move assignment operator for Image
     if(fileinfo.isDir())
-      container->addChild(folderUseNode->clone());
+      addSymbol(folderUseNode.get());
     else if(!containsWord("svg svgz html htm", fileinfo.extension().c_str()))  //fileinfo.extension() != docFileExt)
-      container->addChild(fileUseNode->clone());
+      addSymbol(fileUseNode.get());
     else if(!ScribbleApp::cfg->Bool("showThumbnail"))
-      container->addChild(fileUseNode->clone());
+      addSymbol(fileUseNode.get());
     else {
       Image thumbnail = ScribbleDoc::extractThumbnail(fileinfo.c_str());
-      if(!thumbnail.isNull())
+      if(!thumbnail.isNull()) {
         container->addChild(new SvgImage(std::move(thumbnail), iconSize));
+        itemWidth = iconSize.width();
+      }
       else
-        container->addChild(fileUseNode->clone());
+        addSymbol(fileUseNode.get());
     }
 
     listView->addWidget(item); //structureNode()->addChild(item->node);
@@ -492,7 +510,7 @@ void DocumentList::setCurrDir(const char* path)
     SvgText* textnode = static_cast<SvgText*>(item->containerNode()->selectFirst(".title-text"));
     textnode->addText(s.c_str());
     if(!uselist)
-      SvgPainter::elideText(textnode, iconWidth);
+      SvgPainter::elideText(textnode, itemWidth);
 
     if(uselist) {
       SvgText* mtimenode = static_cast<SvgText*>(item->containerNode()->selectFirst(".mtime-text"));

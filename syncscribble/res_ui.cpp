@@ -67,6 +67,15 @@ const char* mainWindowSVG = R"#(
 </svg>
 )#";
 
+// covers the second pane of a split view until the user picks what to show there
+const char* splitPlaceholderSVG = R"#(
+<g class="split-placeholder" box-anchor="fill" layout="box">
+  <!-- fill is set from ScribbleArea::BACKGROUND_COLOR so the blank pane matches the canvas -->
+  <rect class="split-placeholder-bg" box-anchor="fill" width="20" height="20"/>
+  <g class="split-placeholder-items" layout="flex" flex-direction="column"></g>
+</g>
+)#";
+
 // previous dimensions were 60x60
 const char* scribbleScrollerSVG = R"#(
 <g class="scribble-scroller" box-anchor="right top">
@@ -151,6 +160,11 @@ const char* prefInfoXML = R"#(
       title="Reopen last document" description="on application start" />
   <pref name="docListSiloed" type="bool" group="Document List" exclude="desktop,ios"
       title="Restrict to document folder" description="Prevent navigation out of document folder" />
+
+  <pref name="pdfImportDPI" type="int" min="72" max="600" group="Document List"
+      title="PDF import resolution" description="DPI at which PDF pages are rendered on import" />
+  <pref name="pdfImportLossy" type="bool" level="1" group="Document List"
+      title="Compress imported PDF pages" description="Smaller files, but blurrier text" />
 
   <pref name="growDown" type="bool" level="1" group="General"
       title="Auto grow page down" description="Allow page height to increase" />

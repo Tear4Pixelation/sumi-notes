@@ -82,6 +82,11 @@ public:
 //  int numAbsPos = 0;
 };
 
+// one line of an options row's help popup
+struct HelpEntry { const char* iconfile; const char* name; const char* desc; };
+// "?" button showing a popup listing every button of its options row while pressed
+Button* createHelpButton(const std::vector<HelpEntry>& entries);
+
 // tooltip for widget with long press/right click action
 #define altTooltip(s1, s2) fstring("<text>%s\n<tspan y='14' class='alttext'>%s</tspan></text>", s1, s2).c_str()
 

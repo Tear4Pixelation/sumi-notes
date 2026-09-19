@@ -126,6 +126,10 @@ void ScribbleConfig::init()
   cfg["docListSiloed"] = PLATFORM_IOS;
   // show thumbnail in document list
   cfg["showThumbnail"] = 1;
+  // resolution (DPI) at which PDF pages are rasterized on import; higher = sharper but much bigger
+  cfg["pdfImportDPI"] = 300;
+  // encode imported PDF pages as JPEG instead of PNG - much smaller for scans, blurrier for text
+  cfg["pdfImportLossy"] = 0;
 
   // save thumbnail to HTML file - currently only disabled when running tests
   cfg["saveThumbnail"] = 1;
@@ -234,9 +238,14 @@ void ScribbleConfig::init()
   cfgS["currFolder"] = "";
   cfgS["toolModes"] = "";
   cfgS["clippingDoc"] = "";
+  // rulings most recently used to add a page, shown as previews in the add page menu
+  cfgS["recentPageRulings"] = "";
   // for pen toobar
-  cfgS["savedColors"] = "black,red,green,blue";
-  cfgS["savedWidths"] = "1.4, 2.4, 4.0, 8.0";
+  // three of each, matching the design mockup's draw options row
+  cfgS["savedColors"] = "black,red,blue";
+  cfgS["savedWidths"] = "1.4, 3.0, 6.0";
+  // for the eraser options row: index into MainWindow's eraser radii
+  cfg["eraserWidth"] = 1;
 #if PLATFORM_IOS
   cfgS["iosBookmark0"] = "";  // security-scoped bookmark for most recent doc (base64 encoded)
 #endif
@@ -247,11 +256,11 @@ void ScribbleConfig::init()
   // this is really the small screen setup - iPad, e.g., should be same as desktop except save btn
   //cfgS["toolBars"] = "docTitle,stretch,tools,undoRedoBtn,"
   //    "actionSelection_Menu,actionShow_Bookmarks,actionShow_Clippings,actionSplitView,actionOverflow_Menu";
-  cfgS["toolBars2"] = "docTitle,stretch,tools,separator,undoRedoBtn,separator,seltools,"
+  cfgS["toolBars2"] = "docTitle,stretch,addPage,tools,separator,undoRedoBtn,separator,seltools,"
     "separator,actionShow_Bookmarks,actionShow_Clippings,actionSplitView,separator,actionOverflow_Menu";
 #else
   // appropriate for Surface Pro portrait display
-  cfgS["toolBars2"] = "docTitle,stretch,actionSave,separator,tools,separator,undoRedoBtn,separator,seltools,"
+  cfgS["toolBars2"] = "docTitle,stretch,addPage,actionSave,separator,tools,separator,undoRedoBtn,separator,seltools,"
     "separator,actionShow_Bookmarks,actionShow_Clippings,actionSplitView,separator,actionOverflow_Menu";
 #endif
   // strftime format string for doc title

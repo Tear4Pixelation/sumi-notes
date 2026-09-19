@@ -1,3 +1,4 @@
+#include <set>
 #include "configdialog.h"
 #include "pugixml.hpp"
 #include "ugui/textedit.h"
@@ -288,4 +289,136 @@ void ConfigDialog::accept()
     else
       PLATFORM_LOG("Invalid config key: %s\n", name);
   }
+}
+
+// --- per-tool settings popups ---------------------------------------------------------------
+// The tool options rows each end in a settings button opening a popup with the preferences that
+//  apply to that tool.  Controls are built from the same prefInfoXML the Preferences dialog uses,
+//  but unlike the dialog (which collects everything in accept()), each control writes its value
+//  and applies it as soon as it is changed - there is no OK button on a popup.
+
+static pugi::xml_node findPrefInfo(const pugi::xml_node& infomap, const char* name)
+{
+  for(pugi::xml_node pref = infomap.first_child(); pref; pref = pref.next_sibling()) {
+    if(StringRef(pref.attribute("name").as_string()) == name)
+      return pref;
+  }
+  return pugi::xml_node();
+}
+
+// The pref info is parsed into a temporary pugi document, but a control outlives it and
+//  ScribbleConfig keys on the string pointer itself, so the name has to be interned somewhere
+//  that lives as long as the app.  std::set never moves its elements, so the pointer stays valid.
+static const char* internPrefName(const char* name)
+{
+  static std::set<std::string> names;
+  return names.insert(name).first->c_str();
+}
+
+// one control for a <pref> entry, wired to write the config and apply it immediately
+static Widget* createLivePrefWidget(ScribbleConfig* cfg, const pugi::xml_node& pref)
+{
+  const char* name = internPrefName(pref.attribute("name").as_string());
+  auto applyChange = [](){ ScribbleApp::app->applyConfigChanges(); };
+  std::string type = pref.attribute("type").as_string();
+
+  if(pref.attribute("enum")) {
+    auto enumNames = splitStr<std::vector>(pref.attribute("enum").as_string(), ';', true);
+    for(std::string& s : enumNames)
+      s = _(s.c_str());
+    ComboBox* cb = createComboBox(enumNames);
+    std::vector<int> vals;
+    if(pref.attribute("enumvals")) {
+      for(const std::string& s : splitStr<std::vector>(pref.attribute("enumvals").as_string(), ';', true))
+        vals.push_back(atoi(s.c_str()));
+    }
+    int currval = cfg->Int(name);
+    if(vals.empty())
+      cb->setIndex(currval);
+    else {
+      for(size_t ii = 0; ii < vals.size(); ++ii) {
+        if(vals[ii] == currval)
+          cb->setIndex(int(ii));
+      }
+    }
+    cb->onChanged = [=](const char*) mutable {
+      int idx = cb->index();
+      cfg->set(name, idx >= 0 && idx < int(vals.size()) ? vals[idx] : idx);
+      applyChange();
+    };
+    return cb;
+  }
+  if(type == "bool") {
+    CheckBox* cb = createCheckBox("", cfg->Bool(name));
+    cb->onToggled = [=](bool checked){ cfg->set(name, checked); applyChange(); };
+    return cb;
+  }
+  if(type == "int") {
+    SpinBox* sb = createTextSpinBox(cfg->Int(name), pref.attribute("step").as_int(1),
+        pref.attribute("min").as_int(INT_MIN), pref.attribute("max").as_int(INT_MAX));
+    sb->onValueChanged = [=](real val){ cfg->set(name, int(val)); applyChange(); };
+    return sb;
+  }
+  if(type == "float") {
+    SpinBox* sb = createTextSpinBox(cfg->Float(name), pref.attribute("step").as_float(1),
+        pref.attribute("min").as_float(-FLT_MAX), pref.attribute("max").as_float(FLT_MAX));
+    sb->onValueChanged = [=](real val){ cfg->set(name, float(val)); applyChange(); };
+    return sb;
+  }
+  return NULL;  // string prefs are not offered in the tool popups
+}
+
+ArrowPopup* createToolSettingsPopup(const char* title, const std::vector<const char*>& prefNames)
+{
+  pugi::xml_document infodoc;
+  infodoc.load(prefInfoXML);
+  pugi::xml_node infomap = infodoc.child("map");
+  ScribbleConfig* cfg = ScribbleApp::cfg;
+
+  ArrowPopup* popup = createArrowPopup(Menu::VERT_LEFT);
+  TextBox* popupTitle = createTextBox(_(title));
+  popupTitle->node->addClass("arrowpopup-title");
+  popupTitle->node->setAttribute("box-anchor", "left");
+  popup->addWidget(popupTitle);
+
+  for(const char* name : prefNames) {
+    pugi::xml_node pref = findPrefInfo(infomap, name);
+    if(!pref) {
+      PLATFORM_LOG("No pref info for tool setting: %s\n", name);
+      continue;
+    }
+    StringRef exclude(pref.attribute("exclude").as_string());
+    if(exclude.contains(PLATFORM_NAME) || exclude.contains(PLATFORM_TYPE))
+      continue;
+    Widget* control = createLivePrefWidget(cfg, pref);
+    if(!control)
+      continue;
+    const char* label = _(pref.attribute("title").as_string());
+    // checkboxes get a stretch so the box lands at the right edge, as in the Preferences dialog
+    popup->addWidget(control->node->hasClass("checkbox")
+        ? createTitledRow(label, createStretch(), control) : createTitledRow(label, control));
+  }
+  return popup;
+}
+
+Button* createToolSettingsButton(const char* title, const std::vector<const char*>& prefNames,
+    const std::vector<Button*>& extraItems)
+{
+  Button* btn = createToolbutton(SvgGui::useFile(":/icons/ic_menu_settings2.svg"), _(title));
+  ArrowPopup* popup = createToolSettingsPopup(title, prefNames);
+  for(Button* item : extraItems) {
+    if(item)
+      popup->addItem(item);
+  }
+  popup->addSeparator();
+  popup->addItem(_("All Preferences..."), NULL, [](){ ScribbleApp::app->openPreferences(); });
+  setupAutoClosePopup(popup);
+  btn->addWidget(popup);
+  btn->onClicked = [popup](){
+    if(popup->isVisible())
+      closeAutoClosePopup(popup);
+    else
+      openAutoClosePopup(popup);
+  };
+  return btn;
 }
