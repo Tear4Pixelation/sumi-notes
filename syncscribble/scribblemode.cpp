@@ -66,10 +66,41 @@ void ScribbleMode::setRuled(bool ruled)
   moveSelMode = ruled ? MODE_MOVESELRULED : MODE_MOVESELFREE;
 }
 
+ScribblePen& ScribbleMode::penForDrawTool(int tool)
+{
+  switch(tool) {
+  case DRAWTOOL_HIGHLIGHT:  return highlightPen;
+  case DRAWTOOL_EPHEMERAL:  return ephemeralPen;
+  default:  return drawPen;
+  }
+}
+
+static void writePen(std::ostream& ss, const ScribblePen& pen)
+{
+  ss << ' ' << pen.color.color << ' ' << pen.flags << ' ' << pen.width << ' ' << pen.wRatio
+     << ' ' << pen.prParam << ' ' << pen.spdMax << ' ' << pen.dirAngle << ' ' << pen.dash << ' ' << pen.gap;
+}
+
+static void readPen(std::istream& ss, ScribblePen& pen, unsigned int reqflags)
+{
+  unsigned int argb, flags;
+  ScribblePen loaded(Color::BLACK, 1);
+  if(!(ss >> argb >> flags >> loaded.width >> loaded.wRatio >> loaded.prParam
+      >> loaded.spdMax >> loaded.dirAngle >> loaded.dash >> loaded.gap))
+    return;
+  loaded.color = Color(argb);
+  loaded.flags = flags | reqflags;
+  pen = loaded;
+}
+
 std::string ScribbleMode::saveModes()
 {
   std::ostringstream ss;
-  ss << eraserMode << ' ' << selectMode << ' ' << insSpaceMode << ' ' << moveSelMode;
+  ss << eraserMode << ' ' << selectMode << ' ' << insSpaceMode << ' ' << moveSelMode
+     << ' ' << drawTool << ' ' << int(eraseSwitchBack);
+  writePen(ss, drawPen);
+  writePen(ss, highlightPen);
+  writePen(ss, ephemeralPen);
   return ss.str();
 }
 
@@ -82,6 +113,13 @@ void ScribbleMode::loadModes(const char* modestr)
   selectMode = MODE_SELECTRECT;  // MODE_SELECTRULED
   insSpaceMode = MODE_INSSPACERULED;
   moveSelMode = MODE_MOVESELFREE;  // tough call between ruled and free for initial
+  drawTool = DRAWTOOL_PEN;
+  eraseSwitchBack = false;
+  drawPen = ScribblePen(Color::BLACK, 1.6, ScribblePen::TIP_FLAT | ScribblePen::WIDTH_PR, 0.9, 2.0);
+  highlightPen = ScribblePen(Color(255, 127, 255, 127), 34,
+      ScribblePen::TIP_CHISEL | ScribblePen::DRAW_UNDER);
+  ephemeralPen = ScribblePen(Color::RED, 1.6,
+      ScribblePen::TIP_FLAT | ScribblePen::WIDTH_PR | ScribblePen::EPHEMERAL, 0.9, 2.0);
   // attempt to load from config string
   if(ss >> mode && getModeType(mode) == MODE_ERASE && mode != MODE_ERASE)
     eraserMode = mode;
@@ -92,6 +130,13 @@ void ScribbleMode::loadModes(const char* modestr)
   if(ss >> mode && getModeType(mode) == MODE_MOVESEL && mode != MODE_MOVESEL)
     moveSelMode = mode;
   //moveSelMode = (insSpaceMode == MODE_INSSPACERULED) ? MODE_MOVESELRULED : MODE_MOVESELFREE;
+  if(ss >> mode && mode >= DRAWTOOL_PEN && mode <= DRAWTOOL_EPHEMERAL)
+    drawTool = mode;
+  if(ss >> mode)
+    eraseSwitchBack = mode != 0;
+  readPen(ss, drawPen, 0);
+  readPen(ss, highlightPen, ScribblePen::DRAW_UNDER);
+  readPen(ss, ephemeralPen, ScribblePen::EPHEMERAL);
 }
 
 void ScribbleMode::setMode(int mode, bool once)

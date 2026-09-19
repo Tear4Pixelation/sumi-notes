@@ -359,19 +359,21 @@ void ScribbleDoc::pageCountChanged(int pagenum, int prevpages)
 }
 
 // insert a new page before page "where"; we make the new page the current page
-Page* ScribbleDoc::generatePage(int where) const
+Page* ScribbleDoc::generatePage(int where, const PageProperties* props) const
 {
   Page* newPage = NULL;
   Page* refPage = document->numPages() > 0 ?
       document->pages[std::max(0, std::min(where, document->numPages()-1))] : NULL;
+  if(props)
+    newPage = new Page(*props);
   // if page that will preceed page being inserted has custom ruling, duplicate it
-  if(refPage && refPage->isCustomRuling && !refPage->ruleNode->hasClass("write-no-dup"))
+  else if(refPage && refPage->isCustomRuling && !refPage->ruleNode->hasClass("write-no-dup"))
     newPage = new Page(refPage->getProperties(), refPage->ruleNode);
   else {
-    PageProperties props(cfg->Float("pageWidth"), cfg->Float("pageHeight"),
+    PageProperties defprops(cfg->Float("pageWidth"), cfg->Float("pageHeight"),
         cfg->Float("xRuling"), cfg->Float("yRuling"), cfg->Float("marginLeft"),
         Color::fromRgb(cfg->Int("pageColor")), Color::fromArgb(cfg->Int("ruleColor")));
-    newPage = new Page(props);
+    newPage = new Page(defprops);
   }
   if(globalCfg->Bool("sRGB"))
     newPage->svgDoc->setAttribute("color-interpolation", "linearRGB");  // SVG spec says default is "sRGB"
@@ -384,14 +386,14 @@ void ScribbleDoc::updateGhostPage()
     ghostPage.reset(generatePage(INT_MAX));
 }
 
-void ScribbleDoc::newPage(int where)
+void ScribbleDoc::newPage(int where, const PageProperties* props)
 {
   // if appending page, give `where` appropriate value for undo/redo
   if(where < 0 || where > document->numPages())
     where = document->numPages();
   startAction(where);
   // for double tap to add page, looks like first tap will make last page current, so currPageNum is safe
-  insertPage(generatePage(activeArea->currPageNum), where);
+  insertPage(generatePage(activeArea->currPageNum, props), where);
   endAction();
 }
 

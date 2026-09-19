@@ -52,12 +52,25 @@ private:
   int getSpecificMode(int mode) const;
 
 public:
+  // draw tools all use MODE_STROKE and are distinguished only by the pen they use
+  enum { DRAWTOOL_PEN = 0, DRAWTOOL_HIGHLIGHT, DRAWTOOL_EPHEMERAL };
+
   int eraserMode;
   int selectMode;
   int insSpaceMode;
   int moveSelMode;
+  int drawTool;
+  bool eraseSwitchBack;  // restore previous pen after erasing; behavior not implemented yet
+  // DRAW_UNDER/EPHEMERAL are baked into these so drawing code can just check currPen()->hasFlag()
+  ScribblePen drawPen;
+  ScribblePen highlightPen;
+  ScribblePen ephemeralPen;
 
-  ScribbleMode(ScribbleConfig* _cfg) : currMode(MODE_NONE), stickyMode(MODE_NONE), cfg(_cfg) {}
+  ScribbleMode(ScribbleConfig* _cfg) : currMode(MODE_NONE), stickyMode(MODE_NONE), cfg(_cfg),
+      drawPen(Color::BLACK, 1), highlightPen(Color::BLACK, 1), ephemeralPen(Color::BLACK, 1) {}
+
+  ScribblePen& penForDrawTool(int tool);
+  ScribblePen& currDrawPen() { return penForDrawTool(drawTool); }
 
   // used to show current mode in UI ... might want to return general mode, but return specific mode for
   //  now to maintain previous behavior

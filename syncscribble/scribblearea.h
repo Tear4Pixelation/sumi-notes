@@ -48,6 +48,7 @@ public:
 
   void loadConfig(ScribbleConfig* _cfg) override;
   Page* getCurrPage() const { return currPage; }
+  int getCurrPageNum() const { return currPageNum; }
   void createHyperRef(Element* b, const StrokeProperties* props = NULL) { setSelProperties(props, NULL, b); }
   void createHyperRef(const char* target, const StrokeProperties* props = NULL) { setSelProperties(props, target); }
   const char* getHyperRef() const;
@@ -238,7 +239,10 @@ protected:
 #endif
   // some constants
   static const Dim ERASESTROKE_RADIUS;
-  static const Dim ERASEFREE_RADIUS;
+public:
+  // radius of the free eraser, in screen units; settable from the eraser options row
+  static Dim ERASEFREE_RADIUS;
+protected:
   static const Dim PATHSELECT_RADIUS;
   static const Dim MIN_LASSO_POINT_DIST;
   static const Dim GROW_STEP;
@@ -246,5 +250,9 @@ protected:
   static const Dim GROW_EXTRA;  // in multiples of GROW_STEP or ruling
   static const Dim AUTOSCROLL_BORDER;
   static const Dim MIN_CURSOR_RADIUS;
-  static const Color BACKGROUND_COLOR;
+public:
+  // must match --canvas in ugui/theme.cpp; set from ScribbleApp::loadConfig()
+  static const Color BACKGROUND_COLOR_DARK;
+  static const Color BACKGROUND_COLOR_LIGHT;
+  static Color BACKGROUND_COLOR;
 };

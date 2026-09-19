@@ -9,7 +9,7 @@
 
 
 const Dim ScribbleArea::ERASESTROKE_RADIUS = 7;
-const Dim ScribbleArea::ERASEFREE_RADIUS = 7;
+Dim ScribbleArea::ERASEFREE_RADIUS = 7;
 const Dim ScribbleArea::PATHSELECT_RADIUS = 7;
 const Dim ScribbleArea::MIN_LASSO_POINT_DIST = 2;
 const Dim ScribbleArea::GROW_STEP = 40;
@@ -17,7 +17,9 @@ const Dim ScribbleArea::GROW_TRIGGER = 1.625;  // in multiples of GROW_STEP or r
 const Dim ScribbleArea::GROW_EXTRA = 2.5;  // in multiples of GROW_STEP or ruling
 const Dim ScribbleArea::AUTOSCROLL_BORDER = 60;
 const Dim ScribbleArea::MIN_CURSOR_RADIUS = 2;
-const Color ScribbleArea::BACKGROUND_COLOR = 0xFF444444;
+const Color ScribbleArea::BACKGROUND_COLOR_DARK = 0xFF444444;
+const Color ScribbleArea::BACKGROUND_COLOR_LIGHT = 0xFFBBBBBB;
+Color ScribbleArea::BACKGROUND_COLOR = ScribbleArea::BACKGROUND_COLOR_DARK;
 
 Image* ScribbleArea::watermark = NULL;
 #if !PLATFORM_MOBILE

@@ -12,7 +12,9 @@
 #include "clippingview.h"
 #include "scribbleinput.h"
 #include "documentlist.h"
+#include "pdfimport.h"
 #include "rulingdialog.h"
+#include "scandialog.h"
 #include "pentoolbar.h"
 #include "linkdialog.h"
 #include "configdialog.h"
@@ -265,9 +267,8 @@ void ScribbleApp::init()
   // newDocument results in a call to refreshUI(), so all UI components have to be initialized!
   doc->newDocument();
 
-  // set pen to first saved pen
-  win->refreshPens(doc);
-  setPen(*cfg->getPen(0));
+  // restore the pen of the last used draw tool
+  currPen = scribbleMode->currDrawPen();
   currPenIndex = 0;
   bookmarkColor = Color::fromArgb(cfg->Int("bookmarkColor"));
 
@@ -349,6 +350,15 @@ void ScribbleApp::init()
         cfg->set("currFolder", argInfo.c_str());  // open doc list to passed folder
     }
     else {
+      if(PdfImport::isPdfFile(argInfo.c_str())) {
+        std::string err, imported = importPdfToDocFile(argInfo.c_str(), &err);
+        if(imported.empty()) {
+          showNotify(fstring(_("\"%s\" could not be imported."), argDoc.c_str()), 2);
+          PLATFORM_LOG("Error importing %s: %s\n", argDoc.c_str(), err.c_str());
+          return;
+        }
+        argInfo = FSPath(imported);  // fall through and open the document we just created
+      }
       // don't use doOpenDocument() because it will display dialog on error
       // use argInfo instead of argDoc because relative path causes lots of problems
       Document::loadresult_t res = activeDoc()->openDocument(argInfo.c_str());
@@ -458,7 +468,8 @@ void ScribbleApp::loadConfig()
   AndroidHelper::acceptVolKeys = cfg->Int("volButtonMode") != 0;
 #endif
   // do this here avoids need for restart to change theme
-  if(cfg->Int("uiTheme") == 2) {
+  bool lightTheme = cfg->Int("uiTheme") == 2;
+  if(lightTheme) {
     win->node->addClass("light");
     gui->setWindowXmlClass("light");  // for new windows and dialogs
   }
@@ -466,6 +477,9 @@ void ScribbleApp::loadConfig()
     win->node->removeClass("light");
     gui->setWindowXmlClass("");
   }
+  // canvas fill is painted directly, so it can't pick up the --canvas CSS var itself
+  ScribbleArea::BACKGROUND_COLOR =
+      lightTheme ? ScribbleArea::BACKGROUND_COLOR_LIGHT : ScribbleArea::BACKGROUND_COLOR_DARK;
 
   // If we want to retain discard changes, we should make copy of doc before autosave
   // reasonable not to disable this when losing focus (on desktop), unless we save immediately
@@ -544,8 +558,15 @@ void ScribbleApp::openSplit()
 {
   activeDoc()->addArea(scribbleAreas[1]);
   setActiveArea(scribbleAreas[1]);
+  // the new area shows the current doc, but MainWindow covers it with the split placeholder until the
+  //  user chooses between this doc and another one (via openSplitDoc())
+}
+
+// choose the document for the second area of a split; called from the split placeholder
+bool ScribbleApp::openSplitDoc()
+{
   // openDocument() calls maybeSave(), which is not necessary when opening split
-  openOrCreateDoc(true);
+  return openOrCreateDoc(true);
 }
 
 // hide scribbleAreas[1]
@@ -737,7 +758,12 @@ bool ScribbleApp::sdlEventHandler(SDL_Event* event)
       if(event->user.code == INSERT_IMAGE) {
         std::unique_ptr<Image> image(static_cast<Image*>(event->user.data1));
         bool fromintent = event->user.data2;
-        insertImage(std::move(*image), fromintent);
+        // a scan goes through the same picker as a plain image insert, so intercept it here rather
+        //  than duplicating the per-platform picker code
+        if(pendingScan && !fromintent)
+          finishScan(std::move(*image));
+        else
+          insertImage(std::move(*image), fromintent);
       }
       else if(event->user.code == DISMISS_DIALOG) {
         if(currDialog)
@@ -1232,11 +1258,7 @@ bool ScribbleApp::openURL(const char* url)
 void ScribbleApp::penChanged(int changed)
 {
   const ScribblePen& pen = penToolbar->pen;
-  if(changed & PenToolbar::SAVE_PEN) {
-    cfg->savePen(pen, changed & ~PenToolbar::SAVE_PEN);
-    win->refreshPens(activeDoc());
-  }
-  else if(changed == PenToolbar::YIELD_FOCUS)
+  if(changed == PenToolbar::YIELD_FOCUS)
     gui->setFocused(activeArea()->widget);
   else if(penToolbar->mode == PenToolbar::PEN_MODE || changed == PenToolbar::PEN_CHANGED)
     setPen(pen);
@@ -1258,12 +1280,15 @@ void ScribbleApp::penChanged(int changed)
 void ScribbleApp::setPen(const ScribblePen& pen)
 {
   currPen = pen;
-  // to handle transparent pens (highlighters), just mix colors instead of having two separate fills
-  Color c = Color::mix(pen.color, activeDoc()->getCurrPageColor());
-  const_cast<SvgNode*>(win->drawIcon)->setAttr<color_t>("fill", c.color);
-  // must manually dirty buttons using icon since icon is not part of GUI doc (it's <use>d)
-  for(Button* btn : win->actionDraw->buttons)
-    btn->node->setDirty(SvgNode::PIXELS_DIRTY);
+  // keep the active draw tool's stored pen up to date so it survives a tool switch and app restart
+  scribbleMode->currDrawPen() = pen;
+}
+
+void ScribbleApp::setDrawTool(int tool)
+{
+  scribbleMode->drawTool = tool;
+  currPen = scribbleMode->currDrawPen();
+  setMode(MODE_STROKE);
 }
 
 void ScribbleApp::updatePenToolbar()
@@ -1655,6 +1680,12 @@ bool ScribbleApp::openDocument()
 
 bool ScribbleApp::doOpenDocument(std::string filename)
 {
+  // a PDF isn't a Write document - import it (which then opens the document it produces).  Handling
+  // this here rather than at each call site covers the command line, drag and drop, the document
+  // list and Android intents in one place.
+  if(PdfImport::isPdfFile(filename.c_str()))
+    return doImportPdf(filename);
+
   // if SVG file, try to find the parent HTML file
   if(FSPath(filename).extension() == "svg") {
     // if user is trying to open a _pageXXX.svg file (not just any SVG file), prompt to open whole document
@@ -2032,7 +2063,94 @@ void ScribbleApp::openRecentFile(const std::string& filename)
 
 /// images ///
 
+/// PDF import
+
+void ScribbleApp::importPDF()
+{
+  if(!PdfImport::isAvailable()) {
+    messageBox(Warning, _("Import PDF"), _("This build of Write does not include PDF support."));
+    return;
+  }
+  if(!maybeSave())
+    return;
+  std::string filename = execDocumentList(DocumentList::CHOOSE_DOC, "pdf");
+  if(!filename.empty())
+    doImportPdf(filename);
+}
+
+// Renders every page of the PDF into a new Write document saved alongside the PDF, then opens it.
+// Going through a file (instead of mutating the open document in place) keeps the undo history, the
+// views and the sync machinery out of it entirely - the app just opens an ordinary document.
+bool ScribbleApp::doImportPdf(const std::string& pdfPath)
+{
+  std::string err;
+  std::string docPath = importPdfToDocFile(pdfPath, &err);
+  if(docPath.empty()) {
+    messageBox(Warning, _("Import PDF"),
+        fstring(_("Error importing %s: %s"), FSPath(pdfPath).fileName().c_str(), err.c_str()));
+    return false;
+  }
+  return doOpenDocument(docPath);
+}
+
+// Does the actual work of doImportPdf(), without touching the UI beyond a status notification, and
+// returns the path of the document it created (empty on failure).  Kept separate so the command line
+// can import a PDF and then follow exactly the same path as any other document it is given.
+std::string ScribbleApp::importPdfToDocFile(const std::string& pdfPath, std::string* errorOut)
+{
+  if(!PdfImport::isAvailable()) {
+    if(errorOut) *errorOut = _("This build of Write does not include PDF support.");
+    return std::string();
+  }
+  FSPath pdfinfo(pdfPath);
+  // don't overwrite an existing document
+  FSPath outinfo = pdfinfo.parent().child(pdfinfo.baseName() + ".svgz");
+  for(int ii = 2; outinfo.exists(); ++ii)
+    outinfo = pdfinfo.parent().child(fstring("%s (%d).svgz", pdfinfo.baseName().c_str(), ii));
+
+  // rendering is synchronous and can take a while for a long PDF; level 0 = notification stays up
+  showNotify(fstring(_("Importing %s..."), pdfinfo.fileName().c_str()), 0);
+
+  PdfImport::Options opts;
+  opts.dpi = std::max(72, cfg->Int("pdfImportDPI"));
+  opts.lossy = cfg->Bool("pdfImportLossy");
+
+  std::string err;
+  int numPages = -1;
+  {
+    Document pdfdoc;
+    numPages = PdfImport::importPdf(&pdfdoc, pdfPath.c_str(), opts, &err);
+    // savePicScaled would resample the page images down to one pixel per Write unit (i.e. 150 DPI),
+    // throwing away exactly the extra resolution the user asked for with pdfImportDPI
+    float savedImageScale = SvgWriter::DEFAULT_SAVE_IMAGE_SCALED;
+    SvgWriter::DEFAULT_SAVE_IMAGE_SCALED = 0;
+    bool saved = numPages > 0
+        && pdfdoc.save(new FileStream(outinfo.c_str(), "wb"), NULL, Document::SAVE_FORCE);
+    SvgWriter::DEFAULT_SAVE_IMAGE_SCALED = savedImageScale;
+    if(numPages > 0 && !saved) {
+      numPages = -1;
+      err = _("The imported document could not be saved.");
+    }
+  }
+  dismissNotify();
+  if(numPages <= 0) {
+    if(errorOut) *errorOut = err;
+    return std::string();
+  }
+  PLATFORM_LOG("Imported %d page(s) from %s to %s\n", numPages, pdfinfo.c_str(), outinfo.c_str());
+  return outinfo.c_str();
+}
+
+/// images
+
 void ScribbleApp::insertImage()
+{
+  // a plain insert must clear any scan left pending by a cancelled picker, or it would be hijacked
+  pendingScan = false;
+  pickImage();
+}
+
+void ScribbleApp::pickImage()
 {
 #if PLATFORM_ANDROID
   AndroidHelper::getImage();  // will call insertImage(QImage) when user selects image
@@ -2046,13 +2164,72 @@ void ScribbleApp::insertImage()
 #endif
 }
 
+// Scanning reuses insertImage()'s picker - on Android that is already a chooser merging every camera
+//  app with the gallery, and it needs no Play Services and no CAMERA permission, since the camera app
+//  does the capturing.  pendingScan then diverts the picked image into ScanDialog.
+void ScribbleApp::scanDocument(bool asPage)
+{
+  pendingScan = true;
+  pendingScanAsPage = asPage;
+  pickImage();
+  // if the user cancelled the picker the flag stays set, which is harmless: the next plain insert
+  //  clears it and the next scan overwrites it
+}
+
+void ScribbleApp::finishScan(Image photo)
+{
+  bool asPage = pendingScanAsPage;
+  pendingScan = false;
+  if(photo.isNull())
+    return;
+  ScanDialog dialog(std::move(photo));
+  if(execDialog(&dialog) != Dialog::ACCEPTED)
+    return;
+  Image scan = dialog.takeResult();
+  if(scan.isNull() || scan.width <= 0 || scan.height <= 0)
+    return;
+  if(!asPage) {
+    activeArea()->insertImage(std::move(scan));
+    return;
+  }
+  // As a page, the scan is the background, exactly as an imported PDF page is: in the rule layer, so it
+  //  cannot be selected, dragged or erased while writing on top of it.  See pdfimport.cpp for why
+  //  isCustomRuling and the two classes below are what make that survive a page resize and a save/load.
+  // A scan carries no physical scale - we know its pixel count, not the size of the paper - so match the
+  //  width of the current page and let the height follow the scan's aspect ratio.  That keeps scrolling
+  //  and zoom consistent with the rest of the document, which matters more than a guessed DPI would.
+  PageProperties refProps = activeArea()->getCurrPage()->getProperties();
+  Dim width = refProps.width > 0 ? refProps.width : Dim(scan.width);
+  Dim height = width*scan.height/scan.width;
+  PageProperties props(width, height, 0, 0, 0, Color::WHITE, Color::BLUE);
+  Page* page = new Page(props);
+  SvgImage* background = new SvgImage(std::move(scan), Rect::ltwh(0, 0, width, height));
+  page->ruleNode->addChild(background);
+  page->ruleNode->removeClass("write-std-ruling");
+  page->ruleNode->addClass("write-no-dup");
+  page->isCustomRuling = true;
+  // unlike PDF import, which writes a file and reopens it, this goes into the open document, so it has
+  //  to go through ScribbleDoc to get undo and sync - which needs the start/endAction pair, or the
+  //  insertion is not recorded as an undoable action
+  ScribbleDoc* doc = activeDoc();
+  int where = activeArea()->getCurrPageNum() + 1;
+  doc->startAction(where);
+  doc->insertPage(page, where);
+  doc->endAction();
+}
+
 void ScribbleApp::insertImage(const std::string& filename)
 {
   std::vector<unsigned char> buff;
   if(readFile(&buff, filename.c_str())) {
     Image img = Image::decodeBuffer(&buff[0], buff.size());
     if(!img.isNull()) {
-      activeArea()->insertImage(std::move(img));
+      // the desktop picker hands back a filename and returns here directly, never going through the
+      //  INSERT_IMAGE event that the Android and iOS pickers post, so a pending scan is caught here
+      if(pendingScan)
+        finishScan(std::move(img));
+      else
+        activeArea()->insertImage(std::move(img));
       return;
     }
   }
@@ -2168,26 +2345,41 @@ void ScribbleApp::openPreferences()
   //ConfigDialog dialog(cfg);
   //int res = execDialog(&dialog);  // blocking
   asyncDialog(new ConfigDialog(cfg), [this](int res) {
-    if(res == Dialog::ACCEPTED) {
-      // dialog accepted; note we still save config file if res == 0 (rejected)
-      loadConfig();
-      for(ScribbleDoc* doc : scribbleDocs)
-        doc->loadConfig(true);
-      bookmarkArea->loadConfig(cfg);
-      clippingDoc->loadConfig(true);
-      // destroy doc list so that it will be recreated with new settings
-      delete documentList;
-      documentList = NULL;
-    }
-    else if(res == -1) {
+    if(res == Dialog::ACCEPTED)
+      reloadConfig();  // note we still save config file if res == 0 (rejected)
+    else if(res == -1)
       return;
-    }
-    // write config file immediately to better support multiple instances
-    // would be nice if could also reread before opening dialog!
-    if(!disableConfigSave && !cfg->saveConfigFile(cfgFile.c_str(), true)) {
-      messageBox(Warning, _("Error"), fstring(_("Error saving preferences to \"%s\""), cfgFile.c_str()));
-    }
+    writeConfigFile();
   });
+}
+
+// pick up config changes and persist them; the Preferences dialog defers its writes until OK, but the
+//  tools' settings popups write each change as it is made, so they call this straight away
+void ScribbleApp::applyConfigChanges()
+{
+  reloadConfig();
+  writeConfigFile();
+}
+
+void ScribbleApp::reloadConfig()
+{
+  loadConfig();
+  for(ScribbleDoc* doc : scribbleDocs)
+    doc->loadConfig(true);
+  bookmarkArea->loadConfig(cfg);
+  clippingDoc->loadConfig(true);
+  // destroy doc list so that it will be recreated with new settings
+  delete documentList;
+  documentList = NULL;
+}
+
+void ScribbleApp::writeConfigFile()
+{
+  // write config file immediately to better support multiple instances
+  // would be nice if could also reread before opening dialog!
+  if(!disableConfigSave && !cfg->saveConfigFile(cfgFile.c_str(), true)) {
+    messageBox(Warning, _("Error"), fstring(_("Error saving preferences to \"%s\""), cfgFile.c_str()));
+  }
 }
 
 void ScribbleApp::resetDocPrefs()

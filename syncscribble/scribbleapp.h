@@ -68,6 +68,9 @@ public:
   void clipboardChange();
   void pasteClipboard();
   void openPreferences();
+  void applyConfigChanges();
+  void reloadConfig();
+  void writeConfigFile();
   void resetDocPrefs();
   bool loadClippingsDoc();
   void setMode(int mode);
@@ -75,9 +78,19 @@ public:
   void openRecentFile(const std::string& filename);
   void createLink();
   void exportPDF();
+  void importPDF();
+  bool doImportPdf(const std::string& pdfPath);
+  std::string importPdfToDocFile(const std::string& pdfPath, std::string* errorOut = NULL);
   void insertImage();
+  void pickImage();
   void insertImage(const std::string& filename);
   void insertImage(Image image, bool fromintent = false);
+  // document scanning: reuses the image picker, then runs the photo through ScanDialog.  asPage decides
+  //  whether the result becomes a floating element or the background of a new page.
+  void scanDocument(bool asPage);
+  void finishScan(Image photo);
+  bool pendingScan = false;
+  bool pendingScanAsPage = false;
   void showNotify(const std::string& msg, int level = 1);
   void dismissNotify();
   void appSuspending();
@@ -150,6 +163,7 @@ public:
   ScribbleDoc* activeDoc() const;
   void setActiveArea(ScribbleArea* area);
   void openSplit();
+  bool openSplitDoc();
   bool closeSplit();
 
   void repaintBookmarks(bool newdoc = false);
@@ -165,6 +179,7 @@ public:
   void penChanged(int changed);
   void updatePenToolbar();
   void setPen(const ScribblePen& pen);
+  void setDrawTool(int tool);
   const ScribblePen* getPen() const { return &currPen; }
   void loadConfig();
 
