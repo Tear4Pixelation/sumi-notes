@@ -816,6 +816,118 @@ static const char* icons__ic_menu_settings_svg = R"~~~~(<?xml version="1.0" enco
 </svg>
 )~~~~";
 
+static const char* icons__ic_menu_shape_box_svg = R"~~~~(<?xml version="1.0" encoding="utf-8"?>
+<svg version="1.2" baseProfile="tiny" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+  x="0px" y="0px" viewBox="0 0 24 24" xml:space="preserve">
+<!-- drawn for the shape tool; reicon has no geometric-primitive icons (see reicon_import.py) -->
+<g class="icon" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+  <rect x="3.75" y="5.75" width="16.5" height="12.5"/>
+</g>
+</svg>
+)~~~~";
+
+static const char* icons__ic_menu_shape_ellipse_svg = R"~~~~(<?xml version="1.0" encoding="utf-8"?>
+<svg version="1.2" baseProfile="tiny" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+  x="0px" y="0px" viewBox="0 0 24 24" xml:space="preserve">
+<!-- drawn for the shape tool; reicon has no geometric-primitive icons (see reicon_import.py) -->
+<g class="icon" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+  <ellipse cx="12" cy="12" rx="8.75" ry="6.5"/>
+</g>
+</svg>
+)~~~~";
+
+static const char* icons__ic_menu_shape_fitpoly_svg = R"~~~~(<?xml version="1.0" encoding="utf-8"?>
+<svg version="1.2" baseProfile="tiny" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+  x="0px" y="0px" viewBox="0 0 24 24" xml:space="preserve">
+<!-- drawn for the shape tool; reicon has no geometric-primitive icons (see reicon_import.py) -->
+<!-- the dots sit off the curve: a fitted curve is pulled towards the points without touching them -->
+<g class="icon" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M3 17 C5.5 17 7 11.5 9 11.5 C11 11.5 12.5 13 14.5 13 C16.5 13 18.5 8 21 5"/>
+  <circle cx="3" cy="17" r="1.4" fill="currentColor" stroke="none"/>
+  <circle cx="8.5" cy="7" r="1.4" fill="currentColor" stroke="none"/>
+  <circle cx="14.5" cy="16" r="1.4" fill="currentColor" stroke="none"/>
+  <circle cx="21" cy="5" r="1.4" fill="currentColor" stroke="none"/>
+</g>
+</svg>
+)~~~~";
+
+static const char* icons__ic_menu_shape_head_end_svg = R"~~~~(<?xml version="1.0" encoding="utf-8"?>
+<svg version="1.2" baseProfile="tiny" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+  x="0px" y="0px" viewBox="0 0 24 24" xml:space="preserve">
+<!-- reicon "arrow-right" (outline), https://reicon.dev - MIT -->
+<g class="icon">
+  <path fill-rule="evenodd" clip-rule="evenodd" d="M13.4697 5.46967C13.7626 5.17678 14.2374 5.17678 14.5303 5.46967L20.5303 11.4697C20.8232 11.7626 20.8232 12.2374 20.5303 12.5303L14.5303 18.5303C14.2374 18.8232 13.7626 18.8232 13.4697 18.5303C13.1768 18.2374 13.1768 17.7626 13.4697 17.4697L18.1893 12.75H4C3.58579 12.75 3.25 12.4142 3.25 12C3.25 11.5858 3.58579 11.25 4 11.25H18.1893L13.4697 6.53033C13.1768 6.23744 13.1768 5.76256 13.4697 5.46967Z" fill="currentColor"/>
+</g>
+</svg>
+)~~~~";
+
+static const char* icons__ic_menu_shape_head_start_svg = R"~~~~(<?xml version="1.0" encoding="utf-8"?>
+<svg version="1.2" baseProfile="tiny" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+  x="0px" y="0px" viewBox="0 0 24 24" xml:space="preserve">
+<!-- reicon "arrow-left" (outline), https://reicon.dev - MIT -->
+<g class="icon">
+  <path fill-rule="evenodd" clip-rule="evenodd" d="M10.5303 5.46967C10.8232 5.76256 10.8232 6.23744 10.5303 6.53033L5.81066 11.25H20C20.4142 11.25 20.75 11.5858 20.75 12C20.75 12.4142 20.4142 12.75 20 12.75H5.81066L10.5303 17.4697C10.8232 17.7626 10.8232 18.2374 10.5303 18.5303C10.2374 18.8232 9.76256 18.8232 9.46967 18.5303L3.46967 12.5303C3.17678 12.2374 3.17678 11.7626 3.46967 11.4697L9.46967 5.46967C9.76256 5.17678 10.2374 5.17678 10.5303 5.46967Z" fill="currentColor"/>
+</g>
+</svg>
+)~~~~";
+
+static const char* icons__ic_menu_shape_line_svg = R"~~~~(<?xml version="1.0" encoding="utf-8"?>
+<svg version="1.2" baseProfile="tiny" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+  x="0px" y="0px" viewBox="0 0 24 24" xml:space="preserve">
+<!-- drawn for the shape tool; reicon has no geometric-primitive icons (see reicon_import.py) -->
+<g class="icon" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M4 20 L20 4"/>
+</g>
+</svg>
+)~~~~";
+
+static const char* icons__ic_menu_shape_polyline_svg = R"~~~~(<?xml version="1.0" encoding="utf-8"?>
+<svg version="1.2" baseProfile="tiny" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+  x="0px" y="0px" viewBox="0 0 24 24" xml:space="preserve">
+<!-- drawn for the shape tool; reicon has no geometric-primitive icons (see reicon_import.py) -->
+<g class="icon" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M3 17 L8.5 8 L14 13.5 L21 5"/>
+</g>
+</svg>
+)~~~~";
+
+static const char* icons__ic_menu_shape_rounded_svg = R"~~~~(<?xml version="1.0" encoding="utf-8"?>
+<svg version="1.2" baseProfile="tiny" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+  x="0px" y="0px" viewBox="0 0 24 24" xml:space="preserve">
+<!-- drawn for the shape tool; reicon has no geometric-primitive icons (see reicon_import.py) -->
+<!-- a sharp corner being rounded off: the dashed part is what the radius cuts away -->
+<g class="icon" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M4 20 L4 12 A8 8 0 0 1 12 4 L20 4"/>
+  <path d="M4 12 L4 4 L12 4" stroke-dasharray="2 2.5" stroke-opacity="0.55"/>
+</g>
+</svg>
+)~~~~";
+
+static const char* icons__ic_menu_shape_splinepoly_svg = R"~~~~(<?xml version="1.0" encoding="utf-8"?>
+<svg version="1.2" baseProfile="tiny" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+  x="0px" y="0px" viewBox="0 0 24 24" xml:space="preserve">
+<!-- drawn for the shape tool; reicon has no geometric-primitive icons (see reicon_import.py) -->
+<!-- the dots sit on the curve: a smooth curve passes through every point -->
+<g class="icon" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M3 16 C4.8 16 5.2 8 8 8 C10.8 8 10.2 15 13 15 C15.8 15 17.8 6 21 6"/>
+  <circle cx="3" cy="16" r="1.5" fill="currentColor" stroke="none"/>
+  <circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/>
+  <circle cx="13" cy="15" r="1.5" fill="currentColor" stroke="none"/>
+  <circle cx="21" cy="6" r="1.5" fill="currentColor" stroke="none"/>
+</g>
+</svg>
+)~~~~";
+
+static const char* icons__ic_menu_shapes_svg = R"~~~~(<?xml version="1.0" encoding="utf-8"?>
+<svg version="1.2" baseProfile="tiny" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+  x="0px" y="0px" viewBox="0 0 24 24" xml:space="preserve">
+<!-- reicon "shapes" (outline), https://reicon.dev - MIT -->
+<g class="icon">
+  <circle cx="18" cy="8" r="4.3333" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"></circle><rect x="6.3333" y="14.3333" width="7.3333" height="7.3333" rx="1.3333" ry="1.3333" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"></rect><path d="M 5.0907 2.6533 L 1.5853 8.664 c -0.2587 0.444 0.0613 1.0027 0.576 1.0027 H 9.172 c 0.5147 0 0.8347 -0.5587 0.576 -1.0027 L 6.2427 2.6533 c -0.2573 -0.4413 -0.8947 -0.4413 -1.152 0 Z" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"></path>
+</g>
+</svg>
+)~~~~";
+
 static const char* icons__ic_menu_share_svg = R"~~~~(<?xml version="1.0" encoding="utf-8"?>
 <svg version="1.2" baseProfile="tiny" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
   x="0px" y="0px" viewBox="0 0 24 24" xml:space="preserve">
@@ -1061,6 +1173,16 @@ static void LOAD_RES_FN() { addStringResources({
   {"icons/ic_menu_set_pen.svg", icons__ic_menu_set_pen_svg},
   {"icons/ic_menu_settings2.svg", icons__ic_menu_settings2_svg},
   {"icons/ic_menu_settings.svg", icons__ic_menu_settings_svg},
+  {"icons/ic_menu_shape_box.svg", icons__ic_menu_shape_box_svg},
+  {"icons/ic_menu_shape_ellipse.svg", icons__ic_menu_shape_ellipse_svg},
+  {"icons/ic_menu_shape_fitpoly.svg", icons__ic_menu_shape_fitpoly_svg},
+  {"icons/ic_menu_shape_head_end.svg", icons__ic_menu_shape_head_end_svg},
+  {"icons/ic_menu_shape_head_start.svg", icons__ic_menu_shape_head_start_svg},
+  {"icons/ic_menu_shape_line.svg", icons__ic_menu_shape_line_svg},
+  {"icons/ic_menu_shape_polyline.svg", icons__ic_menu_shape_polyline_svg},
+  {"icons/ic_menu_shape_rounded.svg", icons__ic_menu_shape_rounded_svg},
+  {"icons/ic_menu_shape_splinepoly.svg", icons__ic_menu_shape_splinepoly_svg},
+  {"icons/ic_menu_shapes.svg", icons__ic_menu_shapes_svg},
   {"icons/ic_menu_share.svg", icons__ic_menu_share_svg},
   {"icons/ic_menu_split_bt.svg", icons__ic_menu_split_bt_svg},
   {"icons/ic_menu_split_lr.svg", icons__ic_menu_split_lr_svg},

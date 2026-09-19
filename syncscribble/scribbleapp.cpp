@@ -1373,6 +1373,9 @@ void ScribbleApp::setMode(int mode)
       doc->doRefresh();
     }
   }
+  // a multi-point shape has to be committed before the tool that created it goes away (spec 4)
+  for(ScribbleDoc* doc : scribbleDocs)
+    doc->finishShapes();
   scribbleMode->setMode(mode);
   win->updateMode();
 }

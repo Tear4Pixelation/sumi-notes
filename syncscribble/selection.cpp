@@ -1355,3 +1355,107 @@ void RectSelector::drawBG(Painter* painter)
   }
   painter->restore();
 }
+
+// ShapeSelector - editing handles for a single parametric shape (SHAPES_SPEC.md 5)
+
+Dim ShapeSelector::HANDLE_SIZE = 4;
+
+Element* ShapeSelector::shapeElement() const
+{
+  if(selection->count() != 1)
+    return NULL;
+  Element* s = selection->strokes.front();
+  return s->isShape() ? s : NULL;
+}
+
+// descriptor points are node-local; everything the user interacts with is in page coordinates
+static Transform2D shapePageTransform(const Selection* sel, const Element* s)
+{
+  return sel->transform.tf() * s->node->getTransform();
+}
+
+Point ShapeSelector::toLocal(Point pagepos) const
+{
+  Element* s = shapeElement();
+  return s ? shapePageTransform(selection, s).inverse().map(pagepos) : pagepos;
+}
+
+void ShapeSelector::updateHandles()
+{
+  m_handles.clear();
+  selRect = Rect();
+  Element* s = shapeElement();
+  if(!s)
+    return;
+  getShapeHandles(s->shapeParams(), m_handles);
+  Transform2D tf = shapePageTransform(selection, s);
+  for(ShapeHandle& h : m_handles) {
+    h.pos = tf.map(h.pos);
+    selRect.rectUnion(h.pos);
+  }
+  selRect.rectUnion(s->bbox());
+}
+
+bool ShapeSelector::selectHit(Element* s)
+{
+  // a shape is grabbable anywhere in its bounding box, as a rect selection is
+  return selRect.isValid() && selRect.contains(s->bbox());
+}
+
+void ShapeSelector::shrink()
+{
+  updateHandles();
+}
+
+void ShapeSelector::transform(const Transform2D& tf)
+{
+  updateHandles();
+}
+
+Rect ShapeSelector::getBGBBox()
+{
+  if(!selRect.isValid())
+    return selRect;
+  return Rect(selRect).pad(2*HANDLE_SIZE/mZoom);
+}
+
+int ShapeSelector::shapeHandleHit(Point pos, bool touch)
+{
+  if(!drawHandles)
+    return -1;
+  Dim h = touch ? 2*HANDLE_SIZE : HANDLE_SIZE;
+  Dim a = (h + 3)/mZoom;  // +3 is to make it easier to grab a handle, as for RectSelector
+  Rect handlerect = Rect::ltrb(-a, -a, a, a);
+  // last handle wins, so the radius handle (added last) stays reachable when it sits on a corner
+  for(int ii = int(m_handles.size()); ii-- > 0;) {
+    if(Rect(handlerect).translate(m_handles[ii].pos.x, m_handles[ii].pos.y).contains(pos))
+      return ii;
+  }
+  return -1;
+}
+
+void ShapeSelector::drawBG(Painter* painter)
+{
+  if(m_handles.empty())
+    return;
+  Dim a = HANDLE_SIZE/mZoom;
+  Rect handlerect = Rect::ltrb(-a, -a, a, a);
+  painter->save();
+  painter->setFillBrush(bgFill);
+  painter->setStrokeBrush(bgStroke);
+  painter->setStrokeWidth(1.0/mZoom);
+  if(drawHandles) {
+    painter->setAntiAlias(true);
+    for(const ShapeHandle& handle : m_handles) {
+      if(handle.type == ShapeHandle::RADIUS) {
+        // the radius handle is round so it can't be mistaken for one of the square corner handles
+        painter->setFillBrush(Color::RED);
+        painter->setStrokeBrush(Color::NONE);
+        painter->drawPath(Path2D().addEllipse(handle.pos.x, handle.pos.y, a, a));
+      }
+      else
+        painter->fillRect(Rect(handlerect).translate(handle.pos.x, handle.pos.y), Color::BLACK);
+    }
+  }
+  painter->restore();
+}

@@ -4,6 +4,7 @@
 #include "usvg/svgnode.h"
 #include "usvg/svgwriter.h"
 #include "usvg/svgpainter.h"
+#include "shape.h"
 
 #define MAX_LINE_NUM INT_MAX
 
@@ -161,6 +162,14 @@ public:
   const Selection* selection() const { return m_selection; }
 
   bool isPathElement() const { return node->type() == SvgNode::PATH; }
+  // parametric shapes (SHAPES_SPEC.md): the descriptor is the document, the path is a cache
+  bool isShape() const { return m_shape.isValid(); }
+  const ShapeParams& shapeParams() const { return m_shape; }
+  void setShapeParams(const ShapeParams& params);  // updates descriptor and regenerates the path
+  void rebuildShapePath();
+  // degradation contract: any operation that cannot be expressed in the descriptor must drop it and
+  //  leave a plain path behind, or the next parameter change would silently undo that operation
+  void dropShape();
   bool isBookmark() const { return node->hasClass("bookmark"); }
   bool isHyperRef() const;
   // all children of multi-stroke have Element exts; may extend to include bookmark groups later
@@ -216,4 +225,5 @@ private:
   bool m_applyPending = false;
 
   std::vector<PenPoint> penPoints;
+  ShapeParams m_shape;
 };

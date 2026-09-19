@@ -143,7 +143,10 @@ bool Element::setProperties(const StrokeProperties& props)
   // applyProperties will only set color if fill or stroke is already present, so make sure one is!
   if(props.color.alpha() > 0 && !node->getAttr("fill") && !isMultiStroke())
     setSvgFillColor(node, Color::BLACK);
-  return applyProperties(props, node);
+  bool changed = applyProperties(props, node);
+  if(changed && isShape())
+    rebuildShapePath();  // arrowhead size follows stroke-width
+  return changed;
 }
 
 static bool erasePenPoints(std::vector<PenPoint>& in, const std::vector<Point>& clip)
@@ -526,6 +529,9 @@ void Element::scaleWidth(Dim sx_int, Dim sy_int)
   node->invalidate(false);
   Dim sw = node->getFloatAttr("stroke-width", 1);
   node->setAttr<float>("stroke-width", sw * std::sqrt(std::abs(sx_int * sy_int)));
+  // an arrowhead is sized from the stroke width, so the path has to follow it
+  if(isShape())
+    rebuildShapePath();
   // nothing else to do for stroked element
   if(node->getColorAttr("stroke", Color::NONE) != Color::NONE)
     return;
@@ -573,6 +579,27 @@ void Element::applyTransform(const ScribbleTransform& tf)
     //Transform2D srctf(sx, 0, 0, sy, (1 - sx)*scaleOrigin.x, (1 - sy)*scaleOrigin.y);
     svgimg->m_bounds = tf.mapRect(svgimg->m_bounds);
     svgimg->srcRect = srctf.mapRect(svgimg->m_bounds);
+  }
+  else if(isShape()) {
+    // spec 7.8: the generic path branch below would rewrite the geometry and leave the descriptor stale,
+    //  so the shape must never reach it - the descriptor itself is transformed and the path regenerated
+    bool bboxShape = m_shape.id == SHAPE_BOX || m_shape.id == SHAPE_ELLIPSE;
+    if(tf.isRotating() && bboxShape) {
+      dropShape();  // a rotated axis-aligned rect is not representable in the descriptor
+      m_applyPending = true;
+    }
+    else if(tf.isRotating() || !(approxEq(sx_int, 1, 1E-7) && approxEq(sy_int, 1, 1E-7))) {
+      Transform2D pttf = node->getTransform().inverse() * tf.tf() * node->getTransform();
+      ShapeParams params = m_shape;
+      for(Point& p : params.points)
+        p = pttf.map(p);
+      // a non-uniform scale legitimately makes rx and ry diverge; that is representable, so keep it
+      params.rx *= std::abs(tf.xscale());
+      params.ry *= std::abs(tf.yscale());
+      setShapeParams(params);
+    }
+    else
+      m_applyPending = true;  // pure translate: node transform, descriptor stays node-local
   }
   else if(isPathElement() && !tf.isRotating() && !(approxEq(sx_int, 1, 1E-7) && approxEq(sy_int, 1, 1E-7))) {
     SvgPath* pathnode = static_cast<SvgPath*>(node);
@@ -625,6 +652,55 @@ void Element::updateFromNode()
   const char* ts = node->getStringAttr("__timestamp");
   if(ts && ts[0])
     m_timestamp = strtoull(ts, NULL, 0);
+  // shape descriptor; when present the rendered path is regenerated from it rather than trusted
+  int aliasFlags = 0;
+  int shapeid = shapeIdByStringId(node->getStringAttr("__shape"), &aliasFlags);
+  const ShapeDef* def = shapeDef(shapeid);
+  if(def && isPathElement()) {
+    m_shape.id = shapeid;
+    parseShapePoints(node->getStringAttr("__shapepts"), m_shape.points);
+    m_shape.rx = toReal(node->getStringAttr("__shaperx"), 0);
+    m_shape.ry = toReal(node->getStringAttr("__shapery"), 0);
+    m_shape.tightness = toReal(node->getStringAttr("__shapetight"), 0);
+    const char* flags = node->getStringAttr("__shapeflags");
+    m_shape.flags = (flags && flags[0] ? int(strtol(flags, NULL, 0)) : 0) | aliasFlags;
+    if(int(m_shape.points.size()) < def->minPoints)
+      m_shape = ShapeParams();  // descriptor is unusable; keep the path as saved
+    else
+      rebuildShapePath();
+  }
+}
+
+// the path is a cache of the descriptor, so it is regenerated rather than edited
+void Element::rebuildShapePath()
+{
+  if(!m_shape.isValid() || !isPathElement())
+    return;
+  m_shape.strokeWidth = node->getFloatAttr("stroke-width", 1);
+  Path2D* path = static_cast<SvgPath*>(node)->path();
+  *path = buildShapePath(m_shape);
+  penPoints.clear();
+  node->invalidate(false);
+}
+
+void Element::setShapeParams(const ShapeParams& params)
+{
+  m_shape = params;
+  rebuildShapePath();
+}
+
+void Element::dropShape()
+{
+  if(!m_shape.isValid())
+    return;
+  m_shape = ShapeParams();
+  // the attributes are only written by serializeAttr(), but a node parsed from file still carries them
+  node->removeAttr("__shape");
+  node->removeAttr("__shapepts");
+  node->removeAttr("__shaperx");
+  node->removeAttr("__shapery");
+  node->removeAttr("__shapetight");
+  node->removeAttr("__shapeflags");
 }
 
 void Element::serializeAttr(SvgWriter* writer)
@@ -655,6 +731,18 @@ void Element::serializeAttr(SvgWriter* writer)
   if(m_timestamp > 0 && !SVG_NO_TIMESTAMP)
     node->setAttr("__timestamp",
         fstring("0x%x%08x", uint32_t(m_timestamp >> 32), uint32_t(m_timestamp)).c_str());
+  if(m_shape.isValid()) {
+    node->setAttr("__shape", shapeDef(m_shape.id)->id);
+    node->setAttr("__shapepts", serializeShapePoints(m_shape.points).c_str());
+    if(m_shape.rx != 0 || m_shape.ry != 0) {
+      node->setAttr<Dim>("__shaperx", m_shape.rx);
+      node->setAttr<Dim>("__shapery", m_shape.ry);
+    }
+    if(m_shape.tightness != 0)
+      node->setAttr<Dim>("__shapetight", m_shape.tightness);
+    if(m_shape.flags)
+      node->setAttr("__shapeflags", fstring("%d", m_shape.flags).c_str());
+  }
 }
 
 void Element::applyStyle(SvgPainter* svgp) const

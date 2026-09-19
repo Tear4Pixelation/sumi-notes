@@ -12,6 +12,7 @@ SOURCES = \
   resources.cpp \
   basics.cpp \
   strokebuilder.cpp \
+  shape.cpp \
   element.cpp \
   page.cpp \
   syncundo.cpp \

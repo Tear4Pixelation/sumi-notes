@@ -3,6 +3,7 @@
 #include <map>
 
 #include "ugui/widgets.h"
+#include "shape.h"
 
 class ScribbleApp;
 struct UIState;
@@ -32,6 +33,8 @@ public:
 
   void selectTool(int modeType);
   void selectDrawTool(int tool);
+  void selectShape(int shapeid);
+  void setShapeOptions();
   void showOptionsRow(int modeType);
   void setEraserMode();
   void setEraserWidth(int idx);
@@ -105,6 +108,8 @@ public:
   Action* actionInsert_Space;
   Action* actionLasso_Select;
   Action* actionPath_Select;
+  Action* actionShapes;
+  Action* actionShape[SHAPE_COUNT];
   Action* actionExport_PDF;
   Action* actionImport_PDF;
   Action* actionPreferences;
@@ -152,6 +157,10 @@ public:
   Widget* eraseOptsRow;
   Widget* selectOptsRow;
   Widget* insSpaceOptsRow;
+  Widget* shapeOptsRow;
+  Button* shapeHeadStartToggle = NULL;
+  Button* shapeHeadEndToggle = NULL;
+  Button* shapeRoundedToggle = NULL;
   // the tools row, the divider and the open options row are children of one floating panel with a
   //  single (fully rounded) background, so showing/hiding an options row is just a visibility change
   Widget* mainToolbarPanel = NULL;

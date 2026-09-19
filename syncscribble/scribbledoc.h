@@ -61,6 +61,10 @@ public:
   // some support fns for whiteboarding
   void strokesUpdated(const std::vector<Element*>& strokes);
   void invalidateStroke(Element* s) { for(ScribbleArea* view : views) view->invalidateStroke(s); }
+  // commit any in-progress multi-point shape in every view (called when the tool changes)
+  void finishShapes() { for(ScribbleArea* view : views) view->finishShape(); }
+  bool setSelShapeOptions(int flags, Dim radius)
+      { return activeArea && activeArea->setSelShapeOptions(flags, radius); }
   void invalidatePage(Page* p) { for(ScribbleArea* view : views) view->invalidatePage(p); }
 
   static bool deleteDocument(const char* filename);

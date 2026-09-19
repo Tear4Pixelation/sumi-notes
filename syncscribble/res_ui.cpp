@@ -193,6 +193,16 @@ const char* prefInfoXML = R"#(
       title="Effective Y ruling for unruled pages"
       description="When ruled mode tools are used on unruled page" />
 
+  <pref name="shapeCornerRadius" type="float" min="0" max="200" step="1" group="Shapes"
+      title="Corner radius"
+      description="Initial corner radius when Rounded Corners is on" />
+  <pref name="shapeCurveTightness" type="float" min="0" max="1" step="0.05" group="Shapes"
+      title="Fitted curve tightness"
+      description="0 is roundest; higher follows the points more closely" />
+  <pref name="shapeEditAfterDraw" type="bool" group="Shapes"
+      title="Edit shape after drawing"
+      description="Leave a new shape selected with its handles shown" />
+
   <pref name="sRGB" type="bool" group="Advanced"
       title="Linear color interpolation (reopen)" description="sRGB-correct rendering" />
   <pref name="glRender" type="bool" group="Advanced"

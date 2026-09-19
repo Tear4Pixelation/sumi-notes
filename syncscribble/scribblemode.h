@@ -8,7 +8,8 @@ enum { MODE_NONE = 10, MODE_PAN, MODE_STROKE, MODE_ERASE, MODE_ERASESTROKE, MODE
     MODE_SELECT, MODE_SELECTRECT, MODE_SELECTRULED, MODE_SELECTLASSO, MODE_MOVESEL, MODE_MOVESELFREE,
     MODE_MOVESELRULED, MODE_INSSPACE, MODE_INSSPACEVERT, MODE_INSSPACEHORZ, MODE_INSSPACERULED,
     MODE_BOOKMARK, MODE_SCALESEL, MODE_SCALESELW, MODE_ROTATESEL, MODE_ROTATESELW, MODE_TOOLMENU,
-    MODE_SELECTPATH, MODE_CROPSEL, MODE_PAGESEL, MODE_ERASEFREERULED, MODE_LAST};
+    MODE_SELECTPATH, MODE_CROPSEL, MODE_PAGESEL, MODE_ERASEFREERULED, MODE_DRAWSHAPE, MODE_SHAPEHANDLE,
+    MODE_LAST};
 
 constexpr int MODEMOD_NONE = 0;
 constexpr int MODEMOD_ERASE = 0x01;
@@ -17,6 +18,7 @@ constexpr int MODEMOD_MOVESEL = 0x04;
 constexpr int MODEMOD_SCALESEL = 0x08;
 constexpr int MODEMOD_ROTATESEL = 0x10;
 constexpr int MODEMOD_CROPSEL = 0x20;
+constexpr int MODEMOD_SHAPEHANDLE = 0x40;
 // flags indicating cursor entered from edge of screen
 constexpr int MODEMOD_EDGETOP = 0x100;
 constexpr int MODEMOD_EDGEBOTTOM = 0x200;
@@ -60,6 +62,11 @@ public:
   int insSpaceMode;
   int moveSelMode;
   int drawTool;
+  // active shape for MODE_DRAWSHAPE; one of ShapeId (see shape.h)
+  int shapeId;
+  // SHAPEFLAG_HEADSTART/HEADEND from the head toggles on the shape options row; applied to new shapes
+  //  whose ShapeDef allows heads
+  int shapeFlags;
   bool eraseSwitchBack;  // restore previous pen after erasing; behavior not implemented yet
   // DRAW_UNDER/EPHEMERAL are baked into these so drawing code can just check currPen()->hasFlag()
   ScribblePen drawPen;

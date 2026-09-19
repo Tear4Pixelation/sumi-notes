@@ -37,6 +37,7 @@ public:
   static constexpr unsigned int STROKE_TRANSFORM_ITEM  = 0x00030002;
   static constexpr unsigned int STROKE_TRANSLATE_ITEM  = 0x00040002;
   static constexpr unsigned int STROKE_CHANGE_ITEM     = 0x00050002;
+  static constexpr unsigned int SHAPE_CHANGE_ITEM      = 0x00060002;
   static constexpr unsigned int STROKES_ITEM           = 0x00000004;
   static constexpr unsigned int PAGE_ITEM              = 0x00000008;
   static constexpr unsigned int PAGE_CHANGED_ITEM      = 0x00010008;
@@ -113,6 +114,20 @@ public:
       : StrokeUndoItem(s_, p_), props(props_) {}
   UNDO_ITEM_METHODS
   unsigned int type() const override { return STROKE_CHANGE_ITEM; }
+};
+
+// records a change to a shape descriptor (SHAPES_SPEC.md 6); StrokeChangedItem cannot be reused because
+//  its StrokeProperties carries only colour and width, never geometry
+class ShapeChangedItem : public StrokeUndoItem {
+private:
+  ShapeParams params;
+  void swapParams();
+public:
+  ShapeChangedItem(Element* s_, Page* p_) : StrokeUndoItem(s_, p_), params(s_->shapeParams()) {}
+  ShapeChangedItem(Element* s_, Page* p_, const ShapeParams& params_)
+      : StrokeUndoItem(s_, p_), params(params_) {}
+  UNDO_ITEM_METHODS
+  unsigned int type() const override { return SHAPE_CHANGE_ITEM; }
 };
 
 class StrokeTranslateItem : public StrokeUndoItem {

@@ -122,6 +122,15 @@ protected:
   void gotoPage(int pagenum);
   void viewRect(int pagenum, const Rect& r);
   bool viewHref(const char* href);
+  // Commit any in-progress multi-point shape; safe to call in any mode (SHAPES_SPEC.md 4).
+  // select=true only for the gestures where the *user* finished the shape (tapping the last or first
+  //  point).  Every other caller is finishing it as a side effect of something else starting - another
+  //  gesture, a tool switch, a page change - and must not leave a selection behind, because the caller
+  //  may be about to install its own (doPressEvent's mode switch assigns currSelection directly, having
+  //  already done its clearSelection() pass by the time we get here).
+  void finishShape(bool select = false);
+  // apply the shape options row's toggles to a selected shape; false if the selection isn't one shape
+  bool setSelShapeOptions(int flags, Dim radius);
 
   bool uiDirty;
   void uiChanged(int reason);
@@ -215,10 +224,22 @@ protected:
   PathSelector* pathSelector = NULL;
   RuledSelector* ruledSelector = NULL;
   RectSelector* rectSelector = NULL;
+  ShapeSelector* shapeSelector = NULL;
   LassoSelector* lassoSelector = NULL;
   RuledSelector* insSpaceEraseSelector = NULL;
   Selection* insSpaceEraseSelection = NULL;
   Element* currStroke = NULL;
+  // shape tool: multi-point shapes are the only gesture that outlives one press->move->release cycle
+  Element* shapeInProgress = NULL;
+  int shapeHandleIdx = -1;
+  ShapeParams shapeHandleStart;
+  ShapeParams newShapeParams(int shapeid, Point pos) const;
+  void editShapeAfterDraw(Element* shape);
+  Element* createShapeElement(const ShapeParams& params);
+  void cancelShape();
+  Point snapShapePoint(Point pos) const;
+  // swap in a ShapeSelector when the settled selection is exactly one shape (spec 5)
+  bool useShapeSelector();
 
   // for groupStrokes
   std::vector<Element*> recentStrokes;

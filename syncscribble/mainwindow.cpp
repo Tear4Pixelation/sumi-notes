@@ -335,6 +335,8 @@ Action* MainWindow::modeToAction(int mode)
       return app->scribbleMode->drawTool == ScribbleMode::DRAWTOOL_HIGHLIGHT ? actionHighlight :
           (app->scribbleMode->drawTool == ScribbleMode::DRAWTOOL_EPHEMERAL ? actionEphemeral : actionDraw);
     case MODE_BOOKMARK:  return actionAdd_Bookmark;
+    // the active shape is shown by the options row, not by the tools row icon
+    case MODE_DRAWSHAPE:  return actionShapes;
     // erase submode is shown by the two toggles on the erase options row, not by the top row icon
     case MODE_ERASE:
     case MODE_ERASEFREERULED:  return actionErase;
@@ -388,6 +390,20 @@ void MainWindow::updateMode()
       checkedSubMode->setChecked(false);
     checkedSubMode = NULL;
   }
+  // the active shape is shown on the shape options row, like the eraser submodes below
+  for(int ii = 0; ii < SHAPE_COUNT; ++ii)
+    actionShape[ii]->setChecked(ii == app->scribbleMode->shapeId);
+  int shapeFlags = app->scribbleMode->shapeFlags;
+  const ShapeDef* shapedef = shapeDef(app->scribbleMode->shapeId);
+  bool heads = shapedef && shapedef->allowsHeads;
+  bool rounding = shapedef && shapedef->allowsRounding;
+  shapeHeadStartToggle->setChecked(heads && (shapeFlags & SHAPEFLAG_HEADSTART));
+  shapeHeadEndToggle->setChecked(heads && (shapeFlags & SHAPEFLAG_HEADEND));
+  shapeRoundedToggle->setChecked(rounding && (shapeFlags & SHAPEFLAG_ROUNDED));
+  // a box or ellipse has no ends to put a head on; a curve has no corners to round
+  shapeHeadStartToggle->setEnabled(heads);
+  shapeHeadEndToggle->setEnabled(heads);
+  shapeRoundedToggle->setEnabled(rounding);
   int eraserMode = app->scribbleMode->eraserMode;
   eraseStrokeToggle->setChecked(eraserMode == MODE_ERASESTROKE || eraserMode == MODE_ERASERULED);
   eraseRuledToggle->setChecked(eraserMode == MODE_ERASERULED || eraserMode == MODE_ERASEFREERULED);
@@ -407,12 +423,13 @@ void MainWindow::showOptionsRow(int modeType)
   eraseOptsRow->setVisible(modeType == MODE_ERASE);
   selectOptsRow->setVisible(modeType == MODE_SELECT);
   insSpaceOptsRow->setVisible(modeType == MODE_INSSPACE);
+  shapeOptsRow->setVisible(modeType == MODE_DRAWSHAPE);
   if(vertToolbar)
     return;
   // tools row and options rows are children of a single panel with a single background, so all we
   //  have to do is hide the divider and the options row container when no options row is shown
   bool rowOpen = modeType == MODE_STROKE || modeType == MODE_ERASE
-      || modeType == MODE_SELECT || modeType == MODE_INSSPACE;
+      || modeType == MODE_SELECT || modeType == MODE_INSSPACE || modeType == MODE_DRAWSHAPE;
   if(optsRowDivider)
     optsRowDivider->setVisible(rowOpen);
   if(optsRowContainer)
@@ -436,6 +453,31 @@ void MainWindow::selectDrawTool(int tool)
       && scribbleMode->getMode() == MODE_STROKE && scribbleMode->drawTool == tool;
   app->setDrawTool(tool);
   showOptionsRow(close ? 0 : MODE_STROKE);
+}
+
+// tapping the already active shape closes the options row, as selectDrawTool does for the pens
+void MainWindow::selectShape(int shapeid)
+{
+  ScribbleMode* scribbleMode = app->scribbleMode;
+  bool close = openOptionsRow == MODE_DRAWSHAPE
+      && scribbleMode->getMode() == MODE_DRAWSHAPE && scribbleMode->shapeId == shapeid;
+  scribbleMode->shapeId = shapeid;
+  app->setMode(MODE_DRAWSHAPE);
+  showOptionsRow(close ? 0 : MODE_DRAWSHAPE);
+}
+
+// the three option toggles (start head, end head, rounded corners) are a single set of flags, applied
+//  to the shape about to be drawn and - if one is selected - to that shape as well
+void MainWindow::setShapeOptions()
+{
+  int flags = (shapeHeadStartToggle->isChecked() ? SHAPEFLAG_HEADSTART : 0)
+      | (shapeHeadEndToggle->isChecked() ? SHAPEFLAG_HEADEND : 0)
+      | (shapeRoundedToggle->isChecked() ? SHAPEFLAG_ROUNDED : 0);
+  app->scribbleMode->shapeFlags = flags;
+  ScribbleDoc* doc = app->activeDoc();
+  if(doc)
+    doc->setSelShapeOptions(flags, ScribbleApp::cfg->Float("shapeCornerRadius"));
+  updateMode();
 }
 
 void MainWindow::setEraserWidth(int idx)
@@ -942,14 +984,18 @@ void MainWindow::createToolBars()
       toolsToolbar->addAction(actionDraw);
       toolsToolbar->addAction(actionHighlight);
       toolsToolbar->addAction(actionEphemeral);
+      toolsToolbar->addAction(actionShapes);
       toolsToolbar->addAction(actionErase);
       toolsToolbar->addAction(actionSelect);
       toolsToolbar->addAction(actionInsert_Space);
       toolsToolbar->node->setAttribute("box-anchor", "");  // no stretching for this subtoolbar!
+      // a sub-toolbar is not a surface of its own - the toolbar it sits in supplies the background (and,
+      //  since .toolbar-bg is outlined, would otherwise draw a second outline around just the tools)
+      toolsToolbar->selectFirst(".toolbar-bg")->setVisible(false);
       dest->addWidget(toolsToolbar);
       // the tools are the point of the app, so the row is hidden only as a last resort (see adjFn)
       addTBWidget(toolsToolbar, 4, {actionDraw, actionHighlight, actionEphemeral,
-          actionErase, actionSelect, actionInsert_Space});
+          actionShapes, actionErase, actionSelect, actionInsert_Space});
   };
 
   // page ops, file ops and overflow are separate floating panels on desktop (see below), so the flat
@@ -1173,6 +1219,51 @@ void MainWindow::createToolBars()
       {"popupToolbar", "applyPenToSel", "columnDetectMode"})));
   floatRow(selectRow);
 
+  Toolbar* shapeRow = createToolbar();
+  shapeOptsRow = shapeRow;
+  shapeRow->addWidget(createStretch());
+  for(int ii = 0; ii < SHAPE_COUNT; ++ii)
+    shapeRow->addAction(actionShape[ii]);
+  shapeRow->addSeparator();
+  shapeHeadStartToggle = createToolbutton(
+      SvgGui::useFile(":/icons/ic_menu_shape_head_start.svg"), _("Start Arrowhead"));
+  shapeHeadStartToggle->onClicked = [this](){
+    shapeHeadStartToggle->setChecked(!shapeHeadStartToggle->isChecked());
+    setShapeOptions();
+  };
+  setupTooltip(shapeHeadStartToggle, _("Arrowhead at the start"));
+  shapeRow->addWidget(shapeHeadStartToggle);
+  shapeHeadEndToggle = createToolbutton(
+      SvgGui::useFile(":/icons/ic_menu_shape_head_end.svg"), _("End Arrowhead"));
+  shapeHeadEndToggle->onClicked = [this](){
+    shapeHeadEndToggle->setChecked(!shapeHeadEndToggle->isChecked());
+    setShapeOptions();
+  };
+  setupTooltip(shapeHeadEndToggle, _("Arrowhead at the end"));
+  shapeRow->addWidget(shapeHeadEndToggle);
+  shapeRoundedToggle = createToolbutton(
+      SvgGui::useFile(":/icons/ic_menu_shape_rounded.svg"), _("Rounded Corners"));
+  shapeRoundedToggle->onClicked = [this](){
+    shapeRoundedToggle->setChecked(!shapeRoundedToggle->isChecked());
+    setShapeOptions();
+  };
+  setupTooltip(shapeRoundedToggle, _("Round off the corners"));
+  shapeRow->addWidget(shapeRoundedToggle);
+  shapeRow->addWidget(smallFloatBtn(createHelpButton({
+    {"ic_menu_shape_line.svg", "Line", "Drag to draw a straight line."},
+    {"ic_menu_shape_box.svg", "Box", "Drag to draw a rectangle."},
+    {"ic_menu_shape_ellipse.svg", "Ellipse", "Drag to draw an ellipse."},
+    {"ic_menu_shape_polyline.svg", "Polyline", "Tap to place points; tap the last point to finish, the first to close."},
+    {"ic_menu_shape_splinepoly.svg", "Smooth Curve", "A curve passing through every point you place."},
+    {"ic_menu_shape_fitpoly.svg", "Fitted Curve", "A curve pulled towards your points without passing through them."},
+    {"ic_menu_shape_head_start.svg", "Start Arrowhead", "Puts an arrowhead on the start. Edits the selected shape if there is one."},
+    {"ic_menu_shape_head_end.svg", "End Arrowhead", "Puts an arrowhead on the end. A line with an end arrowhead is an arrow."},
+    {"ic_menu_shape_rounded.svg", "Rounded Corners", "Rounds the corners of a box or polyline; drag the red handle to set the radius."} })));
+  shapeRow->addWidget(createStretch());
+  shapeRow->addWidget(smallFloatBtn(createToolSettingsButton("Shape Settings",
+      {"shapeCornerRadius", "shapeCurveTightness", "shapeEditAfterDraw", "doubleTapSticky"})));
+  floatRow(shapeRow);
+
   Toolbar* insSpaceRow = createToolbar();
   insSpaceOptsRow = insSpaceRow;
   insSpaceRow->addWidget(createStretch());
@@ -1194,7 +1285,8 @@ void MainWindow::createToolBars()
   Widget* toolbarColumn = NULL;
   if(vertToolbar) {
     toolbarColumn = createColumn(
-        {adjtb, optsRowDivider, penToolbarAutoAdj, eraseRow, selectRow, insSpaceRow}, "", "", "vfill");
+        {adjtb, optsRowDivider, penToolbarAutoAdj, eraseRow, shapeRow, selectRow, insSpaceRow},
+        "", "", "vfill");
   }
   else {
     // Only one options row is visible at a time; they are stacked directly (hfill, like the tools row)
@@ -1203,12 +1295,12 @@ void MainWindow::createToolBars()
     //  for vertical scrolling and left visible layout artifacts when repurposed - simple stacking with
     //  the (now-compact) options content is a safer trade for now.
     Widget* optsStack = createColumn(
-        {penToolbarAutoAdj, eraseRow, selectRow, insSpaceRow}, "", "", "hfill");
+        {penToolbarAutoAdj, eraseRow, shapeRow, selectRow, insSpaceRow}, "", "", "hfill");
     optsRowContainer = optsStack;
     // every options row should fit the mockup's six-tool width, but the palettes are user-configurable,
     //  so let a row that has grown past it widen the panel rather than spill outside the background
-    for(Widget* w : {(Widget*)penToolbarAutoAdj, (Widget*)eraseRow, (Widget*)selectRow,
-        (Widget*)insSpaceRow, optsStack})
+    for(Widget* w : {(Widget*)penToolbarAutoAdj, (Widget*)eraseRow, (Widget*)shapeRow,
+        (Widget*)selectRow, (Widget*)insSpaceRow, optsStack})
       w->fillReportsSize = true;
 
     // one panel, one background: the tools row, the divider and the options rows are all children of
@@ -1550,6 +1642,17 @@ void MainWindow::setupActions()
   actionAdd_Bookmark->setCheckable(true);
   actionAdd_Bookmark->tooltip = _("Drop beside text to show in bookmark pane");
 
+  actionShapes = createAction("actionShapes", "Shapes", ":/icons/ic_menu_shapes.svg", "",
+      [this](){ selectTool(MODE_DRAWSHAPE); });
+  actionShapes->setCheckable(true);
+  actionShapes->tooltip = _("Draw lines, arrows, boxes and ellipses");
+  for(int ii = 0; ii < SHAPE_COUNT; ++ii) {
+    const ShapeDef* def = shapeDef(ii);
+    actionShape[ii] = createAction((std::string("actionShape_") + def->id).c_str(),
+        def->name, def->icon, "", [this, ii](){ selectShape(ii); });
+    actionShape[ii]->setCheckable(true);
+  }
+
   actionErase = createAction("actionErase", "Erase", ":/icons/ic_menu_erase.svg", "",
       [this](){ selectTool(MODE_ERASE); });
   actionErase->setCheckable(true);
@@ -1674,7 +1777,7 @@ void MainWindow::setupActions()
   //viewmenu->addAction(actionZoom_Out);
   //viewmenu->addAction(actionReset_Zoom);
   Button* splitviewbtn = viewmenu->addAction(actionSplitView);
-  splitviewbtn->mMenu->setAlign(Menu::HORZ_LEFT);
+  splitviewbtn->mPopup->setAlign(Menu::HORZ_LEFT);
   viewmenu->addAction(actionShow_Bookmarks);  // in case hidden from toolbar
   // not sure this is the best place...
   viewmenu->addAction(actionShow_Clippings);

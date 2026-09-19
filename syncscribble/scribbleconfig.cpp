@@ -21,6 +21,8 @@ void ScribbleConfig::init()
   cfg["eraseOnImage"] = 1;
   // 1: return to previous mode on cursor up (except from draw mode) 0: do not return to previous mode
   cfg["doubleTapSticky"] = 1;
+  // leave a freshly drawn shape selected with its parameter handles up
+  cfg["shapeEditAfterDraw"] = 1;
   // hint shown in the history panel until the user has actually scrubbed once; cleared by using the
   //  feature rather than by dismissing it, so it cannot be waved away without being understood
   cfg["historyHintDone"] = 0;
@@ -204,6 +206,11 @@ void ScribbleConfig::init()
 
   // ruling to be used by ruled selector on blank pages
   cfgF["blankYRuling"] = 60;
+  // default corner radius for a new rounded box (spec 2)
+  cfgF["shapeCornerRadius"] = 12;
+  // starting tightness for a new fitted curve: 0 is the roundest (pure B-spline), 1 passes through
+  //  every point (i.e. becomes the smooth curve)
+  cfgF["shapeCurveTightness"] = 0.35;
   // for continuous view
   cfgF["pageSpacing"] = 20;
   // allow slight overzoom for visual indication of zoom limits

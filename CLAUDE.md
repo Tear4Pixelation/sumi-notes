@@ -167,6 +167,143 @@ Known gap: a scan of ruled paper leaves `yRuling == 0`, so `Page::yruling(true)`
 `BLANK_Y_RULING` and the ruled tools (insert space ruled, select ruled, ruled eraser) snap to a spacing
 unrelated to the lines in the image. The detector's Hough pass already has the data to fix this.
 
+## Shapes
+
+Parametric shapes - line, box, ellipse and three polyline flavours - drawn with `MODE_DRAWSHAPE` and
+edited with handles. Designed in `SHAPES_SPEC.md`; that document is the rationale, this is the summary.
+
+**Six tools, three toggles.** Arrowheads and corner rounding are flags, not shapes: an arrow is a line
+with `SHAPEFLAG_HEADEND`, a rounded box is a box with `SHAPEFLAG_ROUNDED`. Each toggle collapses what
+would otherwise be a pair of near-identical tools, and they compose - a rounded polyline with a head
+needs no third entry. `ShapeDef::allowsHeads`/`allowsRounding` say whether a toggle means anything for
+the active shape; the options row disables it otherwise.
+
+**The parameters are the document; the `Path2D` is a cache.** Every shape is a plain `SvgPath` whose
+`Element` carries a `ShapeParams` descriptor, serialized as `__shape`/`__shapepts`/`__shaperx`/`__shapery`/
+`__shapeflags` - the same custom-attribute convention `Element` already uses for `__comx`/`__timestamp`.
+`Element::updateFromNode()` parses it and regenerates the path; `Element::setShapeParams()` is the only
+way to change a shape, and it regenerates too. Nothing edits a shape's path directly.
+
+- `shape.h`/`.cpp` (`ulib`-style, no app dependencies) hold the `ShapeDef` registry. Adding a shape is one
+  table entry plus a `buildPath` and a `getHandles` function; the mode handlers, selector, serializer and
+  undo item are written once against `ShapeDef`.
+- **Plain `SvgPath`, never `SvgRect`.** `Element::isPathElement()` tests `type() == PATH`, and `SvgRect`
+  returns `RECT`, which would silently fail a long list of guards (selection highlight, free erase, hit
+  testing, width scaling). Widening that test would change behavior for every pre-existing `<rect>` in
+  every document. The cost is ~30 lines of rounded-rect construction copied from `SvgRect::updatePath()`.
+- **Degradation contract.** Any operation that cannot be expressed in the descriptor calls
+  `Element::dropShape()` and leaves a plain path behind - currently only rotation of a box/rbox/ellipse.
+  Without this a shape silently reverts to its pre-operation geometry the next time a parameter changes.
+- **`applyTransform()` has a shape branch ahead of the path branch.** The generic non-rotating-scale branch
+  mutates `m_path` in place and would leave `__shapepts` describing the old size; the shape would look
+  right until the next parameter change regenerated it from the stale descriptor and snapped back. The
+  shape branch maps the descriptor points and scales `rx`/`ry` instead. This is the failure the
+  `shapeRoundTripTest()` check exists to catch.
+- **`ShapeChangedItem` is a sync wire-format change, not just an undo item.** Undo items *are* the sync
+  protocol, so it needs `serialize()`, a type constant (`SHAPE_CHANGE_ITEM`) and a matching `shapechanged`
+  branch in `ScribbleSync::processItem()`. The `__shape*` attributes themselves ride along free inside
+  `<addstroke>`, because sync round-trips nodes through `SvgWriter`/`SvgParser`.
+- Shapes are excluded from `groupStrokes()`, which would otherwise rewrite their centre of mass as if they
+  were handwriting, outside the undo system.
+- `MODE_DRAWSHAPE` is appended at the end of the `scribblemode.h` enum (values are serialized to config);
+  `shapeId` and `shapeFlags` are appended *after the pens* in `ScribbleMode::saveModes()` so older config
+  strings still load. `shapeId` is stored as its **string** id, not its index - shapes have been merged
+  into flags once already, and an index would have silently reassigned everyone's active tool when that
+  happened. `ShapeId`'s numeric order is therefore free.
+- `shapeIdByStringId()` accepts the ids of the shapes that became flags - `arrow`, `rbox`, `rpolyline` -
+  and returns the base shape plus the flags the old name implied, so documents written before the merge
+  still load as what they meant. They are rewritten in canonical form on the next save.
+- Multi-point (polyline) is the only gesture that outlives one press/move/release cycle. The in-progress
+  element lives on `ScribbleArea::shapeInProgress` and `finishShape()` is called from every escape route:
+  cancel, tool switch (`ScribbleApp::setMode`), page change, and `reset()` (document close/save).
+
+### The polyline family
+
+Three shapes share their points, their handles and their arrowheads, and differ only in how the body
+between the points is drawn. They are separate registry entries rather than a flag because they are
+separate tools, reached for in different situations:
+
+| shape | body | overshoots? | passes through the points? |
+|---|---|---|---|
+| `polyline` | straight segments, filleted when `SHAPEFLAG_ROUNDED` | no | yes |
+| `splinepoly` | centripetal Catmull-Rom | at sharp corners | yes |
+| `fitpoly` | relaxed towards B-spline knots, then smoothed | no | only the two ends |
+
+- Rounding reuses `__shaperx` and adds a radius handle on the first interior corner. `rx` is the
+  distance trimmed off each edge, the same thing it means for a rounded box; `filletTrim()` clamps it
+  per corner to half the shorter adjacent segment, so neighbouring fillets can never overlap. `rx` is
+  kept when rounding is switched off, so toggling it back on returns the radius you had.
+- `splinepoly` uses **centripetal**, not uniform, Catmull-Rom. The two are the same curve on evenly
+  spaced points, so this is invisible on a neat rectangle; it pays off on uneven spacing, which is what
+  tapped-out points look like. Measured: a 4-unit segment between neighbours of 100 and 113 overshoots
+  by 10.0 units under uniform and 0.6 under centripetal. `shapetest.cpp` pins this with that exact case
+  - an evenly spaced fixture would not catch a regression to uniform. It does *not* remove the bulge at
+  a sharp corner: passing smoothly through a right angle requires going outside it, and that is the
+  whole reason `fitpoly` exists alongside it.
+- `fitpoly` is built by *relaxing* each interior point towards the uniform B-spline knot
+  `(P[i-1] + 4P[i] + P[i+1])/6` and then running `addSplineBody()` through the relaxed points. That
+  gives one knob, `ShapeParams::tightness`: 0 is the pure B-spline (roundest), 1 relaxes nothing and so
+  reproduces `splinepoly` exactly, and in between trades roundness for fidelity. Building it this way
+  also means it inherits centripetal parameterisation rather than repeating it. The two end points are
+  never relaxed, so the ends stay put and the arrowheads stay attached.
+- Tightness is **per shape** (`__shapetight`), not a global setting, or the same document would render
+  differently on another machine. The `shapeCurveTightness` preference is only the default for newly
+  drawn curves, exactly as `shapeCornerRadius` is for `rx`.
+- Open ends: `splinepoly` reflects a phantom point (`2*p0 - p1`), the B-spline relaxation leaves the end
+  points alone. Both make the curve's end tangent come out exactly along the first/last segment, which
+  is what the arrowheads are oriented from, so a head can never sit skew to its own curve.
+
+### The option toggles
+
+`SHAPEFLAG_HEADSTART`/`HEADEND`/`ROUNDED` live in `ScribbleMode::shapeFlags` and are driven by three
+toggles on the shape options row. Two behaviours worth knowing:
+
+- If a single shape is selected, the toggles edit **it** (via `ShapeChangedItem`, so undo and sync
+  follow) instead of only arming the next shape drawn - adding an arrow to an existing polyline does
+  not mean redrawing it. `setSelShapeOptions()` masks by the shape's own `allowsHeads`/`allowsRounding`,
+  so switching tools with a shape still selected cannot strip flags that shape legitimately carries.
+- The head icons are reicon `arrow-left`/`arrow-right`, i.e. the same two files already shipping as
+  `ic_menu_back`/`ic_menu_forward`.
+
+### After drawing
+
+With `shapeEditAfterDraw` on (the default), `ScribbleArea::editShapeAfterDraw()` leaves a newly
+committed shape selected with its `ShapeSelector` handles up, so the parameters can be adjusted while
+the shape is still the thing being thought about. It falls back to a `RectSelector` if the shape was
+demoted on the way in.
+
+**Only the paths where the *user* finished the shape may select it.** `finishShape(select)` defaults to
+`false`; only the two deliberate multi-point finishes (tapping the last point, tapping the first to
+close) pass `true`. Every other caller - `doPressEvent`'s guard when another gesture starts, a tool
+switch, a page change - is finishing the shape as a side effect and must not leave a selection behind.
+The reason is a sharp edge in `doPressEvent`: its mode switch assigns `currSelection = new Selection(...)`
+**without deleting what was there**, which is safe only because the earlier "clear selection depending on
+mode" pass already ran. Anything that installs a selection between those two points gets leaked, and the
+elements it held keep `m_selection` pointing at the orphan - so they render as selected, are absent from
+`currSelection`, and cannot be deselected, moved or deleted. `shapeInterruptTest()` pins this by
+asserting no element points at a selection other than the current one; it was verified to fail against
+the broken version, not just to pass against the fixed one.
+
+Relatedly, `doPressEvent` drops any live `currStroke` at entry. The in-progress element is held on
+`ScribbleArea` rather than in the page, so a gesture abandoned without a release or cancel - the input
+layer restarts one when the pen button changes mid-stroke - would otherwise leave a shape painted every
+frame that belongs to no page.
+
+Two deliberate deviations from the spec, both documented at the point of deviation:
+
+- **Arrowheads are stroked open Vs in the same path, not filled paths inside a `<g>`.** The spec's reason
+  for the group was that a filled outline would bake the stroke width into the geometry - which cannot
+  happen here, because the path is regenerated from the descriptor on every change. Keeping an arrow as
+  one `SvgPath` means it never becomes a multi-stroke element and carries no filled part that
+  `Element::scaleWidth()` could misread as pen geometry.
+- **Regeneration is driven by `setShapeParams()`, not by `SvgNodeExtension::onAttrChange()`.** The
+  descriptor is held in the `Element` and written to attributes only on serialize, so a handle drag does
+  not round-trip through strings on every move event.
+
+Known gap: shapes carry no pen class, so `Element::toPenPoints()` returns nothing for them and the **free
+eraser does not affect a shape** - the stroke eraser deletes it whole. Giving them `STROKE_PEN_CLASS`
+would make free erase work but would split curved shapes (ellipse, rounded box) at Bezier control points.
+
 ## History panel
 
 The toolbar's **History** button (`ic_menu_history`, formerly the undo arrow) opens a panel of ticks -
@@ -239,5 +376,22 @@ needs neither GL nor a document, so it also builds and runs standalone - see the
 header (it needs `-DNDEBUG`, or `geom.cpp`'s `ASSERT` pulls in `platform_assert` from the application).
 `ScribbleTest::runAll()` calls `runScanTests()` and counts its failures in the result string and exit
 code. The dialog itself has no automated coverage.
+
+The shape math is tested the same way in `scribbletest/shapetest.cpp` (`runShapeTests()`), which likewise
+builds and runs standalone - see the command in that file's header. On top of it,
+two checks that do need the application, both running after the `testN` loop and reporting through the
+unit-check count, so neither needs a reference file:
+
+- `ScribbleTest::shapeRoundTripTest()` - the spec's step-1 gate. Drives input events to draw a box,
+  saves, reloads, resizes and then changes a parameter, checking the shape does not snap back to its
+  pre-resize size.
+- `ScribbleTest::shapeInterruptTest()` - interrupting a shape gesture (pen button down mid-drag, or a
+  right-click between polyline taps) must leave neither an orphaned live element nor an element pointing
+  at an orphaned `Selection`. Both failure modes look the same to the user: a shape that is drawn but
+  belongs to nothing, so it cannot be selected, erased or deleted.
+
+When adding a check here, confirm it **fails against the broken code**, not just that it passes against
+the fixed code - two assertions in this area have been written that were true either way and so tested
+nothing.
 
 `usvg` and `ugui` each have their own standalone example/test build (`cd usvg && make` → `Release/usvgtest`; `cd ugui && make` → `Release/uguitest`), buildable once `Write` itself has been built (they reuse its makefile setup for `nanovgXC`/SDL).

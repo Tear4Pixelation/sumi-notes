@@ -91,6 +91,26 @@ void StrokeChangedItem::redo()
   StrokeUndoItem::redo();
 }
 
+// ShapeChangedItem - record change of a shape descriptor (points, corner radii, flags)
+void ShapeChangedItem::swapParams()
+{
+  ShapeParams temp = s->shapeParams();
+  s->setShapeParams(params);
+  params = temp;
+}
+
+void ShapeChangedItem::undo()
+{
+  swapParams();
+  StrokeUndoItem::undo();
+}
+
+void ShapeChangedItem::redo()
+{
+  swapParams();
+  StrokeUndoItem::redo();
+}
+
 // StrokeTransformItem is passed Stroke prior to commit; used to efficiently save undo info from reflow
 //StrokeTranslateItem::StrokeTranslateItem(Element* s_)
 //    : StrokeUndoItem(s_), xoffset(s_->xOffset()), yoffset(s_->yOffset()) {}
@@ -392,6 +412,17 @@ void StrokeChangedItem::serialize(IOStream& strm)
       s->uuid, currprops.color.argb(), currprops.width);
 }
 
+// spec 7.5: undo items are the sync protocol, so a new item type needs a wire format of its own; the
+//  __shape* attributes themselves ride along free inside <addstroke>, but this does not
+void ShapeChangedItem::serialize(IOStream& strm)
+{
+  const ShapeParams& curr = s->shapeParams();
+  const ShapeDef* def = shapeDef(curr.id);
+  strm << fstring("<shapechanged strokeuuid='%llu' shape='%s' shapepts='%s' rx='%f' ry='%f'"
+      " tight='%f' flags='%d'/>", s->uuid, def ? def->id : "",
+      serializeShapePoints(curr.points).c_str(), curr.rx, curr.ry, curr.tightness, curr.flags);
+}
+
 void PageChangedItem::serialize(IOStream& strm)
 {
   // lots of parameters - just use fstring
@@ -454,6 +485,11 @@ UndoHistoryItem* PageDeletedItem::inverse()
 UndoHistoryItem* StrokeChangedItem::inverse()
 {
   return new StrokeChangedItem(*this);
+}
+
+UndoHistoryItem* ShapeChangedItem::inverse()
+{
+  return new ShapeChangedItem(*this);
 }
 
 UndoHistoryItem* PageChangedItem::inverse()

@@ -13,6 +13,10 @@ public:
   ~ScribbleTest();
 
   void runAll(bool runsynctest = false);
+  // draw/save/reload/resize round-trip for parametric shapes; returns the number of failed checks
+  int shapeRoundTripTest();
+  // interrupting a shape gesture (pen button / right-click) must leave no orphaned element
+  int shapeInterruptTest();
   void performanceTest();
   void inputTest();
   void syncSlaveMsg(std::string msg, int level);

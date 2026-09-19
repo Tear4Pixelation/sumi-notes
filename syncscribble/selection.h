@@ -118,6 +118,8 @@ public:
   virtual void transform(const Transform2D& tf) {}
 
   virtual Point scaleHandleHit(Point pos, bool touch) { return Point(NaN, NaN); }
+  // index into the shape handle list, or -1; only ShapeSelector ever returns a hit
+  virtual int shapeHandleHit(Point pos, bool touch) { return -1; }
   virtual Point rotHandleHit(Point pos, bool touch) { return Point(NaN, NaN); }
   virtual Point cropHandleHit(Point pos, bool touch) { return Point(NaN, NaN); }
 
@@ -173,6 +175,36 @@ private:
   Rect selRect;
   Dim mZoom;
   static Dim HANDLE_SIZE;
+};
+
+// selector for a selection holding exactly one parametric shape (SHAPES_SPEC.md 5): instead of the
+//  scale/rotate handles of a RectSelector, it offers one handle per defining parameter
+class ShapeSelector : public Selector
+{
+public:
+  ShapeSelector(Selection* _sel, Dim zoom = 1) : Selector(_sel), mZoom(zoom) { updateHandles(); }
+
+  bool selectHit(Element* s) override;
+  void shrink() override;
+  Rect getBGBBox() override;
+  void drawBG(Painter* painter) override;
+  void setZoom(Dim zoom) override { mZoom = zoom; }
+  void transform(const Transform2D& tf) override;
+  int shapeHandleHit(Point pos, bool touch) override;
+
+  // the element being edited, or NULL if the selection is no longer a single shape
+  Element* shapeElement() const;
+  const std::vector<ShapeHandle>& handles() const { return m_handles; }
+  void updateHandles();
+  // descriptor points are node-local; handle positions are in page coordinates
+  Point toLocal(Point pagepos) const;
+
+  static Dim HANDLE_SIZE;
+
+private:
+  std::vector<ShapeHandle> m_handles;
+  Rect selRect;
+  Dim mZoom;
 };
 
 struct RuledRange

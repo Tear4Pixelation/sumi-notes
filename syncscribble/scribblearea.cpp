@@ -17,7 +17,7 @@ const Dim ScribbleArea::GROW_TRIGGER = 1.625;  // in multiples of GROW_STEP or r
 const Dim ScribbleArea::GROW_EXTRA = 2.5;  // in multiples of GROW_STEP or ruling
 const Dim ScribbleArea::AUTOSCROLL_BORDER = 60;
 const Dim ScribbleArea::MIN_CURSOR_RADIUS = 2;
-const Color ScribbleArea::BACKGROUND_COLOR_DARK = 0xFF444444;
+const Color ScribbleArea::BACKGROUND_COLOR_DARK = 0xFF333333;
 const Color ScribbleArea::BACKGROUND_COLOR_LIGHT = 0xFFBBBBBB;
 Color ScribbleArea::BACKGROUND_COLOR = ScribbleArea::BACKGROUND_COLOR_DARK;
 
@@ -358,6 +358,7 @@ void ScribbleArea::setPageNum(int pagenum)
   if(currPage != page(pagenum) || currPageNum != pagenum) {
     // process recent strokes before changing page
     groupStrokes();
+    finishShape();  // a multi-point shape belongs to the page it was started on
     currPage = page(pagenum);
     currPageNum = pagenum;
     currPage->ensureLoaded();  // needed for memory usage check if nothing else
@@ -480,6 +481,7 @@ bool ScribbleArea::clearSelection()
   selBGRect = Rect();
   delete currSelection;
   currSelection = NULL;
+  shapeSelector = NULL;
   if(pagenum != currPageNum) {
     scribbleDoc->dirtyPage(currPageNum);
     setPageNum(pagenum);
@@ -782,6 +784,132 @@ void ScribbleArea::doPasteAt(Clipboard* clipboard, Point pos, PasteFlags flags)
 #endif
 }
 
+// shape tool (SHAPES_SPEC.md)
+
+// The descriptor a freshly started shape begins with.  Arrowheads and corner rounding come from the
+//  options row toggles rather than from the shape id, so the same two toggles serve a line, a box and
+//  every polyline flavour; the preferences supply the starting radius and curve tightness, exactly as
+//  the pen supplies the starting colour and width.
+ShapeParams ScribbleArea::newShapeParams(int shapeid, Point pos) const
+{
+  const ShapeDef* def = shapeDef(shapeid);
+  int modeFlags = scribbleDoc->scribbleMode->shapeFlags;
+  ShapeParams params;
+  params.id = shapeid;
+  params.points = {pos, pos};
+  if(def && def->allowsHeads)
+    params.flags |= modeFlags & (SHAPEFLAG_HEADSTART | SHAPEFLAG_HEADEND);
+  if(def && def->allowsRounding && (modeFlags & SHAPEFLAG_ROUNDED)) {
+    params.flags |= SHAPEFLAG_ROUNDED;
+    params.rx = cfg->Float("shapeCornerRadius");
+    params.ry = params.rx;
+  }
+  if(shapeid == SHAPE_FITPOLY)
+    params.tightness = cfg->Float("shapeCurveTightness");
+  return params;
+}
+
+// spec 5: leave a newly drawn shape selected with its handles up, so the parameters can be adjusted
+//  while the shape is still the thing being thought about
+void ScribbleArea::editShapeAfterDraw(Element* shape)
+{
+  if(!shape || !shape->isShape() || !cfg->Bool("shapeEditAfterDraw"))
+    return;
+  clearSelection();
+  currSelection = new Selection(currPage);
+  currSelPageNum = currPageNum;
+  currSelection->addStroke(shape);
+  if(!useShapeSelector())  // falls back to the usual scale/rotate handles if the shape was demoted
+    rectSelector = new RectSelector(currSelection, mZoom, true);
+  currSelection->shrink();
+  dirtyScreen(currSelection->getBGBBox());
+  uiChanged(UIState::SelChange);
+}
+
+// shapes use the current pen's colour, width and dash - reusing the pen is less UI and is what the
+//  selection toolbar already knows how to edit (spec 5, 10)
+Element* ScribbleArea::createShapeElement(const ShapeParams& params)
+{
+  const ScribblePen* pen = currPen();
+  SvgPath* svgPath = new SvgPath();
+  svgPath->setAttr<color_t>("fill", Color::NONE);
+  setSvgStrokeColor(svgPath, pen->color);
+  svgPath->setAttr<float>("stroke-width", pen->width);
+  svgPath->setAttr<int>("stroke-linecap", Painter::RoundCap);
+  svgPath->setAttr<int>("stroke-linejoin", Painter::RoundJoin);
+  if(pen->dash > 0) {
+    std::string dashes(pen->gap > 0 ? fstring("%f %f", pen->dash, pen->gap) : fstring("%f", pen->dash));
+    svgPath->setAttribute("stroke-dasharray", dashes.c_str());
+  }
+  // deliberately no pen class: the pen classes drive toPenPoints(), which reinterprets a path as
+  //  variable-width pen geometry - meaningless for a generated shape path (spec 7.9)
+  Element* shape = new Element(svgPath);
+  shape->setShapeParams(params);
+  return shape;
+}
+
+Point ScribbleArea::snapShapePoint(Point pos) const
+{
+  if(!currPen()->hasFlag(ScribblePen::SNAP_TO_GRID))
+    return pos;
+  Dim yr = currPage->yruling(true);
+  Dim xr = currPage->xruling() > 0 ? currPage->xruling() : yr;
+  return Point(floor(pos.x/xr + 0.5)*xr, floor(pos.y/yr + 0.5)*yr);
+}
+
+// commit an in-progress multi-point shape; a no-op in every other case, so it is safe to call from any
+//  of the escape routes a multi-point gesture has to survive (spec 4)
+void ScribbleArea::finishShape(bool select)
+{
+  Element* shape = shapeInProgress;
+  if(!shape)
+    return;
+  shapeInProgress = NULL;
+  scribbleDoc->updateCurrStroke(shape->bbox());
+  Rect bbox = shape->bbox();
+  const ShapeParams& params = shape->shapeParams();
+  const ShapeDef* def = shapeDef(params.id);
+  if(!def || int(params.points.size()) < def->minPoints || !bbox.isValid()
+      || !currPage->rect().intersects(bbox)) {
+    shape->deleteNode();
+    return;
+  }
+  if(!currPage->rect().contains(bbox))
+    dirtyScreen(bbox);
+  if(cfg->Bool("growWithPen"))
+    growPage(bbox);
+  scribbleDoc->startAction(currPageNum);
+  currPage->addStroke(shape);  // creates the StrokeAddedItem itself (spec 7.11)
+  scribbleDoc->endAction();
+  scribbleDoc->updateCurrStroke(bbox);
+  if(select)
+    editShapeAfterDraw(shape);
+}
+
+void ScribbleArea::cancelShape()
+{
+  if(!shapeInProgress)
+    return;
+  scribbleDoc->updateCurrStroke(shapeInProgress->bbox());
+  shapeInProgress->deleteNode();
+  shapeInProgress = NULL;
+}
+
+bool ScribbleArea::useShapeSelector()
+{
+  shapeSelector = NULL;
+  if(!currSelection || currSelection->count() != 1 || !currSelection->strokes.front()->isShape())
+    return false;
+  delete currSelection->selector;  // Selector dtor clears Selection::selector
+  pathSelector = NULL;
+  ruledSelector = NULL;
+  rectSelector = NULL;
+  lassoSelector = NULL;
+  shapeSelector = new ShapeSelector(currSelection, mZoom);
+  currSelection->xchgBGDirty(true);
+  return true;
+}
+
 // groupStrokes():
 //  called with Stroke* to add to recent stroke list; if passed NULL pointer (the default param) or if
 //  stroke is not estimated to be on the same rule line as the previous strokes, all strokes in the recent
@@ -793,6 +921,9 @@ void ScribbleArea::groupStrokes(Element* b)
 {
   if(!cfg->Bool("groupStrokes"))
     return;
+  // a shape is not handwriting; passing NULL still ends any open group, which is what we want
+  if(b && b->isShape())
+    b = NULL;
 
   if(!recentStrokes.empty()) {
     const Timestamp GROUP_DT_MAX = 2500;  // 2.5 seconds
@@ -1175,6 +1306,52 @@ void ScribbleArea::setSelProperties(const StrokeProperties* props, const char* t
   doRefresh();
 }
 
+// apply the head toggles to an already-drawn shape, so adding an arrow to an existing polyline does not
+//  mean redrawing it.  Returns false if the selection is not a single shape that can carry heads.
+bool ScribbleArea::setSelShapeOptions(int flags, Dim radius)
+{
+  doCancelAction();
+  if(!currSelection || currSelection->count() != 1)
+    return false;
+  Element* shape = currSelection->strokes.front();
+  const ShapeDef* def = shape->isShape() ? shapeDef(shape->shapeParams().id) : NULL;
+  if(!def)
+    return false;
+  // only the toggles that mean something for this shape may touch it, so switching tools with a shape
+  //  still selected cannot strip flags the shape legitimately carries
+  int mask = (def->allowsHeads ? (SHAPEFLAG_HEADSTART | SHAPEFLAG_HEADEND) : 0)
+      | (def->allowsRounding ? SHAPEFLAG_ROUNDED : 0);
+  if(!mask)
+    return false;
+  ShapeParams params = shape->shapeParams();
+  int newflags = (params.flags & ~mask) | (flags & mask);
+  // a shape switched to rounded for the first time has no radius yet; give it the configured one
+  Dim newrx = params.rx, newry = params.ry;
+  if((newflags & SHAPEFLAG_ROUNDED) && newrx <= 0 && newry <= 0) {
+    newrx = radius;
+    newry = radius;
+  }
+  if(newflags == params.flags && newrx == params.rx && newry == params.ry)
+    return true;
+  viewSelection();
+  dirtyScreen(currSelection->getBGBBox());
+  scribbleDoc->startAction(currPageNum);
+  scribbleDoc->history->addItem(new ShapeChangedItem(shape, currPage, params));
+  params.flags = newflags;
+  params.rx = newrx;
+  params.ry = newry;
+  shape->setShapeParams(params);
+  currSelection->invalidateBBox();
+  if(shapeSelector)
+    shapeSelector->updateHandles();
+  currSelection->xchgBGDirty(true);
+  scribbleDoc->endAction();
+  dirtyScreen(currSelection->getBGBBox());
+  uiChanged(UIState::SetSelProps);
+  doRefresh();
+  return true;
+}
+
 // return the target of the first HyperRef found in currSelection or NULL
 const char* ScribbleArea::getHyperRef() const
 {
@@ -1387,6 +1564,10 @@ int ScribbleArea::selectionHit(Point pos, bool touch)
 {
   if(!currSelection || !currSelection->selector)
     return 0;
+  // a shape's parameter handles replace the scale/rotate handles, so check them first
+  shapeHandleIdx = currSelection->selector->shapeHandleHit(pos, touch);
+  if(shapeHandleIdx >= 0)
+    return MODEMOD_SHAPEHANDLE;
   // check for selection scale handle hit
   scaleOrigin = currSelection->selector->scaleHandleHit(pos, touch);
   if(!scaleOrigin.isNaN()) {
@@ -1453,6 +1634,17 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
     if(pos.x < 0 || pos.x > currPage->width() || pos.y < 0 || pos.y > currPage->height())
       modemod |= MODEMOD_EDGEMASK;
   }
+  // A live shape or bookmark element belongs to the gesture that created it and is held here rather than
+  //  in the page, so it is painted every frame but is not part of the document.  If a new press arrives
+  //  with one still held, that gesture was abandoned without going through release or cancel - the input
+  //  layer restarts a gesture when the pen button changes mid-stroke, for one.  Dropping it here is the
+  //  invariant that keeps an abandoned gesture from leaving a shape on screen that belongs to no page
+  //  and so cannot be selected, erased or deleted.
+  if(currStroke) {
+    scribbleDoc->updateCurrStroke(currStroke->bbox());
+    currStroke->deleteNode();
+    currStroke = NULL;
+  }
   prevLine = currPage->getLine(pos.y);
   initialLine = prevLine;
   initialPageSize = currPage->rect();
@@ -1481,6 +1673,7 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
     case MODE_SELECTLASSO:
     case MODE_SELECTPATH:
     case MODE_BOOKMARK:
+    case MODE_DRAWSHAPE:
     case MODE_ERASESTROKE:
     case MODE_ERASERULED:
     case MODE_ERASEFREE:
@@ -1504,6 +1697,9 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
   // process any recent strokes
   if(currMode != MODE_STROKE)
     groupStrokes();
+  // a multi-point shape is abandoned by switching to any other tool
+  if(shapeInProgress && currMode != MODE_DRAWSHAPE)
+    finishShape();
   // second pass
   switch(currMode) {
   case MODE_PAN:
@@ -1543,6 +1739,49 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
     scribbleDoc->updateCurrStroke(builder->getDirty());  // necessary for single point stroke to show up
     break;
   }
+  case MODE_DRAWSHAPE:
+  {
+    int shapeid = scribbleDoc->scribbleMode->shapeId;
+    const ShapeDef* def = shapeDef(shapeid);
+    if(!def)
+      break;
+    if(shapeInProgress && shapeInProgress->shapeParams().id != shapeid)
+      finishShape();  // changing shape while a polyline is open commits the polyline
+    pos = snapShapePoint(pos);
+    if(def->gesture == SHAPEGESTURE_MULTIPOINT) {
+      if(shapeInProgress) {
+        ShapeParams params = shapeInProgress->shapeParams();
+        // generous hit radius, scaled with zoom so it works the same at any magnification
+        Dim hitr = PATHSELECT_RADIUS/mZoom;
+        if((pos - params.points.back()).dist() < hitr) {
+          finishShape(true);  // tap the last placed point to finish
+          break;
+        }
+        if(params.points.size() > 2 && (pos - params.points.front()).dist() < hitr) {
+          params.flags |= SHAPEFLAG_CLOSED;  // tap the first point to close the shape and finish
+          shapeInProgress->setShapeParams(params);
+          finishShape(true);
+          break;
+        }
+        scribbleDoc->updateCurrStroke(shapeInProgress->bbox());
+        params.points.push_back(pos);
+        shapeInProgress->setShapeParams(params);
+        scribbleDoc->updateCurrStroke(shapeInProgress->bbox());
+      }
+      else {
+        shapeInProgress = createShapeElement(newShapeParams(shapeid, pos));
+        scribbleDoc->updateCurrStroke(shapeInProgress->bbox());
+      }
+      break;
+    }
+    currStroke = createShapeElement(newShapeParams(shapeid, pos));
+    break;
+  }
+  case MODE_SHAPEHANDLE:
+    // remember the descriptor so the whole drag collapses into a single undo item
+    if(shapeSelector && shapeSelector->shapeElement())
+      shapeHandleStart = shapeSelector->shapeElement()->shapeParams();
+    break;
   case MODE_BOOKMARK:
   {
     const Dim BKMK_W = 16;
@@ -1854,6 +2093,36 @@ void ScribbleArea::doMoveEvent(const InputEvent& event)
     currSelection->shrink();
     break;
   }
+  case MODE_DRAWSHAPE:
+  {
+    Element* shape = currStroke ? currStroke : shapeInProgress;
+    if(!shape || shape->shapeParams().points.size() < 2)
+      break;
+    scribbleDoc->updateCurrStroke(shape->bbox());
+    ShapeParams params = shape->shapeParams();
+    params.points.back() = snapShapePoint(pos);
+    if(event.modemod & MODEMOD_PENBTN)
+      applyShapeConstraint(params);
+    shape->setShapeParams(params);
+    scribbleDoc->updateCurrStroke(shape->bbox());
+    break;
+  }
+  case MODE_SHAPEHANDLE:
+  {
+    Element* shape = shapeSelector ? shapeSelector->shapeElement() : NULL;
+    if(!shape || shapeHandleIdx < 0 || shapeHandleIdx >= int(shapeSelector->handles().size()))
+      break;
+    dirtyScreen(currSelection->getBGBBox());
+    ShapeParams params = shape->shapeParams();
+    dragShapeHandle(params, shapeSelector->handles()[shapeHandleIdx],
+        shapeSelector->toLocal(snapShapePoint(pos)));
+    shape->setShapeParams(params);
+    currSelection->invalidateBBox();
+    shapeSelector->updateHandles();
+    currSelection->xchgBGDirty(true);
+    scribbleDoc->updateCurrStroke(currSelection->getBGBBox());
+    break;
+  }
   case MODE_BOOKMARK:
     if(currPage->xruling() == 0 && bookmarkSnapX > 0 && pos.x > bookmarkSnapX) {
       pos.x -= std::min(pos.x - bookmarkSnapX, currStroke->bbox().width());
@@ -1952,7 +2221,8 @@ void ScribbleArea::doMoveEvent(const InputEvent& event)
 void ScribbleArea::doReleaseEvent(const InputEvent& event)
 {
   // MODE_PAGESEL is unique in that it involves also clicking on pages
-  if(event.modemod & MODEMOD_DBLCLICK && dimToPageNum(screenToDim(prevRawPos)) == numPages() && currMode != MODE_PAGESEL) {
+  if(event.modemod & MODEMOD_DBLCLICK && dimToPageNum(screenToDim(prevRawPos)) == numPages()
+      && currMode != MODE_PAGESEL && currMode != MODE_DRAWSHAPE) {
     doCancelAction();
     Point oldpos = screenToDim(Point(0, 0));  // save before newPage() jumps position
     scribbleDoc->newPage();
@@ -1989,6 +2259,42 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
         app->showSelToolbar(screenToGlobal(prevRawPos + Point(4,4)));  // shift slightly from tap point
     }
     break;
+  case MODE_DRAWSHAPE:
+    // the multi-point gesture deliberately survives the release; only drag gestures commit here
+    if(currStroke) {
+      scribbleDoc->updateCurrStroke(currStroke->bbox());
+      Rect bbox = currStroke->bbox();
+      // discard a shape that is degenerate or entirely off the page
+      if(!bbox.isValid() || !currPage->rect().intersects(bbox)
+          || (bbox.width() < 1 && bbox.height() < 1)) {
+        currStroke->deleteNode();
+        currStroke = NULL;
+        break;
+      }
+      if(!currPage->rect().contains(bbox))
+        dirtyScreen(bbox);
+      if(cfg->Bool("growWithPen"))
+        growPage(bbox);
+      // Page::addStroke() creates the StrokeAddedItem itself (spec 7.11)
+      currPage->addStroke(currStroke);
+      // shapes are deliberately kept out of recentStrokes: groupStrokes() would rewrite their
+      //  centre of mass as if they were handwriting (spec 7.6)
+      groupStrokes();
+      Element* drawn = currStroke;
+      currStroke = NULL;
+      editShapeAfterDraw(drawn);
+    }
+    break;
+  case MODE_SHAPEHANDLE:
+  {
+    Element* shape = shapeSelector ? shapeSelector->shapeElement() : NULL;
+    // one undo item for the whole drag: we mutated live, and record the starting descriptor here
+    if(shape && shapeHandleStart.isValid())
+      scribbleDoc->history->addItem(new ShapeChangedItem(shape, currPage, shapeHandleStart));
+    shapeHandleStart = ShapeParams();
+    shapeHandleIdx = -1;
+    break;
+  }
   case MODE_BOOKMARK:
     // previously, we fell through to MODE_STROKE, but now bookmarks are handled separately
     scribbleDoc->updateCurrStroke(currStroke->bbox());
@@ -2082,6 +2388,7 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
     break;
   case MODE_SELECTRECT:
     rectSelector->drawHandles = true;
+    useShapeSelector();
     break;
   case MODE_SELECTRULED:
     // lasso and ruled selectors don't support any interaction, so always convert to rect sel for now
@@ -2090,6 +2397,7 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
       delete ruledSelector;
       ruledSelector = NULL;
       rectSelector = new RectSelector(currSelection, mZoom, false);  // ruled sel starts in move ruled mode
+      useShapeSelector();
     }
     break;
   case MODE_SELECTLASSO:
@@ -2098,6 +2406,7 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
       delete lassoSelector;
       lassoSelector = NULL;
       rectSelector = new RectSelector(currSelection, mZoom, true);
+      useShapeSelector();
     }
     break;
   case MODE_SELECTPATH:
@@ -2105,6 +2414,7 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
       delete pathSelector;
       pathSelector = NULL;
       rectSelector = new RectSelector(currSelection, mZoom, true);
+      useShapeSelector();
     }
     break;
   case MODE_MOVESELFREE:
@@ -2308,7 +2618,30 @@ void ScribbleArea::doCancelAction(bool refresh)
 {
   // Should we also call BookmarkView's doCancelAction() in case it's scrolling?
   ScribbleView::doCancelAction();
+  cancelShape();
   switch(currMode) {
+  case MODE_DRAWSHAPE:
+    if(currStroke) {
+      scribbleDoc->updateCurrStroke(currStroke->bbox());
+      currStroke->deleteNode();
+      currStroke = NULL;
+    }
+    break;
+  case MODE_SHAPEHANDLE:
+  {
+    Element* shape = shapeSelector ? shapeSelector->shapeElement() : NULL;
+    if(shape && shapeHandleStart.isValid()) {
+      dirtyScreen(currSelection->getBGBBox());
+      shape->setShapeParams(shapeHandleStart);
+      currSelection->invalidateBBox();
+      shapeSelector->updateHandles();
+      currSelection->xchgBGDirty(true);
+      dirtyScreen(currSelection->getBGBBox());
+    }
+    shapeHandleStart = ShapeParams();
+    shapeHandleIdx = -1;
+    break;
+  }
   case MODE_NONE:
     groupStrokes();
     return;
@@ -2733,9 +3066,11 @@ void ScribbleArea::drawScreen(Painter* painter, const Rect& dirty)
     SvgPainter(painter).drawNode(scribbleDoc->strokeBuilder->getElement()->node);
     painter->restore();
   }
-  // currStroke is now only used for Add Bookmark
+  // currStroke is used for Add Bookmark and for the in-progress drag-gesture shape
   if(currStroke)
     SvgPainter(painter).drawNode(currStroke->node);
+  if(shapeInProgress)
+    SvgPainter(painter).drawNode(shapeInProgress->node);
 
   if(currSelection && currSelection->drawType() == Selection::STROKEDRAW_SEL
       && (currSelPageNum == currPageNum || viewMode != VIEWMODE_SINGLE)) {

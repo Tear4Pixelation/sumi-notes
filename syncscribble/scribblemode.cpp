@@ -1,4 +1,5 @@
 #include "scribblemode.h"
+#include "shape.h"
 #include <sstream>
 
 
@@ -31,6 +32,9 @@ int ScribbleMode::getModeType(int mode)
   case MODE_STROKE:
   case MODE_BOOKMARK:
     return MODE_STROKE;
+  case MODE_DRAWSHAPE:
+  case MODE_SHAPEHANDLE:
+    return MODE_DRAWSHAPE;
   case MODE_ERASE:
   case MODE_ERASESTROKE:
   case MODE_ERASERULED:
@@ -101,6 +105,11 @@ std::string ScribbleMode::saveModes()
   writePen(ss, drawPen);
   writePen(ss, highlightPen);
   writePen(ss, ephemeralPen);
+  // Appended after the pens so that a config string written by an older version still loads correctly.
+  // The shape is stored by *string* id: shapes have been merged into flags once already, and a numeric
+  //  index would have silently reassigned everyone's active tool when that happened.
+  const ShapeDef* shapedef = shapeDef(shapeId);
+  ss << ' ' << (shapedef ? shapedef->id : "box") << ' ' << shapeFlags;
   return ss.str();
 }
 
@@ -114,6 +123,8 @@ void ScribbleMode::loadModes(const char* modestr)
   insSpaceMode = MODE_INSSPACERULED;
   moveSelMode = MODE_MOVESELFREE;  // tough call between ruled and free for initial
   drawTool = DRAWTOOL_PEN;
+  shapeId = SHAPE_BOX;
+  shapeFlags = 0;
   eraseSwitchBack = false;
   drawPen = ScribblePen(Color::BLACK, 1.6, ScribblePen::TIP_FLAT | ScribblePen::WIDTH_PR, 0.9, 2.0);
   highlightPen = ScribblePen(Color(255, 127, 255, 127), 34,
@@ -137,6 +148,14 @@ void ScribbleMode::loadModes(const char* modestr)
   readPen(ss, drawPen, 0);
   readPen(ss, highlightPen, ScribblePen::DRAW_UNDER);
   readPen(ss, ephemeralPen, ScribblePen::EPHEMERAL);
+  std::string shapestr;
+  if(ss >> shapestr) {
+    int id = shapeIdByStringId(shapestr.c_str());
+    if(id != SHAPE_NONE)
+      shapeId = id;
+  }
+  if(ss >> mode)
+    shapeFlags = mode & (SHAPEFLAG_HEADSTART | SHAPEFLAG_HEADEND);
 }
 
 void ScribbleMode::setMode(int mode, bool once)
@@ -180,7 +199,8 @@ void ScribbleMode::setMode(int mode, bool once)
   }
 
   // previously we had newmode == currMode, but I want to prevent changing mode of single-use tool from locking
-  if(!once && (newmode == MODE_STROKE || newmode == MODE_PAGESEL || mode == currMode || !cfg->Bool("doubleTapSticky")))
+  if(!once && (newmode == MODE_STROKE || newmode == MODE_DRAWSHAPE || newmode == MODE_PAGESEL
+      || mode == currMode || !cfg->Bool("doubleTapSticky")))
     stickyMode = newmode;
   else if(currMode == MODE_PAGESEL)
     stickyMode = MODE_STROKE;
@@ -202,6 +222,8 @@ int ScribbleMode::getScribbleMode(int modifier) const
     return (modifier & MODEMOD_PENBTN) ? MODE_ROTATESELW : MODE_ROTATESEL;
   else if(modifier & MODEMOD_CROPSEL)
     return MODE_CROPSEL;
+  else if(modifier & MODEMOD_SHAPEHANDLE)
+    return MODE_SHAPEHANDLE;
   else if(modifier & MODEMOD_ERASE)
     return eraserMode;
   else if(modifier & MODEMOD_PENBTN)

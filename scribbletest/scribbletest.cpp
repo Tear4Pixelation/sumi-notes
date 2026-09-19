@@ -9,6 +9,7 @@
 
 // document scanning math; unlike everything else here it needs neither GL nor a document
 #include "scantest.cpp"
+#include "shapetest.cpp"
 
 // Ideally, these tests should be run under valgrind to help check for memory leaks
 // renaming out files to refs (Linux):  for i in {0..13}; do mv "test${i}_out.html" "test${i}_ref.html"; done;
@@ -193,11 +194,157 @@ bool ScribbleTest::testCompareFiles(const char* f1, const char* f2, bool svgonly
 // a bunch of integration tests ... any "*_out.html" files present after test indicate a failure
 // TODO: add some tests to capture scribbleArea->imgPaint->image and compare to a ref
 
+// SHAPES_SPEC.md step 1 gate: draw a box, save, reload, resize, change a parameter - still correct.
+// Reported through the unit-check count rather than as a testN, so it needs no reference file.
+// Interrupting a shape gesture must never leave an orphan behind.  ScribbleInput restarts the gesture
+// when the pen button goes down mid-stroke, and the shape tool has to survive that: the live element is
+// held on ScribbleArea rather than in the page, so abandoning it without deleting it leaves a shape that
+// is painted every frame but belongs to no page - unselectable, unerasable, undeletable.
+int ScribbleTest::shapeInterruptTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: shape interrupt: %s\n", what); }
+  };
+
+  auto startShape = [&](int shapeid) {
+    scribbleDoc->newDocument();
+    scribbleMode->setMode(MODE_STROKE);
+    scribbleDoc->app->setPen(ScribblePen(Color::BLACK, 2, ScribblePen::TIP_ROUND));
+    scribbleMode->shapeId = shapeid;
+    scribbleMode->shapeFlags = 0;
+    scribbleMode->setMode(MODE_DRAWSHAPE);
+  };
+
+  // drag gesture interrupted by the pen button going down part way through
+  startShape(SHAPE_BOX);
+  ie(120, 160, 0, pen, press);
+  ie(180, 190, 0, pen);
+  ie(200, 200, 0, pen, 0, MODEMOD_PENBTN);   // button down mid-drag: input layer cancels and restarts
+  ie(0, 0, 0, pen, release, MODEMOD_PENBTN);
+  check(scribbleArea->currStroke == NULL, "no live shape may be left over after an interrupted drag");
+  check(scribbleArea->shapeInProgress == NULL, "no multi-point shape may be left over either");
+
+  // same again, but with the button already down on the very first press
+  startShape(SHAPE_BOX);
+  ie(120, 160, 0, pen, press, MODEMOD_PENBTN);
+  ie(180, 190, 0, pen, 0, MODEMOD_PENBTN);
+  ie(0, 0, 0, pen, release, MODEMOD_PENBTN);
+  check(scribbleArea->currStroke == NULL, "pen button on the initial press leaves no live shape");
+
+  // multi-point gesture interrupted between taps
+  startShape(SHAPE_POLYLINE);
+  ie(100, 100, 0, pen, press);
+  ie(0, 0, 0, pen, release);
+  ie(200, 100, 0, pen, press);
+  ie(0, 0, 0, pen, release);
+  check(scribbleArea->shapeInProgress != NULL, "the polyline should still be open between taps");
+  ie(250, 300, 0, pen, press, MODEMOD_PENBTN);  // right-click while the polyline is open
+  ie(0, 0, 0, pen, release, MODEMOD_PENBTN);
+  check(scribbleArea->shapeInProgress == NULL, "interrupting an open polyline must resolve it");
+  check(scribbleArea->currStroke == NULL, "interrupting an open polyline leaves no live shape");
+
+  // No element may point at a Selection that is not the current one.  doPressEvent's mode switch assigns
+  // currSelection directly without deleting what was there, relying on its earlier clearSelection() pass;
+  // anything that installs a selection after that point leaks it, and the elements it held keep rendering
+  // as selected while being absent from currSelection - visibly selected, but untouchable.
+  for(Element* s : scribbleArea->currPage->children()) {
+    check(s->selection() == NULL || s->selection() == scribbleArea->currSelection,
+        "no element may be left pointing at an orphaned selection");
+  }
+
+  // whatever ended up on the page must be a real, selectable element - the symptom of the orphan bug is
+  // that the shape is visible but selectAll() cannot see it
+  scribbleArea->selectAll();
+  int onPage = scribbleArea->currPage->strokeCount();
+  int selected = scribbleArea->currSelection ? scribbleArea->currSelection->count() : 0;
+  check(selected == onPage, "everything drawn must be selectable");
+  scribbleArea->clearSelection();
+
+  scribbleDoc->newDocument();
+  return nbad;
+}
+
+int ScribbleTest::shapeRoundTripTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: shape round trip: %s\n", what); }
+  };
+
+  scribbleDoc->newDocument();
+  scribbleMode->setMode(MODE_STROKE);
+  scribbleDoc->app->setPen(ScribblePen(Color::BLACK, 2, ScribblePen::TIP_ROUND));
+  scribbleMode->shapeId = SHAPE_BOX;
+  scribbleMode->setMode(MODE_DRAWSHAPE);
+  // drag out a box twice as wide as it is tall
+  ie(120, 160, 0, pen, press);
+  ie(180, 190, 0, pen);
+  ie(200, 200, 0, pen);
+  ie(0, 0, 0, pen, release);
+  scribbleMode->setMode(MODE_STROKE);
+
+  Page* page = scribbleArea->currPage;
+  check(page->strokeCount() == 1, "exactly one element should have been added");
+  if(page->strokeCount() != 1)
+    return nbad;
+  Element* shape = *page->children().begin();
+  check(shape->isShape(), "the new element should carry a shape descriptor");
+  check(shape->shapeParams().id == SHAPE_BOX, "the new element should be a box");
+  if(!shape->isShape())
+    return nbad;
+  Rect descriptorRect = shape->shapeParams().rect();
+  // compare against the path, not Element::bbox(), which is padded by the stroke width
+  Rect pathRect = static_cast<SvgPath*>(shape->node)->path()->getBBox();
+  check(approxEq(pathRect, descriptorRect, 1e-6),
+      "the rendered path must match the descriptor it was generated from");
+  check(descriptorRect.width() > 1.5*descriptorRect.height()
+      && descriptorRect.width() < 2.5*descriptorRect.height(),
+      "the box should have the aspect ratio that was dragged");
+
+  // save and reload: the descriptor has to survive the file format
+  std::string file = outPath + "/shape_roundtrip_out.html";
+  check(scribbleDoc->saveDocument(file.c_str()), "saving the document should succeed");
+  scribbleDoc->newDocument();
+  check(scribbleDoc->openDocument(file.c_str()) == Document::LOAD_OK, "reloading should succeed");
+  removeFile(file.c_str());
+  page = scribbleArea->currPage;
+  check(page->strokeCount() == 1, "the reloaded page should hold one element");
+  if(page->strokeCount() != 1)
+    return nbad;
+  shape = *page->children().begin();
+  check(shape->isShape() && shape->shapeParams().id == SHAPE_BOX,
+      "the reloaded element should still be a box");
+  check(approxEq(shape->shapeParams().rect(), descriptorRect, 1e-3),
+      "the reloaded descriptor should match the saved one");
+  check(approxEq(static_cast<SvgPath*>(shape->node)->path()->getBBox(), descriptorRect, 1e-3),
+      "the reloaded path should match the descriptor");
+
+  // spec 7.8: a non-rotating scale must update the descriptor, not just the path - otherwise the shape
+  //  silently snaps back to its old size the next time a parameter changes
+  shape->applyTransform(ScribbleTransform(Transform2D::scaling(2, 1), 2, 1));
+  shape->commitTransform();
+  Rect scaled = static_cast<SvgPath*>(shape->node)->path()->getBBox();
+  check(approxEq(scaled.width(), 2*descriptorRect.width(), 1e-3), "scaling should widen the shape");
+  check(approxEq(shape->shapeParams().rect(), scaled, 1e-6),
+      "scaling must update the descriptor, not only the path");
+  // now change a parameter; the shape must keep its resized dimensions
+  ShapeParams params = shape->shapeParams();
+  params.rx = 4;
+  params.ry = 4;
+  shape->setShapeParams(params);
+  check(approxEq(static_cast<SvgPath*>(shape->node)->path()->getBBox().width(), scaled.width(), 1e-3),
+      "changing a parameter after a resize must not snap the shape back to its old size");
+
+  scribbleDoc->newDocument();
+  return nbad;
+}
+
 void ScribbleTest::runAll(bool runsynctest)
 {
   nFailed = 0;
   int nThumbsFailed = 0;
-  int nUnitFailed = runScanTests();
+  int nUnitFailed = runScanTests() + runShapeTests();
   std::vector<std::string> slFailed;
   void (ScribbleTest::*tests[])() = {
     &ScribbleTest::test0,
@@ -344,6 +491,9 @@ void ScribbleTest::runAll(bool runsynctest)
       nFailed++;
     }
   }
+  // run after the testN loop so it cannot perturb their document/undo state
+  nUnitFailed += shapeRoundTripTest();
+  nUnitFailed += shapeInterruptTest();
   runAllTime = mSecSinceEpoch() - runAllTime;
   // restore global config
   srandpp(mSecSinceEpoch());
