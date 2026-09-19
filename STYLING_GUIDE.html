@@ -1,0 +1,819 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="generator" content="Ferrite">
+    <title>STYLING_GUIDE</title>
+    <style>
+
+/* Reset and base styles */
+*, *::before, *::after {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    padding: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+}
+
+/* Article container */
+.markdown-body {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 32px 24px;
+}
+
+/* Headings */
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4,
+.markdown-body h5,
+.markdown-body h6 {
+    margin-top: 24px;
+    margin-bottom: 16px;
+    font-weight: 600;
+    line-height: 1.25;
+}
+
+.markdown-body h1 { font-size: 2em; border-bottom: 1px solid; padding-bottom: 0.3em; }
+.markdown-body h2 { font-size: 1.5em; border-bottom: 1px solid; padding-bottom: 0.3em; }
+.markdown-body h3 { font-size: 1.25em; }
+.markdown-body h4 { font-size: 1em; }
+.markdown-body h5 { font-size: 0.875em; }
+.markdown-body h6 { font-size: 0.85em; }
+
+/* Paragraphs */
+.markdown-body p {
+    margin-top: 0;
+    margin-bottom: 16px;
+}
+
+/* Links */
+.markdown-body a {
+    text-decoration: none;
+}
+
+.markdown-body a:hover {
+    text-decoration: underline;
+}
+
+/* Lists */
+.markdown-body ul,
+.markdown-body ol {
+    margin-top: 0;
+    margin-bottom: 16px;
+    padding-left: 2em;
+}
+
+.markdown-body li {
+    margin-bottom: 4px;
+}
+
+.markdown-body li + li {
+    margin-top: 4px;
+}
+
+/* Task lists */
+.markdown-body ul.contains-task-list {
+    list-style-type: none;
+    padding-left: 0;
+}
+
+.markdown-body .task-list-item {
+    padding-left: 1.5em;
+    position: relative;
+}
+
+.markdown-body .task-list-item input[type="checkbox"] {
+    position: absolute;
+    left: 0;
+    top: 0.3em;
+}
+
+/* Blockquotes */
+.markdown-body blockquote {
+    margin: 0 0 16px 0;
+    padding: 0 1em;
+    border-left: 4px solid;
+}
+
+.markdown-body blockquote > :first-child {
+    margin-top: 0;
+}
+
+.markdown-body blockquote > :last-child {
+    margin-bottom: 0;
+}
+
+/* Code */
+.markdown-body code {
+    font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', 'Monaco', monospace;
+    font-size: 0.9em;
+    padding: 0.2em 0.4em;
+    border-radius: 4px;
+}
+
+.markdown-body pre {
+    margin-top: 0;
+    margin-bottom: 16px;
+    padding: 16px;
+    overflow: auto;
+    border-radius: 6px;
+    line-height: 1.45;
+}
+
+.markdown-body pre code {
+    padding: 0;
+    background: transparent;
+    border-radius: 0;
+    font-size: 0.875em;
+}
+
+/* Tables */
+.markdown-body table {
+    border-collapse: collapse;
+    width: 100%;
+    margin-bottom: 16px;
+}
+
+.markdown-body th,
+.markdown-body td {
+    padding: 8px 12px;
+    border: 1px solid;
+}
+
+.markdown-body th {
+    font-weight: 600;
+    text-align: left;
+}
+
+.markdown-body tr:nth-child(even) td {
+    background-color: rgba(128, 128, 128, 0.05);
+}
+
+/* Horizontal rule */
+.markdown-body hr {
+    height: 2px;
+    margin: 24px 0;
+    border: none;
+}
+
+/* Images */
+.markdown-body img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 4px;
+}
+
+/* Strong and emphasis */
+.markdown-body strong {
+    font-weight: 600;
+}
+
+.markdown-body em {
+    font-style: italic;
+}
+
+/* Strikethrough */
+.markdown-body del {
+    text-decoration: line-through;
+}
+
+
+
+/* Theme colors */
+:root {
+    color-scheme: dark;
+}
+
+body {
+    background-color: rgb(30, 30, 30);
+    color: rgb(220, 220, 220);
+}
+
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4,
+.markdown-body h5,
+.markdown-body h6 {
+    color: rgb(100, 180, 255);
+}
+
+.markdown-body h1,
+.markdown-body h2 {
+    border-bottom-color: rgb(60, 60, 60);
+}
+
+.markdown-body a {
+    color: rgb(100, 180, 255);
+}
+
+.markdown-body blockquote {
+    color: rgb(180, 180, 180);
+    border-left-color: rgb(80, 80, 80);
+}
+
+.markdown-body code {
+    background-color: rgb(45, 45, 45);
+    color: rgb(200, 200, 150);
+}
+
+.markdown-body pre {
+    background-color: rgb(35, 39, 46);
+    border: 1px solid rgb(55, 60, 68);
+}
+
+.markdown-body th,
+.markdown-body td {
+    border-color: rgb(60, 65, 75);
+}
+
+.markdown-body th {
+    background-color: rgb(45, 50, 60);
+}
+
+.markdown-body hr {
+    background-color: rgb(80, 80, 80);
+}
+
+
+
+/* Syntax highlighting */
+.markdown-body pre code .keyword { color: rgb(198, 120, 221); }
+.markdown-body pre code .string { color: rgb(152, 195, 121); }
+.markdown-body pre code .number { color: rgb(209, 154, 102); }
+.markdown-body pre code .comment { color: rgb(92, 99, 112); font-style: italic; }
+.markdown-body pre code .function { color: rgb(97, 175, 239); }
+.markdown-body pre code .type { color: rgb(229, 192, 123); }
+.markdown-body pre code .variable { color: rgb(224, 108, 117); }
+.markdown-body pre code .operator { color: rgb(171, 178, 191); }
+.markdown-body pre code .punctuation { color: rgb(150, 150, 150); }
+
+
+
+    </style>
+</head>
+<body>
+    <article class="markdown-body">
+<h1><a href="#styling-guide-for-write-stylus-labs" aria-hidden="true" class="anchor" id="styling-guide-for-write-stylus-labs"></a>Styling Guide for Write (Stylus Labs)</h1>
+<p>This guide explains how to customize the visual appearance of the Write app's
+user interface — colors, corner radii, shadows, and interactive states
+(hover/pressed/checked/disabled). It does <strong>not</strong> cover document/canvas
+appearance (page background, ruling color, pen colors) — see <a href="#sec-8">§8</a> for that.</p>
+<blockquote>
+<p><strong>Note on links in this file:</strong> the Table of Contents below uses explicit
+HTML anchors (<code>&lt;a id=&quot;sec-N&quot;&gt;</code>) rather than auto-generated heading slugs,
+because GitHub-style slug generation (<code>#1-how-the-ui-is-styled</code>) is not
+part of the Markdown spec — every renderer implements it differently, and
+<code>glow</code>/<code>marktext</code> don't match GitHub's algorithm. See <a href="#sec-12">§12</a> if
+the links still don't jump in your viewer.</p>
+</blockquote>
+<h2><a href="#table-of-contents" aria-hidden="true" class="anchor" id="table-of-contents"></a>Table of Contents</h2>
+<ol>
+<li><a href="#sec-1">How the UI is styled — the big picture</a></li>
+<li><a href="#sec-2">The three pieces of <code>theme.cpp</code></a></li>
+<li><a href="#sec-3">Changing colors</a></li>
+<li><a href="#sec-4">Changing corner radius</a></li>
+<li><a href="#sec-5">Changing shadows</a></li>
+<li><a href="#sec-6">Styling interactive states (hover / pressed / checked / disabled / focused)</a></li>
+<li><a href="#sec-7">Loading your own theme at runtime</a></li>
+<li><a href="#sec-8">That's UI styling — what about page background / pen colors?</a></li>
+<li><a href="#sec-9">Supported CSS properties reference</a></li>
+<li><a href="#sec-10">Recipes</a></li>
+<li><a href="#sec-11">Gotchas</a></li>
+<li><a href="#sec-12">Building &amp; iterating quickly</a></li>
+<li><a href="#sec-13">Changing icons</a></li>
+<li><a href="#sec-14">Why the ToC links may still not work in your viewer</a></li>
+</ol>
+<hr />
+<p><a id="sec-1"></a></p>
+<h2><a href="#1-how-the-ui-is-styled--the-big-picture" aria-hidden="true" class="anchor" id="1-how-the-ui-is-styled--the-big-picture"></a>1. How the UI is styled — the big picture</h2>
+<p>Write's GUI toolkit (<code>ugui</code>, a submodule of this repo) is <strong>SVG-based</strong>: every
+widget (button, menu, dialog, toolbar, textbox...) is literally an SVG
+fragment, and it's styled with an actual <strong>CSS stylesheet</strong> parsed by a
+CSS/SVG engine (<code>usvg</code>, also a submodule). If you've styled HTML with CSS
+before, most of this will feel familiar — selectors, classes, cascading,
+<code>var(--custom-properties)</code> — with a few desktop-app-specific properties
+bolted on (<code>box-shadow</code>, <code>border-radius</code>, layout properties like
+<code>flex-direction</code>).</p>
+<p>There is no separate theming &quot;system&quot; or config UI beyond this — you edit
+CSS (and optionally the widget SVG markup) directly, either by editing the
+built-in defaults in the source, or by pointing the app at your own files at
+runtime (§7).</p>
+<p><a id="sec-2"></a></p>
+<h2><a href="#2-the-three-pieces-of-themecpp" aria-hidden="true" class="anchor" id="2-the-three-pieces-of-themecpp"></a>2. The three pieces of <code>theme.cpp</code></h2>
+<p>Everything lives in <strong><code>ugui/theme.cpp</code></strong>, as three embedded C++ raw strings:</p>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>defaultColorsCSS</code></td>
+<td>The color <strong>palette</strong> — CSS custom properties (<code>--dark</code>, <code>--button</code>, <code>--checked</code>, etc.) for the dark theme and a <code>.light</code> override</td>
+</tr>
+<tr>
+<td><code>defaultStyleCSS</code></td>
+<td>The actual widget <strong>style rules</strong> (fills, opacity, shadows, corner radii, state classes) — consumes the palette via <code>var(--xxx)</code></td>
+</tr>
+<tr>
+<td><code>defaultWidgetSVG</code></td>
+<td>The <strong>SVG markup prototypes</strong> for every widget type (button, checkbox, menu, dialog, slider, scrollbar, ...), referenced by CSS class name</td>
+</tr>
+</tbody>
+</table>
+<p>These get parsed and applied at startup in <code>syncscribble/resources.cpp</code>
+(<code>createStylesheet()</code> and the code around it). You generally only need to
+touch <code>defaultColorsCSS</code>/<code>defaultStyleCSS</code>, or an external CSS file with
+equivalent rules (§7) — you rarely need to touch the SVG markup itself
+unless you're adding/restructuring a widget's shape.</p>
+<p><a id="sec-3"></a></p>
+<h2><a href="#3-changing-colors" aria-hidden="true" class="anchor" id="3-changing-colors"></a>3. Changing colors</h2>
+<h3><a href="#3a-the-palette-recommended-entry-point" aria-hidden="true" class="anchor" id="3a-the-palette-recommended-entry-point"></a>3a. The palette (recommended entry point)</h3>
+<p>At the top of <code>theme.cpp</code>, <code>defaultColorsCSS</code> defines a palette as CSS
+custom properties on the root window node:</p>
+<pre><code class="language-css">svg.window  /* :root */
+{
+  --dark: #101010;      /* toolbar */
+  --window: #303030;    /* menu, dialog */
+  --light: #505050;     /* separators */
+  --base: #202020;      /* list, inputbox */
+  --button: #555555;
+  --hovered: #32809C;
+  --pressed: #32809C;
+  --checked: #0000C0;
+  --title: #2EA3CF;
+  --text: #F2F2F2;
+  --text-weak: #A0A0A0;
+  --text-bg: #000000;
+  --icon: #CDCDCD;
+  --icon-disabled: #808080;
+}
+
+/* light theme */
+svg.window.light
+{
+  --dark: #F0F0F0;
+  --window: #DDDDDD;
+  ...
+}
+</code></pre>
+<p>Changing one of these variables re-colors every widget rule that consumes
+it via <code>var(--name)</code>, which is most of the stylesheet — e.g.:</p>
+<pre><code class="language-css">.toolbar { fill: var(--dark); }
+.pushbutton { fill: var(--button); }
+.pushbutton.checked { fill: var(--checked); }
+text { fill: var(--text); }
+</code></pre>
+<p><strong>This is the easiest, lowest-risk way to reskin the app</strong>: edit the hex
+values in <code>defaultColorsCSS</code> (or override them in your own stylesheet, see
+§7) and rebuild/reload.</p>
+<p>Variable resolution works like real CSS custom properties: <code>var(--name)</code> is
+resolved by walking up the ancestor chain of the SVG tree looking for the
+nearest node that declares <code>--name</code>, so <code>svg.window.light</code> overriding
+<code>--dark</code> cascades down to every widget under it, exactly like <code>:root</code> +
+<code>.dark-mode</code> overrides in web CSS.</p>
+<h3><a href="#3b-one-off-hardcoded-colors" aria-hidden="true" class="anchor" id="3b-one-off-hardcoded-colors"></a>3b. One-off hardcoded colors</h3>
+<p>A handful of rules in <code>defaultStyleCSS</code> use literal hex colors instead of a
+variable, e.g.:</p>
+<pre><code class="language-css">.toolbutton.checked .checkmark { fill: #0080FF; }
+.tooltip { fill: #FFFFCF; }
+.warning { fill: #FFFF00; }
+.pushbutton.disabled { fill: #404040; }
+</code></pre>
+<p>Edit these directly, or better, promote them to a new <code>--variable</code> in the
+palette if you want the color reused elsewhere.</p>
+<h3><a href="#3c-color-vs-fill" aria-hidden="true" class="anchor" id="3c-color-vs-fill"></a>3c. <code>color</code> vs <code>fill</code></h3>
+<p>Most rules use <code>fill</code> (this is SVG, not HTML — <code>fill</code> is what paints a
+shape). A few icon shapes are drawn with <code>stroke=&quot;currentColor&quot;</code> in the SVG
+markup, in which case the CSS property that controls them is <code>color</code>, not
+<code>fill</code>:</p>
+<pre><code class="language-css">.checkbox { color: var(--icon); }
+.previewbtn { color: #808080; }
+</code></pre>
+<p>If changing <code>fill</code> on a rule doesn't seem to affect a stroked icon, try
+<code>color</code> instead (or check the widget's SVG in <code>defaultWidgetSVG</code> for
+<code>stroke=&quot;currentColor&quot;</code>).</p>
+<p><a id="sec-4"></a></p>
+<h2><a href="#4-changing-corner-radius" aria-hidden="true" class="anchor" id="4-changing-corner-radius"></a>4. Changing corner radius</h2>
+<p>Write's default theme is <strong>square-cornered</strong> — no widget currently ships
+with rounded corners, but the mechanism is there:</p>
+<p><strong>Option A — CSS <code>border-radius</code></strong> (recommended, no SVG editing needed).
+It works on <code>&lt;rect&gt;</code> elements only, and accepts the standard CSS 1-value or
+4-value syntax (top-left, top-right, bottom-right, bottom-left):</p>
+<pre><code class="language-css">.pushbtn-bg { border-radius: 8; }
+.toolbutton .background { border-radius: 4; }
+.inputbox-bg { border-radius: 6 6 6 6; }
+</code></pre>
+<p><strong>Option B — SVG <code>rx</code>/<code>ry</code> attributes</strong>, set directly on a <code>&lt;rect&gt;</code> in
+<code>defaultWidgetSVG</code>. This is what the scrollbar handle already uses:</p>
+<pre><code class="language-xml">&lt;rect id=&quot;scroll-handle&quot; class=&quot;scroll-handle&quot; box-anchor=&quot;vfill&quot; width=&quot;4&quot; height=&quot;20&quot; rx=&quot;2&quot; ry=&quot;2&quot;/&gt;
+</code></pre>
+<p>and the pushbutton's background even has a <strong>commented-out example</strong> ready
+to uncomment:</p>
+<pre><code class="language-xml">&lt;rect class=&quot;background pushbtn-bg&quot; box-anchor=&quot;hfill&quot; width=&quot;36&quot; height=&quot;36&quot;/&gt;  &lt;!-- rx=&quot;8&quot; ry=&quot;8&quot; --&gt;
+</code></pre>
+<p>Use whichever is more convenient: <code>border-radius</code> in CSS if you're only
+touching the stylesheet (e.g. via an external <code>guiCSS</code> file, §7); <code>rx</code>/<code>ry</code>
+if you're editing the widget SVG directly anyway.</p>
+<p><a id="sec-5"></a></p>
+<h2><a href="#5-changing-shadows" aria-hidden="true" class="anchor" id="5-changing-shadows"></a>5. Changing shadows</h2>
+<p>Menus and dialogs use CSS <code>box-shadow</code>, with standard syntax
+(<code>offset-x offset-y [blur] [spread] [inset] color</code>, <code>rgba()</code> supported):</p>
+<pre><code class="language-css">.menu, .dialog { box-shadow: 0px 0px 10px 0px rgba(0,0,0,0.5); }
+</code></pre>
+<p>Alternate examples are left commented out in <code>theme.cpp</code> for reference:</p>
+<pre><code class="language-css">/*.menu, .dialog { box-shadow: 0px 0px 40px 0px rgba(0,0,0,0.40); }*/ /* android-like */
+/*.menu, .dialog { box-shadow: 6px 6px 4px -4px rgba(0,0,0,0.375); }*/ /* offset, windows-like */
+</code></pre>
+<p>Just edit the values or swap in one of the alternates. Shadows can be
+applied to any widget class, not just <code>.menu</code>/<code>.dialog</code>.</p>
+<p><a id="sec-6"></a></p>
+<h2><a href="#6-styling-interactive-states-hover--pressed--checked--disabled--focused" aria-hidden="true" class="anchor" id="6-styling-interactive-states-hover--pressed--checked--disabled--focused"></a>6. Styling interactive states (hover / pressed / checked / disabled / focused)</h2>
+<p>Write does <strong>not</strong> use real CSS pseudo-classes like <code>:hover</code> or <code>:checked</code>.
+Instead, the app toggles plain CSS <strong>classes</strong> on a widget's SVG node at
+runtime (in C++, via <code>SvgNode::addClass()</code>/<code>removeClass()</code>), and the
+stylesheet targets those classes with ordinary compound selectors. So &quot;the
+styling when a button is toggled&quot; is just:</p>
+<pre><code class="language-css">.pushbutton.checked { fill: var(--checked); }
+.toolbutton.checked .checkmark { fill: #0080FF; }
+</code></pre>
+<p>The classes the app manages for you, and what triggers them:</p>
+<table>
+<thead>
+<tr>
+<th>Class</th>
+<th>Applied when</th>
+<th>Typical selector in CSS</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>.hovered</code></td>
+<td>pointer enters the widget (no button held)</td>
+<td><code>.toolbutton.hovered</code></td>
+</tr>
+<tr>
+<td><code>.pressed</code></td>
+<td>actively pressed/clicked</td>
+<td><code>.pushbutton.pressed</code></td>
+</tr>
+<tr>
+<td><code>.checked</code></td>
+<td>a toggle button (checkbox, radio, sticky toolbutton) is ON</td>
+<td><code>.pushbutton.checked</code></td>
+</tr>
+<tr>
+<td><code>.checked.once</code></td>
+<td>a <em>non-sticky</em> checked toolbutton (auto-releases)</td>
+<td><code>.toolbutton.checked.once .checkmark</code></td>
+</tr>
+<tr>
+<td><code>.disabled</code></td>
+<td>widget is disabled (<code>setEnabled(false)</code>)</td>
+<td><code>.pushbutton.disabled</code>, <code>.disabled .icon</code></td>
+</tr>
+<tr>
+<td><code>.focused</code></td>
+<td>text input has keyboard focus</td>
+<td><code>.inputbox.focused .inputbox-bg</code></td>
+</tr>
+<tr>
+<td><code>.light</code></td>
+<td>on the window root only — light theme active</td>
+<td><code>svg.window.light</code></td>
+</tr>
+</tbody>
+</table>
+<p>To style a toggled/checked button, target <code>.&lt;widget-class&gt;.checked</code> (and
+optionally a descendant like <code>.checkmark</code> if you only want the check
+indicator, not the whole button, to change):</p>
+<pre><code class="language-css">/* whole button re-colors when checked */
+.pushbutton.checked { fill: #2E8B57; }
+
+/* only tint the toolbutton's bottom &quot;checkmark&quot; bar, leave background alone */
+.toolbutton.checked .checkmark { fill: #FF8800; }
+</code></pre>
+<p>You can combine states too, since these are just compound class selectors:</p>
+<pre><code class="language-css">.pushbutton.checked.pressed { fill: #1B5E3A; }
+</code></pre>
+<p>Note existing quirks worth knowing:</p>
+<ul>
+<li><code>.checkbox .checkmark { display: none; }</code> / <code>.checkbox.checked .checkmark { display: block; }</code> —
+checkboxes use <code>display</code> toggling (show/hide a checkmark glyph) rather
+than a fill/color change. If you want a checkbox's checkmark to also
+change color when checked, add a <code>.checkbox.checked .checkmark { fill: ...; }</code> rule.</li>
+<li><code>.disabled .icon</code> (descendant selector, not <code>.icon.disabled</code>) — the
+<code>disabled</code> class is set on an ancestor container, not the icon itself, in
+some widgets. If a new rule you write doesn't seem to apply, check
+whether the state class lands on the widget itself or a parent/child by
+searching <code>theme.cpp</code> for a similar existing rule as a template.</li>
+</ul>
+<p><a id="sec-7"></a></p>
+<h2><a href="#7-loading-your-own-theme-at-runtime" aria-hidden="true" class="anchor" id="7-loading-your-own-theme-at-runtime"></a>7. Loading your own theme at runtime</h2>
+<p>You don't have to edit <code>theme.cpp</code> and recompile. Two config keys let you
+supply your own CSS and/or widget SVG at runtime:</p>
+<table>
+<thead>
+<tr>
+<th>Config key</th>
+<th>Replaces</th>
+<th>Default</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>guiCSS</code></td>
+<td><code>defaultColorsCSS</code> + <code>defaultStyleCSS</code></td>
+<td><code>&quot;&quot;</code> (use built-in)</td>
+</tr>
+<tr>
+<td><code>guiSVG</code></td>
+<td><code>defaultWidgetSVG</code></td>
+<td><code>&quot;&quot;</code> (use built-in)</td>
+</tr>
+</tbody>
+</table>
+<p>They're read in <code>syncscribble/resources.cpp</code> and each accepts <strong>either</strong>:</p>
+<ul>
+<li>a literal multi-line CSS/SVG string (if the config value contains a
+newline), <strong>or</strong></li>
+<li>a <strong>file path</strong> (if the value is a single line — it's loaded via
+<code>readFile()</code>).</li>
+</ul>
+<p>Set them by hand-editing the app's config file (they are <strong>not</strong> currently
+exposed in the in-app Preferences dialog):</p>
+<ul>
+<li>Linux: <code>~/.config/styluslabs/write.xml</code></li>
+<li>Android: <code>/sdcard/styluslabs/write.xml</code></li>
+<li>iOS: <code>&lt;Library&gt;/write.xml</code></li>
+<li>Windows: <code>write.xml</code> next to the executable / in the app-data dir</li>
+</ul>
+<p>Add (or edit) the relevant entries, e.g.:</p>
+<pre><code class="language-xml">&lt;guiCSS&gt;/home/yourname/my-write-theme.css&lt;/guiCSS&gt;
+</code></pre>
+<p><strong>Important:</strong> if <code>guiCSS</code> is non-empty, the built-in <code>defaultColorsCSS</code> +
+<code>defaultStyleCSS</code> are <strong>not</strong> loaded at all — there's no merging/fallback.
+Your custom file must be a <strong>complete</strong> stylesheet (every rule the app
+needs), not just the overrides you want to change. The easiest way to make
+one: copy the contents of <code>defaultColorsCSS</code> + <code>defaultStyleCSS</code> out of
+<code>theme.cpp</code> into your own <code>.css</code> file, edit what you want, and point
+<code>guiCSS</code> at it. Same rule applies to <code>guiSVG</code> vs. <code>defaultWidgetSVG</code>.</p>
+<p>For a quick <strong>light/dark toggle only</strong> (no custom colors), you don't need
+any of this — use the existing <code>uiTheme</code> Preferences option (Dark/Light),
+which just switches the <code>.light</code> class on the window root and is already
+wired into Preferences UI.</p>
+<p><a id="sec-8"></a></p>
+<h2><a href="#8-thats-ui-styling--what-about-page-background--pen-colors" aria-hidden="true" class="anchor" id="8-thats-ui-styling--what-about-page-background--pen-colors"></a>8. That's UI styling — what about page background / pen colors?</h2>
+<p>Out of scope for <code>theme.cpp</code>/CSS. Page background, ruling line color, and
+bookmark/link colors are <strong>document/config values</strong>, unrelated to the GUI
+theme system:</p>
+<pre><code class="language-cpp">// syncscribble/scribbleconfig.cpp
+cfg[&quot;pageColor&quot;] = Color(Color::WHITE).argb();
+cfg[&quot;ruleColor&quot;] = Color(0, 0, 0xFF, 0x9F).argb();
+cfg[&quot;bookmarkColor&quot;] = Color(Color::BLUE).argb();
+cfg[&quot;linkColor&quot;] = Color(Color::BLUE).argb();
+</code></pre>
+<p>These are editable per-document in-app via the <strong>Ruling dialog</strong>, not via
+theme CSS. Selection-highlight color (blue/yellow outline when you select
+strokes) is computed automatically from page background luminance in
+<code>selection.cpp</code> and is not currently themeable at all.</p>
+<p><a id="sec-9"></a></p>
+<h2><a href="#9-supported-css-properties-reference" aria-hidden="true" class="anchor" id="9-supported-css-properties-reference"></a>9. Supported CSS properties reference</h2>
+<p>Standard SVG/CSS properties (parsed in <code>usvg/svgstyleparser.cpp</code>):</p>
+<pre><code>color, comp-op, display, fill, fill-rule, fill-opacity,
+font-family, font-size, font-style, font-variant, font-weight,
+offset, opacity, shape-rendering, stop-color, stop-opacity,
+stroke, stroke-dasharray, stroke-dashoffset, stroke-linecap,
+stroke-linejoin, stroke-alignment, stroke-miterlimit, stroke-opacity,
+stroke-width, text-anchor, vector-effect, visibility, letter-spacing
+</code></pre>
+<p>App-specific extensions, layered on top by <code>ugui</code> (parsed in
+<code>ugui/svggui.cpp</code>, <code>Widget::updateLayoutVars()</code>), which flow through the
+same CSS cascade/selectors/<code>var()</code> machinery:</p>
+<pre><code>box-shadow, border-radius,
+left, top, right, bottom, box-anchor, layout,
+flex-direction, flex-wrap, justify-content, flex-break, margin
+</code></pre>
+<p>CSS custom properties (<code>--name: value</code>, consumed via <code>var(--name)</code>) are
+supported generally, not just for the built-in palette — you can define
+your own on any node and reference them anywhere below it in the tree.</p>
+<p>There are <strong>no real CSS pseudo-classes</strong> (<code>:hover</code>, <code>:checked</code>, <code>:focus</code>) —
+use the toggled classes from §6 instead (<code>.hovered</code>, <code>.checked</code>, <code>.focused</code>).</p>
+<p><a id="sec-10"></a></p>
+<h2><a href="#10-recipes" aria-hidden="true" class="anchor" id="10-recipes"></a>10. Recipes</h2>
+<p><strong>Make the whole app use a teal accent instead of blue:</strong></p>
+<pre><code class="language-css">svg.window {
+  --checked: #00897B;
+  --hovered: #26A69A;
+  --pressed: #26A69A;
+  --title: #00897B;
+}
+</code></pre>
+<p><strong>Round every button and input box:</strong></p>
+<pre><code class="language-css">.pushbtn-bg, .inputbox-bg { border-radius: 6; }
+</code></pre>
+<p><strong>Make checked toolbar buttons pill-shaped and orange:</strong></p>
+<pre><code class="language-css">.toolbutton.checked .background { border-radius: 18; fill: #FF9800; }
+</code></pre>
+<p>(You'll likely also want <code>border-radius</code> on the un-checked <code>.background</code>
+rect for consistent shape — or set it as a base <code>.toolbutton .background</code>
+rule so it doesn't change shape when toggled, only color.)</p>
+<p><strong>Flatter shadows:</strong></p>
+<pre><code class="language-css">.menu, .dialog { box-shadow: 0px 2px 4px 0px rgba(0,0,0,0.25); }
+</code></pre>
+<p><a id="sec-11"></a></p>
+<h2><a href="#11-gotchas" aria-hidden="true" class="anchor" id="11-gotchas"></a>11. Gotchas</h2>
+<ul>
+<li><code>border-radius</code> only rounds <code>&lt;rect&gt;</code> nodes — it has no effect on
+<code>&lt;circle&gt;</code>, <code>&lt;path&gt;</code>, etc. (irrelevant for those shapes anyway).</li>
+<li><code>guiCSS</code>/<code>guiSVG</code> fully <strong>replace</strong> the defaults; there's no partial
+override/merge at the config-file level. Start from a full copy of
+<code>theme.cpp</code>'s CSS if you go this route.</li>
+<li><code>guiCSS</code>/<code>guiSVG</code> aren't in the Preferences UI — you must hand-edit
+<code>write.xml</code>, and restart the app to pick up changes.</li>
+<li>Selectors are plain classes/tags, not real pseudo-classes — search
+<code>theme.cpp</code> for an existing similar rule before guessing a selector for a
+new state, since which node gets which class (self vs. ancestor vs.
+descendant) varies per widget.</li>
+<li>Colors defined with <code>fill</code> won't affect <code>stroke=&quot;currentColor&quot;</code> shapes —
+use <code>color</code> for those (see §3c).</li>
+</ul>
+<p><a id="sec-12"></a></p>
+<h2><a href="#12-building--iterating-quickly" aria-hidden="true" class="anchor" id="12-building--iterating-quickly"></a>12. Building &amp; iterating quickly</h2>
+<p><strong>There is no hot-reload / live-reload of the theme.</strong> <code>defaultColorsCSS</code>,
+<code>defaultStyleCSS</code>, and <code>defaultWidgetSVG</code> are parsed exactly once, at
+startup (<code>setupResources()</code>/<code>createStylesheet()</code> in
+<code>syncscribble/resources.cpp</code>, called once from <code>application.cpp</code>'s init
+path). There's no file-watcher and no in-app &quot;reload theme&quot; command —
+every change requires restarting the process. (If you're driving the theme
+via an external <code>guiCSS</code>/<code>guiSVG</code> file per §7, that file is also only read
+at startup — editing it doesn't require a <em>recompile</em>, but still requires a
+<em>restart</em>.)</p>
+<p><strong>Fastest edit→see-it-running loop when editing <code>ugui/theme.cpp</code> directly:</strong></p>
+<p><code>theme.cpp</code> isn't compiled as its own translation unit — it's textually
+<code>#include</code>d by <code>syncscribble/resources.cpp</code> (<code>#include &quot;ugui/theme.cpp&quot;</code>).
+That means it's a dependency of exactly one object file, <code>resources.o</code>, and
+nothing else rebuilds when you touch it:</p>
+<pre><code class="language-sh">cd syncscribble
+make USE_SYSTEM_SDL=1 DEBUG=1
+</code></pre>
+<p>What happens: only <code>resources.cpp</code> recompiles (one file, <code>-O0</code> under
+<code>DEBUG=1</code> so it's quick), then the full binary relinks (a few seconds,
+independent of how much source you have). No other <code>.cpp</code> files in
+<code>ugui/</code>/<code>syncscribble/</code> get touched. <code>DEBUG=1</code> builds land in <code>Debug/</code>
+instead of <code>Release/</code> and use <code>-O0</code> (much faster to compile than the
+<code>-O2</code> Release default) — use it for this kind of iteration, drop it for a
+final build. Then just run <code>./Debug/Write</code> (copy <code>scribbleres/fonts</code> into
+<code>Debug/</code> first if you haven't already, same as the Release setup).</p>
+<p>If you'd rather avoid any recompiling at all while tweaking colors: put your
+working copy of the CSS in an external file and point <code>guiCSS</code> at it in
+<code>write.xml</code> (§7) — then each iteration is just &quot;edit file, restart app&quot;, no
+<code>make</code> involved. This is usually the faster loop for pure color/radius/shadow
+tweaks; drop the result back into <code>theme.cpp</code> once you're happy with it.</p>
+<p><a id="sec-13"></a></p>
+<h2><a href="#13-changing-icons" aria-hidden="true" class="anchor" id="13-changing-icons"></a>13. Changing icons</h2>
+<p>Icons are a separate system from the <code>theme.cpp</code> widget CSS/SVG covered
+above — no <code>&lt;symbol&gt;</code> sprite sheet, no CSS <code>background-image</code>. Each icon is
+its own standalone SVG file, and which icon a widget shows is chosen in C++
+at the call site, not in a stylesheet.</p>
+<h3><a href="#13a-where-icon-shapes-live" aria-hidden="true" class="anchor" id="13a-where-icon-shapes-live"></a>13a. Where icon shapes live</h3>
+<p>Every icon is a small, self-contained SVG document under
+<code>scribbleres/icons/*.svg</code> (a sibling directory to <code>syncscribble/</code>), e.g.
+<code>ic_menu_cancel.svg</code>:</p>
+<pre><code class="language-xml">&lt;?xml version=&quot;1.0&quot; encoding=&quot;utf-8&quot;?&gt;
+&lt;svg version=&quot;1.2&quot; baseProfile=&quot;tiny&quot; xmlns=&quot;http://www.w3.org/2000/svg&quot; ...
+     width=&quot;96px&quot; height=&quot;96px&quot; viewBox=&quot;0 0 96 96&quot; xml:space=&quot;preserve&quot;&gt;
+&lt;g class=&quot;icon&quot;&gt;
+  &lt;polygon points=&quot;74.854,25.288 70.712,21.145 48,43.856 25.289,21.145 ...&quot;/&gt;
+&lt;/g&gt;
+&lt;/svg&gt;
+</code></pre>
+<p>Filenames mostly follow the <a href="https://github.com/google/material-design-icons">Material Design Icons</a>
+naming (<code>ic_menu_*</code>), which is also a good source for more icons if you want
+Material-style additions. Keep the same <code>viewBox</code>/size convention (96x96 is
+typical) and wrap the shape(s) in <code>&lt;g class=&quot;icon&quot;&gt;</code> so existing CSS icon
+rules (<code>.icon</code>, <code>color</code>/<code>fill</code> targeting, <code>.disabled .icon</code>, etc., §3c/§6)
+still apply.</p>
+<h3><a href="#13b-how-a-widget-picks-its-icon" aria-hidden="true" class="anchor" id="13b-how-a-widget-picks-its-icon"></a>13b. How a widget picks its icon</h3>
+<p><code>ugui/theme.cpp</code>'s generic <code>#toolbutton</code> template just has an empty icon
+slot:</p>
+<pre><code class="language-xml">&lt;use class=&quot;icon&quot; width=&quot;36&quot; height=&quot;36&quot; xlink:href=&quot;&quot; /&gt;
+</code></pre>
+<p>The actual icon is bound at runtime in C++, not by editing this markup.
+<code>Button::setIcon()</code> (<code>ugui/widgets.h:58</code>) points that <code>&lt;use&gt;</code> at a parsed
+icon node:</p>
+<pre><code class="language-cpp">void setIcon(const SvgNode* icon) { static_cast&lt;SvgUse*&gt;(selectFirst(&quot;.icon&quot;)-&gt;node)-&gt;setTarget(icon); }
+</code></pre>
+<p>Call sites load the icon file with <code>SvgGui::useFile(&quot;icons/&lt;name&gt;.svg&quot;)</code>
+and pass the result into <code>createToolbutton()</code>/<code>createAction()</code>/<code>setIcon()</code>.
+For example, <code>syncscribble/pentoolbar.cpp:354</code>:</p>
+<pre><code class="language-cpp">closeBtn = createToolbutton(SvgGui::useFile(&quot;icons/ic_menu_cancel.svg&quot;), &quot;&quot;);
+</code></pre>
+<p><code>syncscribble/documentlist.cpp:60</code>:</p>
+<pre><code class="language-cpp">newDocBtn = createToolbutton(SvgGui::useFile(&quot;icons/ic_menu_add_doc.svg&quot;), _(&quot;New Document&quot;), true);
+</code></pre>
+<p>and menu/toolbar <code>Action</code>s in <code>syncscribble/mainwindow.cpp:905-908</code>, which
+take the icon path as a plain string argument:</p>
+<pre><code class="language-cpp">action_Previous_Page = createAction(&quot;action_Previous_Page&quot;,
+    &quot;&amp;Previous Page&quot;, &quot;:/icons/ic_menu_prev.svg&quot;, &quot;Left&quot;, SLOT(doCommand(ID_PREVPAGE)));
+</code></pre>
+<p>(The <code>:/</code> prefix is just an alternate spelling — it's stripped by the
+resource loader, see §13c — both <code>&quot;icons/foo.svg&quot;</code> and <code>&quot;:/icons/foo.svg&quot;</code>
+resolve the same file.)</p>
+<h3><a href="#13c-swapping-an-existing-icon" aria-hidden="true" class="anchor" id="13c-swapping-an-existing-icon"></a>13c. Swapping an existing icon</h3>
+<p>Since the icon is chosen by filename at the C++ call site, swapping one is
+just editing that string literal to point at a different file already in
+<code>scribbleres/icons/</code>, then rebuilding (only the <code>.cpp</code> you edited needs to
+recompile — see §12 for the fast <code>resources.cpp</code>-only loop if you're also
+touching <code>theme.cpp</code>):</p>
+<pre><code class="language-cpp">// before
+closeBtn = createToolbutton(SvgGui::useFile(&quot;icons/ic_menu_cancel.svg&quot;), &quot;&quot;);
+
+// after — reuse an existing &quot;back&quot; arrow instead of an X
+closeBtn = createToolbutton(SvgGui::useFile(&quot;icons/ic_menu_back.svg&quot;), &quot;&quot;);
+</code></pre>
+<p>No theme/CSS change is needed for a simple swap like this.</p>
+<h3><a href="#13d-embedding--how-icon-files-get-into-the-binary" aria-hidden="true" class="anchor" id="13d-embedding--how-icon-files-get-into-the-binary"></a>13d. Embedding — how icon files get into the binary</h3>
+<p>Icons aren't read from disk at runtime by default; they're compiled in.
+<code>scribbleres/embed.py</code> converts every <code>icons/*.svg</code> file into a
+<code>static const char*</code> C string, emitted into the <strong>generated, checked-in</strong>
+file <code>scribbleres/res_icons.cpp</code>, per the header comment in
+<code>syncscribble/resources.cpp:10</code>:</p>
+<pre><code class="language-sh">cd scribbleres
+python embed.py icons/*.svg &gt; res_icons.cpp
+</code></pre>
+<p><code>res_icons.cpp</code> registers each string under its path (e.g.
+<code>&quot;icons/ic_menu_pan.svg&quot;</code>) into an in-memory <code>resourceMap</code>
+(<code>syncscribble/resources.cpp:19-25</code>, <code>loadIconRes()</code> called from
+<code>setupResources()</code>). At runtime, <code>SvgParser::openStream</code> is hooked
+(<code>syncscribble/resources.cpp:136-155</code>) so any <code>parseFile(&quot;icons/...&quot;)</code> call
+(triggered by <code>SvgGui::useFile()</code>) first checks that embedded resource map,
+and only falls back to actually reading the file off disk if the name isn't
+found there.</p>
+<p>This means <strong>editing or adding an SVG file under <code>scribbleres/icons/</code> alone
+does nothing</strong> until you either:</p>
+<ul>
+<li>re-run <code>embed.py</code> to regenerate <code>res_icons.cpp</code> and rebuild (<code>resources.o</code>
+depends on it, so only that file + relink is needed — same fast loop as
+§12), or</li>
+<li>reference a genuinely new filename that isn't yet embedded — since
+<code>getResource()</code> misses, the hook falls through to a real filesystem read,
+so it'll load live off disk without any <code>embed.py</code>/rebuild step, useful
+for quickly trying out a new icon during development. (This path depends
+on your working directory / how the app resolves relative paths at
+runtime — the embedded-resource path is the reliable one for a real
+build.)</li>
+</ul>
+<h3><a href="#13e-adding-a-brand-new-custom-icon" aria-hidden="true" class="anchor" id="13e-adding-a-brand-new-custom-icon"></a>13e. Adding a brand-new custom icon</h3>
+<ol>
+<li>Create <code>scribbleres/icons/my_new_icon.svg</code> — a self-contained SVG,
+matching the existing viewBox/size convention (e.g. 96x96), shape(s)
+wrapped in <code>&lt;g class=&quot;icon&quot;&gt;</code>.</li>
+<li>Regenerate <code>scribbleres/res_icons.cpp</code> via <code>embed.py</code> (13d) so it's
+compiled into the binary.</li>
+<li>Reference it from a call site:
+<pre><code class="language-cpp">myBtn = createToolbutton(SvgGui::useFile(&quot;icons/my_new_icon.svg&quot;), _(&quot;My Action&quot;));
+</code></pre>
+</li>
+</ol>
+<p>There's no separate icon &quot;registry&quot; to update beyond <code>res_icons.cpp</code> — any
+<code>icons/*.svg</code> path becomes usable as soon as it's embedded (or present on
+disk as a fallback, 13d).</p>
+<p><a id="sec-14"></a></p>
+<h2><a href="#14-why-the-toc-links-may-still-not-work-in-your-viewer" aria-hidden="true" class="anchor" id="14-why-the-toc-links-may-still-not-work-in-your-viewer"></a>14. Why the ToC links may still not work in your viewer</h2>
+<p>Markdown itself never standardized &quot;click a heading in a Table of Contents
+and jump to it&quot; — that's a convenience each renderer bolts on by turning
+heading text into an <code>#anchor</code> slug, and every renderer's slugging algorithm
+is slightly different (case-folding, punctuation stripping, em-dash/space
+handling, etc.). GitHub, <code>marktext</code>, and <code>glow</code> don't agree with each other.</p>
+<p>This file sidesteps the slug-matching problem by using <strong>explicit HTML
+anchors</strong> — <code>&lt;a id=&quot;sec-N&quot;&gt;&lt;/a&gt;</code> placed right above each heading — with the
+ToC linking to those fixed ids (<code>#sec-1</code>, <code>#sec-2</code>, ...) instead of relying
+on auto-generated slugs. Raw inline HTML is part of the CommonMark spec, so
+any spec-compliant renderer should pass it through and honor the <code>id</code>. This
+should now work correctly in <strong><code>marktext</code></strong>, which previews Markdown as
+real HTML in an Electron/webview context.</p>
+<p><strong><code>glow</code> is a different case and can't be fixed from the Markdown side.</strong>
+<code>glow</code> renders into a terminal pager (via <code>glamour</code>), not a browser/webview
+— there is no HTML DOM, no <code>id</code> attributes, and no concept of scrolling to
+a fragment. Terminal output is just text; <code>[label](#anchor)</code> links render
+as inert (or, if your terminal supports OSC-8 hyperlinks, clickable-but-
+pointing-nowhere-useful) text, and there is currently no way to make
+same-document anchor jumps work in <code>glow</code>, regardless of how the anchors
+are authored. If you need in-terminal navigation, <code>glow</code>'s own pager search
+(<code>/</code> to search, in the interactive pager) is the practical substitute for a
+clickable ToC.</p>
+
+    </article>
+</body>
+</html>
