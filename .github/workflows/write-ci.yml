@@ -11,7 +11,14 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
     - name: Checkout
-      run: git clone --recurse-submodules https://github.com/styluslabs/Write
+      # skip mupdf during the recursive clone: it has ~17 submodules of its own (tesseract,
+      # leptonica, curl, zxing...) and we build only five of them - see syncscribble/mupdf.mk
+      run: git clone --recurse-submodules -c submodule.mupdf.update=none https://github.com/styluslabs/Write
+    - name: Checkout MuPDF
+      working-directory: Write
+      run: |
+        git submodule update --init --checkout mupdf
+        git -C mupdf submodule update --init --depth 1 thirdparty/freetype thirdparty/libjpeg thirdparty/zlib thirdparty/jbig2dec thirdparty/mujs
     #- run: git clone --recurse-submodules https://github.com/styluslabs/Write
     # can't switch branch of submodule from actions/checkout: https://github.com/actions/checkout/issues/1815
     #- run: git switch write-linux
@@ -48,7 +55,14 @@ jobs:
     runs-on: windows-latest
     steps:
     - name: Checkout
-      run: git clone --recurse-submodules https://github.com/styluslabs/Write
+      # skip mupdf during the recursive clone: it has ~17 submodules of its own (tesseract,
+      # leptonica, curl, zxing...) and we build only five of them - see syncscribble/mupdf.mk
+      run: git clone --recurse-submodules -c submodule.mupdf.update=none https://github.com/styluslabs/Write
+    - name: Checkout MuPDF
+      working-directory: Write
+      run: |
+        git submodule update --init --checkout mupdf
+        git -C mupdf submodule update --init --depth 1 thirdparty/freetype thirdparty/libjpeg thirdparty/zlib thirdparty/jbig2dec thirdparty/mujs
     - name: Download make.exe
       run: curl -L -o make.exe https://github.com/styluslabs/maps/releases/download/alpha-1/make.exe
     - name: MSVC command prompt
@@ -77,7 +91,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout
-      run: git clone --recurse-submodules https://github.com/styluslabs/Write
+      # skip mupdf during the recursive clone: it has ~17 submodules of its own (tesseract,
+      # leptonica, curl, zxing...) and we build only five of them - see syncscribble/mupdf.mk
+      run: git clone --recurse-submodules -c submodule.mupdf.update=none https://github.com/styluslabs/Write
+    - name: Checkout MuPDF
+      working-directory: Write
+      run: |
+        git submodule update --init --checkout mupdf
+        git -C mupdf submodule update --init --depth 1 thirdparty/freetype thirdparty/libjpeg thirdparty/zlib thirdparty/jbig2dec thirdparty/mujs
     - name: Setup JDK
       uses: actions/setup-java@v4
       with:
