@@ -1,0 +1,12 @@
+syncscribble/Debug/
+syncscribble/Release/
+syncscribble/android/.gradle/
+syncscribble/android/app/build/
+
+scribbletest/test*_out.png
+scribbletest/test*_out.html
+scribbletest/test*_diff.png
+scribbletest/test*_ref.png
+
+scribbleres/icons/backup/
+scribbleres/icons/select_icons/
