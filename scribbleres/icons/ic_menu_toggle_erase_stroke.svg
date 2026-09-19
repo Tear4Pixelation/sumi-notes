@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<svg version="1.2" baseProfile="tiny" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+  x="0px" y="0px" viewBox="555 158.51 33 33" xml:space="preserve">
+<g class="icon">
+  <path d="M566.99,178.09L568.93,180.03C569.57,180.66,570.63,180.66,571.27,180.03L577.02,174.28C577.66,173.64,577.66,172.58,577.02,171.93L575.08,169.99C574.44,169.36,573.38,169.36,572.74,169.99L566.99,175.74C566.34,176.39,566.34,177.43,566.99,178.09L566.99,178.09" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+  <path d="M569.31,173.42L573.58,177.69" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+  <circle cx="558.25" cy="175.01" r="1.75" fill="currentColor"/>
+  <circle cx="563.25" cy="175.01" r="1.75" fill="currentColor"/>
+  <circle cx="580.75" cy="175.01" r="1.75" fill="currentColor"/>
+  <circle cx="585.75" cy="175.01" r="1.75" fill="currentColor"/>
+</g>
+</svg>

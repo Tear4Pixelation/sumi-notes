@@ -1,9 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <svg version="1.2" baseProfile="tiny" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
-	 x="0px" y="0px" width="96px" height="96px" viewBox="0 0 96 96" xml:space="preserve">
+  x="0px" y="0px" viewBox="0 0 24 24" xml:space="preserve">
+<!-- reicon "document-text" (outline), https://reicon.dev - MIT -->
 <g class="icon">
-  <path d="M61.599,15.805H21.74v64.39h52.52v-64.39H61.599z M68.378,69.199H27.624v-3.672h40.754V69.199z
-     M68.378,59.652H27.462v-3.834h40.916V59.652z M68.541,49.945H27.624v-3.999h40.917V49.945z M68.541,39.911H27.624v-3.668h40.917
-    V39.911z M68.541,30.203H27.624v-3.672h40.917V30.203z"/>
+  <path fill="none" d="M21 7V17C21 20 19.5 22 16 22H8C4.5 22 3 20 3 17V7C3 4 4.5 2 8 2H16C19.5 2 21 4 21 7Z" stroke="currentColor" stroke-width="1.5" stroke-miterlimit="10" stroke-linecap="round" stroke-linejoin="round"/>
+  <path fill="none" d="M14.5 4.5V6.5C14.5 7.6 15.4 8.5 16.5 8.5H18.5" stroke="currentColor" stroke-width="1.5" stroke-miterlimit="10" stroke-linecap="round" stroke-linejoin="round"/>
+  <path fill="none" d="M8 13H12" stroke="currentColor" stroke-width="1.5" stroke-miterlimit="10" stroke-linecap="round" stroke-linejoin="round"/>
+  <path fill="none" d="M8 17H16" stroke="currentColor" stroke-width="1.5" stroke-miterlimit="10" stroke-linecap="round" stroke-linejoin="round"/>
 </g>
 </svg>

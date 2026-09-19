@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<svg version="1.2" baseProfile="tiny" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+  x="0px" y="0px" viewBox="631.1 31.05 32.5 32.5" xml:space="preserve">
+<g class="icon">
+  <path d="M649.11,56.19L639.32,48.31C638.24,47.44,638.17,45.82,639.17,44.86L650.28,34.25C651.94,32.66,654.53,32.55,656.33,34L659.45,36.51C661.25,37.95,661.69,40.51,660.49,42.47L652.51,55.59C651.79,56.77,650.19,57.06,649.11,56.18L649.11,56.19" fill="none" stroke="currentColor" stroke-width="3"/>
+  <path d="M649.4,56.91C644.67,57.11,641.78,59.96,640.87,61.1L638.63,59.3C638.63,59.3,636.39,57.5,636.39,57.5C637.31,56.36,639.47,52.93,638.66,48.27" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+  <path d="M640.85,61.19L641,62L639.08,62.05L633,61.96L636.38,57.59" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+  <path d="M640,62L657.7,62" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+</g>
+</svg>
