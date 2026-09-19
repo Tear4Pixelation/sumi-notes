@@ -83,6 +83,17 @@ APPVERSION := $(MAJORVER).$(MINORVER).$(GITCOUNT)
 DEFS = PUGIXML_NO_XPATH PUGIXML_NO_EXCEPTIONS
 DEFS += SCRIBBLE_REV_NUMBER="$(GITREV)"
 
+# PDF import via MuPDF, compiled inline - see mupdf.mk.  Pass PDF_IMPORT=0 to build without it
+# (smaller binary, "Import PDF" reports that the build has no PDF support).
+PDF_IMPORT ?= 1
+# pdfimport.cpp is always built; with PDF_IMPORT=0 its body compiles out and PdfImport::isAvailable()
+# returns false, so callers don't need their own #ifdefs
+SOURCES += pdfimport.cpp
+ifneq ($(PDF_IMPORT),0)
+  # by path, not bare name: ndk-build includes this Makefile by absolute path from android/app
+  include $(dir $(lastword $(MAKEFILE_LIST)))mupdf.mk
+endif
+
 
 ifeq ($(OS),Windows_NT)
 # Windows
@@ -316,3 +327,46 @@ include Makefile.unix
 # rm -r /usr/share/doc/*
 
 endif
+
+# Dead code stripping.  Only a small slice of MuPDF is reachable from pdfimport.cpp (open document,
+# count pages, render page), but it arrives as ~310 objects containing a whole PDF *writer*, text
+# extraction, subsetting, signatures, forms and a dozen output formats.  Splitting every function
+# and data object into its own section lets the linker drop what nothing references.
+# This has to come *after* the platform include: Makefile.mac/.ios/.wasm/.msvc assign CFLAGS with
+# `=` rather than `+=`, so anything set earlier (e.g. from mupdf.mk) would be discarded.  Appending
+# here is fine because make expands recipe variables when the rule runs, not when it is read.
+ifneq ($(PDF_IMPORT),0)
+ifeq ($(OS),Windows_NT)
+  # release already links with /OPT:REF /OPT:ICF (Makefile.msvc); /O2 implies /Gy, so only add /Gw
+  CFLAGS += /Gw
+else ifneq ($(BUILD_SHARED_LIBRARY),)
+  # ndk-build already compiles with -ffunction-sections and links release with --gc-sections
+else
+  CFLAGS += -ffunction-sections -fdata-sections
+  ifneq ($(MACOS)$(XPC_FLAGS),)
+    LDFLAGS += -Wl,-dead_strip
+  else
+    LDFLAGS += -Wl,--gc-sections
+  endif
+endif
+
+# Optimize MuPDF for size rather than speed.  It is a decoder that runs once per page at import
+# time, never in the drawing or input path, so -Os costs nothing that matters here.  These are
+# target-specific variables, so they apply only to MuPDF's objects - Write's own code stays -O2.
+# (OBJDIR is defined by the platform fragment, hence this living after the include too.)
+MUPDF_REL_SRC := $(call mupdf_rel,$(MUPDF_SRC))
+ifeq ($(OS),Windows_NT)
+$(patsubst %,$(OBJDIR)/%.obj,$(basename $(MUPDF_REL_SRC))): CFLAGS += /O1
+else ifeq ($(BUILD_SHARED_LIBRARY),)
+$(patsubst %,$(OBJDIR)/%.o,$(basename $(MUPDF_REL_SRC))): CFLAGS += -Os
+endif
+endif
+
+# MuPDF (used for PDF import) lives in a submodule that has submodules of its own, most of which -
+# tesseract, leptonica, curl, zxing - we do not build.  A plain `git clone --recurse-submodules`
+# would fetch all of them, so init just the ones mupdf.mk actually compiles:
+.PHONY: mupdf-submodules
+mupdf-submodules:
+	git -C .. submodule update --init --checkout mupdf
+	git -C ../mupdf submodule update --init --depth 1 \
+	  thirdparty/freetype thirdparty/libjpeg thirdparty/zlib thirdparty/jbig2dec thirdparty/mujs
