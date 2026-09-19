@@ -7,6 +7,9 @@
 #include "scribblesync.h"
 #include "scribbleapp.h"  // only for sync tests
 
+// document scanning math; unlike everything else here it needs neither GL nor a document
+#include "scantest.cpp"
+
 // Ideally, these tests should be run under valgrind to help check for memory leaks
 // renaming out files to refs (Linux):  for i in {0..13}; do mv "test${i}_out.html" "test${i}_ref.html"; done;
 
@@ -194,6 +197,7 @@ void ScribbleTest::runAll(bool runsynctest)
 {
   nFailed = 0;
   int nThumbsFailed = 0;
+  int nUnitFailed = runScanTests();
   std::vector<std::string> slFailed;
   void (ScribbleTest::*tests[])() = {
     &ScribbleTest::test0,
@@ -349,8 +353,10 @@ void ScribbleTest::runAll(bool runsynctest)
   ScribbleApp::app->loadConfig();
   if(syncSlave)
     nFailed = syncSlave->nFailed;
-  resultStr = fstring("Tests completed in %d ms with %d failed tests (%s) and %d failed thumbnails.",
-      int(runAllTime), nFailed, joinStr(slFailed, ", ").c_str(), nThumbsFailed);
+  nFailed += nUnitFailed;
+  resultStr = fstring(
+      "Tests completed in %d ms with %d failed tests (%s), %d failed thumbnails and %d failed unit checks.",
+      int(runAllTime), nFailed, joinStr(slFailed, ", ").c_str(), nThumbsFailed, nUnitFailed);
   //if(!Application::painter->sRGB() || !Application::glRender)
   //  resultStr += "\nWARNING: ScribbleTest requires GL render and sRGB=1 to get correct thumbnails!";
   if(exitAfterTest) {

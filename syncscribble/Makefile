@@ -29,6 +29,8 @@ SOURCES = \
   scribblesync.cpp \
   documentlist.cpp \
   rulingdialog.cpp \
+  addpagemenu.cpp \
+  scandialog.cpp \
   configdialog.cpp \
   linkdialog.cpp \
   pentoolbar.cpp \
@@ -45,7 +47,11 @@ SOURCES += \
 
 SOURCES += \
   ../ulib/geom.cpp \
+  ../ulib/homography.cpp \
   ../ulib/image.cpp \
+  ../ulib/imageenhance.cpp \
+  ../ulib/imagewarp.cpp \
+  ../ulib/quaddetect.cpp \
   ../ulib/path2d.cpp \
   ../ulib/painter.cpp \
   ../usvg/svgnode.cpp \
