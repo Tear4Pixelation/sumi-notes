@@ -21,6 +21,9 @@ void ScribbleConfig::init()
   cfg["eraseOnImage"] = 1;
   // 1: return to previous mode on cursor up (except from draw mode) 0: do not return to previous mode
   cfg["doubleTapSticky"] = 1;
+  // hint shown in the history panel until the user has actually scrubbed once; cleared by using the
+  //  feature rather than by dismissing it, so it cannot be waved away without being understood
+  cfg["historyHintDone"] = 0;
   // show floating toolbar when selection is made
   cfg["popupToolbar"] = 1;
   // automatically enlarge page if strokes added near or beyond edge?

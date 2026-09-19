@@ -207,6 +207,10 @@ public:
   int redo();
   bool canUndo() const;
   bool canRedo() const;
+  // number of undo/redo *steps* (i.e. actions) available; one step is one UndoGroupHeader-delimited
+  //  group, not one item, so these are not derivable from hist.size() and pos
+  size_t undoSteps() const;
+  size_t redoSteps() const;
   bool undoable() const;
   size_t histPos() const { return pos; }
   static UUID_t newUuid();

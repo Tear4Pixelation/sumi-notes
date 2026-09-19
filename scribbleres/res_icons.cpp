@@ -424,6 +424,16 @@ static const char* icons__ic_menu_expandright_svg = R"~~~~(<?xml version="1.0" e
 </svg>
 )~~~~";
 
+static const char* icons__ic_menu_file_plus_svg = R"~~~~(<?xml version="1.0" encoding="utf-8"?>
+<svg version="1.2" baseProfile="tiny" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+  x="0px" y="0px" viewBox="0 0 24 24" xml:space="preserve">
+<!-- reicon "file-plus" (outline), https://reicon.dev - MIT -->
+<g class="icon">
+  <path d="M15.75 14.5C15.75 14.9142 15.4142 15.25 15 15.25H12.75V17.5C12.75 17.9142 12.4142 18.25 12 18.25C11.5858 18.25 11.25 17.9142 11.25 17.5V15.25H9C8.58579 15.25 8.25 14.9142 8.25 14.5C8.25 14.0858 8.58579 13.75 9 13.75H11.25V11.5C11.25 11.0858 11.5858 10.75 12 10.75C12.4142 10.75 12.75 11.0858 12.75 11.5V13.75H15C15.4142 13.75 15.75 14.0858 15.75 14.5Z" fill="currentColor"/> <path fill-rule="evenodd" clip-rule="evenodd" d="M13.5635 1.32604C13.2451 1.24959 12.9156 1.24978 12.497 1.25003L8.7679 1.25005C7.95506 1.25005 7.29944 1.25004 6.76853 1.29342C6.2219 1.33808 5.74176 1.43244 5.29754 1.65878C4.59193 2.01831 4.01825 2.59198 3.65873 3.29759C3.43239 3.74181 3.33803 4.22195 3.29336 4.76859C3.24999 5.29949 3.24999 5.9551 3.25 6.76793V17.2322C3.24999 18.045 3.24999 18.7006 3.29336 19.2315C3.33803 19.7782 3.43239 20.2583 3.65873 20.7025C4.01825 21.4081 4.59193 21.9818 5.29754 22.3413C5.74175 22.5677 6.2219 22.662 6.76853 22.7067C7.29944 22.7501 7.95505 22.7501 8.76788 22.7501H15.2321C16.045 22.7501 16.7006 22.7501 17.2315 22.7067C17.7781 22.662 18.2582 22.5677 18.7025 22.3413C19.4081 21.9818 19.9818 21.4081 20.3413 20.7025C20.5676 20.2583 20.662 19.7782 20.7066 19.2315C20.75 18.7006 20.75 18.045 20.75 17.2322L20.75 9.50307C20.7503 9.08445 20.7505 8.75492 20.674 8.43651C20.6067 8.15591 20.4955 7.88766 20.3448 7.64161C20.1737 7.3624 19.9405 7.12953 19.6443 6.8337L15.1664 2.35572C14.8705 2.05955 14.6376 1.82639 14.3584 1.65529C14.1124 1.50452 13.8441 1.3934 13.5635 1.32604ZM12.75 2.75125C12.6615 2.75035 12.5549 2.75005 12.4245 2.75005H8.8C7.94755 2.75005 7.35331 2.75064 6.89068 2.78844C6.43681 2.82552 6.17604 2.89465 5.97852 2.99529C5.55516 3.21101 5.21095 3.55521 4.99524 3.97858C4.8946 4.17609 4.82547 4.43686 4.78838 4.89073C4.75058 5.35337 4.75 5.9476 4.75 6.80006V17.2001C4.75 18.0525 4.75058 18.6467 4.78838 19.1094C4.82547 19.5633 4.8946 19.824 4.99524 20.0215C5.21095 20.4449 5.55516 20.7891 5.97852 21.0048C6.17604 21.1055 6.43681 21.1746 6.89068 21.2117C7.35331 21.2495 7.94755 21.2501 8.8 21.2501H15.2C16.0525 21.2501 16.6467 21.2495 17.1093 21.2117C17.5632 21.1746 17.824 21.1055 18.0215 21.0048C18.4448 20.7891 18.789 20.4449 19.0048 20.0215C19.1054 19.824 19.1745 19.5633 19.2116 19.1094C19.2494 18.6467 19.25 18.0525 19.25 17.2001V9.57554C19.25 9.44518 19.2497 9.33854 19.2488 9.25H15.5C13.9812 9.25 12.75 8.01878 12.75 6.5V2.75125ZM18.4393 7.75L14.25 3.56071V6.5C14.25 7.19036 14.8096 7.75 15.5 7.75H18.4393Z" fill="currentColor"/>
+</g>
+</svg>
+)~~~~";
+
 static const char* icons__ic_menu_folder_svg = R"~~~~(<?xml version="1.0" encoding="utf-8"?>
 <svg version="1.2" baseProfile="tiny" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
   x="0px" y="0px" viewBox="0 0 24 24" xml:space="preserve">
@@ -472,6 +482,16 @@ static const char* icons__ic_menu_highlight_svg = R"~~~~(<?xml version="1.0" enc
   <path d="M649.4,56.91C644.67,57.11,641.78,59.96,640.87,61.1L638.63,59.3C638.63,59.3,636.39,57.5,636.39,57.5C637.31,56.36,639.47,52.93,638.66,48.27" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
   <path d="M640.85,61.19L641,62L639.08,62.05L633,61.96L636.38,57.59" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
   <path d="M640,62L657.7,62" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+</g>
+</svg>
+)~~~~";
+
+static const char* icons__ic_menu_history_svg = R"~~~~(<?xml version="1.0" encoding="utf-8"?>
+<svg version="1.2" baseProfile="tiny" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+  x="0px" y="0px" viewBox="0 0 24 24" xml:space="preserve">
+<!-- reicon "history" (outline), https://reicon.dev - MIT -->
+<g class="icon">
+  <path fill-rule="evenodd" clip-rule="evenodd" d="M5.07868 5.06891C8.87402 1.27893 15.0437 1.31923 18.8622 5.13778C22.6824 8.95797 22.7211 15.1313 18.9262 18.9262C15.1312 22.7211 8.95793 22.6824 5.13774 18.8622C2.87389 16.5984 1.93904 13.5099 2.34047 10.5812C2.39672 10.1708 2.775 9.88377 3.18537 9.94002C3.59575 9.99627 3.88282 10.3745 3.82658 10.7849C3.4866 13.2652 4.27782 15.881 6.1984 17.8016C9.44288 21.0461 14.6664 21.0646 17.8655 17.8655C21.0646 14.6664 21.046 9.44292 17.8015 6.19844C14.5587 2.95561 9.33889 2.93539 6.13935 6.12957L6.88705 6.13333C7.30126 6.13541 7.63535 6.47288 7.63327 6.88709C7.63119 7.3013 7.29372 7.63539 6.87951 7.63331L4.33396 7.62052C3.92269 7.61845 3.58981 7.28556 3.58774 6.8743L3.57495 4.32874C3.57286 3.91454 3.90696 3.57707 4.32117 3.57498C4.73538 3.5729 5.07285 3.907 5.07493 4.32121L5.07868 5.06891ZM11.9999 7.24992C12.4141 7.24992 12.7499 7.58571 12.7499 7.99992V11.6893L15.0302 13.9696C15.3231 14.2625 15.3231 14.7374 15.0302 15.0302C14.7373 15.3231 14.2624 15.3231 13.9696 15.0302L11.2499 12.3106V7.99992C11.2499 7.58571 11.5857 7.24992 11.9999 7.24992Z" fill="currentColor"/>
 </g>
 </svg>
 )~~~~";
@@ -1005,11 +1025,13 @@ static void LOAD_RES_FN() { addStringResources({
   {"icons/ic_menu_erase.svg", icons__ic_menu_erase_svg},
   {"icons/ic_menu_expanddown.svg", icons__ic_menu_expanddown_svg},
   {"icons/ic_menu_expandright.svg", icons__ic_menu_expandright_svg},
+  {"icons/ic_menu_file_plus.svg", icons__ic_menu_file_plus_svg},
   {"icons/ic_menu_folder.svg", icons__ic_menu_folder_svg},
   {"icons/ic_menu_forward.svg", icons__ic_menu_forward_svg},
   {"icons/ic_menu_fullscreen.svg", icons__ic_menu_fullscreen_svg},
   {"icons/ic_menu_help.svg", icons__ic_menu_help_svg},
   {"icons/ic_menu_highlight.svg", icons__ic_menu_highlight_svg},
+  {"icons/ic_menu_history.svg", icons__ic_menu_history_svg},
   {"icons/ic_menu_insert_space_ruled.svg", icons__ic_menu_insert_space_ruled_svg},
   {"icons/ic_menu_insert_space.svg", icons__ic_menu_insert_space_svg},
   {"icons/ic_menu_link.svg", icons__ic_menu_link_svg},

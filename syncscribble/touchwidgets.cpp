@@ -1,3 +1,5 @@
+#include <algorithm>
+#include <climits>
 #include "touchwidgets.h"
 //#include "scribbledoc.h"
 //#include "scribbleapp.h"
@@ -68,70 +70,101 @@ void PenPreview::draw(SvgPainter* svgp) const
   SvgPainter(p).drawNode(sb->getElement()->node);
 }
 
-// undo dial
-double ButtonDragDial::posToAngle(const Point& pos)
+// undo timeline
+// Sizes are in the same fixed design units as PenPreview above (the whole GUI is scaled for DPI), so one
+//  step is one tick of TIMELINE_STEP_PX both on screen and in the drag that produces it.
+static constexpr Dim TIMELINE_STEP_PX = 20;
+// the ruler is sized to the history it is showing, between these bounds: a two-step history in a panel
+//  wide enough for fifteen reads as "there is more over there", and a one-step history in a panel exactly
+//  one tick wide is a sliver you cannot aim at
+static constexpr int TIMELINE_MAX_TICKS = 15;
+static constexpr int TIMELINE_MIN_TICKS = 5;
+static constexpr Dim TIMELINE_LANE_PX = 42;  // tall enough to aim at with a finger, label included
+static constexpr Dim TIMELINE_HINT_PX = 17;  // the hint line, present only until the first scrub
+static constexpr Dim TIMELINE_EDGE_PX = 24;  // how close to the window edge starts the auto-repeat
+static constexpr int TIMELINE_EDGE_MS = 110;  // one step per, about the rate of a comfortable scrub
+static constexpr Dim TIMELINE_HEIGHT_PX = ButtonDragTimeline::NUM_LANES*TIMELINE_LANE_PX;
+
+ButtonDragTimeline::ButtonDragTimeline(Button* tb, int align) : Widget(new SvgCustomNode), toolBtn(tb),
+    mBounds(Rect::wh(TIMELINE_MAX_TICKS*TIMELINE_STEP_PX, TIMELINE_HEIGHT_PX)),
+    offset{0, 0}, stepsBack{-1, -1}, stepsFwd{-1, -1}, lane(LANE_HISTORY), laneLocked(false),
+    prevX(0), dragMoved(false)
 {
-  Rect bbox = toolBtn->node->bounds();
-  Point center = bbox.center() + Point(0, 0.6*5*bbox.height());
-  Point p = pos - center;
-  //Point p = pos - node->transformedBounds().center();
+  // TODO: this is now used in four places - deduplicate!
+  onApplyLayout = [this](const Rect& src, const Rect& dest){
+    mBounds = dest.toSize();
+    if(src != dest) {
+      m_layoutTransform.translate(dest.left - src.left, dest.top - src.top);
+      node->invalidate(true);
+    }
+    return true;
+  };
 
-  return atan2(p.y, p.x);  //-atan2(p.x, p.y);
-}
+  // the ruler lives in the standard popup chrome so it stays readable over the page; the popup is shown
+  //  and hidden directly (as setupPressedPopup does) rather than through the menu stack, since it lasts
+  //  exactly as long as one press
+  popup = createArrowPopup(align);
+  popup->addWidget(this);
+  toolBtn->addWidget(popup);
 
-void ButtonDragDial::updateDial(Dim angle, bool active, int count)
-{
-  indAngle = angle;
-  indActive = active;
-  indCount += count;
-  redraw();
-}
-
-ButtonDragDial::ButtonDragDial(Button* tb) : AbsPosWidget(new SvgCustomNode), toolBtn(tb), mBounds(Rect::wh(100, 100)),
-    stepAngle(2*M_PI/32), indAngle(0), indActive(false), indCount(0), prevAngle(0), altMode(false)
-{
-  setVisible(false);  // initially invisible
-  node->setAttribute("position", "absolute");
-  toolBtn->addWidget(this);
-
-  // We'll try replacing button's main event handler ... code is a little weird because `this` is dial widget,
-  //  while toolBtn is actual button
+  // We replace the button's main event handler; code is a little weird because `this` is the ruler widget,
+  //  while toolBtn is the actual button
   // if this does work out, need to add an official Widget::clearHandlers()
   toolBtn->sdlHandlers.clear();
   toolBtn->addHandler([this](SvgGui* gui, SDL_Event* event){
     if(event->type == SDL_FINGERDOWN || isLongPressOrRightClick(event)) {
-      // let's try long press to switch to alt mode
       toolBtn->node->setXmlClass(addWord(removeWord(toolBtn->node->xmlClass(), "hovered"), "pressed").c_str());
-      altMode = event->tfinger.fingerId != SDL_BUTTON_LMASK;
-      dialMoved = false;
-      indCount = 0;
-      prevAngle = posToAngle(Point(event->tfinger.x, event->tfinger.y));
-      updateDial(prevAngle, true, 0);
-      setVisible(true);
+      dragMoved = false;
+      for(int ii = 0; ii < NUM_LANES; ++ii) {
+        offset[ii] = 0;
+        stepsBack[ii] = -1;
+        stepsFwd[ii] = -1;
+      }
+      // right click (or long press) still goes straight to the select lane, locked: it costs nothing to
+      //  keep for anyone who already has it in their fingers, and it is the one case where the mode is
+      //  known before the drag starts
+      lane = event->tfinger.fingerId != SDL_BUTTON_LMASK ? LANE_SELECT : LANE_HISTORY;
+      laneLocked = lane == LANE_SELECT;
+      if(getRange)
+        getRange(stepsBack[LANE_HISTORY], stepsFwd[LANE_HISTORY]);
+      // The select lane walks the same history backwards from the current position, so it can reach at
+      //  most as many steps back as there are undo steps - an upper bound, since a step that added no
+      //  strokes is skipped rather than counted, and being refused pins the real end (see applySteps).
+      //  Nothing is selected yet at press, so there is nothing to give back in the other direction:
+      //  without this the lane drew an open ruler both ways, promising history that isn't there.
+      stepsBack[LANE_SELECT] = stepsBack[LANE_HISTORY];
+      stepsFwd[LANE_SELECT] = 0;
+      // size the ruler to the history, once per press: the width has to stay put for the rest of the
+      //  gesture, since it is the thing being dragged (and ends discovered mid-drag would resize it)
+      // the ruler is centered on the current position, so it needs room for the farther of the two ends
+      //  on *both* sides - sizing it to back+fwd+1 would push the end cap off the edge exactly when the
+      //  history is lopsided (e.g. plenty to undo, nothing to redo), which is most of the time
+      int reach = std::max(stepsBack[LANE_HISTORY], stepsFwd[LANE_HISTORY]);
+      int total = reach >= 0 ? 2*reach + 1 : TIMELINE_MAX_TICKS;
+      int visible = std::min(std::max(total, TIMELINE_MIN_TICKS), TIMELINE_MAX_TICKS);
+      bool hinting = showHint && hintText;
+      // a panel sized to a two-step history is narrower than the hint line it would have to carry
+      Dim wpx = std::max(Dim(visible*TIMELINE_STEP_PX), Dim(hinting ? 230 : 0));
+      mBounds = Rect::wh(wpx, TIMELINE_HEIGHT_PX + (hinting ? TIMELINE_HINT_PX : 0));
+      node->invalidate(true);
+      prevX = event->tfinger.x;
+      mGui = gui;  // needed to run the edge auto-repeat timer
+      endGesture();
+      popup->setVisible(true);
+      redraw();
       gui->setPressed(toolBtn);
     }
-    else if(event->type == SDL_FINGERMOTION && isVisible()) {
-      Dim deltaAngle = posToAngle(Point(event->tfinger.x, event->tfinger.y)) - prevAngle;
-      if(deltaAngle > M_PI)
-        deltaAngle -= 2*M_PI;
-      else if(deltaAngle < -M_PI)
-        deltaAngle += 2*M_PI;
-      int delta = deltaAngle/stepAngle;
-      int initdelta = delta;
-      if(delta != 0) {
-        dialMoved = true;
-        prevAngle = fmod(prevAngle + delta*stepAngle, 2*M_PI);
-        delta = altMode ? onAltStep(delta) : onStep(delta);
-        updateDial(prevAngle, delta == 0, initdelta - delta);
-      }
+    else if(event->type == SDL_FINGERMOTION && popup->isVisible()) {
+      applyDrag(event->tfinger.x, event->tfinger.y);
     }
     else if(event->type == SDL_FINGERUP || event->type == SvgGui::OUTSIDE_PRESSED) {
       toolBtn->node->removeClass("pressed");
-      setVisible(false);
-      if(!altMode && !dialMoved && event->type == SDL_FINGERUP)
-        onStep(-1);
-      else if(altMode && dialMoved)
+      popup->setVisible(false);
+      endGesture();  // an auto-repeat left running would keep undoing after the finger is gone
+      if(lane == LANE_SELECT && dragMoved)
         onAltStep(0);
+      else if(!dragMoved && event->type == SDL_FINGERUP)
+        onStep(-1);  // plain tap: single undo, so the button still works as an undo button
     }
     else if(event->type == SvgGui::ENTER && !gui->pressedWidget)
       toolBtn->node->addClass("hovered");
@@ -143,55 +176,195 @@ ButtonDragDial::ButtonDragDial(Button* tb) : AbsPosWidget(new SvgCustomNode), to
   });
 }
 
-Rect ButtonDragDial::bounds(SvgPainter* svgp) const
+// Dragging right undoes, dragging left redoes - the opposite of what "right is the future" suggests, and
+//  correct: with the mark pinned at the center, what is under the finger is the tape, not the playhead.
+//  Dragging the tape to the right has to bring earlier ticks to the center, exactly as on a wheel picker;
+//  the alternative slides the ticks against the finger pushing them.
+void ButtonDragTimeline::applyDrag(Dim x, Dim y)
 {
-  //return svgp->p->getTransform().mapRect(mBounds);
-  Rect btnbbox = toolBtn->node->bounds();
-  Dim h = 5*btnbbox.height();
-  return svgp->p->getTransform().mapRect(Rect::wh(h,h));
-  //return svgp->p->getTransform().mapRect(Rect::centerwh(btnbbox.center() + Point(0, 0.55*h), h, h));
+  // Nothing happens until the pointer is inside the panel.  The press starts on the button, above the
+  //  panel, so every gesture begins by travelling down into a lane - and that travel is never purely
+  //  vertical.  Acting on the sideways component of it would lock the gesture into whichever lane it
+  //  happened to be crossing at the time, which is the one way a lane can be chosen by accident.
+  Rect bbox = node->bounds();
+  if(!laneLocked) {
+    if(!bbox.isValid() || y < bbox.top || y > bbox.bottom) {
+      prevX = x;  // discard travel made on the way in, so it cannot accumulate into a step
+      return;
+    }
+    int newlane = y - bbox.top > bbox.height()/2 ? LANE_SELECT : LANE_HISTORY;
+    if(newlane != lane) {
+      lane = newlane;
+      redraw();
+    }
+  }
+  // event coords and layout units are the same space (the framebuffer is scaled as a whole for DPI), so
+  //  one tick of drag is one tick of ruler without any conversion
+  int ticks = int((x - prevX)/TIMELINE_STEP_PX);  // truncates: no step until a full tick is crossed
+  if(ticks == 0)
+    return;
+  dragMoved = true;
+  // the first step locks the lane: scrubbing sideways always drifts vertically too, and a mode that
+  //  changed halfway through a gesture would leave half its steps applied in the other mode
+  laneLocked = true;
+  prevX += ticks*TIMELINE_STEP_PX;  // consume what the finger travelled, before the sign flip below
+  applySteps(-ticks);
+  updateEdgeRepeat(x);
 }
 
-// we cheat here by ignoring layout transform and drawing relative to toolbutton's bbox
-void ButtonDragDial::draw(SvgPainter* svgp) const
+int ButtonDragTimeline::applySteps(int delta)
+{
+  int rejected = lane == LANE_SELECT ? onAltStep(delta) : onStep(delta);
+  offset[lane] += delta - rejected;
+  // retired by use, not by dismissal - and only by a step that actually landed, so someone who drags
+  //  against a dead end has not yet been taught anything
+  if(showHint && delta != rejected) {
+    showHint = false;
+    if(onHintDone)
+      onHintDone();
+  }
+  // being refused is how we learn where an end is when getRange didn't tell us; pinning it here also keeps
+  //  the ruler honest if the history changed under us since the press
+  if(rejected > 0)
+    stepsFwd[lane] = offset[lane];
+  else if(rejected < 0)
+    stepsBack[lane] = -offset[lane];
+  redraw();
+  return rejected;
+}
+
+// Held against the edge of the window, the gesture keeps stepping on a timer: a drag can only be as long
+// as the screen, and the button is in a corner, so one of the two directions has almost no room - for the
+// top right corner that is undo, which is the one that gets used.
+void ButtonDragTimeline::updateEdgeRepeat(Dim x)
+{
+  Window* win = toolBtn->window();
+  Rect wb = win ? win->node->bounds() : Rect();
+  int dir = 0;
+  if(laneLocked && wb.isValid()) {
+    if(x > wb.right - TIMELINE_EDGE_PX)
+      dir = -1;  // pushing right, which is into the past
+    else if(x < wb.left + TIMELINE_EDGE_PX)
+      dir = 1;
+  }
+  if(dir == edgeDir)
+    return;
+  edgeDir = dir;
+  if(edgeTimer) {
+    if(mGui) mGui->removeTimer(edgeTimer);
+    edgeTimer = NULL;
+  }
+  if(dir && mGui) {
+    edgeTimer = mGui->setTimer(TIMELINE_EDGE_MS, this, [this](){
+      // stop at the end of the history rather than ticking silently against it
+      return !edgeDir || !popup->isVisible() || applySteps(edgeDir) ? 0 : TIMELINE_EDGE_MS;
+    });
+  }
+}
+
+void ButtonDragTimeline::endGesture()
+{
+  edgeDir = 0;
+  if(edgeTimer && mGui)
+    mGui->removeTimer(edgeTimer);
+  edgeTimer = NULL;
+}
+
+Rect ButtonDragTimeline::bounds(SvgPainter* svgp) const
+{
+  return svgp->p->getTransform().mapRect(mBounds);
+}
+
+void ButtonDragTimeline::draw(SvgPainter* svgp) const
 {
   Painter* p = svgp->p;
-  Rect bbox = node->bounds();
-  Dim w = bbox.width(), h = bbox.height();
-  p->translate(w/2, h/2);
-  p->scale(w/83.3, h/83.3); // previously value of 100 w/ 6x size was unnecessarily large (now 83.3 w/ 5x)
+  Dim w = mBounds.width(), h = mBounds.height();
+  p->clipRect(Rect::wh(w, h));
+  bool hinting = showHint && hintText;
+  Dim laneh = (h - (hinting ? TIMELINE_HINT_PX : 0))/NUM_LANES;
+  for(int ii = 0; ii < NUM_LANES; ++ii)
+    drawLane(p, ii, ii*laneh, laneh);
 
-  // to ease keeping appearance consistent vs. varying DPI, we just draw onto a 100 x 100 canvas scaled to
-  //  fill the frame
-  int a = 80;
-  Dim angle = indAngle; // - M_PI/2;
-  Dim sweep = fmod(2*M_PI + indCount*stepAngle, 2*M_PI);
-  if(sweep < 0)
-    sweep += 2*M_PI;
-  if(indCount == 0)
-    sweep = 2*M_PI;  // show complete filled circle for initial state
-
-  if(sweep != 0) {
+  if(hinting) {
+    p->setFontSize(11);
+    p->setTextAlign(Painter::AlignHCenter | Painter::AlignTop);
+    p->setFillBrush(Color(150, 150, 150));
     p->setStrokeBrush(Color::NONE);
-    p->setFillBrush(altMode ? Color(255, 128, 128, 128) : Color(128, 128, 255, 128));
-    Path2D path;
-    path.moveTo(0, 0);
-    path.lineTo(0.5*a*cos(angle), 0.5*a*sin(angle));
-    path.addArc(0, 0, 0.5*a, 0.5*a, angle, -sweep);
-    path.closeSubpath();  //lineTo(0, 0);
-    p->drawPath(path);
+    p->drawText(w/2, NUM_LANES*laneh + 2, hintText);
+  }
+}
+
+void ButtonDragTimeline::drawLane(Painter* p, int ln, Dim top, Dim laneh) const
+{
+  Dim w = mBounds.width();
+  // every tick shares a baseline and grows upward, so a lane reads as a row of ticks of differing height
+  //  rather than as marks scattered about a center line
+  Dim cx = w/2, baseY = top + laneh - 5;
+  Dim tickspace = laneh - 18;  // what is left of the lane once the label has its line
+  bool active = ln == lane;
+  int alpha = active ? 255 : 90;  // the idle lane stays legible, so both are readable at a glance
+  Dim labelEnd = 7;  // right edge of the lane label, so the step count can keep clear of it
+
+  Color mark = ln == LANE_SELECT ? Color(225, 85, 85) : Color(60, 120, 240);
+
+  // The armed lane is named, in bold and in its own color: the label already says what the lane does, so
+  //  styling it is what tells you what is about to happen - no extra chrome needed to carry that.
+  if(laneLabel[ln]) {
+    p->setFontSize(11);
+    p->setFontWeight(active ? 700 : 400);
+    p->setTextAlign(Painter::AlignLeft | Painter::AlignTop);
+    // idle labels stay a mid-gray that works on a light theme as well as this dark one; we draw these
+    //  ourselves, so there is no theme color to read
+    p->setFillBrush(active ? mark : Color(150, 150, 150, 170));
+    p->setStrokeBrush(Color::NONE);
+    labelEnd += p->drawText(7, top + 3, laneLabel[ln]);
+    p->setFontWeight(400);
   }
 
-  p->setFillBrush(Color::NONE);
-  p->setStroke(Color(128, 128, 128), 1.5, Painter::RoundCap, Painter::RoundJoin);
-  for(Dim ang = 0; ang < 2*M_PI; ang += stepAngle)
-    p->drawLine(Point(39*sin(ang - indAngle), 39*cos(ang - indAngle)),
-        Point(33*sin(ang - indAngle), 33*cos(ang - indAngle)));
+  // How far this lane has moved, above the current tick: the ruler shows where you are, this says how
+  //  many steps that is, which otherwise has to be counted off the ticks.  Only once it has moved - a
+  //  "0" sitting there at rest would be noise on a panel that opens under the finger every time.
+  if(offset[ln] != 0) {
+    // the select lane counts strokes taken into the selection, where a minus sign would read as removing
+    //  them; the history lane is signed, since which side of now you are on is the whole point
+    std::string count = ln == LANE_SELECT ? fstring("%d", -offset[ln]) : fstring("%+d", offset[ln]);
+    p->setFontSize(11);
+    p->setFontWeight(700);
+    p->setFillBrush(Color(mark).setAlpha(alpha));
+    p->setStrokeBrush(Color::NONE);
+    // the label shares this band; if the panel is too narrow to fit both, the count goes to the far end
+    //  rather than on top of the label
+    Dim half = 0.5*p->textBounds(0, 0, count.c_str());
+    bool fits = cx - half > labelEnd + 6;
+    p->setTextAlign((fits ? Painter::AlignHCenter : Painter::AlignRight) | Painter::AlignTop);
+    p->drawText(fits ? cx : w - 7, top + 3, count.c_str());
+    p->setFontWeight(400);
+  }
 
-  // for debugging
-  //fprintf(stderr, "angle: %f  sweep: %f  angle+sweep: %f", angle*180/M_PI, sweep*180/M_PI, (angle+sweep)*180/M_PI);
-  //p->fillRect(Rect::centerwh(Point(0.5*a*cos(angle), 0.5*a*sin(angle)), 5, 5), Color::GREEN);
-  //p->fillRect(Rect::centerwh(Point(0.5*a*cos(angle-sweep), 0.5*a*sin(angle-sweep)), 5, 5), Color::RED);
+  // ticks that exist (the history is finite) and could be on screen (the panel is not); the panel was
+  //  sized to the history at press, so when it all fits, nothing is clipped
+  int halfticks = int(cx/TIMELINE_STEP_PX) + 1;
+  int lo = std::max(stepsBack[ln] >= 0 ? -stepsBack[ln] : INT_MIN/2, offset[ln] - halfticks);
+  int hi = std::min(stepsFwd[ln] >= 0 ? stepsFwd[ln] : INT_MAX/2, offset[ln] + halfticks);
+
+  p->setFillBrush(Color::NONE);
+  for(int ii = lo; ii <= hi; ++ii) {
+    if(ii == offset[ln])
+      continue;  // drawn last, so it is never clipped by a neighbor
+    // the ends are set apart by weight and height at the same gray as the rest, not by brightness: we
+    //  draw these ourselves and so can't read the theme, and any fixed brightness that stands out on the
+    //  dark theme recedes on the light one (making the two most meaningful ticks the faintest)
+    bool isEnd = (stepsBack[ln] >= 0 && ii == -stepsBack[ln]) || (stepsFwd[ln] >= 0 && ii == stepsFwd[ln]);
+    p->setStroke(Color(128, 128, 128, alpha), isEnd ? 3 : 1.5, Painter::RoundCap, Painter::RoundJoin);
+    Dim tickh = isEnd ? 0.55*tickspace : 0.30*tickspace;
+    Dim x = cx + (ii - offset[ln])*TIMELINE_STEP_PX;
+    p->drawLine(Point(x, baseY), Point(x, baseY - tickh));
+  }
+
+  // the current position: always at the center, but still marked, since "the tall blue one is you" is
+  //  what makes the neighboring ticks readable as steps away from it
+  p->setStroke(Color(mark).setAlpha(alpha), 3, Painter::RoundCap, Painter::RoundJoin);
+  p->drawLine(Point(cx, baseY), Point(cx, baseY - 0.80*tickspace));
 }
 
 // most modern applications (at least on mobile) won't have any menubars, so complicating Button class to

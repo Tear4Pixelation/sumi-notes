@@ -312,6 +312,28 @@ bool UndoHistory::canRedo() const
   return pos < hist.size();
 }
 
+// undo() stops at a header and leaves pos pointing at it, so every group is [header, items...) and the
+//  number of steps in either direction is just the number of headers on that side of pos
+size_t UndoHistory::undoSteps() const
+{
+  size_t n = 0;
+  for(size_t ii = 0; ii < pos && ii < hist.size(); ++ii) {
+    if(hist[ii]->isA(UndoHistoryItem::HEADER))
+      ++n;
+  }
+  return n;
+}
+
+size_t UndoHistory::redoSteps() const
+{
+  size_t n = 0;
+  for(size_t ii = pos; ii < hist.size(); ++ii) {
+    if(hist[ii]->isA(UndoHistoryItem::HEADER))
+      ++n;
+  }
+  return n;
+}
+
 // Note that this is provided for optimization purposes - items added to history when inAction == 0
 //  are discarded.  Checking this flag allows us to avoid unnecessary creation of such items.
 // We expect inAction to be 0 when in the process of undoing or redoing

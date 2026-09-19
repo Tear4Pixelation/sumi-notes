@@ -199,7 +199,7 @@ static std::string rulingTooltip(const PageProperties& props)
 
 Button* createAddPageButton(Action* scanPageAction)
 {
-  Button* btn = createToolbutton(SvgGui::useFile(":/icons/ic_menu_plus.svg"), _("Add Page"));
+  Button* btn = createToolbutton(SvgGui::useFile(":/icons/ic_menu_file_plus.svg"), _("Add Page"));
   ArrowPopup* popup = createArrowPopup(Menu::VERT_LEFT);
 
   TextBox* title = createTextBox(_("Add Page"));

@@ -40,6 +40,8 @@ MAPPING = {
   'ic_menu_bookmark': 'bookmark',
   'ic_menu_cancel': 'x',
   'ic_menu_clock': 'clock',
+  'ic_menu_file_plus': 'file-plus',
+  'ic_menu_history': 'history',
   'ic_menu_cloud': 'cloud',
   'ic_menu_copy': 'copy',
   'ic_menu_cut': 'scissors',

@@ -25,8 +25,11 @@ static const real floatCorner = 12*floatUIScale;
 // horizontal padding between a floating panel's rounded background and its first/last button:
 //  the mockup gives the editing panel more room than the page/file ops panels, and none at all
 //  to the lone overflow button
-static const Dim floatPad = 22.5*floatUIScale;
+static const Dim floatPad = 12*floatUIScale;
 static const Dim floatSidePad = 12*floatUIScale;
+// the separator's prototype reserves a fixed 16px cell that does not scale with the panel, so next to
+//  the scaled cells it reads as a gap of its own rather than as a divider between two neighbours
+static const Dim floatSepWidth = 10*floatUIScale;
 // Buttons in the floating panels are bigger than the app-wide #toolbutton prototype (36x42 with a
 //  23px icon), per the design mockup (64x64 with a 32x32 icon).  The prototype is shared by every
 //  menu, dialog and toolbar in the app, so instead of changing it we resize the buttons of these
@@ -35,8 +38,10 @@ static const Dim floatBtnSize = 64*floatUIScale;
 static const Dim floatIconSize = 32*floatUIScale;
 // the page/file ops panels draw their icons larger than the editing tools
 static const Dim floatSideIconSize = 42*floatUIScale;
-// the divider between the tools row and the options row stops short of the panel's padding
-static const Dim optsDividerInset = 27.5*floatUIScale;
+// the divider between the tools row and the options row stops short of the panel's padding; this is
+//  measured from the content edge, so it carries the 10.5 the padding above gave up, leaving the
+//  divider where the mockup put it while the row itself sits closer to the panel edge
+static const Dim optsDividerInset = 38*floatUIScale;
 // the help and settings buttons are the mockup's narrower secondary cells
 static const Dim floatSmallBtnSize = 48*floatUIScale;
 static const Dim floatSmallIconSize = 24*floatUIScale;
@@ -112,6 +117,12 @@ static void scaleFloatPanel(Widget* panel, Dim iconSize)
     Widget* rule = sep->selectFirst(".separator");
     if(rule && rule->node->type() == SvgNode::RECT)
       static_cast<SvgRect*>(rule->node)->setRect(Rect::wh(2, 40*floatUIScale));
+    // the unclassed sibling rect is the prototype's spacer, which sets how much room the separator
+    //  takes; it is not scaled by the panel, so it has to be brought down with everything else
+    for(SvgNode* child : sep->containerNode()->children()) {
+      if(child->type() == SvgNode::RECT && !child->hasClass("separator"))
+        static_cast<SvgRect*>(child)->setRect(Rect::wh(floatSepWidth, 36*floatUIScale));
+    }
   }
 }
 
@@ -984,8 +995,17 @@ void MainWindow::createToolBars()
       }
     }
   }
-  else
-    addTools(tb);  // main toolbar holds only the editing tools
+  else {
+    addTools(tb);  // main toolbar holds the editing tools ...
+    // ... plus History, which is not a tool: it is a verb, and never shows the checked state the tools
+    //  do, so the separator is what keeps it from reading as an eighth mode.  It earns its place here by
+    //  being reached for about as often as a tool switch, and by being centered - the panel is dragged
+    //  horizontally, and in the file ops panel at the right edge the *undo* direction had no room at all
+    //  (see "History panel" in CLAUDE.md), leaving the edge auto-repeat to carry the common case.
+    addTBWidget(tb->addSeparator(), -100);
+    tb->addWidget(undoRedoBtn);
+    addTBWidget(undoRedoBtn, 5, {actionUndo, actionRedo});
+  }
 
   // container to hide/show toolbar items depending on width, using adjFn
   AutoAdjContainer* adjtb = new AutoAdjContainer(new SvgG(), tb);
@@ -1040,9 +1060,7 @@ void MainWindow::createToolBars()
     addTBWidget(fileopsRow->addAction(actionSave), actionSave->priority, {actionSave});
     addTBWidget(fileopsRow->addAction(actionShow_Clippings), actionShow_Clippings->priority,
         {actionShow_Clippings});
-    fileopsRow->addWidget(undoRedoBtn);
-    // undo/redo outranks even the tools row; the overflow button itself is never hidden
-    addTBWidget(undoRedoBtn, 5, {actionUndo, actionRedo});
+    // History now lives at the end of the tools row instead (see addTools above)
     // the overflow panel hugs the file ops panel rather than being pushed to the window edge
     floatBox(fileopsRow, 18*floatUIScale, floatSidePad);
     scaleFloatPanel(fileopsRow, floatSideIconSize);
@@ -1227,6 +1245,10 @@ void MainWindow::createToolBars()
     // the floating panels use bigger buttons than the rest of the app (see scaleFloatToolbutton);
     //  the side panels were already scaled above, with their own (larger) icon size
     scaleFloatPanel(toolbarColumn, floatIconSize);
+    // History gets a larger box than the tools beside it, to end up looking the same size: the tool
+    //  glyphs are strokes running corner to corner of their viewBox, while a clock face is a circle
+    //  inscribed in it, so at equal box sizes the circle reads smaller (measured ink: 10px vs 11-12px)
+    scaleFloatToolbutton(undoRedoBtn, floatBtnSize, 40*floatUIScale);
     selectFirst("#main-toolbar-container")->addWidget(adjOuter);
   }
   else
@@ -1747,12 +1769,25 @@ void MainWindow::setupActions()
   setupTooltip(titleButton, "Open Document");
 #endif
 
-  undoRedoBtn = createToolbutton(actionUndo->icon(), _("Undo/Redo"));
-  ButtonDragDial* undoDial = new ButtonDragDial(undoRedoBtn);
-  // undo dial is fixed at 5x size of button (height), but a more general way to center would be nice
-  undoDial->node->setAttribute(vertToolbar ? "top" : "left", "-200%");
-  undoDial->node->setAttribute(vertToolbar ? "left" : "top", "130%");
-  undoDial->onStep = [this](int delta){
+  // "History", not "Undo": tapping it still undoes, but the panel behind it is a history scrubber and a
+  //  selector, and the undo arrow promised only the first of those.  Plain undo is still reachable by the
+  //  tap, by Ctrl+Z and from the menu, so the rename costs recognition, not capability.
+  undoRedoBtn = createToolbutton(SvgGui::useFile(":/icons/ic_menu_history.svg"), _("History"));
+  // the popup places itself relative to the button, so the timeline needs no manual offsets (unlike the
+  //  dial it replaces, which was hand-centered under the button)
+  ButtonDragTimeline* undoTimeline = new ButtonDragTimeline(undoRedoBtn, vertToolbar ? Menu::HORZ : Menu::VERT);
+  // the lane labels are the only place either feature names itself, so they carry the explaining
+  undoTimeline->laneLabel[ButtonDragTimeline::LANE_HISTORY] = _("Undo / Redo");
+  undoTimeline->laneLabel[ButtonDragTimeline::LANE_SELECT] = _("Select recent");
+  undoTimeline->hintText = _("Drag sideways to step through history");
+  undoTimeline->showHint = ScribbleApp::cfg->Int("historyHintDone") == 0;
+  undoTimeline->onHintDone = [](){ ScribbleApp::cfg->set("historyHintDone", 1); };
+  undoTimeline->getRange = [this](int& back, int& fwd){
+    UndoHistory* hist = app->activeDoc()->history;
+    back = int(hist->undoSteps());
+    fwd = int(hist->redoSteps());
+  };
+  undoTimeline->onStep = [this](int delta){
     while(delta > 0 && app->activeDoc()->canRedo()) {
       app->doCommand(ID_REDO);
       delta--;
@@ -1763,7 +1798,7 @@ void MainWindow::setupActions()
     }
     return delta;
   };
-  undoDial->onAltStep = [this](int delta){
+  undoTimeline->onAltStep = [this](int delta){
     if(delta == 0)
       app->activeArea()->recentStrokeSelDone();
     while(delta > 0 && app->activeArea()->recentStrokeDeselect())
@@ -1772,7 +1807,7 @@ void MainWindow::setupActions()
       delta++;
     return delta;
   };
-  setupTooltip(undoRedoBtn, altTooltip(_("Undo/Redo"), _("Select Recent")));
+  setupTooltip(undoRedoBtn, altTooltip(_("History (tap to undo)"), _("Select Recent")));
 }
 
 // one-time help popups ... disabled for now awaiting further consideration

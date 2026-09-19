@@ -24,35 +24,68 @@ private:
   ScribblePen mPen = {Color::INVALID_COLOR, -1};
 };
 
-// this is Widget for the actual dial canvas; toolbutton is just a regular toolbutton with special sdlEvent handler
-class ButtonDragDial : public AbsPosWidget
+// A horizontal ruler with one tick per undo step, scrolling under a fixed center mark for the current
+//  position - dragging right steps forward through history (redo), left steps back (undo).
+// This replaces the earlier ButtonDragDial, which was the same interaction on a circle.  A circle has no
+//  ends, so the two things a user most needs while scrubbing - where am I, and how much further can I go -
+//  could only be hinted at (by a wedge that grew when you over-turned it).  The ends of a line are simply
+//  where the ticks stop, and past-left/future-right needs no explaining.
+// This is the Widget for the ruler canvas, shown inside an ArrowPopup so it stays legible over the page;
+//  the toolbutton is a regular toolbutton with a special sdlEvent handler.
+class ButtonDragTimeline : public Widget
 {
 public:
-  ButtonDragDial(Button* tb);
-  //~ButtonDragDial();
+  // align positions the popup relative to the button, as for a Menu (e.g. Menu::VERT below a horizontal
+  //  toolbar, Menu::HORZ beside a vertical one)
+  // the panel is split into two lanes, each its own ruler: the one you drag in decides what the ticks
+  //  mean.  This is how the second mode is reached on a stylus, which has exactly one input and so cannot
+  //  express "the other button"; it also means one popup teaches both features instead of two controls
+  //  each needing their own explanation.
+  enum Lane { LANE_HISTORY = 0, LANE_SELECT = 1, NUM_LANES = 2 };
+
+  ButtonDragTimeline(Button* tb, int align);
 
   void draw(SvgPainter* svgp) const override;
   Rect bounds(SvgPainter* svgp) const override;
 
-  // These should of course be private
+  // as for the old dial, these apply `delta` steps and return the number that could not be applied
   std::function<int(int delta)> onStep;
   std::function<int(int delta)> onAltStep;
+  // steps available from the current position, for drawing the ends of the history ruler; either may be
+  //  left as -1 for "unknown", in which case that end stays open until a step is actually rejected
+  std::function<void(int& back, int& fwd)> getRange;
+  const char* laneLabel[NUM_LANES] = {NULL, NULL};
+  // A hint line shown inside the panel until the first successful scrub, then retired for good via
+  //  onHintDone().  Teaching lives in the panel rather than in a popup of its own: this is the one moment
+  //  the user is already looking at the thing being explained, with history behind them to try it on.
+  const char* hintText = NULL;
+  bool showHint = false;
+  std::function<void()> onHintDone;
 
 private:
-  double posToAngle(const Point& pos);
-  void updateDial(Dim angle, bool active, int count);
+  void applyDrag(Dim x, Dim y);
+  int applySteps(int delta);  // returns the steps of `delta` that could not be applied
+  void updateEdgeRepeat(Dim x);
+  void endGesture();
+  void drawLane(Painter* p, int ln, Dim top, Dim laneh) const;
 
   Button* toolBtn;
+  ArrowPopup* popup;
   Rect mBounds;
-  //int yCenter;
+  // A ruler runs out of screen where a dial did not, and the button sits in a corner, so the direction
+  //  with the least room to drag is whichever one points at the near edge.  Holding against that edge
+  //  keeps stepping, which also removes any ceiling on how far a single gesture can reach.
+  SvgGui* mGui = NULL;
+  Timer* edgeTimer = NULL;
+  int edgeDir = 0;
 
-  double stepAngle;
-  double indAngle;
-  bool indActive;
-  int indCount;
-  double prevAngle;
-  bool dialMoved;
-  bool altMode;
+  int offset[NUM_LANES];     // steps from the position at press; negative is into the past
+  int stepsBack[NUM_LANES];  // steps available from the press position, -1 until known (see getRange)
+  int stepsFwd[NUM_LANES];
+  int lane;
+  bool laneLocked;  // set by the first step: after that, vertical drift cannot change mode mid-gesture
+  Dim prevX;
+  bool dragMoved;
 };
 
 class Menubar : public Toolbar
