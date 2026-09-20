@@ -315,6 +315,28 @@ Known gap: shapes carry no pen class, so `Element::toPenPoints()` returns nothin
 eraser does not affect a shape** - the stroke eraser deletes it whole. Giving them `STROKE_PEN_CLASS`
 would make free erase work but would split curved shapes (ellipse, rounded box) at Bezier control points.
 
+## Switch back (single-use tools)
+
+Picking a tool uses it once and returns to the previous one; double tapping the tool locks it. The
+eraser, the selection tool and insert space each have a **Switch Back** toggle on their options row
+(`ScribbleMode::eraseSwitchBack`/`selectSwitchBack`/`insSpaceSwitchBack`, `setSwitchBack()`), so any of
+them can be made to stick without touching a preference. `hasSwitchBack()` is the one place that says
+which tools have a toggle. `doubleTapSticky` remains the master switch - with it off nothing switches
+back and the toggles are disabled, since they would otherwise silently do nothing.
+
+- **The toggle also edits the active tool**, not just the next selection of it: turning it off makes the
+  tool sticky immediately, turning it on hands the tool back to `prevStickyMode`, which `setMode()`
+  records for exactly this reason. Without that, the toggle appears inert until the tool is reselected -
+  which is how the eraser's toggle looked for as long as it was unimplemented.
+- **The flags are initialized in the `ScribbleMode` constructor as well as in `loadModes()`.**
+  `ScribbleTest` builds a `ScribbleMode` directly and never calls `loadModes`, so anything read by
+  `setMode()` but only initialized there is uninitialized memory during tests. That cost six failing
+  `testN` fixtures with no obvious connection to the change.
+- `eraseSwitchBack` had a slot in the `toolModes` config string from when the toggle did nothing, so
+  every config written before this has a 0 in it. That slot is still written (positions after it depend
+  on it) but is **not** read back; all three flags are read from tokens appended at the end of the string
+  instead, so upgrading does not silently make everyone's eraser sticky.
+
 ## History panel
 
 The toolbar's **History** button (`ic_menu_history`, formerly the undo arrow) opens a panel of ticks -
@@ -357,9 +379,26 @@ entries are untouched - which is what makes the rename cost recognition rather t
   toolbar cramps redo instead, and pointer capture would fix only the mouse. The timer must be torn down
   on release and on a fresh press, or it keeps undoing after the finger is gone.
 - The button is a verb, not a tool, and never shows the tools' checked state; the separator before it is
-  what keeps it from reading as an eighth mode. Only the desktop floating-toolbar path was moved - the
-  vertical/narrow toolbar is built from the `tbcfg` config string, which still places `undoRedoBtn`
-  itself.
+  what keeps it from reading as an eighth mode. This is the layout on *every* platform: `vertToolbar`
+  (`mainwindow.h`) is initialised false and never assigned, so the `tbcfg`-driven vertical toolbar beside
+  it is dead code, and phones and tablets get these same floating panels. Narrow screens are handled by
+  `AutoAdjContainer` hiding widgets in `ui-priority` order instead.
+- **`undoRedoBtn` is priority 5, above the tools' 4**, so the tools are dropped *first*. At phone density
+  (preview with `--screenDPI=522`, see below) that leaves the Editing panel holding History and nothing
+  else, with all seven tools in the overflow menu. The priority predates the move - it made more sense
+  when the button lived in the file ops panel - but the result now looks like a bug.
+
+To preview another device's layout, override the config from the command line: `screenDPI` sets
+`paintScale = dpi/150`, so a higher value shrinks the window's logical width exactly as a denser screen
+does, and `agent-display.sh run` passes extra args through to the app:
+
+```
+tools/agent-display.sh run --debug -- --screenDPI=141   # ~iPad landscape
+tools/agent-display.sh run --debug -- --screenDPI=202   # ~iPad portrait
+tools/agent-display.sh run --debug -- --screenDPI=522   # ~phone
+```
+
+The headless output stays 1280x720, so this reproduces width-driven layout, not portrait aspect.
 - **`UndoHistory::undoSteps()/redoSteps()`** count `HEADER` items either side of `pos`: one step is one
   action, so this is not derivable from `hist.size()` and `pos`.
 - **Colors and weights are hardcoded, and must stay theme-neutral.** The panel is custom-drawn onto an
@@ -408,3 +447,93 @@ the fixed code - two assertions in this area have been written that were true ei
 nothing.
 
 `usvg` and `ugui` each have their own standalone example/test build (`cd usvg && make` → `Release/usvgtest`; `cd ugui && make` → `Release/uguitest`), buildable once `Write` itself has been built (they reuse its makefile setup for `nanovgXC`/SDL).
+
+## Agent display
+
+Write is a GUI app, and an agent launching it puts a window on the user's own
+session and steals focus. **Never run `Release/Write` or `Debug/Write` directly.**
+Everything goes through `tools/agent-display.sh`, which runs it inside a nested
+`cage` compositor - headless by default, so it is invisible and cannot take focus.
+A `PreToolUse` hook (`.claude/hooks/guard-agent-display.py`) denies direct launches
+rather than relying on this paragraph being read.
+
+```
+tools/agent-display.sh run [--windowed] [--debug]   # start session + app
+tools/agent-display.sh shot [out.png]               # grim capture, on demand
+tools/agent-display.sh click X Y [left|right|middle]
+tools/agent-display.sh move X Y | scroll DY [DX]
+tools/agent-display.sh drag X1 Y1 X2 Y2
+tools/agent-display.sh stroke X1 Y1 X2 Y2 [X3 Y3 ...]
+tools/agent-display.sh type "text" | key ctrl+z
+tools/agent-display.sh record start|stop [out.mp4]
+tools/agent-display.sh test                         # ./Debug/Write --test
+tools/agent-display.sh status | stop
+```
+
+Interaction is **blind and scripted**: act, then screenshot only when you need to
+see the result. There is no continuous stream, by design - `record` exists for
+capturing a specific interaction to show the user, not for watching.
+
+Setup is `tools/install-agent-display.sh` (needs sudo). Verified working
+end to end: stroke, toolbar click, tool switch and Ctrl+Z undo.
+
+### Two displays, and which one each command uses
+
+cage provides both a Wayland socket **and** its own Xwayland server, and the
+split is not cosmetic:
+
+| | display | used for |
+|---|---|---|
+| pointer, screenshots, video | `WAYLAND_DISPLAY` (cage's socket) | `agent-pointer`, `grim`, `wf-recorder` |
+| keyboard | `DISPLAY` (cage's Xwayland, e.g. `:2`) | `xdotool` |
+
+Keyboard goes through X because **Write runs as an X11 client inside cage**:
+forcing `SDL_VIDEODRIVER=wayland` segfaults it (verified, exit 139), so SDL falls
+back to x11. `wtype` speaks the right Wayland protocol and works on native
+Wayland clients in the same cage (verified against `foot`), but its
+virtual-keyboard keymap does not survive the Xwayland translation, so it silently
+does nothing to Write. Pointer events do survive that translation, which is why
+the two halves use different mechanisms.
+
+Both displays are private to the nested session, so neither can reach the user's
+niri session. `in_session_x()` refuses to run if the recorded X display is empty
+or implausible, because falling back to the inherited `DISPLAY` would type into
+the user's real windows - the one failure this whole setup exists to prevent.
+For the same reason, never substitute `ydotool`/`dotool`: they inject through
+kernel `uinput`, which is seat-global, and a headless cage
+(`WLR_LIBINPUT_NO_DEVICES=1`) would never see them while niri would.
+
+### Things that bite
+
+- **A click must be one invocation.** `agent-pointer` creates a virtual pointer
+  and destroys it on exit, and the cursor position does not survive that, so a
+  separate `move` then `click` clicks wherever the cursor defaulted to. The
+  symptom is confusing: canvas drags work (one invocation) while toolbar buttons
+  appear to ignore clicks entirely. Hence `click X Y`, never `move` then `click`.
+- **`wlrctl` cannot express a drag.** It offers only relative motion and an
+  atomic click, so there is no way to hold a button down - and in a drawing app
+  every stroke is a press, a path, and a release. That is why
+  `tools/agent-pointer/` exists instead; it also does absolute motion, so callers
+  pass coordinates read straight off a screenshot.
+- **The document list opens over the canvas on a fresh start.** Strokes sent
+  before dismissing it go to the overlay and nothing appears to happen. Close it
+  (the X at the top right) before drawing.
+- **Killing cage does not kill Write.** A Write that outlives its compositor
+  keeps running headless forever, holding its document. `stop` reaps it by exact
+  process name - `-x Write`, never `pkill -f .../Release/Write`, which would also
+  match the command line of the shell doing the killing.
+- The headless output is 1280x720 (wlroots' default); cage exposes no way to
+  change it. Use headless `sway` if a specific size matters.
+- `--test` works here: the headless backend renders on the GPU via
+  `/dev/dri/renderD128`, so it is a real GL run, not llvmpipe. Result as of this
+  setup: **0 failed tests, 0 failed unit checks, 16 of 17 failed thumbnails.**
+  Read that exit code carefully - `ScribbleTest` exits with the *failed thumbnail
+  count*, so a clean run of the checks that matter still exits non-zero. The
+  thumbnail comparison renders pixels and differs across GPUs and drivers;
+  `scribbletest.cpp:470` says as much ("we've had so many problems with
+  thumbnails"), and 16 of 17 failing uniformly is that, not 16 regressions - the
+  document content matched for every fixture, only the embedded thumbnail image
+  differed.
+- **Leak detection is off for `test`.** ASan reports ~2.2 MB leaked entirely
+  inside NVIDIA's GL driver and libdbus, and worse, its exitcode (1) masks the
+  thumbnail count. `AGENT_DISPLAY_ASAN_LEAKS=1` restores it.

@@ -48,6 +48,9 @@ class ScribbleMode {
 private:
   int currMode;  // specific mode
   int stickyMode;  // for return after single use
+  // the tool stickyMode replaced, so that turning switch back on for the active tool has something to
+  //  return to - we'd otherwise have no record of what the user was using before
+  int prevStickyMode;
   // these are used to select the specific tool if a general tool selection is made
   ScribbleConfig* cfg;
 
@@ -67,13 +70,23 @@ public:
   // SHAPEFLAG_HEADSTART/HEADEND from the head toggles on the shape options row; applied to new shapes
   //  whose ShapeDef allows heads
   int shapeFlags;
-  bool eraseSwitchBack;  // restore previous pen after erasing; behavior not implemented yet
+  // Switch back: return to the previous tool after one use.  These refine the global "doubleTapSticky"
+  //  pref, which stays the master switch: with it off nothing switches back, with it on the eraser, the
+  //  selection tool and insert space follow these flags and every other tool switches back as before.
+  //  Double tapping the tool locks it either way, as before.
+  bool eraseSwitchBack;
+  bool selectSwitchBack;
+  bool insSpaceSwitchBack;
   // DRAW_UNDER/EPHEMERAL are baked into these so drawing code can just check currPen()->hasFlag()
   ScribblePen drawPen;
   ScribblePen highlightPen;
   ScribblePen ephemeralPen;
 
-  ScribbleMode(ScribbleConfig* _cfg) : currMode(MODE_NONE), stickyMode(MODE_NONE), cfg(_cfg),
+  // the switch back flags are initialized here as well as in loadModes(): ScribbleTest builds a
+  //  ScribbleMode directly and never calls loadModes, so setMode() would otherwise read uninitialized
+  ScribbleMode(ScribbleConfig* _cfg) : currMode(MODE_NONE), stickyMode(MODE_NONE),
+      prevStickyMode(MODE_STROKE), cfg(_cfg), eraseSwitchBack(true), selectSwitchBack(true),
+      insSpaceSwitchBack(true),
       drawPen(Color::BLACK, 1), highlightPen(Color::BLACK, 1), ephemeralPen(Color::BLACK, 1) {}
 
   ScribblePen& penForDrawTool(int tool);
@@ -85,6 +98,10 @@ public:
   int getNextMode() const { return getSpecificMode(stickyMode); }
   // this should be called when user selects a tool
   void setMode(int mode, bool once=false);
+  // switch back toggles; modetype is MODE_ERASE, MODE_SELECT or MODE_INSSPACE
+  static bool hasSwitchBack(int modetype);
+  bool switchBack(int modetype) const;
+  void setSwitchBack(int modetype, bool on);
   // legacy support
   void setRuled(bool ruled);
   // interface to ScribbleArea

@@ -130,7 +130,7 @@ const char* prefInfoXML = R"#(
       enum="Dark;Light" enumvals="1;2"
       title="Theme" description="User interface style" />
   <pref name="doubleTapSticky" type="bool" group="User Interface"
-      title="Return to previous tool" description="Double tap to lock current tool" />
+      title="Return to previous tool" description="Double tap to lock current tool; the eraser and select tools have their own toggle" />
   <pref name="popupToolbar" type="bool" group="User Interface"
       title="Popup selection tools" description="Show floating toolbar when selection is made" />
   <!-- pref name="scrollerLocation" type="int" group="User Interface"

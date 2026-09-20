@@ -236,6 +236,13 @@ void MainWindow::refreshCommonUI(ScribbleDoc* doc, const UIState* uiState)
   actionRedo->setEnabled(doc->canRedo());
   // we're not going to bother changing tooltip text anymore
   undoRedoBtn->setEnabled(doc->canUndo() || doc->canRedo());
+  // put the tip up the moment there is something to undo - on a blank document it would be pointing at
+  //  a disabled button and explaining a gesture that does nothing, which is the mistake it exists to
+  //  avoid.  Once per session; it stays until the panel is opened, and for good once actually used.
+  if(historyTip && !historyTipShown && doc->canUndo()) {
+    historyTipShown = true;
+    historyTip->setVisible(true);
+  }
 
   actionCut->setEnabled(uiState->activeSel || uiState->pageSel);
   actionCopy->setEnabled(uiState->activeSel || uiState->pageSel);
@@ -407,6 +414,14 @@ void MainWindow::updateMode()
   int eraserMode = app->scribbleMode->eraserMode;
   eraseStrokeToggle->setChecked(eraserMode == MODE_ERASESTROKE || eraserMode == MODE_ERASERULED);
   eraseRuledToggle->setChecked(eraserMode == MODE_ERASERULED || eraserMode == MODE_ERASEFREERULED);
+  eraseSwitchBackToggle->setChecked(app->scribbleMode->eraseSwitchBack);
+  selectSwitchBackToggle->setChecked(app->scribbleMode->selectSwitchBack);
+  insSpaceSwitchBackToggle->setChecked(app->scribbleMode->insSpaceSwitchBack);
+  // with the master pref off no tool switches back, so the toggles would do nothing - say so instead
+  bool stickyPref = ScribbleApp::cfg->Bool("doubleTapSticky");
+  eraseSwitchBackToggle->setEnabled(stickyPref);
+  selectSwitchBackToggle->setEnabled(stickyPref);
+  insSpaceSwitchBackToggle->setEnabled(stickyPref);
   // an options row left open follows a mode change made outside the tools toolbar
   int modeType = ScribbleMode::getModeType(mode);
   if(openOptionsRow && openOptionsRow != modeType)
@@ -1183,9 +1198,8 @@ void MainWindow::createToolBars()
       SvgGui::useFile(":/icons/ic_menu_switch_back.svg"), _("Switch Back"));
   eraseSwitchBackToggle->setChecked(app->scribbleMode->eraseSwitchBack);
   eraseSwitchBackToggle->onClicked = [this](){
-    bool on = !eraseSwitchBackToggle->isChecked();
-    eraseSwitchBackToggle->setChecked(on);
-    app->scribbleMode->eraseSwitchBack = on;
+    app->scribbleMode->setSwitchBack(MODE_ERASE, !eraseSwitchBackToggle->isChecked());
+    updateMode();  // the tools row shows the "once" state of the active tool
   };
   setupTooltip(eraseSwitchBackToggle, _("Return to previous tool after erasing"));
   eraseRow->addWidget(eraseSwitchBackToggle);
@@ -1209,14 +1223,24 @@ void MainWindow::createToolBars()
   selectRow->addAction(actionRect_Select);
   selectRow->addAction(actionRuled_Select);
   selectRow->addAction(actionPath_Select);
+  selectSwitchBackToggle = createToolbutton(
+      SvgGui::useFile(":/icons/ic_menu_switch_back.svg"), _("Switch Back"));
+  selectSwitchBackToggle->setChecked(app->scribbleMode->selectSwitchBack);
+  selectSwitchBackToggle->onClicked = [this](){
+    app->scribbleMode->setSwitchBack(MODE_SELECT, !selectSwitchBackToggle->isChecked());
+    updateMode();
+  };
+  setupTooltip(selectSwitchBackToggle, _("Return to previous tool after selecting"));
+  selectRow->addWidget(selectSwitchBackToggle);
   selectRow->addWidget(smallFloatBtn(createHelpButton({
     {"ic_menu_select_lasso.svg", "Lasso Select", "Selects everything inside a freehand path."},
     {"ic_menu_select.svg", "Rect Select", "Selects everything inside a rectangle you drag."},
     {"ic_menu_select_ruled.svg", "Ruled Select", "Selects handwritten text; use in the margin to select whole lines."},
-    {"ic_menu_select_path.svg", "Path Select", "Selects the strokes crossed by a freehand path."} })));
+    {"ic_menu_select_path.svg", "Path Select", "Selects the strokes crossed by a freehand path."},
+    {"ic_menu_switch_back.svg", "Switch Back", "Returns to the previous tool after one selection."} })));
   selectRow->addWidget(createStretch());
   selectRow->addWidget(smallFloatBtn(createToolSettingsButton("Selection Settings",
-      {"popupToolbar", "applyPenToSel", "columnDetectMode"})));
+      {"popupToolbar", "applyPenToSel", "columnDetectMode", "doubleTapSticky"})));
   floatRow(selectRow);
 
   Toolbar* shapeRow = createToolbar();
@@ -1268,12 +1292,22 @@ void MainWindow::createToolBars()
   insSpaceRow->addWidget(createStretch());
   insSpaceRow->addAction(actionInsert_Space_Vert);
   insSpaceRow->addAction(actionRuled_Insert_Space);
+  insSpaceSwitchBackToggle = createToolbutton(
+      SvgGui::useFile(":/icons/ic_menu_switch_back.svg"), _("Switch Back"));
+  insSpaceSwitchBackToggle->setChecked(app->scribbleMode->insSpaceSwitchBack);
+  insSpaceSwitchBackToggle->onClicked = [this](){
+    app->scribbleMode->setSwitchBack(MODE_INSSPACE, !insSpaceSwitchBackToggle->isChecked());
+    updateMode();
+  };
+  setupTooltip(insSpaceSwitchBackToggle, _("Return to previous tool after inserting space"));
+  insSpaceRow->addWidget(insSpaceSwitchBackToggle);
   insSpaceRow->addWidget(smallFloatBtn(createHelpButton({
     {"ic_menu_insert_space.svg", "Insert Space", "Drags everything below the line you draw up or down."},
-    {"ic_menu_insert_space_ruled.svg", "Ruled Insert Space", "Inserts whole lines and reflows handwritten text."} })));
+    {"ic_menu_insert_space_ruled.svg", "Ruled Insert Space", "Inserts whole lines and reflows handwritten text."},
+    {"ic_menu_switch_back.svg", "Switch Back", "Returns to the previous tool after inserting space once."} })));
   insSpaceRow->addWidget(createStretch());
   insSpaceRow->addWidget(smallFloatBtn(createToolSettingsButton("Insert Space Settings",
-      {"reflow", "insSpaceErase", "minWordSep", "columnDetectMode", "blankYRuling"})));
+      {"reflow", "insSpaceErase", "minWordSep", "columnDetectMode", "blankYRuling", "doubleTapSticky"})));
   floatRow(insSpaceRow);
 
   // thin divider between the tools row and the open options row (both are one panel)
@@ -1883,7 +1917,32 @@ void MainWindow::setupActions()
   undoTimeline->laneLabel[ButtonDragTimeline::LANE_SELECT] = _("Select recent");
   undoTimeline->hintText = _("Drag sideways to step through history");
   undoTimeline->showHint = ScribbleApp::cfg->Int("historyHintDone") == 0;
-  undoTimeline->onHintDone = [](){ ScribbleApp::cfg->set("historyHintDone", 1); };
+  undoTimeline->onHintDone = [this](){
+    ScribbleApp::cfg->set("historyHintDone", 1);
+    if(historyTip) historyTip->setVisible(false);
+  };
+  // the tip goes away as soon as the panel is opened - at that point it is in the way of the thing it
+  //  is pointing at, and the panel's own hint takes over
+  undoTimeline->onOpened = [this](){ if(historyTip) historyTip->setVisible(false); };
+
+  // The unprompted tip: an arrow popup on the button itself, put up once there is history to act on.
+  //  Text rather than an animation for now, and deliberately naming both lanes - someone who never
+  //  presses the button cannot be taught by anything inside the panel.
+  if(!vertToolbar && ScribbleApp::cfg->Int("historyHintDone") == 0) {
+    historyTip = createArrowPopup(Menu::VERT);
+    SvgText* tipNode = createTextNode(_("Tap to undo. Press and hold, then drag sideways to move "
+        "through history, or up and down to switch between Undo / Redo and Select recent."));
+    tipNode->addClass("arrowpopup-desc");
+    tipNode->setAttribute("box-anchor", "left");
+    std::string wrapped = SvgPainter::breakText(tipNode, 253 - 32);
+    if(wrapped != tipNode->text()) {
+      tipNode->clearText();
+      tipNode->addText(wrapped.c_str());
+    }
+    historyTip->addWidget(new Widget(tipNode));
+    undoRedoBtn->addWidget(historyTip);
+    historyTip->setVisible(false);
+  }
   undoTimeline->getRange = [this](int& back, int& fwd){
     UndoHistory* hist = app->activeDoc()->history;
     back = int(hist->undoSteps());

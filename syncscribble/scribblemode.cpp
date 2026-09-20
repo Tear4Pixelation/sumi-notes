@@ -109,7 +109,8 @@ std::string ScribbleMode::saveModes()
   // The shape is stored by *string* id: shapes have been merged into flags once already, and a numeric
   //  index would have silently reassigned everyone's active tool when that happened.
   const ShapeDef* shapedef = shapeDef(shapeId);
-  ss << ' ' << (shapedef ? shapedef->id : "box") << ' ' << shapeFlags;
+  ss << ' ' << (shapedef ? shapedef->id : "box") << ' ' << shapeFlags
+     << ' ' << int(selectSwitchBack) << ' ' << int(eraseSwitchBack) << ' ' << int(insSpaceSwitchBack);
   return ss.str();
 }
 
@@ -125,7 +126,10 @@ void ScribbleMode::loadModes(const char* modestr)
   drawTool = DRAWTOOL_PEN;
   shapeId = SHAPE_BOX;
   shapeFlags = 0;
-  eraseSwitchBack = false;
+  // all default to on, which is what the global doubleTapSticky pref (also on by default) used to do
+  eraseSwitchBack = true;
+  selectSwitchBack = true;
+  insSpaceSwitchBack = true;
   drawPen = ScribblePen(Color::BLACK, 1.6, ScribblePen::TIP_FLAT | ScribblePen::WIDTH_PR, 0.9, 2.0);
   highlightPen = ScribblePen(Color(255, 127, 255, 127), 34,
       ScribblePen::TIP_CHISEL | ScribblePen::DRAW_UNDER);
@@ -143,8 +147,12 @@ void ScribbleMode::loadModes(const char* modestr)
   //moveSelMode = (insSpaceMode == MODE_INSSPACERULED) ? MODE_MOVESELRULED : MODE_MOVESELFREE;
   if(ss >> mode && mode >= DRAWTOOL_PEN && mode <= DRAWTOOL_EPHEMERAL)
     drawTool = mode;
+  // The switch back flags are read from the trailing section below, not here: this slot held
+  //  eraseSwitchBack back when the toggle did nothing, so every config written before switch back was
+  //  implemented has a 0 in it, and honoring that would silently make the eraser sticky on upgrade.
+  //  Still written (and consumed here) to keep the field positions that follow it.
   if(ss >> mode)
-    eraseSwitchBack = mode != 0;
+    (void)mode;
   readPen(ss, drawPen, 0);
   readPen(ss, highlightPen, ScribblePen::DRAW_UNDER);
   readPen(ss, ephemeralPen, ScribblePen::EPHEMERAL);
@@ -156,6 +164,12 @@ void ScribbleMode::loadModes(const char* modestr)
   }
   if(ss >> mode)
     shapeFlags = mode & (SHAPEFLAG_HEADSTART | SHAPEFLAG_HEADEND);
+  if(ss >> mode)
+    selectSwitchBack = mode != 0;
+  if(ss >> mode)
+    eraseSwitchBack = mode != 0;
+  if(ss >> mode)
+    insSpaceSwitchBack = mode != 0;
 }
 
 void ScribbleMode::setMode(int mode, bool once)
@@ -198,14 +212,47 @@ void ScribbleMode::setMode(int mode, bool once)
     break;
   }
 
+  // The "doubleTapSticky" pref is the master switch - off means no tool ever switches back.  With it on,
+  //  the tools with a switch back toggle follow it; every other tool switches back.
+  bool switchback = cfg->Bool("doubleTapSticky")
+      && (hasSwitchBack(newmode) ? switchBack(newmode) : true);
   // previously we had newmode == currMode, but I want to prevent changing mode of single-use tool from locking
   if(!once && (newmode == MODE_STROKE || newmode == MODE_DRAWSHAPE || newmode == MODE_PAGESEL
-      || mode == currMode || !cfg->Bool("doubleTapSticky")))
+      || mode == currMode || !switchback)) {
+    if(newmode != stickyMode)
+      prevStickyMode = stickyMode;
     stickyMode = newmode;
+  }
   else if(currMode == MODE_PAGESEL)
     stickyMode = MODE_STROKE;
 
   currMode = newmode;
+}
+
+// the tools whose options row carries a switch back toggle
+bool ScribbleMode::hasSwitchBack(int modetype)
+{
+  return modetype == MODE_ERASE || modetype == MODE_SELECT || modetype == MODE_INSSPACE;
+}
+
+bool ScribbleMode::switchBack(int modetype) const
+{
+  return modetype == MODE_ERASE ? eraseSwitchBack :
+      modetype == MODE_SELECT ? selectSwitchBack : insSpaceSwitchBack;
+}
+
+// applied to the active tool as well as to the next selection of it, so the toggle takes effect on the
+//  tool the user is looking at instead of only the next time they pick it
+void ScribbleMode::setSwitchBack(int modetype, bool on)
+{
+  (modetype == MODE_ERASE ? eraseSwitchBack :
+      modetype == MODE_SELECT ? selectSwitchBack : insSpaceSwitchBack) = on;
+  if(currMode != modetype || !cfg->Bool("doubleTapSticky"))
+    return;
+  if(!on)
+    stickyMode = currMode;
+  else if(stickyMode == currMode)  // stop locking the tool; return to whatever it replaced
+    stickyMode = prevStickyMode != currMode ? prevStickyMode : MODE_STROKE;
 }
 
 // Declaring this const to make it clear that it can be called multiple times for the same cursor down event

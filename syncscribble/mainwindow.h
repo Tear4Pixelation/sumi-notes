@@ -149,6 +149,10 @@ public:
   ArrowPopup* menuWhiteboard;
   Button* menuWhiteboardBtn;
   Button* undoRedoBtn;
+  // unprompted tip on the History button, shown once history exists (see refreshCommonUI); the panel's
+  //  own hint only reaches someone who already pressed the button, which is not who needs telling
+  ArrowPopup* historyTip = NULL;
+  bool historyTipShown = false;
   Button* titleButton;
   Button* iapButton = NULL;  // iOS IAP
   Widget* toolBarStretch;
@@ -171,6 +175,8 @@ public:
   Button* eraseStrokeToggle;
   Button* eraseRuledToggle;
   Button* eraseSwitchBackToggle;
+  Button* selectSwitchBackToggle;
+  Button* insSpaceSwitchBackToggle;
   // mode type of the options row currently shown, 0 if none
   int openOptionsRow = 0;
   std::vector<Widget*> tbWidgets;
