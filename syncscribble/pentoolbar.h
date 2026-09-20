@@ -41,6 +41,9 @@ public:
   enum Mode { PEN_MODE, BOOKMARK_MODE, SELECTION_MODE } mode = PEN_MODE;
 
   void saveConfig(ScribbleConfig* cfg) const;
+  // Repopulates the swatches from the active document's theme (COLORS_SPEC.md §6). Called when the
+  //  theme changes and when the document changes; harmless when theming is off.
+  void refreshPalette();
   void updateColor();
   void updateWidth();
   void updatePen();
@@ -93,6 +96,12 @@ private:
   Widget* relWidthRow;
   Widget* rulingPreview;
   Button* addColorBtn;
+  // the + opens this: a grid of the theme's own colors, with a trailing "custom color" button.  The
+  //  theme's answer is offered first; a color from outside it takes one more deliberate step.
+  ArrowPopup* palettePopup;
+  Widget* paletteGrid;
+  // true while a document theme is supplying the colors on offer
+  bool themed = false;
   Button* settingsBtn;
   ArrowPopup* widthPopup;
   int widthPopupIdx = -1;

@@ -1,5 +1,7 @@
 #include "pentoolbar.h"
 #include "scribbleapp.h"
+#include "scribbledoc.h"
+#include "themedialog.h"
 #include "scribblearea.h"
 #include "scribblemode.h"
 #include "page.h"
@@ -28,6 +30,24 @@ static const Dim DEFAULT_WIDTHS[] = {1.4, 3.0, 6.0};
 // one step of the relative width spinbox - a twentieth of a line height is about as fine as this is
 //  worth setting, and it keeps the value readable at the "%.3g" the spinbox formats with
 static const Dim RELATIVE_WIDTH_STEP = 0.05;
+
+// The add-color grid: 4 columns of smaller-than-toolbar swatches, so the theme's 16 entries
+//  (neutral + 15 families) land as a compact 4x4 block rather than a long strip.
+static const Dim PALETTE_CELL = 30;
+static const Dim PALETTE_DOT = 11;   // swatch radius within the cell
+static const int PALETTE_GRID_COLS = 4;
+
+// The active document's palette, or NULL when there is no document yet (the toolbar is built before
+//  the first one is opened).  Defined up here because the constructor's lambdas need it.
+static const Palette *docPalette() {
+  ScribbleDoc *doc = ScribbleApp::app ? ScribbleApp::app->activeDoc() : NULL;
+  return doc ? &doc->palette() : NULL;
+}
+
+static bool offPaletteAllowed() {
+  ScribbleDoc *doc = ScribbleApp::app ? ScribbleApp::app->activeDoc() : NULL;
+  return doc && doc->cfg->Bool("themeOffPalette");
+}
 
 std::unique_ptr<SvgNode> PenToolbar::widthBtnNode;
 std::unique_ptr<SvgNode> PenToolbar::compactWidthBtnNode;
@@ -377,6 +397,16 @@ PenToolbar::PenToolbar(bool _compact)
   colorPopupPicker->onColorChanged = [this](Color c) {
     if (colorPopupIdx < 0 || colorPopupIdx >= int(savedColors.size()))
       return;
+    // This edits a swatch directly, bypassing updateColor(), so it needs its own snap - otherwise the
+    //  custom-color route is a hole straight through the palette.
+    if (themed && !offPaletteAllowed()) {
+      const Palette *pal = docPalette();
+      if (pal) {
+        int alpha = c.alpha();
+        c = pal->nearest(c);
+        c.setAlpha(alpha);
+      }
+    }
     savedColors[colorPopupIdx] = c;
     colorPalette->items[colorPopupIdx]
         ->selectFirst(".btn-color")
@@ -450,19 +480,91 @@ PenToolbar::PenToolbar(bool _compact)
   // closeBtn->onClicked = [this](){ setVisible(false); };  -- must be set by
   // auto adj container
 
-  addColorBtn = createToolbutton(
-      SvgGui::useFile(":/icons/ic_menu_add_color.svg"), _("Add Color"));
-  addColorBtn->onClicked = [this]() {
-    Color color = colorPicker->color();
+  // Adds `color` to the row if it is not already there, then selects it.
+  auto addSwatch = [this](Color color) {
     auto it = std::find(savedColors.begin(), savedColors.end(), color);
     if (it == savedColors.end()) {
       savedColors.push_back(color);
-      rebuildGrids();
       it = savedColors.end() - 1;
     }
-    colorPopupIdx = int(it - savedColors.begin());
-    colorPopupPicker->setColor(*it);
+    int idx = int(it - savedColors.begin());
+    rebuildGrids();
+    colorPicker->setColor(savedColors[idx]);
+    updateColor();
+    return idx;
+  };
+
+  // The custom-color route: append the current color and open the hex/slider popup on it. Reached from
+  //  the end of the theme grid rather than directly, so the theme's own colors are always the first
+  //  answer offered and a custom color is the deliberate second step.
+  auto openCustomColor = [this, addSwatch]() {
+    closeAutoClosePopup(palettePopup);
+    int idx = addSwatch(colorPicker->color());
+    colorPopupIdx = idx;
+    colorPopupPicker->setColor(savedColors[idx]);
     openAutoClosePopup(colorPopup);
+  };
+
+  // The theme's colors, as a 4x4 grid. Rows are forced with an explicit `flex-break` on every fourth
+  //  cell - setting a width on the container does *not* wrap it, which is the same mechanism
+  //  PaletteWidget::addButton() already uses for the overflow menu.
+  palettePopup = createArrowPopup(Menu::VERT_LEFT);
+  paletteGrid = createRow({}, "0 0", "flex-start");
+  paletteGrid->node->setAttribute("flex-wrap", "wrap");
+  paletteGrid->node->setAttribute("margin", "4 4");
+  palettePopup->addWidget(paletteGrid);
+  setupAutoClosePopup(palettePopup);
+
+  addColorBtn = createToolbutton(
+      SvgGui::useFile(":/icons/ic_menu_add_color.svg"), _("Add Color"));
+  addColorBtn->onClicked = [this, addSwatch, openCustomColor]() {
+    const Palette *pal = docPalette();
+    if (!pal || pal->families.empty()) {
+      // no theme: the + keeps its original meaning, straight to the color editor
+      openCustomColor();
+      return;
+    }
+    SvgGui *gui = window() ? window()->gui() : NULL;
+    if (gui)
+      gui->deleteContents(paletteGrid);
+    std::vector<Color> offer;
+    offer.push_back(pal->neutral);
+    for (const PaletteFamily &fam : pal->families)
+      offer.push_back(fam.base);
+    // A cell smaller than the toolbar's own swatches: this is a grid to scan, not a row to hit
+    //  repeatedly, so density matters more than target size here.
+    std::string cellSVG = fstring(R"#(
+      <g class="toolbutton" layout="box">
+        <rect class="background" width="%g" height="%g"/>
+        <circle class="btn-color" cx="%g" cy="%g" r="%g"/>
+      </g>
+    )#", double(PALETTE_CELL), double(PALETTE_CELL), double(PALETTE_CELL/2),
+        double(PALETTE_CELL/2), double(PALETTE_DOT));
+
+    int cell = 0;
+    auto addCell = [this, &cell](Button *btn) {
+      if (cell > 0 && cell % PALETTE_GRID_COLS == 0)
+        btn->node->setAttribute("flex-break", "before");
+      btn->setMargins(0);
+      paletteGrid->addWidget(btn);
+      ++cell;
+    };
+    for (Color c : offer) {
+      Button *btn = new Button(loadSVGFragment(cellSVG.c_str()));
+      btn->selectFirst(".btn-color")->node->setAttr<color_t>("fill", c.color);
+      setupTooltip(btn, colorToHex(c).c_str());
+      btn->onClicked = [this, addSwatch, c]() {
+        closeAutoClosePopup(palettePopup);
+        addSwatch(c);
+      };
+      addCell(btn);
+    }
+    // ...and the escape hatch, last, so it reads as "or something else"
+    Button *customBtn = createToolbutton(
+        SvgGui::useFile(":/icons/ic_menu_add_color.svg"), _("Custom Color"));
+    customBtn->onClicked = openCustomColor;
+    addCell(customBtn);
+    openAutoClosePopup(palettePopup);
   };
 
   settingsBtn = createToolSettingsButton(
@@ -498,6 +600,7 @@ PenToolbar::PenToolbar(bool _compact)
   //  its contents)
   colorGroup->addWidget(colorPalette);
   colorGroup->addWidget(colorPopup);
+  colorGroup->addWidget(palettePopup);
   colorGroup->addWidget(addColorBtn);
   if (!compact) {
     colorGroup->addWidget(new Widget(loadSVGFragment(spacerSVG)));
@@ -570,6 +673,57 @@ PenToolbar::PenToolbar(bool _compact)
   updateWidthPopup();
 }
 
+// Is this color one the current theme can produce? Any variant of any family counts, plus the neutral.
+static bool isPaletteMember(const Palette *pal, Color c) {
+  if (!pal)
+    return false;
+  if (c == pal->neutral)
+    return true;
+  for (const PaletteFamily &fam : pal->families) {
+    for (int vv = 0; vv < PALETTE_NUM_VARIANTS; ++vv) {
+      if (fam.variant(vv) == c)
+        return true;
+    }
+  }
+  return false;
+}
+
+// The toolbar's *default* working set: the neutral plus a handful of families spread around the wheel.
+// Deliberately small. The whole palette belongs in the add-color grid, not on the options row - a row
+//  of thirteen swatches is a row nobody reads, and picking from it is slower than picking from five.
+static std::vector<Color> defaultThemeSwatches(const Palette *pal) {
+  std::vector<Color> out;
+  out.push_back(pal->neutral);
+  const int want = 5;
+  int n = int(pal->families.size());
+  for (int kk = 0; kk < want && n > 0; ++kk)
+    out.push_back(pal->families[(kk * n) / want].base);
+  return out;
+}
+
+void PenToolbar::refreshPalette() {
+  const Palette *pal = docPalette();
+  themed = pal && !pal->families.empty();
+  if (themed) {
+    // Unlike the widths, these are the user's picks, not the theme's - the theme only supplies the
+    //  menu to pick from. So the list is left alone unless it plainly belongs to some other theme,
+    //  which is what happens after a theme change (and on the first run, where the config still holds
+    //  the old black/red/green/blue defaults). Reseeding then is what keeps a themed document from
+    //  showing swatches its own palette cannot produce.
+    // Every swatch must belong to the theme, not merely one of them: the legacy default is
+    //  black/red/green/blue, and black *is* the neutral, so an "any member" test counts that whole
+    //  list as themed and leaves three colors the palette cannot produce sitting on the row.
+    // Skipped when off-palette colors are allowed, since then a deliberate custom swatch is legal and
+    //  reseeding would delete it on every launch.
+    bool allMembers = true;
+    for (Color c : savedColors)
+      allMembers = allMembers && isPaletteMember(pal, c);
+    if (savedColors.empty() || (!allMembers && !offPaletteAllowed()))
+      savedColors = defaultThemeSwatches(pal);
+  }
+  rebuildGrids();
+}
+
 void PenToolbar::rebuildGrids() {
   closeAutoClosePopup(colorPopup);
   colorPopupIdx = -1;
@@ -585,11 +739,18 @@ void PenToolbar::rebuildGrids() {
     // do we need class=toolbutton?
     btn->onClicked = [this, ii]() { selectColor(int(ii)); };
 
-    SvgGui::setupRightClick(btn, [this, ii](SvgGui *gui, Widget *w, Point p) {
-      contextMenuIdx = ii;
-      gui->showContextMenu(colorCtxMenu, p, w);
-    });
-    setupTooltip(btn, altTooltip(colorToHex(color).c_str(), _("Edit")));
+    // A themed swatch has no "insert current" or "delete": the list is generated, so editing one
+    //  entry would be undone by the next rebuild. Leaving the menu wired up would offer an action
+    //  that silently does nothing.
+    if (!themed) {
+      SvgGui::setupRightClick(btn, [this, ii](SvgGui *gui, Widget *w, Point p) {
+        contextMenuIdx = ii;
+        gui->showContextMenu(colorCtxMenu, p, w);
+      });
+      setupTooltip(btn, altTooltip(colorToHex(color).c_str(), _("Edit")));
+    }
+    else
+      setupTooltip(btn, ii == 0 ? _("Neutral") : colorToHex(color).c_str());
     colorPalette->addButton(btn);
     if (compact)
       btn->setMargins(
@@ -673,6 +834,9 @@ void PenToolbar::updateSelected() {
 }
 
 void PenToolbar::saveConfig(ScribbleConfig *cfg) const {
+  // Always saved, themed or not: these are the user's chosen working set, picked from the theme rather
+  //  than generated by it. refreshPalette() reseeds them only when they plainly belong to some other
+  //  theme, so persisting them is what makes a pick stick across a restart.
   std::vector<std::string> colorStrs;
   for (Color c : savedColors)
     colorStrs.emplace_back(
@@ -721,7 +885,9 @@ void PenToolbar::setPen(const ScribblePen &newpen, Mode m) {
   cbSnaptoGrid->setChecked(pen.hasFlag(ScribblePen::SNAP_TO_GRID));
   cbLineDrawing->setChecked(pen.hasFlag(ScribblePen::LINE_DRAWING));
   if (rebuild)
-    rebuildGrids();
+    // refreshPalette() rather than rebuildGrids(): switching to or from the marker changes which
+    //  variant the swatches show, so the color list itself has to be rebuilt, not just redrawn
+    refreshPalette();
   else
     updateSelected();
 }
@@ -737,6 +903,22 @@ void PenToolbar::setPen(const ScribblePen &newpen, Mode m) {
 
 void PenToolbar::updateColor() {
   pen.color = colorPicker->color();
+  // The reluctance (COLORS_SPEC.md §6.1): a color typed into the hex box or dialled on the sliders is
+  //  answered with the nearest thing that belongs to the theme rather than refused. Snapping happens
+  //  here, after the picker has reported, so every route into the pen color goes through it.
+  // The picker is only pushed back if the value actually moved, or setColor() would re-enter this.
+  if (themed && !offPaletteAllowed()) {
+    const Palette *pal = docPalette();
+    if (pal) {
+      Color snapped = pal->nearest(pen.color);
+      // alpha is the marker's business, not the palette's, so it is carried across
+      snapped.setAlpha(pen.color.alpha());
+      if (!(snapped == pen.color)) {
+        pen.color = snapped;
+        colorPicker->setColor(snapped);
+      }
+    }
+  }
   updateSelected();
   updateWidthPopup();  // the relative size display draws its stroke in the pen color
   if (onChanged)

@@ -1,0 +1,708 @@
+<!DOCTYPE html>
+<!--
+  color-lab.html - playground for the themed ink palette generator.
+
+  Self-contained, no dependencies, no build. Open it in a browser.
+
+  This is the algorithm discussed for Write's themed color system, made visible so the
+  knobs can be judged by eye instead of argued about in prose. Nothing here is wired
+  into the app; it is a model of the generator that would live in ulib.
+
+  The core idea, in one line:
+      pick a hue, find the most saturated color sRGB can make at that hue (the "cusp"),
+      then walk DOWN from it until the color is dark enough to read on the paper.
+  Lightness is never chosen. It is whatever legibility forces. Chroma is then whatever
+  the gamut still allows. That is what makes the palette hang together without any two
+  colors having an obvious relationship.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Write &mdash; ink palette lab</title>
+<style>
+  :root {
+    --bg: #15171c;
+    --panel: #1d2027;
+    --panel2: #252932;
+    --line: #333844;
+    --text: #dfe3ea;
+    --dim: #8b93a3;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 13px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  header {
+    padding: 14px 20px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
+  }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: .01em; }
+  header .sub { color: var(--dim); font-size: 12px; }
+  .wrap { display: flex; align-items: flex-start; gap: 0; }
+  .controls {
+    width: 320px; flex: none; padding: 16px 18px 40px; border-right: 1px solid var(--line);
+    position: sticky; top: 0; max-height: 100vh; overflow-y: auto;
+  }
+  .stage { flex: 1; padding: 16px 20px 60px; min-width: 0; }
+
+  .grp { margin-bottom: 20px; }
+  .grp > h3 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .09em;
+    color: var(--dim); margin: 0 0 10px; font-weight: 600;
+  }
+  .ctl { margin-bottom: 13px; }
+  .ctl label { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
+  .ctl label .v { color: var(--dim); font-variant-numeric: tabular-nums; }
+  .ctl input[type=range] { width: 100%; accent-color: #6f9ce8; }
+  .hint { color: var(--dim); font-size: 11px; margin-top: 3px; line-height: 1.45; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  button {
+    background: var(--panel2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 6px; padding: 7px 11px; font: inherit; cursor: pointer;
+  }
+  button:hover { background: #2e3440; }
+  button.primary { background: #35507e; border-color: #47679c; }
+  button.primary:hover { background: #3d5c91; }
+  .seg { display: flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .seg button { border: 0; border-radius: 0; flex: 1; padding: 6px 4px; }
+  .seg button.on { background: #35507e; }
+  .chk { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 9px; cursor: pointer; }
+  .chk input { margin-top: 3px; accent-color: #6f9ce8; }
+
+  h2.stage-h {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .09em;
+    color: var(--dim); margin: 22px 0 9px; font-weight: 600;
+  }
+  h2.stage-h:first-child { margin-top: 0; }
+
+  .paper { border-radius: 8px; padding: 0; overflow: hidden; border: 1px solid var(--line); }
+
+  .swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: 8px; }
+  .sw {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 7px;
+    overflow: hidden;
+  }
+  .sw .chips { display: flex; height: 46px; }
+  .sw .chips i { flex: 1; display: block; }
+  .sw .chips i.base { flex: 2.2; }
+  .sw .meta { padding: 6px 8px 7px; font-size: 10.5px; color: var(--dim); font-variant-numeric: tabular-nums; }
+  .sw .meta .hex { color: var(--text); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+  .sw .meta .warn { color: #e8a33d; }
+  .sw .meta .bad { color: #e2685f; }
+
+  .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+  .th { border: 1px solid var(--line); border-radius: 7px; overflow: hidden; cursor: pointer; background: var(--panel); }
+  .th:hover { border-color: #6f9ce8; }
+  .th .strip { display: flex; height: 34px; }
+  .th .strip i { flex: 1; }
+  .th .cap { padding: 5px 7px 6px; font-size: 10.5px; color: var(--dim); font-variant-numeric: tabular-nums; }
+
+  .ab { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .ab .col { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--panel); }
+  .ab .col > .hd {
+    padding: 7px 10px; font-size: 11px; font-weight: 600; letter-spacing: .04em;
+    border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; gap: 6px;
+  }
+  .ab .col > .hd .tag { color: var(--dim); font-weight: 500; }
+  .ab .col > .hd.masked .tag { visibility: hidden; }
+  .ab .col > .ft { padding: 6px 10px 8px; font-size: 10.5px; color: var(--dim); font-variant-numeric: tabular-nums; }
+  .ab .col > .ft .bad { color: #e2685f; }
+  .ab .col > .ft .warn { color: #e8a33d; }
+
+  table.cmp { border-collapse: collapse; width: 100%; font-size: 11.5px; font-variant-numeric: tabular-nums; }
+  table.cmp th, table.cmp td { text-align: right; padding: 5px 9px; border-bottom: 1px solid var(--line); }
+  table.cmp th:first-child, table.cmp td:first-child { text-align: left; }
+  table.cmp th { color: var(--dim); font-weight: 600; font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; }
+  table.cmp td .dot { display: inline-block; width: 11px; height: 11px; border-radius: 3px; vertical-align: -1px; margin-right: 6px; }
+  .note { color: var(--dim); font-size: 11.5px; max-width: 70ch; margin: 8px 0 0; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Write &mdash; ink palette lab</h1>
+  <span class="sub">gamut-boundary generator &middot; drag the knobs, the palette regenerates live</span>
+</header>
+
+<div class="wrap">
+  <div class="controls">
+
+    <div class="grp">
+      <h3>Seed</h3>
+      <div class="ctl">
+        <label>Seed hue <span class="v" id="v-hue"></span></label>
+        <input type="range" id="c-hue" min="0" max="359" step="1" value="218">
+        <div class="hint">The only thing taken from a seed color. Its lightness and saturation are discarded &mdash; that is why no seed can be &ldquo;bad&rdquo;.</div>
+      </div>
+      <div class="row">
+        <button id="b-roll" class="primary" style="flex:1">Reroll seed</button>
+      </div>
+    </div>
+
+    <div class="grp">
+      <h3>Character</h3>
+
+      <div class="ctl">
+        <label>Depth below cusp <span class="v" id="v-depth"></span></label>
+        <input type="range" id="c-depth" min="0" max="0.30" step="0.005" value="0.10">
+        <div class="hint"><b>This is the neon&ndash;to&ndash;ink knob.</b> 0 puts every color at its most saturated possible point (garish). The Schuler palette you showed me sits about 0.10 below.</div>
+      </div>
+
+      <div class="ctl">
+        <label>Vividness <span class="v" id="v-k"></span></label>
+        <input type="range" id="c-k" min="0.25" max="1" step="0.01" value="1">
+        <div class="hint">Fraction of the maximum chroma each hue can reach <i>at its own lightness</i>. Never an absolute number &mdash; 0.20 chroma is dull for magenta and impossible for cyan.</div>
+      </div>
+
+      <div class="ctl">
+        <label>Min contrast vs paper <span class="v" id="v-cr"></span></label>
+        <input type="range" id="c-cr" min="1.5" max="7" step="0.1" value="3">
+        <div class="hint">The legibility floor. Any color too pale to read gets pushed darker until it complies. 3:1 is the WCAG non-text threshold; 4.5:1 is body-text strict and costs a lot of chroma in yellow/green/teal.</div>
+      </div>
+
+      <div class="ctl">
+        <label>Hue scatter <span class="v" id="v-jit"></span></label>
+        <input type="range" id="c-jit" min="0" max="22" step="0.5" value="11">
+        <div class="hint">Deterministic per-seed wobble off perfectly even spacing. Schuler&rsquo;s triad is 108&deg;/140&deg;/112&deg;, not 120/120/120 &mdash; the error is what stops it reading as a formula.</div>
+      </div>
+    </div>
+
+    <div class="grp">
+      <h3>Paper</h3>
+      <div class="ctl">
+        <label>Lightness <span class="v" id="v-pl"></span></label>
+        <input type="range" id="c-pl" min="0.10" max="1.00" step="0.01" value="0.99">
+        <div class="hint">Drag below ~0.5 and the whole algorithm mirrors: ink walks <i>up</i> from the cusp and the palette goes pastel on its own.</div>
+      </div>
+      <div class="ctl">
+        <label>Warmth <span class="v" id="v-pw"></span></label>
+        <input type="range" id="c-pw" min="0" max="1" step="0.01" value="0.35">
+      </div>
+    </div>
+
+    <div class="grp">
+      <h3>Families</h3>
+      <div class="ctl">
+        <div class="seg" id="c-n">
+          <button data-n="8">8</button>
+          <button data-n="12" class="on">12</button>
+          <button data-n="16">16</button>
+        </div>
+      </div>
+      <label class="chk">
+        <input type="checkbox" id="c-env">
+        <span>Force shared envelope<div class="hint" style="margin-top:2px">The Tailwind/Material approach: one lightness for everything, chroma capped to what the <i>worst</i> hue can reach. Turn it on to see why it is wrong for ink.</div></span>
+      </label>
+    </div>
+
+    <div class="grp">
+      <h3>Presets</h3>
+      <div class="row">
+        <button data-preset="schuler">Schuler-like</button>
+        <button data-preset="calm">Calm</button>
+        <button data-preset="muted">Muted / earthy</button>
+        <button data-preset="neon">Neon (bad)</button>
+        <button data-preset="dark">Dark paper</button>
+        <button data-preset="strict">Strict 4.5:1</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="stage">
+    <h2 class="stage-h">On paper</h2>
+    <div class="paper" id="paper"></div>
+    <p class="note" id="paper-note"></p>
+
+    <h2 class="stage-h">Themed vs. not &mdash; same hues, same paper, only the rule differs</h2>
+    <div class="row" style="margin-bottom:10px">
+      <label class="chk" style="margin:0">
+        <input type="checkbox" id="c-blind" checked>
+        <span>Hide which is which (order shuffles each reroll)</span>
+      </label>
+      <button id="b-reveal">Reveal</button>
+    </div>
+    <div class="ab" id="ab"></div>
+    <p class="note" id="ab-note"></p>
+
+    <h2 class="stage-h">Families &mdash; base / dark / highlighter</h2>
+    <div class="swatches" id="swatches"></div>
+
+    <h2 class="stage-h">Reference: G&uuml;nter Schuler, &ldquo;modern&rdquo; &mdash; measured</h2>
+    <table class="cmp" id="ref"></table>
+    <p class="note">
+      All three sit at 97&ndash;100% of the maximum chroma sRGB can produce at their own lightness,
+      and all three sit below their hue&rsquo;s cusp by a similar amount (&minus;0.08 to &minus;0.13).
+      They share no lightness and no chroma. The only thing they have in common is a fact about the
+      display gamut &mdash; which is exactly why the relationship is invisible.
+    </p>
+
+    <h2 class="stage-h">Gallery &mdash; twelve seeds, current character settings</h2>
+    <div class="gallery" id="gallery"></div>
+    <p class="note">Click any thumbnail to load its seed. Everything here is generated; nothing is hand-picked.</p>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+/* ---------------------------------------------------------------------------
+   Color math: sRGB <-> OKLab/OKLCh, plus the sRGB gamut boundary.
+   Bjorn Ottosson's OKLab matrices. Everything below works in OKLCh because it
+   is the only common space where "same lightness" and "same hue" actually look
+   like it, which is the whole premise of the generator.
+   ------------------------------------------------------------------------ */
+
+const srgbToLinear = c => { c /= 255; return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+const linearToSrgb = c => c <= 0.0031308 ? 12.92 * c : 1.055 * Math.pow(Math.max(c, 0), 1 / 2.4) - 0.055;
+
+function rgbToOklch(r, g, b) {
+  const R = srgbToLinear(r), G = srgbToLinear(g), B = srgbToLinear(b);
+  const l = Math.cbrt(0.4122214708 * R + 0.5363325363 * G + 0.0514459929 * B);
+  const m = Math.cbrt(0.2119034982 * R + 0.6806995451 * G + 0.1073969566 * B);
+  const s = Math.cbrt(0.0883024619 * R + 0.2817188376 * G + 0.6299787005 * B);
+  const L = 0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s;
+  const a = 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s;
+  const bb = 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s;
+  let h = Math.atan2(bb, a) * 180 / Math.PI; if (h < 0) h += 360;
+  return { L, C: Math.hypot(a, bb), h };
+}
+
+/* linear-light RGB, may fall outside [0,1] when the color is out of gamut */
+function oklchToLinearRgb(L, C, h) {
+  const a = C * Math.cos(h * Math.PI / 180), bb = C * Math.sin(h * Math.PI / 180);
+  const l = Math.pow(L + 0.3963377774 * a + 0.2158037573 * bb, 3);
+  const m = Math.pow(L - 0.1055613458 * a - 0.0638541728 * bb, 3);
+  const s = Math.pow(L - 0.0894841775 * a - 1.2914855480 * bb, 3);
+  return [
+     4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+    -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+    -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s
+  ];
+}
+
+const inGamut = (L, C, h) => oklchToLinearRgb(L, C, h).every(v => v >= -1e-4 && v <= 1 + 1e-4);
+
+/* the gamut boundary: the largest chroma this hue can hold at this lightness */
+function maxChroma(L, h) {
+  let lo = 0, hi = 0.45;
+  for (let i = 0; i < 28; i++) { const mid = (lo + hi) / 2; inGamut(L, mid, h) ? lo = mid : hi = mid; }
+  return lo;
+}
+
+/* the cusp: the lightness at which this hue is most saturated. Note it moves a
+   long way around the wheel - yellow peaks near L=0.96, blue near L=0.49 - which
+   is precisely why a fixed lightness ramp cannot serve every hue. */
+const cuspCache = new Map();
+function cusp(h) {
+  const key = Math.round(h * 4);
+  if (cuspCache.has(key)) return cuspCache.get(key);
+  let bestL = 0.5, bestC = -1;
+  for (let L = 0.05; L <= 0.98; L += 0.01) { const c = maxChroma(L, h); if (c > bestC) { bestC = c; bestL = L; } }
+  for (let L = Math.max(0.03, bestL - 0.012); L <= Math.min(0.99, bestL + 0.012); L += 0.0015) {
+    const c = maxChroma(L, h); if (c > bestC) { bestC = c; bestL = L; }
+  }
+  const out = { L: bestL, C: bestC };
+  cuspCache.set(key, out);
+  return out;
+}
+
+function oklchToHex(L, C, h) {
+  const [r, g, b] = oklchToLinearRgb(L, C, h).map(v => Math.round(255 * Math.min(1, Math.max(0, linearToSrgb(v)))));
+  return '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
+}
+function oklchToRgb255(L, C, h) {
+  return oklchToLinearRgb(L, C, h).map(v => Math.round(255 * Math.min(1, Math.max(0, linearToSrgb(v)))));
+}
+
+/* WCAG relative luminance + contrast ratio. Used as the legibility floor. */
+const relLum = ([r, g, b]) => 0.2126 * srgbToLinear(r) + 0.7152 * srgbToLinear(g) + 0.0722 * srgbToLinear(b);
+function contrast(rgbA, rgbB) {
+  const a = relLum(rgbA), b = relLum(rgbB);
+  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+}
+
+/* ---------------------------------------------------------------------------
+   The generator.
+   ------------------------------------------------------------------------ */
+
+/* deterministic per-(seed, index) jitter, so a given seed always makes the same
+   palette - a random wobble would repaint the theme on every launch */
+function hash01(seed, i) {
+  let x = Math.imul(Math.round(seed * 1000) ^ Math.imul(i + 1, 0x9e3779b9), 0x85ebca6b);
+  x ^= x >>> 13; x = Math.imul(x, 0xc2b2ae35); x ^= x >>> 16;
+  return ((x >>> 0) / 4294967296);
+}
+
+function paperColor(cfg) {
+  /* paper is a hue-80 (warm cream) tint; warmth scales its chroma */
+  const C = 0.022 * cfg.paperWarm * (cfg.paperL > 0.5 ? 1 : 0.6);
+  return { L: cfg.paperL, C, h: 80 };
+}
+
+function generate(cfg) {
+  const paper = paperColor(cfg);
+  const paperRgb = oklchToRgb255(paper.L, paper.C, paper.h);
+  const darkInk = paper.L > 0.5;          /* light paper -> ink is darker than it */
+  const families = [];
+
+  for (let i = 0; i < cfg.n; i++) {
+    const jitter = (hash01(cfg.seedHue, i) * 2 - 1) * cfg.jitter;
+    const h = (cfg.seedHue + i * 360 / cfg.n + jitter + 360) % 360;
+    const cu = cusp(h);
+
+    /* Start "depth" away from the cusp, on the side the paper is not on. This is
+       the single step that turns a neon wheel into a set of inks. */
+    let L = darkInk ? cu.L - cfg.depth : cu.L + cfg.depth;
+    L = Math.min(0.95, Math.max(0.12, L));
+
+    /* Then keep walking until the color is legible on THIS paper. For blue and
+       violet this does nothing (they already pass); for yellow, green, teal and
+       cyan it is the difference between a color and an invisible one. */
+    const step = darkInk ? -0.004 : 0.004;
+    let guard = 0;
+    while (guard++ < 250) {
+      const rgb = oklchToRgb255(L, cfg.k * maxChroma(L, h), h);
+      if (contrast(rgb, paperRgb) >= cfg.minContrast) break;
+      const next = L + step;
+      if (next < 0.10 || next > 0.97) break;
+      L = next;
+    }
+
+    const C = cfg.k * maxChroma(L, h);
+    const cr = contrast(oklchToRgb255(L, C, h), paperRgb);
+
+    /* variants: dark for emphasis, highlighter tuned to sit UNDER text rather
+       than over paper, so it is deliberately pale and translucent */
+    const dL = darkInk ? Math.max(0.12, L - 0.14) : Math.min(0.95, L + 0.14);
+    const hlL = darkInk ? Math.min(0.93, cu.L + 0.10) : Math.max(0.25, cu.L - 0.18);
+
+    families.push({
+      h, L, C, cusp: cu,
+      hex: oklchToHex(L, C, h),
+      contrast: cr,
+      frac: C / Math.max(1e-6, maxChroma(L, h)),
+      darkHex: oklchToHex(dL, cfg.k * maxChroma(dL, h) * 0.92, h),
+      hlHex: oklchToHex(hlL, Math.min(maxChroma(hlL, h), 0.13) * cfg.k, h)
+    });
+  }
+
+  /* The comparison case: one lightness for all, chroma capped to whatever the
+     weakest hue can manage. Everything flattens; the vivid hues lose the most. */
+  if (cfg.sharedEnvelope) {
+    const Lc = families.reduce((s, f) => s + f.L, 0) / families.length;
+    const cap = Math.min(...families.map(f => maxChroma(Lc, f.h)));
+    for (const f of families) {
+      f.L = Lc; f.C = cap * cfg.k;
+      f.hex = oklchToHex(f.L, f.C, f.h);
+      f.contrast = contrast(oklchToRgb255(f.L, f.C, f.h), paperRgb);
+      f.frac = f.C / Math.max(1e-6, maxChroma(f.L, f.h));
+      f.darkHex = oklchToHex(Math.max(0.12, f.L - 0.14), cap * cfg.k * 0.92, f.h);
+      f.hlHex = oklchToHex(Math.min(0.93, f.L + 0.28), Math.min(cap, 0.11) * cfg.k, f.h);
+    }
+  }
+
+  return { families, paper, paperHex: oklchToHex(paper.L, paper.C, paper.h), darkInk };
+}
+
+/* ---------------------------------------------------------------------------
+   Rendering
+   ------------------------------------------------------------------------ */
+
+/* a handwriting-ish squiggle, deterministic so the sample does not dance around
+   while a slider is being dragged */
+function squiggle(x, y, w, seed) {
+  const amp = 7, seg = 17;
+  let d = `M ${x} ${y}`;
+  const n = Math.max(3, Math.round(w / seg));
+  for (let i = 0; i < n; i++) {
+    const r1 = hash01(seed, i * 3), r2 = hash01(seed, i * 3 + 1), r3 = hash01(seed, i * 3 + 2);
+    const x0 = x + (i * w) / n, x1 = x + ((i + 1) * w) / n;
+    d += ` C ${x0 + (x1 - x0) * 0.33} ${y - amp * (0.4 + r1)}, `
+       + `${x0 + (x1 - x0) * 0.66} ${y + amp * (0.4 + r2)}, `
+       + `${x1} ${y + (r3 - 0.5) * 3}`;
+  }
+  return d;
+}
+
+function renderPaper(pal, cfg) {
+  const W = 860, rowH = 52, top = 30;
+  const rows = pal.families.length;
+  const H = top + rows * rowH + 38;
+  let svg = `<svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block;background:${pal.paperHex}">`;
+
+  /* ruling, in the same spirit as Write's blue rule lines */
+  const ruleHex = oklchToHex(
+    pal.darkInk ? Math.max(0.55, pal.paper.L - 0.30) : Math.min(0.80, pal.paper.L + 0.22),
+    0.045, 250);
+  for (let i = 0; i <= rows; i++) {
+    const y = top + i * rowH + 14;
+    svg += `<line x1="26" y1="${y}" x2="${W - 26}" y2="${y}" stroke="${ruleHex}" stroke-width="1" opacity=".55"/>`;
+  }
+
+  pal.families.slice(0, rows).forEach((f, i) => {
+    const y = top + i * rowH;
+    /* highlighter band first, so the ink lands on top of it like a real marker */
+    svg += `<rect x="54" y="${y - 13}" width="250" height="24" rx="3" fill="${f.hlHex}" opacity=".75"/>`;
+    svg += `<path d="${squiggle(54, y, 420, i + 1)}" fill="none" stroke="${f.hex}" `
+         + `stroke-width="3.1" stroke-linecap="round" stroke-linejoin="round"/>`;
+    /* a thicker mark and a dark-variant underline, to judge the color at weight */
+    svg += `<path d="${squiggle(500, y, 150, i + 40)}" fill="none" stroke="${f.hex}" `
+         + `stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>`;
+    svg += `<line x1="676" y1="${y + 9}" x2="${W - 40}" y2="${y + 9}" stroke="${f.darkHex}" stroke-width="2.4" stroke-linecap="round"/>`;
+    svg += `<path d="${squiggle(676, y - 2, 144, i + 90)}" fill="none" stroke="${f.darkHex}" `
+         + `stroke-width="2.2" stroke-linecap="round"/>`;
+    /* family 0 sits exactly on the seed hue; the rest are even steps from it */
+    const lbl = oklchToHex(pal.darkInk ? 0.55 : 0.80, 0.01, 80);
+    svg += `<text x="26" y="${y + 4}" font-size="9" font-family="ui-sans-serif,system-ui,sans-serif" `
+         + `fill="${lbl}">${i === 0 ? 'seed' : String(i + 1)}</text>`;
+  });
+  svg += `</svg>`;
+  return svg;
+}
+
+function renderSwatches(pal) {
+  return pal.families.map((f, i) => {
+    const crCls = f.contrast < 2.2 ? 'bad' : (f.contrast < 3 ? 'warn' : '');
+    return `<div class="sw">
+      <div class="chips">
+        <i class="base" style="background:${f.hex}"></i>
+        <i style="background:${f.darkHex}"></i>
+        <i style="background:${f.hlHex}"></i>
+      </div>
+      <div class="meta">
+        <div class="hex">${f.hex}</div>
+        <div>h ${f.h.toFixed(0)}&deg; &middot; L ${f.L.toFixed(3)} &middot; C ${f.C.toFixed(3)}</div>
+        <div>${(f.frac * 100).toFixed(0)}% of gamut edge &middot;
+          <span class="${crCls}">${f.contrast.toFixed(2)}:1</span></div>
+        <div>cusp L ${f.cusp.L.toFixed(2)} &rarr; &Delta;${(f.L - f.cusp.L).toFixed(3)}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+const SCHULER = [['magenta', 213, 19, 121], ['cyan', 0, 169, 201], ['yellow', 221, 220, 0]];
+
+function renderRef() {
+  const white = [255, 255, 255];
+  let rows = SCHULER.map(([n, r, g, b]) => {
+    const c = rgbToOklch(r, g, b), mx = maxChroma(c.L, c.h), cu = cusp(c.h);
+    const hex = '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
+    return `<tr>
+      <td><span class="dot" style="background:${hex}"></span>${n}</td>
+      <td>${hex}</td>
+      <td>${c.L.toFixed(3)}</td>
+      <td>${c.C.toFixed(3)}</td>
+      <td>${c.h.toFixed(1)}&deg;</td>
+      <td>${(c.C / mx * 100).toFixed(0)}%</td>
+      <td>${(c.L - cu.L).toFixed(3)}</td>
+      <td>${contrast([r, g, b], white).toFixed(2)}:1</td>
+    </tr>`;
+  }).join('');
+  return `<thead><tr>
+      <th>color</th><th>hex</th><th>L</th><th>C</th><th>hue</th>
+      <th>of max C</th><th>&Delta; to cusp</th><th>vs white</th>
+    </tr></thead><tbody>${rows}</tbody>`;
+}
+
+function renderGallery(cfg) {
+  let out = '';
+  for (let i = 0; i < 12; i++) {
+    const seed = Math.round((i * 360 / 12 + hash01(i + 7, 3) * 26) % 360);
+    const pal = generate({ ...cfg, seedHue: seed, n: 8 });
+    out += `<div class="th" data-seed="${seed}">
+      <div class="strip" style="background:${pal.paperHex}">
+        ${pal.families.map(f => `<i style="background:${f.hex}"></i>`).join('')}
+      </div>
+      <div class="cap">seed ${seed}&deg;</div>
+    </div>`;
+  }
+  return out;
+}
+
+/* ---------------------------------------------------------------------------
+   The A/B test: is the generator actually buying anything over the obvious
+   alternatives? Same hues, same paper, same strokes - only the rule that picks
+   lightness and chroma differs.
+
+     themed   - walk down from each hue's cusp until legible (this generator)
+     rotated  - "just shift the hue": fixed HSV saturation and value, hue stepped
+     classic  - the rainbow palette nearly every drawing app ships
+   ------------------------------------------------------------------------ */
+
+function hsvToHex(h, s, v) {
+  h = ((h % 360) + 360) % 360;
+  const c = v * s, x = c * (1 - Math.abs((h / 60) % 2 - 1)), m = v - c;
+  const seg = [[c,x,0],[x,c,0],[0,c,x],[0,x,c],[x,0,c],[c,0,x]][Math.floor(h / 60) % 6];
+  const rgb = seg.map(u => Math.round((u + m) * 255));
+  return '#' + rgb.map(u => u.toString(16).padStart(2, '0')).join('');
+}
+const hexToRgb = hex => [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16));
+
+/* the standard-issue palette: saturated primaries and secondaries, evenly spaced
+   around the HSV wheel. This is what Write ships today, and what almost every
+   note-taking app offers. */
+const CLASSIC = ['#ff0000','#ff7f00','#ffbf00','#ffff00','#7fff00','#00c000',
+                 '#00bfbf','#00bfff','#0000ff','#7f00ff','#ff00ff','#ff007f'];
+
+function buildColumns(cfg, pal) {
+  const themed = pal.families.map(f => f.hex);
+
+  /* naive hue rotation at full saturation/value - the literal "just shift hue" */
+  const rotated = [];
+  for (let i = 0; i < cfg.n; i++) rotated.push(hsvToHex(cfg.seedHue + i * 360 / cfg.n, 1, 1));
+
+  /* the classic palette, resampled if the family count is not 12 */
+  const classic = [];
+  for (let i = 0; i < cfg.n; i++) classic.push(CLASSIC[Math.round(i * CLASSIC.length / cfg.n) % CLASSIC.length]);
+
+  return [
+    { key: 'themed',  name: 'Generated',      tag: 'gamut boundary, legibility-driven', colors: themed },
+    { key: 'rotated', name: 'Hue rotation',   tag: 'fixed HSV sat/value, hue stepped',  colors: rotated },
+    { key: 'classic', name: 'Classic palette',tag: 'the usual rainbow',                 colors: classic }
+  ];
+}
+
+function miniPaper(colors, paperHex) {
+  const W = 300, rowH = 26, top = 12, H = top + colors.length * rowH + 8;
+  let svg = `<svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block;background:${paperHex}">`;
+  colors.forEach((hex, i) => {
+    const y = top + i * rowH + 8;
+    svg += `<path d="${squiggle(14, y, 200, i + 1)}" fill="none" stroke="${hex}" `
+         + `stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>`;
+    svg += `<path d="${squiggle(226, y, 60, i + 40)}" fill="none" stroke="${hex}" `
+         + `stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>`;
+  });
+  return svg + `</svg>`;
+}
+
+function columnStats(colors, paperRgb) {
+  const crs = colors.map(h => contrast(hexToRgb(h), paperRgb));
+  const Ls = colors.map(h => { const c = hexToRgb(h); return rgbToOklch(c[0], c[1], c[2]).L; });
+  return {
+    worst: Math.min(...crs),
+    illegible: crs.filter(c => c < 3).length,
+    lRange: Math.max(...Ls) - Math.min(...Ls)
+  };
+}
+
+let abOrder = [0, 1, 2], abRevealed = false;
+
+function renderCompare(cfg, pal) {
+  const cols = buildColumns(cfg, pal);
+  const paperRgb = oklchToRgb255(pal.paper.L, pal.paper.C, pal.paper.h);
+  const blind = $('c-blind').checked && !abRevealed;
+
+  $('ab').innerHTML = abOrder.map((idx, slot) => {
+    const c = cols[idx], st = columnStats(c.colors, paperRgb);
+    const badCls = st.illegible > 0 ? 'bad' : (st.worst < 3.5 ? 'warn' : '');
+    return `<div class="col">
+      <div class="hd ${blind ? 'masked' : ''}">
+        <span>${blind ? String.fromCharCode(65 + slot) : c.name}</span>
+        <span class="tag">${c.tag}</span>
+      </div>
+      ${miniPaper(c.colors, pal.paperHex)}
+      <div class="ft">
+        worst contrast <span class="${badCls}">${st.worst.toFixed(2)}:1</span><br>
+        <span class="${badCls}">${st.illegible}</span> of ${c.colors.length} below 3:1<br>
+        lightness spread ${st.lRange.toFixed(3)}
+      </div>
+    </div>`;
+  }).join('');
+
+  const stats = cols.map(c => columnStats(c.colors, paperRgb));
+  $('ab-note').innerHTML = blind
+    ? 'Labels hidden. Judge by eye first, then press Reveal &mdash; the objective numbers under each column are shown either way.'
+    : `Hue rotation puts <b>${stats[1].illegible}</b> and the classic palette <b>${stats[2].illegible}</b> `
+      + `of ${cols[0].colors.length} colors below the 3:1 legibility floor, against <b>${stats[0].illegible}</b> for the generator. `
+      + `The failures are always the same hues &mdash; yellow, green, cyan &mdash; because at a fixed saturation and value those are far too light to read on paper, `
+      + `while blue and violet come out almost black. That uneven weight is the thing a rotated wheel cannot fix, and it is what the generator is for.`;
+}
+
+/* ---------------------------------------------------------------------------
+   Wiring
+   ------------------------------------------------------------------------ */
+
+const cfg = {
+  seedHue: 218, depth: 0.10, k: 1.0, minContrast: 3.0, jitter: 11,
+  paperL: 0.99, paperWarm: 0.35, n: 12, sharedEnvelope: false
+};
+
+const PRESETS = {
+  schuler: { depth: 0.10, k: 1.00, minContrast: 3.0, jitter: 14, paperL: 0.99, paperWarm: 0.15, sharedEnvelope: false },
+  calm:    { depth: 0.16, k: 0.72, minContrast: 3.5, jitter: 9,  paperL: 0.98, paperWarm: 0.45, sharedEnvelope: false },
+  muted:   { depth: 0.20, k: 0.45, minContrast: 3.5, jitter: 7,  paperL: 0.96, paperWarm: 0.75, sharedEnvelope: false },
+  neon:    { depth: 0.00, k: 1.00, minContrast: 1.5, jitter: 0,  paperL: 0.99, paperWarm: 0.0,  sharedEnvelope: false },
+  dark:    { depth: 0.12, k: 0.85, minContrast: 3.5, jitter: 11, paperL: 0.22, paperWarm: 0.30, sharedEnvelope: false },
+  strict:  { depth: 0.10, k: 1.00, minContrast: 4.5, jitter: 11, paperL: 0.99, paperWarm: 0.35, sharedEnvelope: false }
+};
+
+const $ = id => document.getElementById(id);
+
+function syncInputs() {
+  $('c-hue').value = cfg.seedHue;   $('v-hue').textContent = cfg.seedHue + '°';
+  $('c-depth').value = cfg.depth;   $('v-depth').textContent = cfg.depth.toFixed(3);
+  $('c-k').value = cfg.k;           $('v-k').textContent = (cfg.k * 100).toFixed(0) + '%';
+  $('c-cr').value = cfg.minContrast;$('v-cr').textContent = cfg.minContrast.toFixed(1) + ':1';
+  $('c-jit').value = cfg.jitter;    $('v-jit').textContent = '±' + cfg.jitter.toFixed(1) + '°';
+  $('c-pl').value = cfg.paperL;     $('v-pl').textContent = cfg.paperL.toFixed(2);
+  $('c-pw').value = cfg.paperWarm;  $('v-pw').textContent = (cfg.paperWarm * 100).toFixed(0) + '%';
+  $('c-env').checked = cfg.sharedEnvelope;
+  [...$('c-n').children].forEach(b => b.classList.toggle('on', +b.dataset.n === cfg.n));
+}
+
+let galleryKey = '';
+function render() {
+  const pal = generate(cfg);
+  $('paper').innerHTML = renderPaper(pal, cfg);
+  $('swatches').innerHTML = renderSwatches(pal);
+  renderCompare(cfg, pal);
+
+  const avgFrac = pal.families.reduce((s, f) => s + f.frac, 0) / pal.families.length;
+  const worst = Math.min(...pal.families.map(f => f.contrast));
+  const lRange = Math.max(...pal.families.map(f => f.L)) - Math.min(...pal.families.map(f => f.L));
+  $('paper-note').innerHTML =
+    `paper ${pal.paperHex} &middot; ink sits at <b>${(avgFrac * 100).toFixed(0)}%</b> of the gamut edge on average &middot; `
+    + `lightness spread <b>${lRange.toFixed(3)}</b> &middot; worst contrast <b>${worst.toFixed(2)}:1</b>`
+    + (cfg.sharedEnvelope ? ' &middot; <b style="color:#e8a33d">shared envelope on &mdash; note the collapsed lightness spread and the chroma lost</b>' : '');
+
+  /* the gallery only depends on character, not on the seed, so do not rebuild it
+     on every drag of the hue slider */
+  const key = [cfg.depth, cfg.k, cfg.minContrast, cfg.jitter, cfg.paperL, cfg.paperWarm, cfg.sharedEnvelope].join(',');
+  if (key !== galleryKey) { galleryKey = key; $('gallery').innerHTML = renderGallery(cfg); }
+}
+
+function update(patch) { Object.assign(cfg, patch); syncInputs(); render(); }
+
+$('c-hue').oninput   = e => update({ seedHue: +e.target.value });
+$('c-depth').oninput = e => update({ depth: +e.target.value });
+$('c-k').oninput     = e => update({ k: +e.target.value });
+$('c-cr').oninput    = e => update({ minContrast: +e.target.value });
+$('c-jit').oninput   = e => update({ jitter: +e.target.value });
+$('c-pl').oninput    = e => update({ paperL: +e.target.value });
+$('c-pw').oninput    = e => update({ paperWarm: +e.target.value });
+$('c-env').onchange  = e => update({ sharedEnvelope: e.target.checked });
+$('b-roll').onclick  = () => {
+  abOrder = [0, 1, 2].sort(() => Math.random() - 0.5);
+  abRevealed = false;
+  update({ seedHue: Math.floor(Math.random() * 360) });
+};
+$('c-blind').onchange = () => { abRevealed = false; render(); };
+$('b-reveal').onclick = () => { abRevealed = true; render(); };
+$('c-n').onclick     = e => { if (e.target.dataset.n) update({ n: +e.target.dataset.n }); };
+
+document.querySelectorAll('[data-preset]').forEach(b => {
+  b.onclick = () => update(PRESETS[b.dataset.preset]);
+});
+$('gallery').onclick = e => {
+  const th = e.target.closest('.th');
+  if (th) update({ seedHue: +th.dataset.seed });
+};
+
+$('ref').innerHTML = renderRef();
+syncInputs();
+render();
+</script>
+</body>
+</html>

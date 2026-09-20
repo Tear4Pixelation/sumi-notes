@@ -47,6 +47,23 @@ public:
   int getScribbleMode(int modemod);
   int getActiveMode() const;
 
+  // The document's themed palette (COLORS_SPEC.md), generated from cfg's recipe and cached - the
+  //  generator is far too expensive to run per frame, and nothing in the drawing or input path calls it.
+  const Palette& palette();
+  void invalidatePalette() { paletteValid = false; }
+  // False once the palette has been generated from a generator id this build does not have: the
+  //  document still renders correctly from its literal stroke colors, but its palette is a fallback.
+  bool isThemeGenKnown() const { return themeGenKnown; }
+  // applyPages writes the theme's paper and rule colors onto the document's pages, undoably;
+  //  globalDefault additionally makes this the recipe new documents get.
+  // ownAction false means the caller has already opened an undo action and this must not open its
+  //  own - restyleToTheme() needs the page recolor and the stroke recolor to be one Ctrl+Z.
+  void setTheme(const PaletteRecipe& recipe, bool applyPages, bool globalDefault, bool ownAction = true);
+  // Phase 5: change the theme *and* rewrite every stroke drawn in the old palette to the matching
+  //  color in the new one, as a single undoable action.  Returns the number of strokes changed.
+  //  Strokes that are not the old palette's colors are left untouched.
+  int restyleToTheme(const PaletteRecipe& recipe, bool applyPages, bool globalDefault);
+
   Color getCurrPageColor() const;
   void scribbleDone();
   void pageSizeChanged();
@@ -116,6 +133,9 @@ public:
   std::unique_ptr<Page> ghostPage;
   Timestamp fileLastMod = 0;
   bool autoSaveReq = false;
+  Palette themePalette;
+  bool paletteValid = false;
+  bool themeGenKnown = true;
 
   StrokeBuilder* strokeBuilder = NULL;
 };

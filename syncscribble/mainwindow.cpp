@@ -554,8 +554,33 @@ void MainWindow::toggleFullscreen()
 #endif
 }
 
+// COLORS_SPEC.md §10.1, resolved: for a themed document the theme's dark paper supersedes the old
+//  XOR inversion.
+//
+// `colorXorMask` is a photographic negative - it flips every channel, so a themed cyan comes out an
+//  unrelated orange. That was always true (red has always inverted to cyan), but a palette that was
+//  computed to sit on a particular paper is exactly the thing a negative destroys: the contrast the
+//  walk guaranteed is against the *old* paper, and the hues no longer belong to any theme.
+//
+// So a themed document inverts by **mirroring its own recipe** - `paperL -> 1 - paperL`, which is the
+//  case the generator already handles by walking up from the cusp instead of down - and remapping the
+//  strokes through `Palette::mapFrom()`. The result is a real dark-paper rendering of the same theme
+//  rather than a negative of it, and round-trips exactly, since the mapping is by ordinal and variant.
+//
+// The cost, stated plainly: this makes Invert Colors a **document edit** rather than a view filter.
+//  It is one undo step, but it is saved and it syncs - so it is no longer a way to read in the dark
+//  without changing the file. Documents with no palette keep the original XOR path.
 void MainWindow::toggleInvertColors()
 {
+  ScribbleDoc* doc = app->activeDoc();
+  if(doc && !doc->palette().families.empty()) {
+    PaletteRecipe mirrored = doc->cfg->themeRecipe();
+    mirrored.paperL = 1 - mirrored.paperL;
+    doc->restyleToTheme(mirrored, true, false);
+    actionInvertColors->setChecked(doc->palette().isDarkPaper());
+    redraw();
+    return;
+  }
   bool invert = !actionInvertColors->checked();
   actionInvertColors->setChecked(invert);
   ScribbleApp::cfg->set("invertColors", invert);
@@ -1569,6 +1594,10 @@ void MainWindow::setupActions()
   actionShow_Bookmarks->setPriority(Action::NormalPriority - 1);
   actionPage_Setup = createAction("actionPage_Setup",
       "Page Setup...", ":/icons/ic_menu_document.svg", "", SLOT(showPageSetup()));
+  // ic_menu_add_color is the closest thing already in scribbleres/icons; a dedicated icon would have to
+  //  come from the reicon pipeline (see CLAUDE.md), not be hand-drawn here
+  actionTheme = createAction("actionTheme",
+      "Theme...", ":/icons/ic_menu_add_color.svg", "", SLOT(showThemePicker()));
   actionInsert_Image = createAction("actionInsert_Image",
       "Insert Image...", ":/icons/ic_menu_add_pic.svg", "", SLOT(insertImage()));
   // two entries rather than one plus a choice in the dialog: the destination is decided before the
@@ -1857,6 +1886,7 @@ void MainWindow::setupActions()
   overflowPopup->addSubmenu(_("View"), viewmenu);
   overflowPopup->addSubmenu(_("Selection"), selectionmenu);
   overflowPopup->addAction(actionPage_Setup);
+  overflowPopup->addAction(actionTheme);
   overflowPopup->addAction(actionInsert_Image);  // move to Document menu?
   overflowPopup->addAction(actionScan_Element);
   overflowPopup->addAction(actionPreferences);

@@ -17,6 +17,10 @@ public:
   int shapeRoundTripTest();
   // interrupting a shape gesture (pen button / right-click) must leave no orphaned element
   int shapeInterruptTest();
+  // the document theme recipe must survive save/reload, and applying it must not flatten page rulings
+  int themeRoundTripTest();
+  // restyling moves the theme's own ink, leaves everything else alone, and undoes in one step
+  int restyleTest();
   void performanceTest();
   void inputTest();
   void syncSlaveMsg(std::string msg, int level);

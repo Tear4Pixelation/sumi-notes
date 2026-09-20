@@ -1,5 +1,6 @@
 #include <sstream>
 #include "scribbledoc.h"
+#include "pentoolbar.h"  // the themed swatches are rebuilt from here when the theme changes
 #include "scribblemode.h"
 #include "scribblesync.h"
 #include "strokebuilder.h"
@@ -47,6 +48,14 @@ void ScribbleDoc::removeArea(ScribbleArea* area)
 
 void ScribbleDoc::loadConfig(bool refresh)
 {
+  // every path that swaps cfg (newDocument, openDocument) calls this immediately afterwards, and a
+  //  change to the global prefs can move the recipe too, so this is the one place the cached palette
+  //  has to be dropped
+  paletteValid = false;
+  // a different document can carry a different theme, so the swatches follow it; guarded because
+  //  loadConfig() also runs while the app is still being constructed
+  if(app && app->penToolbar)
+    app->penToolbar->refreshPalette();
   for(unsigned int ii = 0; ii < views.size(); ii++)
     views[ii]->loadConfig(cfg);
 
@@ -297,6 +306,7 @@ void ScribbleDoc::resetDocPrefs()
 {
   delete cfg;
   cfg = new ScribbleConfig(globalCfg);   //cfg->set("bookmarkSerialNum", n);
+  paletteValid = false;  // the document's theme override went with the old cfg
 }
 
 void ScribbleDoc::doUndoRedo(bool redo)
@@ -645,6 +655,133 @@ bool ScribbleDoc::setPageProperties(const PageProperties* props, bool applytoall
   uiChanged(UIState::SetPageProps);
   doRefresh();
   return clipped;
+}
+
+const Palette& ScribbleDoc::palette()
+{
+  if(!paletteValid) {
+    themeGenKnown = generatePalette(cfg->themeRecipe(), &themePalette);
+    paletteValid = true;
+  }
+  return themePalette;
+}
+
+void ScribbleDoc::setTheme(const PaletteRecipe& recipe, bool applyPages, bool globalDefault, bool ownAction)
+{
+  cfg->setThemeRecipe(recipe);
+  if(globalDefault)
+    globalCfg->setThemeRecipe(recipe);
+  paletteValid = false;
+  const Palette& pal = palette();
+
+  // the recipe is also the source of the page defaults, so a page added later matches the theme
+  cfg->set("pageColor", int(pal.paper.argb()));
+  cfg->set("ruleColor", int(pal.rule.argb()));
+  // Accents are part of the theme too (COLORS_SPEC.md §10.3): a bookmark or link in some unrelated
+  //  blue is the one thing on the page that ignores the palette.  These were global-only; writing
+  //  them to the document config as well is what resolves the inconsistency the spec flagged, and
+  //  costs nothing because cfg falls through to globalCfg for documents that have no theme.
+  cfg->set("bookmarkColor", int(pal.bookmark.argb()));
+  cfg->set("linkColor", int(pal.link.argb()));
+  if(globalDefault) {
+    globalCfg->set("pageColor", int(pal.paper.argb()));
+    globalCfg->set("ruleColor", int(pal.rule.argb()));
+    globalCfg->set("bookmarkColor", int(pal.bookmark.argb()));
+    globalCfg->set("linkColor", int(pal.link.argb()));
+  }
+  // ScribbleApp caches the bookmark color in a member, so the config write alone would not take
+  //  effect until the next restart
+  app->bookmarkColor = pal.bookmark;
+
+  if(applyPages) {
+    // Deliberately not setPageProperties(): that applies one PageProperties to every page, and since
+    //  Page::setProperties() assigns the whole struct, it would flatten each page's own ruling and
+    //  (for any page whose size differs) its dimensions onto the current page's. A theme changes two
+    //  colors and must leave the rest of each page alone, so each page gets its own props back with
+    //  only color and ruleColor replaced.
+    if(ownAction)
+      startAction(activeArea->currPageNum | UndoHistory::MULTIPAGE);
+    for(Page* page : document->pages) {
+      // Pages whose background is an image - PDF import, document scan - are skipped: their paper is
+      //  the image, so recoloring underneath it does nothing visible and only dirties the page.
+      if(page->isCustomRuling)
+        continue;
+      PageProperties props = page->getProperties();
+      props.color = pal.paper;
+      props.ruleColor = pal.rule;
+      page->setProperties(&props);
+    }
+    if(ownAction)
+      endAction();
+    pageSizeChanged();
+  }
+  updateGhostPage();
+  // the pen toolbar's swatches are generated from this palette, so they have to be rebuilt here -
+  //  setPen() early-returns when the pen has not changed, which a theme change does not do
+  if(app->penToolbar)
+    app->penToolbar->refreshPalette();
+  uiChanged(UIState::SetPageProps);
+  doRefresh();
+}
+
+// Restyle (COLORS_SPEC.md §7).  Deliberate deviation from the spec: strokes carry **no `__inkbase`**.
+//
+// The spec had each stroke record which reference-palette entry it came from, so a restyle could look
+//  it up later.  That is unnecessary here, because at the moment of restyling we know both palettes -
+//  the old recipe is still in cfg, and the new one is the argument - so a stroke can be identified by
+//  its literal color being an exact member of the *old* palette.  Two things fall out of that, both
+//  strictly better: no new file-format attribute, and strokes drawn before this feature existed are
+//  restyleable, where a tag-based scheme could only ever restyle strokes drawn after it shipped.
+//
+// The cost is that a document carried through several themes without restyling keeps only its most
+//  recent theme's strokes mappable; older ink is left alone.  That is the same "leave it alone" rule
+//  that protects imported PDFs and deliberately off-palette strokes, so it fails safe.
+int ScribbleDoc::restyleToTheme(const PaletteRecipe& recipe, bool applyPages, bool globalDefault)
+{
+  // Copy, not reference: setTheme() regenerates the cached palette in place and would leave this
+  //  dangling - and every mapping below is from the OLD palette.
+  Palette oldPal = palette();
+  document->ensurePagesLoaded();  // a delay-loaded page cannot be restyled
+
+  // One action around *both* halves.  setTheme() brackets its own page recolor, so letting it do that
+  //  here would make a restyle two undo steps - press Ctrl+Z once and the strokes revert while the
+  //  paper stays on the new theme, which looks like a bug and is one.
+  int nchanged = 0;
+  startAction(activeArea->currPageNum | UndoHistory::MULTIPAGE);
+  setTheme(recipe, applyPages, globalDefault, false);
+  const Palette& newPal = palette();
+  for(Page* page : document->pages) {
+    // copy the element list: setProperties() can replace an element (see Selection::setStrokeProperties)
+    std::vector<Element*> elements;
+    for(Element* s : page->children())
+      elements.push_back(s);
+    for(Element* s : elements) {
+      // Groups and text descend recursively and need the clone dance that Selection does; a plain
+      //  stroke is the overwhelming case and the only one handled here.  Skipping the rest is why
+      //  this reports a count rather than claiming to have restyled everything.
+      if(s->containerNode() || s->node->type() == SvgNode::TEXT)
+        continue;
+      StrokeProperties props = s->getProperties();
+      if(!props.color.isValid())
+        continue;
+      Color mapped;
+      if(!newPal.mapFrom(oldPal, props.color, &mapped))
+        continue;              // not the old theme's ink - leave it exactly as it is
+      if(mapped == props.color)
+        continue;              // already right; do not manufacture an undo item for a no-op
+      StrokeChangedItem* undoitem = new StrokeChangedItem(s, page);
+      if(s->setProperties(StrokeProperties(mapped, -1))) {
+        history->addItem(undoitem);
+        ++nchanged;
+      }
+      else
+        delete undoitem;
+    }
+  }
+  endAction();
+  pageSizeChanged();
+  doRefresh();
+  return nchanged;
 }
 
 void ScribbleDoc::openURL(const char* url)

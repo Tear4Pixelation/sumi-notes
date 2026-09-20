@@ -14,6 +14,7 @@
 #include "documentlist.h"
 #include "pdfimport.h"
 #include "rulingdialog.h"
+#include "themedialog.h"
 #include "scandialog.h"
 #include "pentoolbar.h"
 #include "linkdialog.h"
@@ -1541,6 +1542,7 @@ bool ScribbleApp::openOrCreateDoc(bool cancelable)
     //  doesn't exist; user can use .htm for single file doc
     if(FSPath(filename).extension() == "html")
       activeDoc()->saveDocument((IOStream*)NULL, Document::SAVE_MULTIFILE);
+    askThemeForNewDoc();
   }
   return true;
 }
@@ -1660,6 +1662,21 @@ void ScribbleApp::doNewDocument()
 {
   activeDoc()->newDocument();
   onLoadFile("");
+  askThemeForNewDoc();
+}
+
+// Picking the theme belongs at the start, while the document is still empty: it is the one moment the
+//  choice costs nothing, and a theme chosen later has to be reconciled with what is already drawn.
+//
+// Called from *both* new-document paths.  doNewDocument() is only the fallback used when there is no
+//  document list; the ordinary desktop route is openOrCreateDoc()'s NEW_DOC branch, which creates a
+//  file and opens it. Hooking only one of them is why this looked like it did nothing.
+// Not hooked in ScribbleDoc::newDocument(), which is also the reset path used by document close and by
+//  ScribbleTest - neither may open a dialog.
+void ScribbleApp::askThemeForNewDoc()
+{
+  if(cfg->Bool("themeAskOnNew", true))
+    asyncDialog(new ThemeDialog(activeDoc()));
 }
 
 bool ScribbleApp::openDocument(std::string filename)
@@ -2337,6 +2354,12 @@ void ScribbleApp::showPageSetup()
   //RulingDialog rulingDialog(activeDoc());
   //execDialog(&rulingDialog);  // blocking
   asyncDialog(new RulingDialog(activeDoc()));
+}
+
+void ScribbleApp::showThemePicker()
+{
+  // works on an untitled document exactly as on a saved one - the per-document config exists either way
+  asyncDialog(new ThemeDialog(activeDoc()));
 }
 
 void ScribbleApp::openPreferences()

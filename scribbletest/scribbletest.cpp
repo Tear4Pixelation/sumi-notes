@@ -10,6 +10,7 @@
 // document scanning math; unlike everything else here it needs neither GL nor a document
 #include "scantest.cpp"
 #include "shapetest.cpp"
+#include "colortest.cpp"
 
 // Ideally, these tests should be run under valgrind to help check for memory leaks
 // renaming out files to refs (Linux):  for i in {0..13}; do mv "test${i}_out.html" "test${i}_ref.html"; done;
@@ -295,6 +296,237 @@ int ScribbleTest::shapeInterruptTest()
   return nbad;
 }
 
+// Phase 2 of COLORS_SPEC.md: the recipe has to survive the file format, an unthemed document has to
+//  inherit the global recipe, and applying a theme must not flatten the pages it touches.
+int ScribbleTest::themeRoundTripTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: theme round trip: %s\n", what); }
+  };
+
+  scribbleDoc->newDocument();
+
+  // a document that has never been themed must still have a usable palette, inherited from the global
+  //  config - this is what makes an untitled document need no special case
+  check(!scribbleDoc->palette().families.empty(), "an unthemed document still has a palette");
+  check(scribbleDoc->isThemeGenKnown(), "the default recipe names a generator this build has");
+
+  // Give the two pages *different* rulings and widths, and check both afterwards.  Checking only the
+  //  current page would be worthless: setPageProperties() pushes the current page's own properties onto
+  //  the others, so the current page looks untouched however badly the rest are flattened - an
+  //  assertion that passes against the broken code as well as the fixed one.
+  PageProperties p0 = scribbleArea->currPage->getProperties();
+  p0.yRuling = 40;
+  p0.width = 800;
+  scribbleArea->currPage->setProperties(&p0);
+  Dim page0Ruling = scribbleArea->currPage->getProperties().yRuling;
+  Dim page0Width = scribbleArea->currPage->getProperties().width;
+
+  scribbleDoc->newPage();
+  PageProperties p1 = scribbleArea->currPage->getProperties();
+  p1.yRuling = 37;
+  p1.width = 640;
+  scribbleArea->currPage->setProperties(&p1);
+  Dim page1Ruling = scribbleArea->currPage->getProperties().yRuling;
+  Dim page1Width = scribbleArea->currPage->getProperties().width;
+  check(page0Ruling != page1Ruling && page0Width != page1Width,
+      "the two pages must actually differ for this check to mean anything");
+
+  PaletteRecipe r;
+  r.gen = "cusp-walk-1";
+  r.seedHue = 47;
+  r.vividness = 0.62f;
+  r.depth = 0.17f;
+  r.minContrast = 3.5f;
+  r.jitter = 6;
+  r.paperL = 0.97f;
+  r.paperWarm = 0.8f;
+  r.families = 12;
+  scribbleDoc->setTheme(r, true, false);
+
+  Color themedPaper = scribbleDoc->palette().paper;
+  Color themedRule = scribbleDoc->palette().rule;
+  check(scribbleDoc->document->pages.size() == 2, "the document should have two pages");
+  for(size_t ii = 0; ii < scribbleDoc->document->pages.size(); ++ii) {
+    PageProperties got = scribbleDoc->document->pages[ii]->getProperties();
+    check(got.color == themedPaper, "applying a theme sets every page's paper color");
+    check(got.ruleColor == themedRule, "applying a theme sets every page's rule color");
+    // the reason setTheme() does not use setPageProperties(): that assigns the whole struct, so one
+    //  shared PageProperties would push the current page's ruling and size onto every other page
+    check(got.yRuling == (ii == 0 ? page0Ruling : page1Ruling),
+        "applying a theme must not overwrite a page's own ruling");
+    check(got.width == (ii == 0 ? page0Width : page1Width),
+        "applying a theme must not overwrite a page's own width");
+  }
+
+  // Accents follow the theme too (phase 4).  These were global-only config values, so the failure
+  //  mode is a bookmark or link in some unrelated blue - the one mark on the page ignoring the
+  //  palette - which is easy to miss by eye and trivial to catch here.
+  check(Color::fromArgb(scribbleDoc->cfg->Int("bookmarkColor")) == scribbleDoc->palette().bookmark,
+      "the theme sets the document's bookmark color");
+  check(Color::fromArgb(scribbleDoc->cfg->Int("linkColor")) == scribbleDoc->palette().link,
+      "the theme sets the document's link color");
+  // ScribbleApp caches the bookmark color in a member, so writing the config alone is not enough
+  check(scribbleDoc->app->bookmarkColor == scribbleDoc->palette().bookmark,
+      "the theme updates the cached bookmark color, not just the config value");
+
+  // save and reload: the recipe has to survive the document config node
+  std::string file = outPath + "/theme_roundtrip_out.html";
+  check(scribbleDoc->saveDocument(file.c_str()), "saving the document should succeed");
+  scribbleDoc->newDocument();
+  check(scribbleDoc->openDocument(file.c_str()) == Document::LOAD_OK, "reloading should succeed");
+  removeFile(file.c_str());
+
+  PaletteRecipe back = scribbleDoc->cfg->themeRecipe();
+  check(back.gen == "cusp-walk-1", "the generator id survives save/load");
+  check(std::abs(back.seedHue - r.seedHue) < 0.01, "the seed hue survives save/load");
+  check(std::abs(back.vividness - r.vividness) < 1e-4, "vividness survives save/load");
+  check(std::abs(back.depth - r.depth) < 1e-4, "depth survives save/load");
+  check(std::abs(back.minContrast - r.minContrast) < 1e-4, "contrast survives save/load");
+  check(std::abs(back.paperWarm - r.paperWarm) < 1e-4, "paper warmth survives save/load");
+  check(back.families == r.families, "the family count survives save/load");
+  // and the reloaded recipe must regenerate the same colors it was saved with
+  check(scribbleDoc->palette().paper == themedPaper,
+      "the reloaded recipe regenerates the same palette");
+
+  // Starting a fresh document must drop the cached palette.  Note the check above cannot catch a stale
+  //  cache - a cache left over from setTheme() holds precisely the palette that check expects - so the
+  //  invalidation is only observable somewhere the two answers differ, which is here.
+  scribbleDoc->newDocument();
+  check(!(scribbleDoc->palette().paper == themedPaper),
+      "a new document must not keep the previous document's palette");
+
+  // a document written by a newer build keeps its unknown generator id rather than having it rewritten
+  PaletteRecipe future = r;
+  future.gen = "cusp-walk-99";
+  scribbleDoc->setTheme(future, false, false);
+  check(!scribbleDoc->isThemeGenKnown(), "an unknown generator id is reported as such");
+  check(!scribbleDoc->palette().families.empty(), "an unknown generator id still yields a palette");
+  check(scribbleDoc->cfg->themeRecipe().gen == "cusp-walk-99",
+      "an unknown generator id is preserved, not rewritten to this build's default");
+
+  scribbleDoc->newDocument();
+  return nbad;
+}
+
+// Phase 5: restyling must move the theme's own ink and nothing else, and must undo in one step.
+int ScribbleTest::restyleTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: restyle: %s\n", what); }
+  };
+
+  scribbleDoc->newDocument();
+  PaletteRecipe themeA;
+  themeA.gen = "cusp-walk-1";
+  themeA.seedHue = 200;
+  scribbleDoc->setTheme(themeA, true, false);
+
+  // one stroke in a palette color, one in a color the palette cannot produce
+  Palette palA = scribbleDoc->palette();
+  check(palA.families.size() >= 3, "the theme should have families to draw with");
+  Color inkA = palA.families[2].base;
+  const Color offPalette(0x12, 0x34, 0x56);
+
+  // Four strokes, one per behaviour the mapping has to get right: a family base, a *dark variant*
+  //  (which must not collapse to the base), the *neutral* (which must stay neutral rather than being
+  //  mapped by ordinal like a family), and an off-palette color (which must not move at all).
+  Color darkA = palA.families[2].dark;
+  Color neutralA = palA.neutral;
+  scribbleMode->setMode(MODE_STROKE);
+  scribbleDoc->app->setPen(ScribblePen(inkA, 2, ScribblePen::TIP_ROUND));
+  ie(120, 160, 0, pen, press);  ie(200, 200, 0, pen);  ie(0, 0, 0, pen, release);
+  scribbleDoc->app->setPen(ScribblePen(offPalette, 2, ScribblePen::TIP_ROUND));
+  ie(120, 260, 0, pen, press);  ie(200, 300, 0, pen);  ie(0, 0, 0, pen, release);
+  scribbleDoc->app->setPen(ScribblePen(darkA, 2, ScribblePen::TIP_ROUND));
+  ie(120, 360, 0, pen, press);  ie(200, 400, 0, pen);  ie(0, 0, 0, pen, release);
+  scribbleDoc->app->setPen(ScribblePen(neutralA, 2, ScribblePen::TIP_ROUND));
+  ie(120, 460, 0, pen, press);  ie(200, 500, 0, pen);  ie(0, 0, 0, pen, release);
+
+  Page* page = scribbleArea->currPage;
+  check(page->strokeCount() == 4, "four strokes should have been drawn");
+  if(page->strokeCount() != 4)
+    return nbad;
+  auto colorAt = [&](int idx) {
+    int ii = 0;
+    for(Element* s : page->children()) { if(ii++ == idx) return s->getProperties().color; }
+    return Color(Color::INVALID_COLOR);
+  };
+  check(colorAt(0) == inkA, "the first stroke should be the theme's ink");
+  check(colorAt(1) == offPalette, "the second stroke should be the off-palette color");
+
+  int undoBefore = scribbleDoc->history->undoSteps();
+
+  PaletteRecipe themeB = themeA;
+  themeB.seedHue = 40;
+  int nchanged = scribbleDoc->restyleToTheme(themeB, true, false);
+
+  const Palette& palB = scribbleDoc->palette();
+  // base and dark move; the neutral is unchanged by definition, so it is not counted
+  check(nchanged == 2, "exactly the two non-neutral palette strokes should have been restyled");
+
+  Color expected;
+  check(palB.mapFrom(palA, inkA, &expected), "the old ink should map into theme B");
+  check(colorAt(0) == expected, "the themed stroke takes theme B's matching color");
+  check(!(colorAt(0) == inkA), "...and is actually different from what it was");
+
+  // The off-palette stroke is untouched.  This is the half that protects imported PDFs and deliberate
+  //  custom colors, and the one a careless "recolor everything" would break.
+  check(colorAt(1) == offPalette, "an off-palette stroke must not be touched by a restyle");
+
+  // A dark variant must land on theme B's *dark*, not on its base - otherwise every emphasis stroke
+  //  in the document silently flattens into ordinary ink.
+  int famB = -2, varB = -2;
+  check(palB.indexOf(colorAt(2), &famB, &varB), "the restyled dark stroke is still a palette color");
+  check(varB == PALETTE_DARK, "a dark variant must restyle to a dark variant, not to the base");
+
+  // The neutral is exempt from the walk in both palettes, so mapping it by ordinal like a family
+  //  would turn black-on-white into a colored ink - the one thing a neutral exists to prevent.
+  check(colorAt(3) == palB.neutral, "the neutral maps to the neutral");
+  check(colorAt(3) == neutralA, "...which for light paper means black stays black");
+
+  // one action, so one Ctrl+Z puts every stroke back
+  check(scribbleDoc->history->undoSteps() == undoBefore + 1,
+      "a restyle is a single undo step, however many strokes it moved");
+  scribbleDoc->doUndoRedo(false);
+  check(colorAt(0) == inkA, "undoing a restyle restores the original ink");
+  check(colorAt(1) == offPalette, "undo leaves the untouched stroke untouched");
+  check(colorAt(2) == darkA, "undo restores the dark variant too");
+
+  // COLORS_SPEC.md §10.1: inverting a themed document mirrors its paper rather than XOR-ing to a
+  //  negative, so inverting twice must land exactly back where it started - ink, paper and all.
+  //  A lossy mirror would be invisible until someone toggled it twice and found their colors drifted.
+  {
+    // KNOWN DEFECT, and the reason for this line: undoing a restyle restores the stroke colors (they
+    //  are StrokeChangedItems) but *not* the recipe, which lives in the document config and is not an
+    //  undo item. So right now the document holds theme B's recipe and theme A's ink, and any restyle
+    //  from here would find nothing to map. Putting theme A back makes the state consistent again.
+    //  The real fix is COLORS_SPEC.md §8's ThemeChangedItem; see COLORS_HANDOFF.md §7.
+    scribbleDoc->setTheme(themeA, true, false);
+
+    PaletteRecipe lightA = scribbleDoc->cfg->themeRecipe();
+    Color inkBefore = colorAt(0), offBefore = colorAt(1), paperBefore = scribbleDoc->palette().paper;
+
+    PaletteRecipe dark = lightA;
+    dark.paperL = 1 - dark.paperL;
+    scribbleDoc->restyleToTheme(dark, true, false);
+    check(scribbleDoc->palette().isDarkPaper(), "mirroring the paper gives a dark-paper theme");
+    check(!(colorAt(0) == inkBefore), "the ink actually changes on the dark theme");
+
+    PaletteRecipe back = scribbleDoc->cfg->themeRecipe();
+    back.paperL = 1 - back.paperL;
+    scribbleDoc->restyleToTheme(back, true, false);
+    check(colorAt(0) == inkBefore, "inverting twice restores the ink exactly");
+    check(colorAt(1) == offBefore, "...and still never touches the off-palette stroke");
+    check(scribbleDoc->palette().paper == paperBefore, "...and restores the paper exactly");
+  }
+
+  scribbleDoc->newDocument();
+  return nbad;
+}
+
 int ScribbleTest::shapeRoundTripTest()
 {
   int nbad = 0;
@@ -374,7 +606,7 @@ void ScribbleTest::runAll(bool runsynctest)
 {
   nFailed = 0;
   int nThumbsFailed = 0;
-  int nUnitFailed = runScanTests() + runShapeTests();
+  int nUnitFailed = runScanTests() + runShapeTests() + runColorTests();
   std::vector<std::string> slFailed;
   void (ScribbleTest::*tests[])() = {
     &ScribbleTest::test0,
@@ -524,6 +756,8 @@ void ScribbleTest::runAll(bool runsynctest)
   // run after the testN loop so it cannot perturb their document/undo state
   nUnitFailed += shapeRoundTripTest();
   nUnitFailed += shapeInterruptTest();
+  nUnitFailed += themeRoundTripTest();
+  nUnitFailed += restyleTest();
   runAllTime = mSecSinceEpoch() - runAllTime;
   // restore global config
   srandpp(mSecSinceEpoch());

@@ -82,6 +82,7 @@ public:
   Action* actionInsertDocument;
   Action* actionSave;
   Action* actionPage_Setup;
+  Action* actionTheme;
   Action* actionUndo;
   Action* actionRedo;
   Action* actionExpand_Down;

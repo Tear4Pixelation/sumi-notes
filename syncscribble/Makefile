@@ -30,6 +30,7 @@ SOURCES = \
   scribblesync.cpp \
   documentlist.cpp \
   rulingdialog.cpp \
+  themedialog.cpp \
   addpagemenu.cpp \
   scandialog.cpp \
   configdialog.cpp \
@@ -53,6 +54,8 @@ SOURCES += \
   ../ulib/imageenhance.cpp \
   ../ulib/imagewarp.cpp \
   ../ulib/quaddetect.cpp \
+  ../ulib/oklab.cpp \
+  ../ulib/palettegen.cpp \
   ../ulib/path2d.cpp \
   ../ulib/painter.cpp \
   ../usvg/svgnode.cpp \

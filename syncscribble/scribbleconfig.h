@@ -7,6 +7,7 @@
 #include <string>
 #include "pugixml.hpp"
 #include "scribblepen.h"
+#include "ulib/palettegen.h"
 
 struct ltstr { bool operator()(const char* s1, const char* s2) const { return strcmp(s1, s2) < 0; } };
 
@@ -41,6 +42,14 @@ public:
 
   ScribblePen* getPen(int num);
   void savePen(const ScribblePen& pen, int slot=-1);
+
+  // The document theme (COLORS_SPEC.md §4.1).  Stored as ordinary config values rather than as a new
+  //  file-format construct, which buys the whole round trip for free: a ScribbleDoc's cfg already loads
+  //  from and saves to the document's <script type="text/writeconfig"> node.  It also means a document
+  //  that has never been themed simply inherits the global recipe through upconfig, so "Untitled" gets
+  //  a theme with no special case anywhere.
+  PaletteRecipe themeRecipe() const;
+  void setThemeRecipe(const PaletteRecipe& recipe);
 
   const char* isInt(const char* s) const;
   const char* isFloat(const char* s) const;

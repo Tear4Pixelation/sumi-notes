@@ -75,6 +75,8 @@ public:
   bool loadClippingsDoc();
   void setMode(int mode);
   void showPageSetup();
+  void showThemePicker();
+  void askThemeForNewDoc();
   void openRecentFile(const std::string& filename);
   void createLink();
   void exportPDF();

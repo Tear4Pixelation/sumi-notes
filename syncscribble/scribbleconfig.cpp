@@ -172,6 +172,27 @@ void ScribbleConfig::init()
   cfg["invertColors"] = 0;
   cfg["colorXorMask"] = 0x00FFFFFF;
 
+  // document theme (COLORS_SPEC.md).  These are the defaults new documents get; a document that has
+  //  been themed overrides them in its own config node, and one that has not inherits these.
+  // themeFamilies is the only int - everything else is a float or the generator's string id.
+  // 15 families + the neutral = 16, which fills the add-color grid's 4x4 exactly.  Note the jitter
+  //  below must stay under half the family spacing (360/15 = 24, so under 12) or the families stop
+  //  being in hue order and Palette::mapFrom()'s ordinal mapping loses its meaning.
+  cfg["themeFamilies"] = 15;
+  // The single escape hatch (COLORS_SPEC.md §6.2).  Per document rather than global, so turning it on
+  //  for one note that needs an exact brand color does not quietly disable the feature everywhere.
+  cfg["themeOffPalette"] = 0;
+  // ask for a theme when a document is created.  A modal on every new document earns its keep only
+  //  while the feature is new, so it is a preference rather than a hard rule.
+  cfg["themeAskOnNew"] = 1;
+  cfgF["themeSeedHue"] = 218.0f;
+  cfgF["themeVividness"] = 1.0f;
+  cfgF["themeDepth"] = 0.10f;
+  cfgF["themeContrast"] = 3.0f;
+  cfgF["themeJitter"] = 11.0f;
+  cfgF["themePaperL"] = 0.99f;
+  cfgF["themePaperWarm"] = 0.35f;
+
   // page color
   cfg["pageColor"] = Color(Color::WHITE).argb();
   cfg["ruleColor"] = Color(0, 0, 0xFF, 0x9F).argb();
@@ -305,6 +326,41 @@ void ScribbleConfig::init()
   cfgS["syncServer"] = IS_DEBUG ? "localhost" : ""; // www.styluslabs.com
   cfgS["syncUser"] = "";
   cfgS["syncPass"] = "";
+
+  // empty means "whatever generator this build considers current"; a themed document always writes an
+  //  explicit id, so it keeps generating the palette it was authored with
+  cfgS["themeGen"] = "";
+}
+
+PaletteRecipe ScribbleConfig::themeRecipe() const
+{
+  PaletteRecipe r;
+  r.gen          = String("themeGen", "");
+  r.seedHue      = Float("themeSeedHue", float(r.seedHue));
+  r.vividness    = Float("themeVividness", float(r.vividness));
+  r.depth        = Float("themeDepth", float(r.depth));
+  r.minContrast  = Float("themeContrast", float(r.minContrast));
+  r.jitter       = Float("themeJitter", float(r.jitter));
+  r.paperL       = Float("themePaperL", float(r.paperL));
+  r.paperWarm    = Float("themePaperWarm", float(r.paperWarm));
+  r.families     = Int("themeFamilies", r.families);
+  return r;
+}
+
+void ScribbleConfig::setThemeRecipe(const PaletteRecipe& recipe)
+{
+  // The generator id is written even when it matches this build's default.  A document that recorded
+  //  only "whatever is current" would silently change palette the next time the default moves, which is
+  //  the one thing COLORS_SPEC.md §3 exists to prevent.
+  set("themeGen", recipe.gen.empty() ? defaultPaletteGen()->id : recipe.gen.c_str());
+  set("themeSeedHue", float(recipe.seedHue));
+  set("themeVividness", float(recipe.vividness));
+  set("themeDepth", float(recipe.depth));
+  set("themeContrast", float(recipe.minContrast));
+  set("themeJitter", float(recipe.jitter));
+  set("themePaperL", float(recipe.paperL));
+  set("themePaperWarm", float(recipe.paperWarm));
+  set("themeFamilies", recipe.families);
 }
 
 bool ScribbleConfig::loadConfigString(const char* cfgstr)
