@@ -61,6 +61,8 @@ public:
   const char* hintText = NULL;
   bool showHint = false;
   std::function<void()> onHintDone;
+  bool hintUsed = false;  // a step landed this gesture; retires the hint once the gesture ends
+  std::function<void()> onOpened;  // panel shown; lets an outside tip pointing at the button get out of the way
 
 private:
   void applyDrag(Dim x, Dim y);

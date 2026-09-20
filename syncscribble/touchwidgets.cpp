@@ -150,6 +150,8 @@ ButtonDragTimeline::ButtonDragTimeline(Button* tb, int align) : Widget(new SvgCu
       prevX = event->tfinger.x;
       mGui = gui;  // needed to run the edge auto-repeat timer
       endGesture();
+      if(onOpened)
+        onOpened();
       popup->setVisible(true);
       redraw();
       gui->setPressed(toolBtn);
@@ -217,12 +219,12 @@ int ButtonDragTimeline::applySteps(int delta)
   int rejected = lane == LANE_SELECT ? onAltStep(delta) : onStep(delta);
   offset[lane] += delta - rejected;
   // retired by use, not by dismissal - and only by a step that actually landed, so someone who drags
-  //  against a dead end has not yet been taught anything
-  if(showHint && delta != rejected) {
-    showHint = false;
-    if(onHintDone)
-      onHintDone();
-  }
+  //  against a dead end has not yet been taught anything.  Noted here but not acted on until the
+  //  gesture ends (see endGesture): the first step lands about one tick into the very drag that is
+  //  showing the hint, so clearing it here would retire it unread - and would shorten the panel
+  //  mid-drag, moving the lanes under the finger.
+  if(showHint && delta != rejected)
+    hintUsed = true;
   // being refused is how we learn where an end is when getRange didn't tell us; pinning it here also keeps
   //  the ruler honest if the history changed under us since the press
   if(rejected > 0)
@@ -268,6 +270,14 @@ void ButtonDragTimeline::endGesture()
   if(edgeTimer && mGui)
     mGui->removeTimer(edgeTimer);
   edgeTimer = NULL;
+  // the hint has now been on screen for a whole gesture, and the user has scrubbed, so it has both
+  //  been readable and been made unnecessary
+  if(hintUsed && showHint) {
+    showHint = false;
+    if(onHintDone)
+      onHintDone();
+  }
+  hintUsed = false;
 }
 
 Rect ButtonDragTimeline::bounds(SvgPainter* svgp) const
