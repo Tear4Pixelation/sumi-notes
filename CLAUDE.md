@@ -315,6 +315,55 @@ Known gap: shapes carry no pen class, so `Element::toPenPoints()` returns nothin
 eraser does not affect a shape** - the stroke eraser deletes it whole. Giving them `STROKE_PEN_CLASS`
 would make free erase work but would split curved shapes (ellipse, rounded box) at Bezier control points.
 
+## Relative pen width
+
+Any pen's thickness can be expressed as a **multiple of the page's line height** rather than in
+document units - `ScribblePen::WIDTH_RELATIVE`, with `width` holding the fraction. The **Relative size**
+toggle in the Width popup (`PenToolbar`) switches a pen between the two, and is **on by default for the
+text marker only** (`DRAWTOOL_HIGHLIGHT`): a marker's job is to cover a line of text, so "three quarters
+of a line" is the number that means something, where a pen is drawing a mark of a particular size. The
+mechanism is the same for all three draw tools, and only the default differs.
+
+- **`ScribbleArea::resolvedPen()` is the only place the multiplication happens**, and every consumer of
+  the pen's width goes through it - the stroke builder, `createShapeElement()` and the hover cursor.
+  What lands in the document is therefore always an absolute `stroke-width`, so the file format, the
+  undo history and sync know nothing about relative widths.
+- **The toggle converts, it does not reinterpret.** Flipping it multiplies or divides the pen's width
+  *and its presets* by the current line height, so nothing changes thickness on screen: 0.75 of a 40 unit
+  ruling becomes 30, and back. Without that, turning it off would leave a 0.75 unit hairline.
+- **One preset list per draw tool** (`savedWidths`, `savedMarkerWidths`, `savedEphemeralWidths`), each
+  held in that tool's current unit. They cannot share a list: two tools can be in different units at the
+  same time, and the shared list would then be read in the wrong one by whichever tool is not holding
+  it - three identical-looking hairlines, or three identical-looking slabs. For the same reason a list
+  cannot have a fixed default in the config (a config written before this has *absolute* widths, and
+  line-height fractions would load there as hairlines), so the marker's and the ephemeral pen's lists
+  start empty and `seedWidths()` fills them on first use, once the unit is known. The marker seeds from
+  `MARKER_WIDTHS` (line heights), everything else from `DEFAULT_WIDTHS` (document units).
+- `PenToolbar::widthPreview()` **scales the whole preset set down** once any of them exceeds the swatch
+  cap (`penWidthPreviewMax`), instead of clamping each. Every marker preset is past the cap, so clamping
+  drew three identical bars. A pen's presets are all below it, so pen swatches are unchanged.
+- The width display in the popup is a plain SVG fragment - four rule lines with the outer two faded,
+  and the stroke lying **in the gap between the middle two**. The gap, not a line, because writing sits
+  between the rulings: a stroke centred on a rule line would be showing coverage of the wrong band. One
+  line height therefore fills the gap exactly. It is **always shown**, in both units (an absolute width
+  is simply divided by the line height first), so the number always has a picture beside it.
+  Three things about it: it carries **no `layout` attribute**, because a box layout centres children
+  that have no `box-anchor` and would stack all five lines on top of each other; it is drawn in the
+  **page's own colors** (`props.color`/`props.ruleColor`, set per page in `updateWidthPopup()`), since
+  the usual pen is black and would be invisible against the dark popup; and the outer lines' 0.35
+  `stroke-opacity` is opacity rather than a dimmer gray so that "half there" reads that way whatever the
+  page and rule colors are.
+
+Also fixed here: `.toolbutton.checked > g > .icon` in `theme.cpp` never matched the swatch prototypes
+(pen thickness, eraser radius), which put `.icon` directly in the button rather than in the icon/title
+row, so a selected thickness stayed gray. The added rules set only `color`, never `fill`: these icons
+are strokes with `fill="none"`, CSS outranks presentation attributes in usvg, and filling them would
+blot out the color swatch's selection ring.
+
+Known gap: the toggle converts against the *current page's* ruling, so flipping a pen to absolute on a
+blank page and then drawing on a ruled one gives a width picked for the wrong line height. Leaving it on
+is the answer, which is why it is the marker's default.
+
 ## Switch back (single-use tools)
 
 Picking a tool uses it once and returns to the previous one; double tapping the tool locks it. The

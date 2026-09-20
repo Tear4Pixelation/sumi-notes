@@ -830,7 +830,8 @@ void ScribbleArea::editShapeAfterDraw(Element* shape)
 //  selection toolbar already knows how to edit (spec 5, 10)
 Element* ScribbleArea::createShapeElement(const ShapeParams& params)
 {
-  const ScribblePen* pen = currPen();
+  ScribblePen resolved = resolvedPen();  // the marker's relative width has to be in document units
+  const ScribblePen* pen = &resolved;
   SvgPath* svgPath = new SvgPath();
   svgPath->setAttr<color_t>("fill", Color::NONE);
   setSvgStrokeColor(svgPath, pen->color);
@@ -1560,6 +1561,19 @@ const ScribblePen* ScribbleArea::currPen() const
   return app->getPen();
 }
 
+// the text marker stores its width as a fraction of the page's line height (ScribblePen::
+//  WIDTH_RELATIVE); everything downstream - stroke builders, shapes, the hover cursor - wants
+//  document units, so this is the single place the multiplication happens.  Note the resolved width is
+//  what lands in the document: strokes are always saved with an absolute stroke-width, so nothing in
+//  the file format, the undo history or sync has to know about relative widths.
+ScribblePen ScribbleArea::resolvedPen() const
+{
+  ScribblePen pen = *currPen();
+  if(pen.hasFlag(ScribblePen::WIDTH_RELATIVE))
+    pen.width *= currPage ? currPage->yruling(true) : Page::BLANK_Y_RULING;
+  return pen;
+}
+
 int ScribbleArea::selectionHit(Point pos, bool touch)
 {
   if(!currSelection || !currSelection->selector)
@@ -1707,7 +1721,8 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
     break;
   case MODE_STROKE:
   {
-    const ScribblePen* pen = currPen();
+    ScribblePen resolved = resolvedPen();  // the marker's relative width has to be in document units
+    const ScribblePen* pen = &resolved;
     if(pen->hasFlag(ScribblePen::SNAP_TO_GRID)) {
       Dim yr = currPage->yruling(true);
       Dim xr = currPage->xruling() > 0 ? currPage->xruling() : yr;
@@ -2846,7 +2861,7 @@ void ScribbleArea::doMotionEvent(const InputEvent& event, inputevent_t eventtype
   if(drawCursor == 2 && (cursorMode == MODE_STROKE || cursorMode == MODE_ERASE)) {
     Dim hw = MIN_CURSOR_RADIUS*preScale, hh = MIN_CURSOR_RADIUS*preScale;
     if(cursorMode == MODE_STROKE) {
-      Rect penbox = currPen()->getBBox();
+      Rect penbox = resolvedPen().getBBox();
       hw = std::max(hw, mScale*penbox.width()/2);
       hh = std::max(hh, mScale*penbox.height()/2);
     }
@@ -3088,7 +3103,7 @@ void ScribbleArea::drawScreen(Painter* painter, const Rect& dirty)
     painter->save();
     painter->translate(rawPos.x, rawPos.y);
     if(cursorMode == MODE_STROKE) {
-      Rect penbox = currPen()->getBBox();
+      Rect penbox = resolvedPen().getBBox();
       // minimum pen cursor size = 2 pix * preScale
       Dim hw = std::max(MIN_CURSOR_RADIUS, mScale*penbox.width()/2);
       Dim hh = std::max(MIN_CURSOR_RADIUS, mScale*penbox.height()/2);

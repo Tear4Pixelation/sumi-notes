@@ -131,8 +131,12 @@ void ScribbleMode::loadModes(const char* modestr)
   selectSwitchBack = true;
   insSpaceSwitchBack = true;
   drawPen = ScribblePen(Color::BLACK, 1.6, ScribblePen::TIP_FLAT | ScribblePen::WIDTH_PR, 0.9, 2.0);
-  highlightPen = ScribblePen(Color(255, 127, 255, 127), 34,
-      ScribblePen::TIP_CHISEL | ScribblePen::DRAW_UNDER);
+  // the marker's width is a fraction of the line height by default: what a marker has to do is cover a
+  //  line of text, so the useful number is "three quarters of a line", not "30 units" (which covers a
+  //  line on one ruling and a third of one on another).  0.75 is also the middle savedMarkerWidths
+  //  preset, so the toolbar opens with a preset selected.
+  highlightPen = ScribblePen(Color(255, 127, 255, 127), 0.75,
+      ScribblePen::TIP_CHISEL | ScribblePen::DRAW_UNDER | ScribblePen::WIDTH_RELATIVE);
   ephemeralPen = ScribblePen(Color::RED, 1.6,
       ScribblePen::TIP_FLAT | ScribblePen::WIDTH_PR | ScribblePen::EPHEMERAL, 0.9, 2.0);
   // attempt to load from config string

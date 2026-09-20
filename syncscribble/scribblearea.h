@@ -102,6 +102,7 @@ protected:
   Page* page(int n) const;
   int numPages() const;
   const ScribblePen* currPen() const;
+  ScribblePen resolvedPen() const;
 
   void setPageNum(int pagenum);
   void nextPage(bool appendnew = false);

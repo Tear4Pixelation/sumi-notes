@@ -18,7 +18,10 @@ public:
   // existing numerical values must NOT be changed - flags is serialized to config file when saving pen
   static constexpr unsigned int DRAW_UNDER = 0x1, SNAP_TO_GRID = 0x2, LINE_DRAWING = 0x4, EPHEMERAL = 0x8,
       WIDTH_PR = 0x10, WIDTH_SPEED = 0x20, WIDTH_DIR = 0x40, WIDTH_MASK = 0xF0, //WIDTH_LINPR = 0x80,
-      TIP_FLAT = 0x100, TIP_ROUND = 0x200, TIP_CHISEL = 0x400, TIP_MASK = 0xF00;
+      TIP_FLAT = 0x100, TIP_ROUND = 0x200, TIP_CHISEL = 0x400, TIP_MASK = 0xF00,
+      // width is a multiple of the page's line height instead of an absolute size (text marker); see
+      //  ScribbleArea::resolvedPen(), which is the only place the multiplication is done
+      WIDTH_RELATIVE = 0x1000;
 
   ScribblePen(Color c, Dim w, unsigned int _flags = 0, Dim wr = 0, Dim pr = 0, Dim spd = 0, Dim angle = 0, Dim _dash = 0, Dim _gap = 0)
       : color(c), width(w), wRatio(wr), prParam(pr), spdMax(spd), dirAngle(angle), dash(_dash), gap(_gap), flags(_flags) {}

@@ -6,6 +6,7 @@
 
 
 class ScribbleApp;
+class Page;
 class ColorEditBox;
 class PenPreview;
 
@@ -65,11 +66,32 @@ private:
   void selectWidth(int idx);
   void selectColor(int idx);
   void updateSelected();
+  // any pen's thickness can be expressed as a multiple of the line height (the relative size toggle in
+  //  the width popup); it is on by default for the text marker only, which is the tool whose job is to
+  //  cover a line of text.  Each draw tool carries its own presets, in its own unit.
+  bool relativeWidths() const;
+  void setRelativeWidth(bool relative);
+  void updateWidthPopup();
+  // ScribbleMode::DRAWTOOL_* whose presets belong on the row for the given toolbar mode
+  int drawToolForMode(Mode m) const;
+  std::vector<Dim>& activeWidths();
+  const std::vector<Dim>& activeWidths() const;
+  // fills the active preset list if it is empty, in the active pen's unit; true if it did
+  bool seedWidths();
+  // line height of the page being drawn on; the unit relative widths are measured in
+  Page* currentPage() const;
+  Dim lineHeight() const;
+  // preview line thickness for a preset, in the swatch's units
+  Dim widthPreview(Dim w) const;
 
   Button* cbSnaptoGrid;
   Button* cbLineDrawing;
   //Button* comboPressure;
   SpinBox* spinWidth;
+  Widget* widthSpinRow;
+  CheckBox* cbRelWidth;
+  Widget* relWidthRow;
+  Widget* rulingPreview;
   Button* addColorBtn;
   Button* settingsBtn;
   ArrowPopup* widthPopup;
@@ -91,7 +113,15 @@ private:
   int changesSinceFocused = -1;
   int contextMenuIdx;
   std::vector<Color> savedColors;
-  std::vector<Dim> savedWidths;
+  // One preset list per draw tool, each held in that tool's own unit - absolute, or multiples of the
+  //  line height while that tool's relative size toggle is on (see setRelativeWidth).  They cannot
+  //  share a list: two tools can be in different units at the same time, and one list would then be
+  //  read as the wrong one by whichever tool is not holding it.
+  std::vector<Dim> savedWidths;           // DRAWTOOL_PEN, and every non-pen toolbar mode
+  std::vector<Dim> savedMarkerWidths;     // DRAWTOOL_HIGHLIGHT
+  std::vector<Dim> savedEphemeralWidths;  // DRAWTOOL_EPHEMERAL
+  // which of those lists is currently on the row
+  int widthsTool = 0;
   static std::unique_ptr<SvgNode> widthBtnNode;
   static std::unique_ptr<SvgNode> compactWidthBtnNode;
   static std::unique_ptr<SvgNode> compactColorBtnNode;
