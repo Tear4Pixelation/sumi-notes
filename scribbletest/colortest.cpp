@@ -426,6 +426,94 @@ static void dumpGolden()
   }
 }
 
+// Every shipped theme, in BOTH modes.  A theme is ink character plus paper tint; the dialog's toggle
+// supplies the mode, so a theme that is fine on white and unusable on black is only half checked.
+static void testShippedThemes()
+{
+  for(int ii = 0; ii < paletteThemeCount(); ++ii) {
+    const PaletteTheme* theme = paletteThemeByIndex(ii);
+    // The chroma budget.  Separation between 12 families 30 degrees apart tracks their mean chroma
+    //  almost exactly, and BOTH of these desaturate - measured at 12 families, light paper:
+    //    minContrast 3.0 -> 7.0 at vividness 1.0:  sep 0.0415 -> 0.0293  (chroma 0.180 -> 0.149)
+    //    vividness 1.0 -> 0.70 at minContrast 3.0: sep 0.0415 -> 0.0294  (chroma 0.180 -> 0.126)
+    //  They compound, which is how a theme at vividness 0.90 *and* 7:1 reached 0.0267.  Depth is free
+    //  on light paper and only mildly costly on dark, so it is not budgeted here.
+    colorCheckTrue(theme->vividness >= real(0.90),
+        (std::string("theme ") + theme->name + " stays within the chroma budget (vividness)").c_str());
+    colorCheckTrue(theme->minContrast <= real(5.0),
+        (std::string("theme ") + theme->name + " stays within the chroma budget (contrast)").c_str());
+
+    for(int dark = 0; dark < 2; ++dark) {
+      PaletteRecipe r = paletteThemeRecipe(*theme, dark != 0);
+      Palette pal;
+      generatePalette(r, &pal);
+      std::string where = std::string("theme ") + theme->name + (dark ? " (dark)" : " (light)");
+
+      colorCheckTrue(int(pal.families.size()) == r.families,
+          (where + ": generated the families its recipe asked for").c_str());
+
+      // legibility, the invariant the whole generator exists to hold
+      for(size_t ff = 0; ff < pal.families.size(); ++ff) {
+        if(srgbContrast(pal.families[ff].base, pal.paper) < r.minContrast - real(0.01)) {
+          colorCheckTrue(false, (where + ": every base is legible on its own paper").c_str());
+          break;
+        }
+      }
+
+      // ...and the other half of legibility: colors you cannot tell apart are no more usable than
+      //  colors you cannot see.  The reference is the palette that already ships - 12 families at
+      //  full chroma, which separates at 0.0414 on light paper.  The shipped themes all clear 0.0302,
+      //  i.e. 73% of it; 0.029 leaves a little headroom without letting a theme drift back toward the
+      //  0.025 an unbudgeted table produced.
+      real worstPair = real(1e9);
+      for(size_t aa = 0; aa < pal.families.size(); ++aa) {
+        for(size_t bb = aa + 1; bb < pal.families.size(); ++bb)
+          worstPair = std::min(worstPair,
+              oklabDeltaE(pal.families[aa].base, pal.families[bb].base));
+      }
+      colorCheckTrue(worstPair >= real(0.029),
+          (where + ": its families stay distinguishable from each other").c_str());
+
+      // the dark-mode contrast cap - uncapped, a high floor bleaches ink toward the paper's opposite
+      //  and "Deep" comes out as the palest theme in the set
+      if(dark)
+        colorCheckTrue(r.minContrast <= real(4.5),
+            (where + ": contrast is capped so deep themes do not bleach").c_str());
+
+      // a recipe built from a theme must resolve back to that theme, or the dialog cannot ring the
+      //  tile the document is actually using
+      colorCheckTrue(paletteThemeIndexOf(r) == ii,
+          (where + ": resolves back to its own theme").c_str());
+
+      // ...and it must still resolve after a trip through the config, which stores every field as a
+      //  float while `real` is a double.  An exact comparison passes the line above and fails here,
+      //  which is what left a saved theme with no ring in the gallery.
+      PaletteRecipe roundtripped = r;
+      roundtripped.seedHue     = real(float(r.seedHue));
+      roundtripped.vividness   = real(float(r.vividness));
+      roundtripped.depth       = real(float(r.depth));
+      roundtripped.minContrast = real(float(r.minContrast));
+      roundtripped.jitter      = real(float(r.jitter));
+      roundtripped.paperL      = real(float(r.paperL));
+      roundtripped.paperWarm   = real(float(r.paperWarm));
+      colorCheckTrue(paletteThemeIndexOf(roundtripped) == ii,
+          (where + ": resolves back to its own theme after a float round trip").c_str());
+    }
+  }
+
+  // ids are what a theme is looked up by, so duplicates would silently shadow one another
+  for(int ii = 0; ii < paletteThemeCount(); ++ii) {
+    const PaletteTheme* theme = paletteThemeByIndex(ii);
+    colorCheckTrue(paletteThemeById(theme->id) == theme, "theme ids are unique and resolve");
+  }
+
+  // a recipe that is not one of ours must say so rather than claiming the nearest theme
+  PaletteRecipe stranger = goldenRecipe();
+  stranger.vividness = real(0.123);
+  colorCheckTrue(paletteThemeIndexOf(stranger) == -1,
+      "a recipe from outside the shipped set resolves to no theme");
+}
+
 int runColorTests()
 {
   nColorChecksFailed = 0;
@@ -438,6 +526,7 @@ int runColorTests()
   testRestyleRoundTrip();
   testUnknownGenerator();
   testBeatsNaive();
+  testShippedThemes();
   return nColorChecksFailed;
 }
 

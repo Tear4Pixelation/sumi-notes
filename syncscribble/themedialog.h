@@ -7,14 +7,18 @@ class ScribbleDoc;
 
 // Theme picker (COLORS_SPEC.md §6.4).
 //
-// The gallery is *generated*, not curated: seeds are spread evenly around the hue wheel and every
-//  thumbnail is built by the same generator the document will use. There is no hand-picked list to
-//  drift out of step with the algorithm.
+// A grid of the shipped themes, plus one toggle for light/dark paper.  No sliders: of the recipe's
+//  knobs, seed hue was measured to move a full-wheel palette by less than its own jitter, and
+//  vividness already defaults to its maximum, so both could only make a theme worse.  What is left -
+//  ink character and paper tint - is what the themes themselves vary, and picking one from rendered
+//  strokes is a better question to ask than "how vivid, 0 to 1".
+//
+// Every tile is drawn as strokes on that theme's own paper, never as swatch chips: a color that reads
+//  fine as a 40px block can be invisible as a 3px line, which is the whole point of the generator.
+// The dark toggle rebuilds all of them, so the grid always shows what you will actually get.
 //
 // Applies to the current document, whether or not it has been saved - an untitled document has a
-//  per-document config exactly like any other, so it needs no special case. "Use for new documents"
-//  writes the same recipe to the global config, which is what an untitled document inherits when it
-//  has no theme of its own.
+//  per-document config exactly like any other, so it needs no special case.
 class ThemeDialog : public PopupDialog
 {
 public:
@@ -22,22 +26,18 @@ public:
   void accept();
 
 private:
-  void selectSeed(real hue);
+  void selectTheme(int index);
   void rebuildGallery();
-  void updatePreview();
-  PaletteRecipe currentRecipe() const;
 
   ScribbleDoc* scribbleDoc;
   PaletteRecipe recipe;
+  // which shipped theme is selected, or -1 for a recipe that is not one of ours (a document themed by
+  //  an older build, or by a newer one)
+  int themeIndex = -1;
 
   Widget* gallery;
-  Widget* preview;
-  Slider* sliderSeed;
-  Slider* sliderVivid;
-  Slider* sliderDepth;
   CheckBox* cbDarkPaper;
   CheckBox* cbApplyPages;
-  CheckBox* cbGlobalDefault;
   CheckBox* cbOffPalette;
   CheckBox* cbRestyle;
   std::vector<Button*> galleryBtns;

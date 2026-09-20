@@ -4,8 +4,8 @@ Written for the next agent picking this up. `COLORS_SPEC.md` is the rationale an
 `CLAUDE.md` §Themed colors is the short summary. **This document is the state of play**: what is
 built, what was learned the hard way, what is deliberately not done, and what to do next.
 
-Phases 1–5 of `COLORS_SPEC.md` §11 are implemented. The remaining work is the **theme creation UI**,
-which is large — see §7.
+Phases 1–5 of `COLORS_SPEC.md` §11 are implemented, plus the theme picker (§7). What remains is
+user-created/saved themes and the sync gap in §7's open decisions.
 
 ---
 
@@ -14,7 +14,7 @@ which is large — see §7.
 | file | what |
 | --- | --- |
 | `ulib/oklab.h`/`.cpp` | OKLab/OKLCh, sRGB gamut boundary, cusp table, ΔE, WCAG contrast |
-| `ulib/palettegen.h`/`.cpp` | `PaletteRecipe`, `Palette`, the `cusp-walk-1` generator, the registry |
+| `ulib/palettegen.h`/`.cpp` | `PaletteRecipe`, `Palette`, the `cusp-walk-1` generator, the registry, the shipped theme table |
 | `syncscribble/themedialog.h`/`.cpp` | the theme picker dialog |
 | `scribbletest/colortest.cpp` + `colortest_golden.inc` | standalone palette math tests |
 | `labs/color-lab.html` | browser prototype of the generator, every knob live, A/B vs naive |
@@ -60,9 +60,10 @@ Old generators are never deleted — each is ~80 lines of dependency-free math.
 
 - **Family 0 is never jittered.** The seed hue must actually appear in its own palette, or "this is
   the color you chose" is a lie and the seed control has nothing to point at.
-- **`jitter` must stay below half the family spacing.** At 15 families the spacing is 24°, so jitter
-  must stay under 12; it is 11. Above that, families stop being in hue order and
-  `Palette::mapFrom()`'s ordinal mapping silently loses its meaning.
+- **`jitter` must stay below half the family spacing.** At the default 12 families the spacing is 30°,
+  so jitter must stay under 15; it is 11. Above that, families stop being in hue order and
+  `Palette::mapFrom()`'s ordinal mapping silently loses its meaning. This is the real reason the family
+  count cannot simply be raised: 16 families would be 22.5° apart, needing jitter below 11.
 - **The dark variant takes its chroma as a fraction of what is available at its own lightness**, not
   as a fraction of the base's chroma. Scaling twice collapsed it to near-black at low vividness.
 - **`hash01()` is not a RNG.** A random jitter would repaint every theme on every launch, make the
@@ -127,17 +128,24 @@ counts that whole list as belonging to the theme and leaves three unreachable co
 Reseeding is skipped entirely when `themeOffPalette` is on, or a deliberate custom swatch would be
 deleted on every launch.
 
-### 4.6 `flex-break`, not `width`, makes a grid wrap
+### 4.6 The grid popup has two modes, and one index
+`PenToolbar::openPaletteGrid(editIdx)` serves both the `+` (append) and the tap-the-selected-swatch
+route (replace in place, with a cancel/delete header). The mode is carried in `paletteEditIdx`, which
+is an index into `savedColors` — so `rebuildGrids()` must close the popup and clear it, exactly as it
+already does for `colorPopupIdx`. A cell's handler reads it into a local *before* closing the popup,
+for the same reason.
+
+### 4.7 `flex-break`, not `width`, makes a grid wrap
 Setting a width on the container does **not** wrap the row in this layout engine. The add-color grid
 forces rows with an explicit `flex-break=before` on every 4th cell — the same mechanism
 `PaletteWidget::addButton()` uses.
 
-### 4.7 A restyle must be one undo step
+### 4.8 A restyle must be one undo step
 `setTheme()` brackets its own undo action for the page recolor, so `restyleToTheme()` calling it
 normally produced **two** Ctrl+Z steps — press once and the strokes revert while the paper stays on
 the new theme. Hence `setTheme(..., ownAction=false)` with the caller bracketing both halves.
 
-### 4.8 Ordinal mapping, never hue proximity
+### 4.9 Ordinal mapping, never hue proximity
 Both palettes carry up to ±jitter of scatter, so two offsets can differ by 2×jitter against a smaller
 spacing, and two families collapse onto one — a 16-color document quietly becoming a 15-color one.
 Measured: 5 collisions on absolute hue, still 2 on seed-relative hue, 0 on ordinal. The ordinal is
@@ -188,31 +196,103 @@ And two coverage gaps found the same way: the restyle test originally drew only 
 neither the neutral nor the variant path was exercised, and both corresponding mutations passed.
 
 Where the tests live:
-- `scribbletest/colortest.cpp` — standalone (`--dump` regenerates the golden table), 9 checks
+- `scribbletest/colortest.cpp` — standalone (`--dump` regenerates the golden table), 10 checks
 - `ScribbleTest::themeRoundTripTest()` — recipe round-trip, inheritance, page preservation, unknown gen id
 - `ScribbleTest::restyleTest()` — base/dark/neutral/off-palette mapping, single undo step
+- `testShippedThemes()` in `colortest.cpp` — every shipped theme in **both** modes: legibility, the
+  vividness floor, within-theme separation, the dark contrast cap, and that a theme's recipe resolves
+  back to that theme. Mutation-tested: dropping the dark cap fails 3 checks, vividness under the floor
+  1, a duplicate theme id 1, `paletteThemeIndexOf` ignoring the cap 12, an unreachable `minContrast` 2,
+  and disabling the contrast walk 30. Note that setting a theme to `minContrast = 15` does **not** fail
+  — 15:1 is reachable on white paper, so the walk satisfies it honestly. That was a bad mutation, not
+  an inert check; the distinction is worth keeping in mind before concluding a check is dead.
 
 Baseline on this machine: **0 failed tests, 0 failed unit checks, 16 failed thumbnails** (the
 thumbnail count is the documented GPU baseline, and is what the binary exits with).
 
 ---
 
-## 7. Next: the theme creation UI (the big one)
+## 7. The theme picker (phase 6) — built, and why it looks the way it does
 
-`ThemeDialog` today is a working stopgap, not the designed experience. It has a generated gallery,
-three sliders, and four checkboxes. What it lacks:
+`ThemeDialog` is now a 3x4 grid of twelve named themes, a dark-paper toggle, and three checkboxes.
+The sliders, the generated seed gallery and "Use for new documents" are gone. The reasoning matters
+more than the result, because every one of these was arrived at by measuring and three of them
+reversed a decision that looked obvious first:
 
-- **`themeFamilies` is not exposed.** It is a recipe field; the default is 15 (so the add-color grid
-  is 16 cells including the neutral). Changing it changes the whole palette's structure.
-- **No named/saved themes.** A recipe is nine numbers; letting people name and reuse one is cheap and
-  obviously wanted.
-- **No live preview on the real document** — the preview is a synthetic strip of squiggles.
-- **The gallery is one flat row of 12.** Rerolling, and seeding from a photo (the spec notes a seed
-  from an image falls out for free — it is just a hue), are both unimplemented.
-- **The dark-paper control is a checkbox**, which is right for the mirror but gives no control over
-  *how* dark.
-- Deciding a theme by sliders is the wrong verb for most people. The gallery is the good path; it
-  should probably grow, and the sliders shrink into an "adjust" disclosure.
+**Seed hue cannot differentiate themes, and never could.** With families spread over the full wheel,
+palettes at seeds 180° apart differ by a mean of 10.1° per color against a 30° family spacing — less
+than the ±11° jitter. The seed only decides which family is called #0. The old gallery of twelve
+seeds was therefore twelve near-identical palettes, and making its thumbnails bigger would only have
+made that more obvious.
+
+**Vividness could only ever make a theme worse.** The default is 1.0; the slider ran 0.25–1.0.
+
+**Hue arcs were prototyped and rejected — the rejection is the useful part.** Restricting families to
+an arc does make the seed matter, and separation stays fine on paper. But arc and family count trade
+directly:
+
+| arc | families that stay as separated as the shipping palette |
+| --- | --- |
+| 120° | 4 |
+| 180° | 6 |
+| 240° | 8 |
+| 360° | 12 |
+
+At a 120° arc with 12 families the minimum pairwise ΔE is **0.0000** — two families are the same
+color. And the fatal objection is simpler than any of that: a 120° "warm" theme has *no blue in it*.
+A note-taking palette that cannot do red and blue and green on one page is not a palette. Every theme
+covers the full wheel.
+
+**A theme is ink character + paper tint, and does not own light-vs-dark.** `paperL` does two jobs —
+which side of the mirror, and how light exactly — and only the second belongs to a theme. A theme
+carries a `paperOffset`; `paletteThemeRecipe(theme, dark)` supplies the side. Otherwise "vivid ink on
+white" and "vivid ink on black" become two tiles for one theme.
+
+### The chroma budget — why the table looks conservative
+
+Offering each family's **dark variant** in the picker was tried and reverted, and the measurement
+that killed it also explains the table's shape. On light paper the variants are good (17 cells at
+min pairwise ΔE 0.067 against 13 at 0.041). On **dark** paper they collapse to **0.0137** — for some
+families the "dark" *is* its base, because the walk has already pushed ink up toward light and
+`dL = min(0.92, L + 0.13)` clamps. That clamp is inside frozen `cusp-walk-1`, so it cannot be fixed
+without a new generator id. Families went back to 12 and the grid back to bases only.
+
+Reverting to 12 families then broke the separation check for nine theme/mode pairs, which exposed the
+real constraint. **Separation between 12 families 30° apart tracks their mean chroma**, and two
+recipe fields desaturate — measured at 12 families on light paper:
+
+| | separation | mean chroma |
+| --- | --- | --- |
+| `minContrast` 3.0 → 7.0 at vividness 1.0 | 0.0415 → 0.0293 | 0.180 → 0.149 |
+| vividness 1.0 → 0.70 at `minContrast` 3.0 | 0.0415 → 0.0294 | 0.180 → 0.126 |
+
+They **compound**: a theme at vividness 0.90 *and* 7:1 measured 0.0267. `depth` is free on light paper
+(0.0415 flat from depth 0 to 0.24) and only mildly costly on dark, which is why it looked like the
+culprit at first and is not budgeted.
+
+So the themes are held to **vividness ≥ 0.90 and `minContrast` ≤ 5.0**, and all twelve clear 0.0302 —
+73% of the shipping palette's 0.0414. The cost is that there is no genuinely *muted* theme and no 7:1
+*Contrast* theme; those were the two most distinctive, and they are the two 12 families cannot afford.
+At 8 families the same themes measured 0.039–0.051, so this is a real trade between hue count and ink
+character, not a tuning accident.
+
+### Two constraints in the table that are load-bearing
+
+- **The chroma budget above** (vividness ≥ 0.90, `minContrast` ≤ 5.0), which `colortest.cpp` checks
+  per theme rather than trusting the table to stay in line.
+- **`minContrast` capped at 4.5 in dark mode.** The walk steps *away* from the paper, so a high floor
+  is richer ink on white and *bleached* ink on black. Uncapped, "Deep" and "Contrast" rendered as the
+  palest themes in the set — identity inverted. `paletteThemeIndexOf()` applies the same cap when it
+  compares, or a dark "Contrast" stops recognising itself and the dialog loses its ring.
+
+### What is still open
+
+- **Parchment vs Graphite** are the closest pair (ΔE 0.0224 in dark mode): both muted-with-depth,
+  differing mainly in paper warmth, which collapses when both papers are near-black.
+- **Dark mode reads flatter than light mode** across the set — legible and distinct, but less
+  characterful.
+- Named/saved *user* themes, a live preview on the real document, and seeding from a photo remain
+  unbuilt. The photo seed is moot now that hue is not a theme axis.
 
 ### Known open decisions
 
@@ -240,11 +320,11 @@ three sliders, and four checkboxes. What it lacks:
 3. **Changing a theme resets the toolbar swatch picks** to the new theme's default five, because the
    old picks are not colors the new palette can make. Defensible, but it is a behavior users notice.
 4. **App chrome is out of scope** — `uiTheme` remains a dark/light switch.
-5. **The `ulib` submodule.** `oklab.*` and `palettegen.*` are **untracked** in the `ulib` submodule,
-   which has `ignore = untracked` in `.gitmodules` — so they are invisible to `git status` in the
-   superproject. This is the same state as the existing document-scan files (`homography.cpp` etc.),
-   so it is pre-existing practice rather than a new problem, but it means this code currently exists
-   only in the working tree. **Resolve this before relying on the work.**
+5. **The `ulib` submodule — resolved.** `oklab.*` and `palettegen.*` are now tracked in `ulib`, so
+   changes to them do show up (as `m ulib` in the superproject, since `.gitmodules` has
+   `ignore = untracked`). They no longer exist only in the working tree. Note the consequence: a
+   change to the palette code needs a commit **in the submodule** as well as the superproject bump —
+   committing only in `Write` leaves the generator behind.
 
 ---
 

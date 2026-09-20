@@ -480,35 +480,39 @@ PenToolbar::PenToolbar(bool _compact)
   // closeBtn->onClicked = [this](){ setVisible(false); };  -- must be set by
   // auto adj container
 
-  // Adds `color` to the row if it is not already there, then selects it.
-  auto addSwatch = [this](Color color) {
-    auto it = std::find(savedColors.begin(), savedColors.end(), color);
-    if (it == savedColors.end()) {
-      savedColors.push_back(color);
-      it = savedColors.end() - 1;
-    }
-    int idx = int(it - savedColors.begin());
-    rebuildGrids();
-    colorPicker->setColor(savedColors[idx]);
-    updateColor();
-    return idx;
-  };
-
-  // The custom-color route: append the current color and open the hex/slider popup on it. Reached from
-  //  the end of the theme grid rather than directly, so the theme's own colors are always the first
-  //  answer offered and a custom color is the deliberate second step.
-  auto openCustomColor = [this, addSwatch]() {
-    closeAutoClosePopup(palettePopup);
-    int idx = addSwatch(colorPicker->color());
-    colorPopupIdx = idx;
-    colorPopupPicker->setColor(savedColors[idx]);
-    openAutoClosePopup(colorPopup);
-  };
-
   // The theme's colors, as a 4x4 grid. Rows are forced with an explicit `flex-break` on every fourth
   //  cell - setting a width on the container does *not* wrap it, which is the same mechanism
   //  PaletteWidget::addButton() already uses for the overflow menu.
   palettePopup = createArrowPopup(Menu::VERT_LEFT);
+  // Cancel and delete for the edit route.  They live on a header row rather than as two more cells in
+  //  the grid because they are not colors: mixing a destructive action in among the swatches would put
+  //  it one slip away from every ordinary pick.
+  Button *paletteCancelBtn = createToolbutton(
+      SvgGui::useFile("icons/ic_menu_cancel.svg"), _("Cancel"));
+  paletteCancelBtn->onClicked = [this]() { closeAutoClosePopup(palettePopup); };
+  paletteDeleteBtn = createToolbutton(
+      SvgGui::useFile("icons/ic_menu_discard.svg"), _("Delete Swatch"));
+  paletteDeleteBtn->onClicked = [this]() {
+    if (paletteEditIdx < 0 || paletteEditIdx >= int(savedColors.size()))
+      return;
+    closeAutoClosePopup(palettePopup);
+    int deleted = paletteEditIdx;
+    savedColors.erase(savedColors.begin() + deleted);
+    paletteEditIdx = -1;
+    rebuildGrids();
+    // The deleted swatch is the selected one - this route is only reachable by tapping it - so the pen
+    //  would otherwise be left on a color the row no longer offers, with no swatch ringed.
+    int next = std::min(deleted, int(savedColors.size()) - 1);
+    if (next >= 0) {
+      colorPicker->setColor(savedColors[next]);
+      updateColor();
+    }
+  };
+  paletteHeader = createRow();
+  paletteHeader->addWidget(paletteCancelBtn);
+  paletteHeader->addWidget(createStretch());
+  paletteHeader->addWidget(paletteDeleteBtn);
+  palettePopup->addWidget(paletteHeader);
   paletteGrid = createRow({}, "0 0", "flex-start");
   paletteGrid->node->setAttribute("flex-wrap", "wrap");
   paletteGrid->node->setAttribute("margin", "4 4");
@@ -517,55 +521,7 @@ PenToolbar::PenToolbar(bool _compact)
 
   addColorBtn = createToolbutton(
       SvgGui::useFile(":/icons/ic_menu_add_color.svg"), _("Add Color"));
-  addColorBtn->onClicked = [this, addSwatch, openCustomColor]() {
-    const Palette *pal = docPalette();
-    if (!pal || pal->families.empty()) {
-      // no theme: the + keeps its original meaning, straight to the color editor
-      openCustomColor();
-      return;
-    }
-    SvgGui *gui = window() ? window()->gui() : NULL;
-    if (gui)
-      gui->deleteContents(paletteGrid);
-    std::vector<Color> offer;
-    offer.push_back(pal->neutral);
-    for (const PaletteFamily &fam : pal->families)
-      offer.push_back(fam.base);
-    // A cell smaller than the toolbar's own swatches: this is a grid to scan, not a row to hit
-    //  repeatedly, so density matters more than target size here.
-    std::string cellSVG = fstring(R"#(
-      <g class="toolbutton" layout="box">
-        <rect class="background" width="%g" height="%g"/>
-        <circle class="btn-color" cx="%g" cy="%g" r="%g"/>
-      </g>
-    )#", double(PALETTE_CELL), double(PALETTE_CELL), double(PALETTE_CELL/2),
-        double(PALETTE_CELL/2), double(PALETTE_DOT));
-
-    int cell = 0;
-    auto addCell = [this, &cell](Button *btn) {
-      if (cell > 0 && cell % PALETTE_GRID_COLS == 0)
-        btn->node->setAttribute("flex-break", "before");
-      btn->setMargins(0);
-      paletteGrid->addWidget(btn);
-      ++cell;
-    };
-    for (Color c : offer) {
-      Button *btn = new Button(loadSVGFragment(cellSVG.c_str()));
-      btn->selectFirst(".btn-color")->node->setAttr<color_t>("fill", c.color);
-      setupTooltip(btn, colorToHex(c).c_str());
-      btn->onClicked = [this, addSwatch, c]() {
-        closeAutoClosePopup(palettePopup);
-        addSwatch(c);
-      };
-      addCell(btn);
-    }
-    // ...and the escape hatch, last, so it reads as "or something else"
-    Button *customBtn = createToolbutton(
-        SvgGui::useFile(":/icons/ic_menu_add_color.svg"), _("Custom Color"));
-    customBtn->onClicked = openCustomColor;
-    addCell(customBtn);
-    openAutoClosePopup(palettePopup);
-  };
+  addColorBtn->onClicked = [this]() { openPaletteGrid(-1); };
 
   settingsBtn = createToolSettingsButton(
       "Pen Settings", {"inputSmoothing", "inputSimplify", "applyPenToSel", "savePenMode"},
@@ -724,14 +680,119 @@ void PenToolbar::refreshPalette() {
   rebuildGrids();
 }
 
+int PenToolbar::addSwatchColor(Color color) {
+  auto it = std::find(savedColors.begin(), savedColors.end(), color);
+  if (it == savedColors.end()) {
+    savedColors.push_back(color);
+    it = savedColors.end() - 1;
+  }
+  int idx = int(it - savedColors.begin());
+  rebuildGrids();
+  colorPicker->setColor(toolColor(savedColors[idx]));
+  updateColor();
+  return idx;
+}
+
+// Replaces one swatch in place, keeping its position on the row - the edit route must never grow the
+//  row, which is the thing it exists to be able to undo.
+void PenToolbar::setSwatchColor(int idx, Color color) {
+  if (idx < 0 || idx >= int(savedColors.size()))
+    return;
+  savedColors[idx] = color;
+  rebuildGrids();
+  colorPicker->setColor(toolColor(color));
+  updateColor();
+}
+
+// The custom-color route: the hex/slider popup, on an appended swatch (editIdx < 0) or on an existing
+//  one. Reached from the end of the theme grid rather than directly, so the theme's own colors are
+//  always the first answer offered and a custom color is the deliberate second step.
+void PenToolbar::openCustomColor(int editIdx) {
+  closeAutoClosePopup(palettePopup);
+  int idx = editIdx >= 0 && editIdx < int(savedColors.size())
+      ? editIdx : addSwatchColor(colorPicker->color());
+  // rebuildGrids() (via addSwatchColor) resets colorPopupIdx, so this must come after it
+  colorPopupIdx = idx;
+  colorPopupPicker->setColor(savedColors[idx]);
+  openAutoClosePopup(colorPopup);
+}
+
+void PenToolbar::openPaletteGrid(int editIdx) {
+  bool editing = editIdx >= 0 && editIdx < int(savedColors.size());
+  const Palette *pal = docPalette();
+  if (!pal || pal->families.empty()) {
+    // no theme: there is no grid to show, so both routes fall through to the color editor
+    openCustomColor(editing ? editIdx : -1);
+    return;
+  }
+  paletteEditIdx = editing ? editIdx : -1;
+  paletteHeader->setVisible(editing);
+  // the row must keep at least one swatch, as the pen's color has to come from somewhere
+  paletteDeleteBtn->setEnabled(editing && savedColors.size() > 1);
+
+  SvgGui *gui = window() ? window()->gui() : NULL;
+  if (gui)
+    gui->deleteContents(paletteGrid);
+  // Bases only. Offering each family's dark variant too was tried and measured: it is better on light
+  //  paper (17 cells at min pairwise dE 0.067 against 13 cells at 0.041) and much worse on dark, where
+  //  the generator's `dL = min(0.92, L + 0.13)` clamps a dark onto its own base and the grid falls to
+  //  0.014 - visually duplicate swatches. The variants stay reachable through restyle, which preserves
+  //  them; they are just not worth a cell here.
+  std::vector<Color> offer;
+  offer.push_back(pal->neutral);
+  for (const PaletteFamily &fam : pal->families)
+    offer.push_back(fam.base);
+  // A cell smaller than the toolbar's own swatches: this is a grid to scan, not a row to hit
+  //  repeatedly, so density matters more than target size here.
+  std::string cellSVG = fstring(R"#(
+    <g class="toolbutton" layout="box">
+      <rect class="background" width="%g" height="%g"/>
+      <circle class="btn-color" cx="%g" cy="%g" r="%g"/>
+    </g>
+  )#", double(PALETTE_CELL), double(PALETTE_CELL), double(PALETTE_CELL/2),
+      double(PALETTE_CELL/2), double(PALETTE_DOT));
+
+  int cell = 0;
+  auto addCell = [this, &cell](Button *btn) {
+    if (cell > 0 && cell % PALETTE_GRID_COLS == 0)
+      btn->node->setAttribute("flex-break", "before");
+    btn->setMargins(0);
+    paletteGrid->addWidget(btn);
+    ++cell;
+  };
+  for (Color c : offer) {
+    Button *btn = new Button(loadSVGFragment(cellSVG.c_str()));
+    btn->selectFirst(".btn-color")->node->setAttr<color_t>("fill", toolColor(c).color);
+    setupTooltip(btn, colorToHex(c).c_str());
+    btn->onClicked = [this, c]() {
+      int idx = paletteEditIdx;
+      closeAutoClosePopup(palettePopup);
+      if (idx >= 0)
+        setSwatchColor(idx, c);
+      else
+        addSwatchColor(c);
+    };
+    addCell(btn);
+  }
+  // ...and the escape hatch, last, so it reads as "or something else"
+  Button *customBtn = createToolbutton(
+      SvgGui::useFile(":/icons/ic_menu_add_color.svg"), _("Custom Color"));
+  customBtn->onClicked = [this]() { openCustomColor(paletteEditIdx); };
+  addCell(customBtn);
+  openAutoClosePopup(palettePopup);
+}
+
 void PenToolbar::rebuildGrids() {
   closeAutoClosePopup(colorPopup);
   colorPopupIdx = -1;
+  // the indices both popups hold are into the list being rebuilt, so neither may outlive it
+  closeAutoClosePopup(palettePopup);
+  paletteEditIdx = -1;
   colorPalette->clear();
   widthPalette->clear();
 
   for (size_t ii = 0; ii < savedColors.size(); ++ii) {
-    Color color = savedColors[ii];
+    Color color = toolColor(savedColors[ii]);
     Button *btn =
         compact ? new Button(compactColorBtnNode->clone()) : createColorBtn();
     btn->selectFirst(".btn-color")->node->setAttr<color_t>("fill", color.color);
@@ -750,7 +811,8 @@ void PenToolbar::rebuildGrids() {
       setupTooltip(btn, altTooltip(colorToHex(color).c_str(), _("Edit")));
     }
     else
-      setupTooltip(btn, ii == 0 ? _("Neutral") : colorToHex(color).c_str());
+      setupTooltip(btn, altTooltip(
+          ii == 0 ? _("Neutral") : colorToHex(color).c_str(), _("Edit")));
     colorPalette->addButton(btn);
     if (compact)
       btn->setMargins(
@@ -801,26 +863,28 @@ void PenToolbar::selectWidth(int idx) {
   updateWidth();
 }
 
-// tapping the already selected swatch opens the detail editor for it
+// Tapping the already selected swatch opens the theme's grid on it: the same menu the "+" gives, plus
+//  cancel and delete, so a swatch added by mistake can be replaced or taken back where it sits.
 void PenToolbar::selectColor(int idx) {
-  if (savedColors[idx] == pen.color) {
-    colorPopupIdx = idx;
-    colorPopupPicker->setColor(savedColors[idx]);
-    if (colorPopup->isVisible())
+  if (toolColor(savedColors[idx]) == pen.color) {
+    if (palettePopup->isVisible() || colorPopup->isVisible()) {
+      closeAutoClosePopup(palettePopup);
       closeAutoClosePopup(colorPopup);
+    }
     else
-      openAutoClosePopup(colorPopup);
+      openPaletteGrid(idx);
     return;
   }
+  closeAutoClosePopup(palettePopup);
   closeAutoClosePopup(colorPopup);
-  colorPicker->setColor(savedColors[idx]);
+  colorPicker->setColor(toolColor(savedColors[idx]));
   updateColor();
 }
 
 void PenToolbar::updateSelected() {
   for (size_t ii = 0;
        ii < colorPalette->items.size() && ii < savedColors.size(); ++ii) {
-    bool sel = savedColors[ii] == pen.color;
+    bool sel = toolColor(savedColors[ii]) == pen.color;
     colorPalette->items[ii]->setChecked(sel);
     // a circular swatch has no background to tint, so mark the selected one
     // with a ring instead
@@ -990,6 +1054,26 @@ bool PenToolbar::seedWidths() {
       activeWidths().push_back(relativeWidths() ? w/lh : w);
   }
   return true;
+}
+
+// A marker stroke is its family at another alpha (Palette::indexOf ignores alpha), so this maps a
+//  swatch to the highlighter variant of whatever family it belongs to.  The saved list itself is left
+//  in ink colors: it is shared by every tool, and storing it per tool would mean the user's picks
+//  splitting into three lists that drift apart.
+// Off-palette colors are passed through untouched apart from the marker's alpha - the point of the
+//  escape hatch is that the color asked for is the color drawn.
+Color PenToolbar::toolColor(Color c) const {
+  if (widthsTool != ScribbleMode::DRAWTOOL_HIGHLIGHT)
+    return c;
+  const Palette *pal = themed ? docPalette() : NULL;
+  int family = -1, variant = PALETTE_BASE;
+  if (pal && pal->indexOf(c, &family, &variant) && family >= 0)
+    return pal->families[family].hl;
+  // the neutral has no highlighter variant of its own (it is exempt from the walk), and neither does
+  //  an off-palette color; both simply take the marker's alpha
+  Color out = c;
+  out.setAlpha(pal && !pal->families.empty() ? pal->families[0].hl.alpha() : 127);
+  return out;
 }
 
 bool PenToolbar::relativeWidths() const {

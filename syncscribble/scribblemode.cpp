@@ -1,5 +1,7 @@
 #include "scribblemode.h"
 #include "shape.h"
+#include "page.h"
+#include "scribbleconfig.h"
 #include <sstream>
 
 
@@ -159,6 +161,20 @@ void ScribbleMode::loadModes(const char* modestr)
     (void)mode;
   readPen(ss, drawPen, 0);
   readPen(ss, highlightPen, ScribblePen::DRAW_UNDER);
+  // The marker's width is a fraction of the line height, always - that is the number that means
+  //  something for a tool whose job is to cover a line of text, and it is the default above.  A config
+  //  written before relative widths existed (or with the toggle turned off) carries an absolute width,
+  //  so it is converted here rather than reinterpreted: 30 units would otherwise load as 30 line
+  //  heights.  The page being drawn on is not known yet, so the blank-page ruling is the unit; it is
+  //  the same fallback PenToolbar::lineHeight() uses when a page has none.
+  // The marker's preset list is in whatever unit the pen was in, and there is no per-preset flag to
+  //  convert it by, so it is cleared and reseeded (in line heights) by PenToolbar::seedWidths().  This
+  //  runs before the toolbar is built, which is what makes clearing the config value enough.
+  if(!highlightPen.hasFlag(ScribblePen::WIDTH_RELATIVE)) {
+    highlightPen.width = highlightPen.width/Page::BLANK_Y_RULING;
+    highlightPen.setFlag(ScribblePen::WIDTH_RELATIVE, true);
+    cfg->set("savedMarkerWidths", "");
+  }
   readPen(ss, ephemeralPen, ScribblePen::EPHEMERAL);
   std::string shapestr;
   if(ss >> shapestr) {

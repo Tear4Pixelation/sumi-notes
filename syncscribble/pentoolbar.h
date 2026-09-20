@@ -68,6 +68,19 @@ private:
   void rebuildGrids();
   void selectWidth(int idx);
   void selectColor(int idx);
+  // Opens the theme's color grid.  editIdx < 0 is the "+" route: a pick is appended to the row.
+  //  editIdx >= 0 edits that swatch - a pick replaces it in place, and the popup grows a header row
+  //  with cancel on the left and delete on the right, so a swatch added by mistake can be taken back.
+  void openPaletteGrid(int editIdx);
+  // appends `color` to the row if it is not already there, then selects it; returns its index
+  int addSwatchColor(Color color);
+  // the hex/slider editor, on a new swatch (editIdx < 0) or on an existing one
+  void openCustomColor(int editIdx);
+  void setSwatchColor(int idx, Color color);
+  // The color a swatch actually gives the pen in hand: the saved list holds the theme's ink colors,
+  //  but the marker draws translucent, so with it selected every swatch is offered as that family's
+  //  highlighter variant instead.  Identity for every other tool, and for an unthemed document.
+  Color toolColor(Color c) const;
   void updateSelected();
   // any pen's thickness can be expressed as a multiple of the line height (the relative size toggle in
   //  the width popup); it is on by default for the text marker only, which is the tool whose job is to
@@ -100,6 +113,11 @@ private:
   //  theme's answer is offered first; a color from outside it takes one more deliberate step.
   ArrowPopup* palettePopup;
   Widget* paletteGrid;
+  // cancel/delete row, shown only while the grid is editing an existing swatch
+  Widget* paletteHeader;
+  Button* paletteDeleteBtn;
+  // which swatch the open grid is editing, or -1 when it is adding one
+  int paletteEditIdx = -1;
   // true while a document theme is supplying the colors on offer
   bool themed = false;
   Button* settingsBtn;

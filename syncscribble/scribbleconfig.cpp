@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <cmath>
 #include "scribbleconfig.h"
 #include "document.h"
 
@@ -344,6 +345,18 @@ PaletteRecipe ScribbleConfig::themeRecipe() const
   r.paperL       = Float("themePaperL", float(r.paperL));
   r.paperWarm    = Float("themePaperWarm", float(r.paperWarm));
   r.families     = Int("themeFamilies", r.families);
+  // Snap back to the shipped theme this is (within a hair): every field is a double stored as a float,
+  //  so a recipe read back generates colors a fraction off the ones it was saved with - and restyle
+  //  identifies a stroke by its color being an *exact* palette member.  Nothing is snapped unless the
+  //  whole recipe, seed and jitter included, matches a theme, so a hand-tuned one is left alone.
+  int themeIdx = paletteThemeIndexOf(r);
+  const PaletteTheme* theme = paletteThemeByIndex(themeIdx);
+  if(theme) {
+    PaletteRecipe canonical = paletteThemeRecipe(*theme, r.paperL <= 0.5);
+    if(std::fabs(r.seedHue - canonical.seedHue) < 1e-4 && std::fabs(r.jitter - canonical.jitter) < 1e-4
+        && (r.gen.empty() || r.gen == canonical.gen))
+      return canonical;
+  }
   return r;
 }
 
