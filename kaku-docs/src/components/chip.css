@@ -1,0 +1,49 @@
+/*
+ * Shared by the site (imported from global.css) and Fumadocs Studio (listed in
+ * fumadocs-studio.config.ts), so plain CSS rather than Tailwind classes: Studio
+ * does not run the site's Tailwind build.
+ *
+ * Everything is derived from --chip-color, which defaults to the surrounding
+ * text color. The text is the chip color mixed with that surrounding color, so
+ * it stays readable on both light and dark themes.
+ */
+.chip {
+  --chip-color: currentColor;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+  max-width: 100%;
+  padding: 0.05em 0.6em;
+  border: 1px solid color-mix(in oklab, var(--chip-color) 30%, transparent);
+  border-radius: 9999px;
+  background: color-mix(in oklab, var(--chip-color) 12%, transparent);
+  color: color-mix(in oklab, var(--chip-color) 70%, currentColor);
+  font-size: 0.8125em;
+  font-weight: 500;
+  line-height: 1.6;
+  text-decoration: none;
+  white-space: nowrap;
+  vertical-align: 0.05em;
+}
+
+a.chip {
+  transition: background-color 0.15s;
+}
+
+a.chip:hover {
+  background: color-mix(in oklab, var(--chip-color) 22%, transparent);
+}
+
+.chip-icon {
+  flex: none;
+  width: 1.1em;
+  height: 1.1em;
+  margin: 0;
+  border-radius: 3px;
+}
+
+.chip-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
