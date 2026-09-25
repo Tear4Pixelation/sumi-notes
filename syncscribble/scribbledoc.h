@@ -41,6 +41,11 @@ public:
   bool doesClipStrokes(const PageProperties* props, bool applytoall);
   bool setPageProperties(const PageProperties* props, bool applytoall, bool docdefault, bool global, bool undoable = true);
   void openURL(const char* url);
+  // Set or clear a page's outline (table of contents) entry, as one undoable, syncable action.
+  // A NULL or empty title removes the entry.  Returns false if pagenum is out of range or the
+  // entry is already exactly this, so a no-op cannot push an empty step onto the undo history.
+  bool setPageOutline(int pagenum, const char* title, int level = 0);
+  std::vector<OutlineEntry> outline(bool loadpages = true) { return document->outline(loadpages); }
   void bookmarkHit(int pagenum, Element* bookmark);
 
   // a lot of stuff needs to be moved up from ScribbleDoc to application level

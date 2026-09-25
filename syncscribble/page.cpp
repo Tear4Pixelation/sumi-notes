@@ -524,12 +524,24 @@ bool Page::loadSVG(SvgDocument* doc)
   props.xRuling = xr;
   props.yRuling = yr;
   props.marginLeft = margin;
+  props.dotRadius = contentNode->getFloatAttr("dotradius", atof(contentNode->getStringAttr("dotradius", "0")));
   props.ruleColor = rulecolor;
   props.color.setAlphaF(1);
+
+  // outline entry - note the "__" prefix: an unprefixed "outline" would collide with the CSS property
+  //  of that name, which usvg does support, so the parser could plausibly claim it as a presentation
+  //  attribute.  The other page attributes above predate CSS support and are left as they are.
+  outlineTitle = contentNode->getStringAttr("__outline", "");
+  outlineLevel = std::min(std::max(0,
+      int(contentNode->getFloatAttr("__outlinelevel", atof(contentNode->getStringAttr("__outlinelevel", "0"))))),
+      int(MAX_OUTLINE_LEVEL));
 
   // load content
   onPageSizeChange();
   loadStatus = props.width > 0 && props.height > 0 ? LOAD_OK : LOAD_SVG_ERROR;
+  // a delay-loaded page arrives after the layer table has been read from the document config, so
+  //  hidden layers have to be applied here as well as when the table changes
+  applyLayerState();
   return loadStatus == LOAD_OK;
 }
 
@@ -652,6 +664,27 @@ SvgNode* Page::findNamedNode(const char* idstr) const
 {
   const_cast<Page*>(this)->ensureLoaded();
   return svgDoc->namedNode(idstr);
+}
+
+// Set or clear this page's outline entry.  Writing the attributes here rather than in
+//  onPageSizeChange() (where the other page attributes are written) keeps them off the page-geometry
+//  path, but like those they are written eagerly so copy+paste of a page carries the entry with it.
+void Page::setOutlineEntry(const char* title, int level)
+{
+  // the attributes live in the page SVG, so an unloaded page has nowhere to put them; the reload
+  //  would overwrite whatever we wrote into the placeholder svgDoc that unload() left behind
+  if(!ensureLoaded()) return;
+  outlineTitle = title ? title : "";
+  outlineLevel = std::min(std::max(0, level), int(MAX_OUTLINE_LEVEL));
+  if(outlineTitle.empty()) {
+    outlineLevel = 0;
+    contentNode->removeAttr("__outline");
+    contentNode->removeAttr("__outlinelevel");
+  }
+  else {
+    contentNode->setAttr("__outline", outlineTitle.c_str());
+    contentNode->setAttr<float>("__outlinelevel", float(outlineLevel));
+  }
 }
 
 void Page::setSelected(bool sel)

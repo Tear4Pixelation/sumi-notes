@@ -410,7 +410,140 @@ int ScribbleTest::themeRoundTripTest()
   return nbad;
 }
 
+// Outline (table of contents) entries must follow their page through document edits.  The whole point
+//  of storing the entry inside the page's own SVG rather than in a {page number, title} list on
+//  Document is that inserting or deleting a page above it cannot invalidate it - so that is what this
+//  checks, along with the round trip, the level normalization and the undo step.
+int ScribbleTest::outlineTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: outline: %s\n", what); }
+  };
+  // find the entry for a given title, or NULL
+  auto entryFor = [&](std::vector<OutlineEntry>& es, const char* title) -> OutlineEntry* {
+    for(OutlineEntry& e : es) { if(e.title == title) return &e; }
+    return NULL;
+  };
+
+  scribbleDoc->newDocument();
+  scribbleDoc->newPage();
+  scribbleDoc->newPage();  // 3 pages: 0, 1, 2
+  check(scribbleDoc->document->numPages() == 3, "three pages to work with");
+
+  check(scribbleDoc->outline().empty(), "a fresh document has an empty outline");
+
+  check(scribbleDoc->setPageOutline(0, "Intro", 0), "setting an entry succeeds");
+  check(scribbleDoc->setPageOutline(2, "Results", 1), "setting a second entry succeeds");
+  // a no-op must not push an empty undo step
+  check(!scribbleDoc->setPageOutline(0, "Intro", 0), "setting the same entry again is a no-op");
+  check(!scribbleDoc->setPageOutline(99, "Nowhere", 0), "an out-of-range page is refused");
+
+  std::vector<OutlineEntry> es = scribbleDoc->outline();
+  check(es.size() == 2, "two entries");
+  check(es.size() == 2 && es[0].title == "Intro" && es[1].title == "Results",
+      "entries come back in page order");
+  check(entryFor(es, "Intro") && entryFor(es, "Intro")->pagenum == 0, "Intro is on page 0");
+  check(entryFor(es, "Results") && entryFor(es, "Results")->pagenum == 2, "Results is on page 2");
+  // page 2 asked for level 1 and follows a level 0, so it is a legal child and must stay at 1
+  check(entryFor(es, "Results") && entryFor(es, "Results")->level == 1, "a legal nesting level is kept");
+
+  // *** the requirement: insert a page above and the entries must still name the right pages ***
+  scribbleDoc->newPage(0);  // insert a new page at the very front
+  check(scribbleDoc->document->numPages() == 4, "the page was inserted");
+  es = scribbleDoc->outline();
+  check(es.size() == 2, "inserting a page adds no entries and loses none");
+  check(entryFor(es, "Intro") && entryFor(es, "Intro")->pagenum == 1,
+      "an entry follows its page when a page is inserted above it");
+  check(entryFor(es, "Results") && entryFor(es, "Results")->pagenum == 3,
+      "a later entry follows its page too");
+  // and the title must be on the page it points at, not merely at a shifted index
+  check(scribbleDoc->document->pages[1]->outlineTitle == "Intro",
+      "the entry is stored on the page it names");
+  check(!scribbleDoc->document->pages[0]->hasOutlineEntry(),
+      "the newly inserted page has no entry of its own");
+
+  // deleting a page above must shift them back
+  scribbleDoc->deletePage(0);
+  es = scribbleDoc->outline();
+  check(entryFor(es, "Intro") && entryFor(es, "Intro")->pagenum == 0,
+      "an entry follows its page when a page above it is deleted");
+
+  // Level normalization: an entry may not sit more than one level below the one before it.  Here the
+  //  first entry is level 0, so a level-3 request must come back as 1 - otherwise deleting the page
+  //  that held a parent leaves children hanging under nothing.
+  check(scribbleDoc->setPageOutline(1, "Orphan", 3), "setting a deep entry succeeds");
+  es = scribbleDoc->outline();
+  check(entryFor(es, "Orphan") && entryFor(es, "Orphan")->level == 1,
+      "a level more than one deeper than the previous entry is normalized");
+  // but the page keeps what was asked for, so restoring the parent restores the intent
+  check(scribbleDoc->document->pages[1]->outlineLevel == 3,
+      "the stored level is the user's request, not the normalized one");
+  check(scribbleDoc->setPageOutline(1, NULL, 0), "clearing an entry succeeds");
+  check(scribbleDoc->outline().size() == 2, "a cleared entry leaves the outline");
+
+  // one undo step per change: undo the clear and the entry comes back
+  scribbleDoc->doCommand(ID_UNDO);
+  es = scribbleDoc->outline();
+  check(entryFor(es, "Orphan") != NULL, "undo restores a cleared entry");
+  check(entryFor(es, "Orphan") && scribbleDoc->document->pages[1]->outlineLevel == 3,
+      "undo restores the entry's level too");
+  scribbleDoc->doCommand(ID_REDO);
+  check(scribbleDoc->outline().size() == 2, "redo clears it again");
+
+  // save and reload: the entry rides the page SVG
+  std::string file = outPath + "/outline_roundtrip_out.html";
+  check(scribbleDoc->saveDocument(file.c_str()), "saving the document should succeed");
+  scribbleDoc->newDocument();
+  check(scribbleDoc->openDocument(file.c_str()) == Document::LOAD_OK, "reloading should succeed");
+  removeFile(file.c_str());
+
+  es = scribbleDoc->outline();
+  check(es.size() == 2, "both entries survive save/reload");
+  check(entryFor(es, "Intro") && entryFor(es, "Intro")->pagenum == 0, "Intro reloads on page 0");
+  check(entryFor(es, "Results") && entryFor(es, "Results")->pagenum == 2, "Results reloads on page 2");
+  check(entryFor(es, "Results") && entryFor(es, "Results")->level == 1,
+      "the nesting level survives save/reload");
+
+  // a title containing XML metacharacters must survive both the file and the sync wire format
+  const char* nasty = "R&D <draft> \"one\" 'two'";
+  check(scribbleDoc->setPageOutline(1, nasty, 1), "setting a title with markup characters succeeds");
+  file = outPath + "/outline_escape_out.html";
+  check(scribbleDoc->saveDocument(file.c_str()), "saving with a markup title should succeed");
+  scribbleDoc->newDocument();
+  check(scribbleDoc->openDocument(file.c_str()) == Document::LOAD_OK, "reloading should succeed");
+  removeFile(file.c_str());
+  check(scribbleDoc->document->pages[1]->outlineTitle == nasty,
+      "a title containing & < > and quotes round-trips unmangled");
+
+  // The check above only exercises the *file* format (SvgWriter escapes for us).  The sync wire
+  //  format is hand-written, and a title is the first arbitrary user string to go on it, so serialize
+  //  the undo item and parse it back the way ScribbleSync would - an unescaped & or ' produces a
+  //  malformed item and desyncs the stream, which nothing else here would notice.
+  {
+    MemStream strm;
+    PageOutlineItem item(scribbleDoc->document->pages[1]);
+    item.serialize(strm);
+    std::string wire(strm.data(), strm.size());
+    pugi::xml_document wiredoc;
+    bool parsed = wiredoc.load_buffer(wire.data(), wire.size());
+    check(parsed, "the serialized outline item is well-formed XML");
+    pugi::xml_node n = wiredoc.child("outlinechanged");
+    check(!n.empty(), "the item serializes as <outlinechanged>");
+    check(n.attribute("pagenum").as_int(-1) == 1, "the wire format carries the page number");
+    check(n.attribute("level").as_int(-1) == 1, "the wire format carries the level");
+    check(strcmp(n.attribute("title").as_string(), nasty) == 0,
+        "a title with markup characters survives the sync wire format");
+  }
+
+  scribbleDoc->newDocument();
+  return nbad;
+}
+
 // Phase 5: restyling must move the theme's own ink and nothing else, and must undo in one step.
+// Layers (LAYERS_INVESTIGATION.md).  runLayerTests() in layertest.cpp covers the table's own logic;
+//  everything here needs a document: the lock actually blocking the editing paths, the undo item, the
+//  round trip through the document config, and the wire format.
 int ScribbleTest::restyleTest()
 {
   int nbad = 0;

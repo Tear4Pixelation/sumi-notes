@@ -165,6 +165,25 @@ public:
   unsigned int type() const override { return PAGE_CHANGED_ITEM; }
 };
 
+// Change to a page's outline (table of contents) entry.  Deliberately *not* folded into
+//  PageProperties/PageChangedItem: ScribbleDoc::setPageProperties(applytoall) assigns one
+//  PageProperties struct to every page, so an outline title carried in that struct would be stamped
+//  onto the whole document by an unrelated ruling or theme change.
+class PageOutlineItem : public UndoHistoryItem {
+public:
+  Page* p;
+  std::string title;
+  int level;
+  void swapOutline();
+//public:
+  PageOutlineItem(Page* p_) : p(p_), title(p_->outlineTitle), level(p_->outlineLevel) {}
+  PageOutlineItem(Page* p_, const char* title_, int level_)
+      : p(p_), title(title_ ? title_ : ""), level(level_) {}
+  void commit() override;
+  ADDRM_UNDO_ITEM_METHODS
+  unsigned int type() const override { return PAGE_OUTLINE_ITEM; }
+};
+
 // Document level undo items
 
 class DocumentUndoItem : public UndoHistoryItem {

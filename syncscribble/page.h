@@ -39,6 +39,14 @@ public:
   std::list<Element*> bookmarks;
   Dim maxBookmarkWidth = 0;
   int numBookmarks = -1;
+  // Outline (table of contents) entry for this page; an empty title means the page has no entry.
+  // These are a cache of the __outline/__outlinelevel attributes on contentNode - the page's own SVG
+  // is the storage, deliberately, rather than a list of {page number, title} on Document.  A
+  // document-level list keyed by page number would have to be fixed up by insertPage/deletePage,
+  // by undo of either, and by sync, and would silently point at the wrong page whenever one of
+  // those was missed.  Living on the page, an entry moves with its page for free.
+  std::string outlineTitle;
+  int outlineLevel = 0;
   enum loadstatus_t {LOAD_SVG_ERROR=-1, NOT_LOADED=0, LOAD_OK=1} loadStatus = NOT_LOADED;
   // dirtyCount is managed by undo system; page needs to be written out if != 0
   int dirtyCount = 0;
@@ -96,9 +104,14 @@ public:
   bool ensureLoaded(bool checkmem = true);
   void migrateLegacySVG();
   void contentToRuling();
+  bool hasOutlineEntry() const { return !outlineTitle.empty(); }
+  // set (or clear, with a NULL/empty title) this page's outline entry, writing through to the SVG
+  void setOutlineEntry(const char* title, int level);
   void setSelected(bool sel);
   void unload();
 
+  // deepest nesting level an entry may claim; keeps a malformed document from producing a silly tree
+  static const int MAX_OUTLINE_LEVEL = 8;
   static Dim BLANK_Y_RULING;
   static const color_t DEFAULT_RULE_COLOR = Color::BLUE;
   //static const int NOT_AUTO_SAVED = INT_MAX;

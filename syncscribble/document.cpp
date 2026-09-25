@@ -541,6 +541,30 @@ Document::loadresult_t Document::load(const pugi::xml_document& doc, const char*
   return LOAD_OK;
 }
 
+// Build the table of contents.  Levels are normalized as we go: an entry may not sit more than one
+//  level deeper than the entry before it.  Without that, deleting the page that held a level-0 entry
+//  would leave its level-2 children dangling under nothing, and a renderer walking the list would
+//  have to cope with a hole it cannot draw.  Normalizing here means the stored level is a preference
+//  and the returned level is always a well-formed tree, whatever editing the document has been through.
+std::vector<OutlineEntry> Document::outline(bool loadpages)
+{
+  std::vector<OutlineEntry> entries;
+  int prevlevel = -1;
+  for(unsigned int ii = 0; ii < pages.size(); ++ii) {
+    Page* page = pages[ii];
+    // a page that has never been loaded has no cached title; only pay to load it if asked to.  One
+    //  that was loaded and then unloaded (memory limit) keeps its cached title - unload() only takes
+    //  clean pages - so it still counts without loading, and loadpages=false does not drop it.
+    if(page->loadStatus == Page::NOT_LOADED && loadpages && !page->ensureLoaded())
+      continue;
+    if(!page->hasOutlineEntry()) continue;
+    int level = std::min(page->outlineLevel, prevlevel + 1);
+    entries.emplace_back(int(ii), page->outlineTitle, level);
+    prevlevel = level;
+  }
+  return entries;
+}
+
 bool Document::checkAndClearErrors()
 {
   for(unsigned int ii = 0; ii < pages.size(); ++ii) {

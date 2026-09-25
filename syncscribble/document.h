@@ -25,10 +25,25 @@ struct DocViewBox {
   bool isValid() { return pagenum >= 0 && box.isValid(); }
 };
 
+// One entry of the document's outline (table of contents).  pagenum is computed when the outline is
+//  built, never stored, which is what makes an entry immune to pages being inserted or removed above it.
+struct OutlineEntry {
+  int pagenum;
+  std::string title;
+  int level;  // nesting depth, 0 = top level
+
+  OutlineEntry(int pn, const std::string& t, int lvl) : pagenum(pn), title(t), level(lvl) {}
+};
+
 class Document {
 public:
   std::vector<Page*> pages;
   UndoHistory* history;
+  // The document's layers (LAYERS_INVESTIGATION.md).  Elements carry only an id; this says what the
+  //  ids mean.  Persistence is ScribbleDoc's job - the table rides the per-document config, exactly
+  //  as the theme recipe does - so Document just holds it, and a Document with no ScribbleDoc (a
+  //  clipping, a thumbnail read) gets the default single layer.
+  LayerList layers;
   int dirtyCount = 0;  // managed just as Page.dirtyCount
   int autoSaveSerialNum = 0;
   bool bookmarksDirty = false;

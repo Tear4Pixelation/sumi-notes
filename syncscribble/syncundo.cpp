@@ -181,6 +181,34 @@ void PageChangedItem::redo()
   p->dirtyCount++;
 }
 
+void PageOutlineItem::discard(bool undone) {}
+
+void PageOutlineItem::commit()
+{
+  p->dirtyCount++;
+}
+
+void PageOutlineItem::swapOutline()
+{
+  std::string prevtitle = p->outlineTitle;
+  int prevlevel = p->outlineLevel;
+  p->setOutlineEntry(title.c_str(), level);
+  title = prevtitle;
+  level = prevlevel;
+}
+
+void PageOutlineItem::undo()
+{
+  swapOutline();
+  p->dirtyCount--;
+}
+
+void PageOutlineItem::redo()
+{
+  swapOutline();
+  p->dirtyCount++;
+}
+
 DocumentUndoItem::DocumentUndoItem(Page* p_, int pagenum_, Document* document_)
     : p(p_), pagenum(pagenum_), document(document_) {}
 
@@ -496,4 +524,12 @@ UndoHistoryItem* PageChangedItem::inverse()
 {
   return new PageChangedItem(*this);
 }
+
+UndoHistoryItem* PageOutlineItem::inverse()
+{
+  return new PageOutlineItem(*this);
+}
+
+
+// LayerTableItem
 

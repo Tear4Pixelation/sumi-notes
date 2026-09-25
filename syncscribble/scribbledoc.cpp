@@ -785,6 +785,31 @@ int ScribbleDoc::restyleToTheme(const PaletteRecipe& recipe, bool applyPages, bo
   return nchanged;
 }
 
+// Set or clear a page's outline entry.  Note this goes through the undo system rather than calling
+//  Page::setOutlineEntry() directly: undo items are the sync protocol, so doing it here is also what
+//  makes the entry reach other clients of a shared document.
+bool ScribbleDoc::setPageOutline(int pagenum, const char* title, int level)
+{
+  if(pagenum < 0 || pagenum >= document->numPages())
+    return false;
+  Page* page = document->pages[pagenum];
+  if(!page->ensureLoaded())
+    return false;
+  std::string newtitle(title ? title : "");
+  int newlevel = newtitle.empty() ? 0 : std::min(std::max(0, level), int(Page::MAX_OUTLINE_LEVEL));
+  if(page->outlineTitle == newtitle && page->outlineLevel == newlevel)
+    return false;  // nothing to do; don't push an empty undo step
+
+  startAction(pagenum);
+  if(history->undoable())
+    history->addItem(new PageOutlineItem(page));  // records the *previous* entry, as PageChangedItem does
+  // no dirtyCount++ here: UndoHistory::addItem() calls commit(), which does it - the same convention
+  //  Page::setProperties() follows
+  page->setOutlineEntry(newtitle.c_str(), newlevel);
+  endAction();
+  return true;
+}
+
 void ScribbleDoc::openURL(const char* url)
 {
   // address starting with a '.' (so '.' or '..') is assumed to point to a local file
