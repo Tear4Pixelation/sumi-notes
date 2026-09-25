@@ -16,6 +16,20 @@ typedef int64_t Timestamp;
 //  1.0 is the original design-mockup size; 0.5 halves the whole toolbar.
 static const Dim floatUIScale = 0.5;
 
+// Where the floating panels sit relative to the window, and how tall one panel row is.  These live
+//  here rather than in mainwindow.cpp (where the rest of the toolbar geometry is file-static)
+//  because the sidebar has to line up with the toolbar: it takes its own inset from floatInset and
+//  its top from floatTopInset + floatBtnSize + floatInset.  Duplicating the numbers there is how
+//  the two drifted apart in the first place.
+static const Dim floatInset = 27*floatUIScale;
+static const Dim floatTopInset = 15*floatUIScale;
+static const Dim floatBtnSize = 64*floatUIScale;
+// The gap to the *window* edge, as opposed to floatInset, which is the gap between two panels.  The
+//  two were the same number, which left the row noticeably further from the left and right edges
+//  than from the top; the edge gap is now the top gap, so the chrome is inset equally on all three
+//  sides.  The sidebar takes its own edge inset (and the gap below the toolbar) from here too.
+static const Dim floatEdgeInset = floatTopInset;
+
 
 #define MIN std::min
 #define MAX std::max

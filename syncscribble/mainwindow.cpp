@@ -5,22 +5,22 @@
 #include "scribblewidget.h"
 #include "scribblesync.h"
 #include "bookmarkview.h"
-#include "clippingview.h"
 #include "scribbledoc.h"
 #include "pentoolbar.h"
 #include "touchwidgets.h"
 #include "addpagemenu.h"
 #include "configdialog.h"
+#include "sidebar.h"
+#include "usvg/svgparser.h"
 
-// SVG for main window, default clippings; preferences info
+// SVG for main window, preferences info
 #include "res_ui.cpp"
 
 // TODO: figure out why just capturing mw doesn't work
 #define SLOT(x) [=](){ app->x; }
 
 // geometry of the floating main toolbar (tools row + options row form a single panel)
-static const Dim floatInset = 27*floatUIScale;
-static const Dim floatTopInset = 15*floatUIScale;
+//  floatInset, floatTopInset and floatBtnSize are in basics.h - the sidebar aligns to them
 static const real floatCorner = 12*floatUIScale;
 // horizontal padding between a floating panel's rounded background and its first/last button:
 //  the mockup gives the editing panel more room than the page/file ops panels, and none at all
@@ -34,7 +34,6 @@ static const Dim floatSepWidth = 10*floatUIScale;
 //  23px icon), per the design mockup (64x64 with a 32x32 icon).  The prototype is shared by every
 //  menu, dialog and toolbar in the app, so instead of changing it we resize the buttons of these
 //  panels (and only these) after they have been created.
-static const Dim floatBtnSize = 64*floatUIScale;
 static const Dim floatIconSize = 32*floatUIScale;
 // the page/file ops panels draw their icons larger than the editing tools
 static const Dim floatSideIconSize = 42*floatUIScale;
@@ -1110,10 +1109,12 @@ void MainWindow::createToolBars()
   Toolbar* pageopsRow = NULL, *fileopsRow = NULL, *overflowRow = NULL;
   Widget* stretch2 = NULL;
 
-  // each panel sizes to its contents and gets a rounded floating background inset from its contents
-  auto floatBox = [](Widget* box, Dim rmargin, Dim pad) {
+  // each panel sizes to its contents and gets a rounded floating background inset from its contents;
+  //  lmargin/rmargin are floatEdgeInset on the side facing the window edge, so the row sits as far from
+  //  the left and right edges as it does from the top
+  auto floatBox = [](Widget* box, Dim rmargin, Dim pad, Dim lmargin = floatInset) {
     box->node->setAttribute("box-anchor", "top");  // no stretching - panel hugs its contents
-    box->setMargins(floatTopInset, rmargin, floatTopInset, floatInset);
+    box->setMargins(floatTopInset, rmargin, floatTopInset, lmargin);
     SvgRect* bg = static_cast<SvgRect*>(box->selectFirst(".toolbar-bg")->node);
     bg->setRect(bg->getRect(), floatCorner, floatCorner);
     // breathing room between the rounded background and the first/last button
@@ -1132,28 +1133,29 @@ void MainWindow::createToolBars()
     selectFirst("#scribble-focus")->setVisible(false);
     selectFirst("#scribble-focus-2")->setVisible(false);
 
-    // page ops: doc title, bookmarks, paste, split view
+    // page ops: doc title, sidebar, paste, split view
     pageopsRow = createToolbar();
     titleButton->node->addClass("float-wide-btn");  // sized by its label, not the button grid
     pageopsRow->addWidget(titleButton);
     addTBWidget(titleButton, 2);
     addTBWidget(pageopsRow->addSeparator(), -100);
-    addTBWidget(pageopsRow->addAction(actionShow_Bookmarks), actionShow_Bookmarks->priority,
-        {actionShow_Bookmarks});
+    // The sidebar button sits at the left end of the page ops panel: the sidebar itself defaults to
+    //  the left edge, so the control is on the side of what it opens.  Bookmarks is off the toolbar
+    //  for now; Ctrl+B still toggles the panel.
+    addTBWidget(pageopsRow->addAction(actionShow_Sidebar), actionShow_Sidebar->priority,
+        {actionShow_Sidebar});
     addTBWidget(pageopsRow->addAction(actionPaste), actionPaste->priority, {actionPaste});
     addTBWidget(pageopsRow->addAction(actionSplitView), actionSplitView->priority, {actionSplitView});
-    floatBox(pageopsRow, floatInset, floatSidePad);
+    floatBox(pageopsRow, floatInset, floatSidePad, floatEdgeInset);
     scaleFloatPanel(pageopsRow, floatSideIconSize);
 
-    // file ops: add page, save, clippings, undo/redo (the mockup's order)
+    // file ops: add page, save, undo/redo (the mockup's order)
     fileopsRow = createToolbar();
     // the universal "add page" button - see addpagemenu.cpp for why the ruling is chosen here
     Widget* addPageBtn = AddPageMenu::createAddPageButton(actionScan_Page);
     fileopsRow->addWidget(addPageBtn);
     addTBWidget(addPageBtn, 3);
     addTBWidget(fileopsRow->addAction(actionSave), actionSave->priority, {actionSave});
-    addTBWidget(fileopsRow->addAction(actionShow_Clippings), actionShow_Clippings->priority,
-        {actionShow_Clippings});
     // History now lives at the end of the tools row instead (see addTools above)
     // the overflow panel hugs the file ops panel rather than being pushed to the window edge
     floatBox(fileopsRow, 18*floatUIScale, floatSidePad);
@@ -1162,7 +1164,7 @@ void MainWindow::createToolBars()
     // overflow menu sits alone in its own small panel at the right edge
     overflowRow = createToolbar();
     overflowRow->addAction(actionOverflow_Menu);  // never hidden: it holds everything that was
-    floatBox(overflowRow, floatInset, 0);
+    floatBox(overflowRow, floatEdgeInset, 0);
     scaleFloatPanel(overflowRow, floatSideIconSize);
 
     stretch = createStretch();
@@ -1407,6 +1409,13 @@ void MainWindow::createToolBars()
     //  glyphs are strokes running corner to corner of their viewBox, while a clock face is a circle
     //  inscribed in it, so at equal box sizes the circle reads smaller (measured ink: 10px vs 11-12px)
     scaleFloatToolbutton(undoRedoBtn, floatBtnSize, 40*floatUIScale);
+    // The row overlays the canvas and the pinned sidebar, and a container is hit anywhere inside its
+    //  bounding box - which here is the full window width (the stretches) by the height of the tallest
+    //  panel.  With a tool's options row open that band is twice as deep, and it swallowed presses on
+    //  the top of the pinned sidebar (its view selector responded only on its bottom part) and on the
+    //  page between the panels.  Only the panels themselves should take presses.
+    for(Widget* w : {selectFirst("#main-toolbar-container"), (Widget*)adjOuter, toolbarRow, stretch, stretch2})
+      w->hitTransparent = true;
     selectFirst("#main-toolbar-container")->addWidget(adjOuter);
   }
   else
@@ -1489,6 +1498,19 @@ void MainWindow::createToolBars()
   }
 
   showOptionsRow(ScribbleApp::cfg->Bool("showPenToolbar") ? MODE_STROKE : 0);
+}
+
+// Keep the toolbar's sidebar button in step with the sidebar: its glyph names the edge the sidebar
+// is docked to (so the left/right variants are not decorative - they say where it will appear), and
+// its checked state says whether it is open.  Called from Sidebar::setOpen and Sidebar::setOnLeft,
+// and once after the sidebar is constructed, since the action is created before it.
+void MainWindow::updateSidebarButton()
+{
+  if(!actionShow_Sidebar || !sidebar)
+    return;
+  actionShow_Sidebar->setIcon(SvgGui::useFile(
+      sidebar->isOnLeft() ? ":/icons/ic_menu_sidebar_left.svg" : ":/icons/ic_menu_sidebar_right.svg"));
+  actionShow_Sidebar->setChecked(sidebar->isOpen());
 }
 
 void MainWindow::setupActions()
@@ -1606,6 +1628,22 @@ void MainWindow::setupActions()
   //  come from the reicon pipeline (see CLAUDE.md), not be hand-drawn here
   actionTheme = createAction("actionTheme",
       "Theme...", ":/icons/ic_menu_add_color.svg", "", SLOT(showThemePicker()));
+  // the sidebar is a panel, not a document command, so it is toggled here rather than through
+  //  ScribbleApp's command dispatch
+  actionShow_Sidebar = createAction("actionShow_Sidebar",
+      "Sidebar", ":/icons/ic_menu_sidebar_left.svg", "", [this](){ sidebar->toggleOpen(); });
+  // the glyph names the edge the sidebar is docked to, so it is swapped whenever that changes
+  //  (updateSidebarButton); checkable so the toolbar button reads as open/closed
+  actionShow_Sidebar->setCheckable(true);
+  // With the tag browser, documents live in the library, so the folder browser is no longer a way to
+  //  browse; it survives only as the file picker behind Import, which copies what it opens into the
+  //  library. Without it, the tag browser stays reachable from here.
+  if(ScribbleApp::cfg->Bool("useTagDocList"))
+    actionTagDocList = createAction("actionTagDocList",
+        "Import Document...", ":/icons/ic_menu_folder.svg", "", SLOT(importDocument()));
+  else
+    actionTagDocList = createAction("actionTagDocList",
+        "Tag Document Browser...", ":/icons/ic_tag.svg", "", SLOT(execTagDocList()));
   actionInsert_Image = createAction("actionInsert_Image",
       "Insert Image...", ":/icons/ic_menu_add_pic.svg", "", SLOT(insertImage()));
   // two entries rather than one plus a choice in the dialog: the destination is decided before the

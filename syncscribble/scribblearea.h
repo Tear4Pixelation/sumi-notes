@@ -40,8 +40,9 @@ class ScribbleArea : public ScribbleView
   friend class ScribbleTest;
 #endif
   friend class LinkDialog;
+  // the outline sidebar navigates to a page, exactly as a link does (sidebar.cpp)
+  friend class Sidebar;
   friend class ScribbleDoc;
-  friend class ClippingView;
 public:
   ScribbleArea();
   //~ScribbleArea();

@@ -200,6 +200,13 @@ void ScribbleConfig::init()
   // ask for a theme when a document is created.  A modal on every new document earns its keep only
   //  while the feature is new, so it is a preference rather than a hard rule.
   cfg["themeAskOnNew"] = 1;
+  // General-purpose sidebar (sidebar.h).  Pinned by default: the sidebar is worth having open for a
+  //  while, and pinned is the mode where it never covers what it is pointing at.
+  cfg["sidebarVisible"] = 0;
+  cfg["sidebarPinned"] = 1;
+  cfg["sidebarLeft"] = 1;
+  cfg["sidebarView"] = 0;  // Sidebar::OUTLINE
+
   cfgF["themeSeedHue"] = 218.0f;
   cfgF["themeVividness"] = 1.0f;
   cfgF["themeDepth"] = 0.10f;

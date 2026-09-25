@@ -22,13 +22,16 @@ SOURCES = \
   scribbleinput.cpp \
   scribbleview.cpp \
   bookmarkview.cpp \
-  clippingview.cpp \
   scribblearea.cpp \
   scribbledoc.cpp \
   scribblewidget.cpp \
   scribbleconfig.cpp \
   scribblesync.cpp \
   documentlist.cpp \
+  tagstore.cpp \
+  tagdoclist.cpp \
+  doclibrary.cpp \
+  sidebar.cpp \
   rulingdialog.cpp \
   themedialog.cpp \
   addpagemenu.cpp \

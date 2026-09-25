@@ -27,6 +27,8 @@ public:
   void updateMode();
   void refreshScribbleWidget(ScribbleWidget* w, const UIState* uiState);
   void refreshCommonUI(ScribbleDoc* doc, const UIState* uiState);
+  // sync the toolbar sidebar button's glyph (which edge) and checked state (open) with the sidebar
+  void updateSidebarButton();
   void refreshUI(ScribbleDoc* doc, int reason);
   void orientationChanged();
   bool oneTimeTip(const char* id, Point pos = {}, const char* message = NULL);
@@ -82,6 +84,8 @@ public:
   Action* actionSave;
   Action* actionPage_Setup;
   Action* actionTheme;
+  Action* actionShow_Sidebar;
+  Action* actionTagDocList;
   Action* actionUndo;
   Action* actionRedo;
   Action* actionExpand_Down;
@@ -192,9 +196,9 @@ public:
 
   Splitter* bookmarkSplitter;
   Widget* bookmarkPanel;
-  Splitter* clippingsSplitter;
-  Widget* clippingsPanel;
   OverlayWidget* overlayWidget;
+  // the outline/layers sidebar (sidebar.h); owned by the widget tree, not by MainWindow
+  Sidebar* sidebar = NULL;
 
   Widget* scribbleContainer2 = NULL;
   Widget* scribbleFocusContainer2 = NULL;

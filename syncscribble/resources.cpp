@@ -120,6 +120,24 @@ void setupResources()
     Painter::loadFont("ui-sans-bold", sansBoldPath.c_str());
   if(!sansItalicPath.isEmpty())
     Painter::loadFont("ui-sans-italic", sansItalicPath.c_str());
+  // Sidebar redesign typefaces: Raleway Bold for the "Write" title, Satoshi Medium for everything
+  // else. Static weight instances, not the variable fonts they ship as - fontstash here is built on
+  // plain stb_truetype (no FONS_USE_FREETYPE), which only ever rasterizes a variable font's default
+  // instance and has no way to select the bold axis position. Each is registered under its bare
+  // family name with no separate "-bold" face: both are used at exactly one weight in the design,
+  // so CSS for them should leave font-weight unset (normal) rather than asking Painter::resolveFont
+  // to faux-bold an already-bold face on top of itself. Loaded the same way as the base sans font:
+  // prefer a copy next to the binary, fall back to the scribbleres checkout for a dev build run
+  // without that copy step.
+  FSPath ralewayPath(Application::appDir, "Raleway-Bold.ttf");
+  FSPath satoshiPath(Application::appDir, "Satoshi-Medium.otf");
+  if(!ralewayPath.exists())
+    ralewayPath = FSPath(Application::appDir, "../../scribbleres/fonts/Raleway-Bold.ttf");
+  if(!satoshiPath.exists())
+    satoshiPath = FSPath(Application::appDir, "../../scribbleres/fonts/Satoshi-Medium.otf");
+  Painter::loadFont("raleway", ralewayPath.c_str());
+  Painter::loadFont("satoshi", satoshiPath.c_str());
+
   // load user fallbacks
   const char* userFontsStr = ScribbleApp::cfg->String("userFonts", "");
   auto userFonts = splitStringRef(StringRef(userFontsStr), ";", true);

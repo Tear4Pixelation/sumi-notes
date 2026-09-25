@@ -470,7 +470,7 @@ Button* createHelpButton(const std::vector<HelpEntry>& entries)
   // cap popup width to ~2/3 of the color picker popup's ~380px design width and word-wrap the
   //  description to fit, since ArrowPopup has no built-in max-width/word-wrap of its own
   const real popupMaxWidth = 253;
-  real descMaxWidth = popupMaxWidth - 32 /* ArrowPopup content padding */
+  real descMaxWidth = popupMaxWidth - 2*16 /* ArrowPopup left/right content padding */
       - iconSize - 0.2*iconSize /* row margin */ - 0.4*iconSize /* text column margin */;
 
   ArrowPopup* popup = createArrowPopup(Menu::VERT_LEFT);
