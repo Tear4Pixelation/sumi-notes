@@ -5,6 +5,7 @@
 #include "ugui/textedit.h"
 #include "basics.h"
 #include "tagstore.h"
+#include "newdocdialog.h"
 #include <set>
 
 // Small prompt for naming a new tag or renaming an existing one -- deliberately not NewDocDialog,
@@ -40,6 +41,9 @@ public:
   void setRoot(const char* root);
 
   std::function<void(int)> onFinished;
+
+  // what the Create Notebook dialog chose, for ScribbleApp to apply once the NEW_DOC file is open
+  NewDocChoices newDocChoices;
 
 protected:
   void refresh();

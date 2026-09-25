@@ -55,6 +55,19 @@ Dim screenScale();
 //  over the page showing the ruling at that scale (the ruling dialog passes screenScale()).
 SvgNode* createPagePreviewNode(const PageProperties& props, Dim boxw, Dim boxh, Dim lensScale = 0);
 
+// the layout a new page gets from this config, size 0 so it follows the default page size
+PageLayout defaultLayout(const ScribbleConfig* cfg);
+bool sameLayout(const PageLayout& a, const PageLayout& b);
+// one layout as a config string, in the same form as the custom layout list
+std::string layoutToString(const PageLayout& layout);
+bool layoutFromString(const char* str, PageLayout* layout);
+
+// The Add Page grid - built-in layouts by category, then custom ones - added to container as rows, with
+//  a tap on a tile calling onPick instead of adding a page.  For choosing a layout somewhere else (the
+//  new document dialog).  Returns the tiles in grid order, e.g. to mark the selected one.
+std::vector<Button*> createLayoutGrid(Widget* container, const ScribbleConfig* cfg,
+    const std::function<void(const PageLayout&)>& onPick);
+
 // the button itself, popup and all; scanPageAction supplies the "scan as page" item
 Button* createAddPageButton(Action* scanPageAction);
 

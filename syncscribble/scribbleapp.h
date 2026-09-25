@@ -40,6 +40,7 @@ class BookmarkView;
 class OverlayWidget;
 class DocumentList;
 class TagDocList;
+struct NewDocChoices;
 class PenToolbar;
 class Selection;
 class Clipboard;
@@ -80,6 +81,7 @@ public:
   //  (openOrCreateDocTagged(), which also handles OPEN_WHITEBOARD)
   void execTagDocList(bool openResult = true);
   void askThemeForNewDoc();
+  void applyNewDocChoices(const NewDocChoices& choices);
   void openRecentFile(const std::string& filename);
   void createLink();
   void exportPDF();

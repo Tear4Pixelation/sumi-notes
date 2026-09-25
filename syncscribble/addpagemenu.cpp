@@ -498,18 +498,11 @@ static SvgNode* createPlusTileNode(const char* label, Dim tilew)
 
 /// the button
 
-static bool sameLayout(const PageLayout& a, const PageLayout& b)
-{
-  return a.xRuling == b.xRuling && a.yRuling == b.yRuling && a.marginLeft == b.marginLeft
-      && a.dotRadius == b.dotRadius && a.width == b.width && a.height == b.height;
-}
 
 // the document's default page as a layout; size 0 so it follows the default rather than copying it
 static PageLayout defaultLayout(const ScribbleDoc* doc)
 {
-  const ScribbleConfig* cfg = doc->cfg;
-  return makeLayout("", cfg->Float("xRuling"), cfg->Float("yRuling"), cfg->Float("marginLeft"),
-      cfg->Float("dotRadius"));
+  return defaultLayout(doc->cfg);
 }
 
 // Recently used layouts, most recent first.  Stored as layouts - geometry only - under a new key: the
@@ -597,7 +590,11 @@ static Button* createLayoutTile(ArrowPopup* popup, ScribbleDoc* doc, const PageL
 // The grid: rows of tiles, the category named at the left of its first row only.  With the margin line
 //  switched off, the built-in layouts are shown - and added - without it; custom layouts keep whatever
 //  margin they were given, since that was chosen for that layout specifically.
-static void buildLayoutGrid(ArrowPopup* popup, Widget* layoutGrid, ScribbleDoc* doc)
+// makeTile builds each tile (what a tap does is the caller's business - add a page here, pick the layout
+//  in the new document dialog); lastTile, if any, goes after the custom layouts.
+typedef std::function<Widget*(const PageLayout& layout, const char* label, int customidx)> TileMaker;
+
+static void buildLayoutGrid(Widget* layoutGrid, const TileMaker& makeTile, Widget* lastTile)
 {
   bool marginline = ScribbleApp::cfg->Bool("layoutMarginLine", true);
   std::vector<Widget*> tiles;
@@ -622,14 +619,21 @@ static void buildLayoutGrid(ArrowPopup* popup, Widget* layoutGrid, ScribbleDoc* 
       PageLayout layout = builtin.layout;
       if(!marginline && !builtin.marginIsLayout)
         layout.marginLeft = 0;
-      tiles.push_back(createLayoutTile(popup, doc, layout, layout.name, -1));
+      tiles.push_back(makeTile(layout, layout.name, -1));
     }
     flushRows(categoryName(LayoutCategory(category)));
   }
 
   std::vector<PageLayout> customs = customLayouts(ScribbleApp::cfg);
   for(size_t i = 0; i < customs.size(); ++i)
-    tiles.push_back(createLayoutTile(popup, doc, customs[i], shortDescription(customs[i]).c_str(), int(i)));
+    tiles.push_back(makeTile(customs[i], shortDescription(customs[i]).c_str(), int(i)));
+  if(lastTile)
+    tiles.push_back(lastTile);
+  flushRows(_("Custom"));
+}
+
+static void buildAddPageGrid(ArrowPopup* popup, Widget* layoutGrid, ScribbleDoc* doc)
+{
   Button* newtile = new Button(createPlusTileNode(_("New layout"), TILE_W));
   newtile->onClicked = [popup](){
     closeAutoClosePopup(popup);
@@ -638,8 +642,49 @@ static void buildLayoutGrid(ArrowPopup* popup, Widget* layoutGrid, ScribbleDoc* 
       editLayout(defaultLayout(activedoc), -1, _("New Layout"));
   };
   setupTooltip(newtile, _("Add a custom layout"));
-  tiles.push_back(newtile);
-  flushRows(_("Custom"));
+  buildLayoutGrid(layoutGrid, [popup, doc](const PageLayout& layout, const char* label, int customidx) {
+    return createLayoutTile(popup, doc, layout, label, customidx);
+  }, newtile);
+}
+
+std::vector<Button*> createLayoutGrid(Widget* container, const ScribbleConfig* cfg,
+    const std::function<void(const PageLayout&)>& onPick)
+{
+  std::vector<Button*> tiles;
+  buildLayoutGrid(container, [cfg, &onPick, &tiles](const PageLayout& layout, const char* label, int) {
+    Button* tile = new Button(createLayoutTileNode(layoutToProps(layout, cfg), label));
+    tile->onClicked = [onPick, layout](){ onPick(layout); };
+    setupTooltip(tile, layoutDescription(layout).c_str());
+    tiles.push_back(tile);
+    return tile;
+  }, NULL);
+  return tiles;
+}
+
+PageLayout defaultLayout(const ScribbleConfig* cfg)
+{
+  return makeLayout("", cfg->Float("xRuling"), cfg->Float("yRuling"), cfg->Float("marginLeft"),
+      cfg->Float("dotRadius"));
+}
+
+bool sameLayout(const PageLayout& a, const PageLayout& b)
+{
+  return a.xRuling == b.xRuling && a.yRuling == b.yRuling && a.marginLeft == b.marginLeft
+      && a.dotRadius == b.dotRadius && a.width == b.width && a.height == b.height;
+}
+
+std::string layoutToString(const PageLayout& layout)
+{
+  return serializeLayouts({layout});
+}
+
+bool layoutFromString(const char* str, PageLayout* layout)
+{
+  std::vector<PageLayout> layouts = parseLayouts(str);
+  if(layouts.empty())
+    return false;
+  *layout = layouts[0];
+  return true;
 }
 
 Button* createAddPageButton(Action* scanPageAction)
@@ -684,7 +729,7 @@ Button* createAddPageButton(Action* scanPageAction)
     if(!doc || !gui)
       return;
     gui->deleteContents(layoutGrid);
-    buildLayoutGrid(popup, layoutGrid, doc);
+    buildAddPageGrid(popup, layoutGrid, doc);
   };
 
   // rebuilt on every open: recents and custom layouts change, and the 1:1 halves follow the zoom
@@ -724,7 +769,7 @@ Button* createAddPageButton(Action* scanPageAction)
     setupTooltip(more, _("All layouts"));
     recentRow->addWidget(more);
 
-    buildLayoutGrid(popup, layoutGrid, doc);
+    buildAddPageGrid(popup, layoutGrid, doc);
   };
 
   // opened on press like a menu, not from onClicked: a popup shown on release is closed again by that

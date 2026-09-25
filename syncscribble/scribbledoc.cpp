@@ -411,7 +411,7 @@ Image ScribbleDoc::extractThumbnail(const char* filename)
   return Image(0,0);
 }
 
-std::vector<std::string> ScribbleDoc::extractDocTags(const char* filename)
+std::string ScribbleDoc::extractDocConfigValue(const char* filename, const char* name)
 {
   StringRef buff;
   FileStream istrm(filename, "rb");
@@ -423,30 +423,35 @@ std::vector<std::string> ScribbleDoc::extractDocTags(const char* filename)
     auto blockInfo = bgz_get_index(zistrm);
     std::stringstream inf_block;
     if(blockInfo.empty() || !bgz_read_block(zistrm, &blockInfo.back() - 1, minigz_io_t(infstrm)))
-      return {};
+      return "";
     buff = StringRef(infstrm.data(), infstrm.size());
   }
   else
     buff.len = istrm.readp((void**)&buff.str, 1 << 18);  // 256KB, same window extractThumbnail uses
 
-  // looking for <string name="tags" value="t1,t2,..."/> as written by ScribbleConfig::saveConfig()
-  int idx = buff.find("name=\"tags\"");
+  // looking for e.g. <string name="tags" value="t1,t2,..."/> as written by ScribbleConfig::saveConfig()
+  int idx = buff.find(fstring("name=\"%s\"", name).c_str());
   if(idx < 0)
-    idx = buff.find("name='tags'");
+    idx = buff.find(fstring("name='%s'", name).c_str());
   if(idx < 0)
-    return {};
+    return "";
   idx = buff.find("value=", idx);
   if(idx < 0)
-    return {};
+    return "";
   idx += 6;
   char quote = idx < buff.len ? buff[idx] : '\0';
   if(quote != '"' && quote != '\'')
-    return {};
+    return "";
   ++idx;
   int end = buff.findFirstOf(quote == '"' ? "\"" : "'", idx);
   if(end < 0)
-    return {};
-  return TagStore::parseTagList(std::string(&buff[idx], end - idx).c_str());
+    return "";
+  return std::string(&buff[idx], end - idx);
+}
+
+std::vector<std::string> ScribbleDoc::extractDocTags(const char* filename)
+{
+  return TagStore::parseTagList(extractDocConfigValue(filename, "tags").c_str());
 }
 
 Document::loadresult_t ScribbleDoc::openDocument(const char* filename, bool delayload)

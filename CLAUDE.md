@@ -211,6 +211,36 @@ folder pref is a text field, not a folder picker; merging a fallback into a libr
 picker offers `public.svg-image` only); none of this has run on Android, iOS, Windows or macOS yet (verified
 on Linux only; the iOS C++ was syntax-checked with the platform forced, `ioshelper.m` not at all).
 
+## Create Notebook (new document dialog)
+
+The tag browser's "+" opens `CreateNotebookDialog` (`newdocdialog.cpp`; `NewDocDialog` was taken, by
+`documentlist.h`): a Cover tile, a Pages tile, the name, tag chips with "+ Add tags", and a Cover toggle.
+Designed in the Penpot page "Create page" as a proposition, not followed to the pixel.
+
+- **A cover is one stored color.** `coverColor` (ARGB, per-document config; 0 = no cover) holds only the
+  seed; `Cover::bandColor()` (`cover.cpp`) derives the band by moving OKLab lightness towards the middle -
+  darker on a light seed, lighter on a dark one, chroma clamped to what the new lightness holds - so black
+  gets a gray band. Nothing derived is stored, so a cover cannot disagree with itself.
+- **The grid draws the cover instead of the page thumbnail** when `coverColor` is set, read with
+  `ScribbleDoc::extractDocConfigValue()` - `extractDocTags()` generalized to any config value.
+- **Pages reuses the Add Page grid**: `AddPageMenu::createLayoutGrid()` is the same builder with a tile
+  action passed in. The pick becomes the document default as well as the first page's ruling.
+- **Tags**: the browser's own `TagStore` is passed in; tags made in the dialog are saved at once (so they
+  survive Cancel), and the tags being filtered on when "+" was pressed are pre-selected.
+- The dialog touches no files: `TagDocList::newDoc()` creates the file and carries `NewDocChoices` to
+  `ScribbleApp::applyNewDocChoices()`, which applies them to the opened document and saves it right
+  away - an untouched new document is otherwise never written, and the cover and tags live in it.
+  The theme prompt still follows (`askThemeForNewDoc()`).
+- The last cover/layout are remembered globally (`newDocCover`, `newDocCoverColor`, `newDocLayout`).
+- Traps hit: `ColorEditBox::setColor()` segfaults before the widget is in a document (its slider
+  gradients resolve by reference), so the custom color is set when the popup opens; chips and the
+  "Create tag" row are removed by rebuilds their own clicks trigger, so those rebuilds go through a
+  1 ms `setTimer`; in a flex column a child without `box-anchor` is centred, and an empty `hfill` row
+  takes the whole width.
+
+Known gaps: the classic `DocumentList` new-document path (non-library platforms) is unchanged; the Pages
+popup opens downwards and runs off a 720 px screen's bottom; no automated test; new strings are untranslated.
+
 ## Default page size
 
 New pages take `pageWidth`/`pageHeight` from the config. `askDefaultPageSize()` asks once at startup

@@ -37,6 +37,8 @@ SOURCES = \
   sidebar.cpp \
   rulingdialog.cpp \
   themedialog.cpp \
+  cover.cpp \
+  newdocdialog.cpp \
   addpagemenu.cpp \
   scandialog.cpp \
   configdialog.cpp \

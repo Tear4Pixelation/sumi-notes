@@ -12,6 +12,8 @@
 #include "scribbleinput.h"
 #include "documentlist.h"
 #include "tagdoclist.h"
+#include "addpagemenu.h"
+#include "tagstore.h"
 #include "doclibrary.h"
 #include "pdfimport.h"
 #include "rulingdialog.h"
@@ -1897,8 +1899,9 @@ bool ScribbleApp::openOrCreateDocTagged(bool cancelable)
   else if(res == TagDocList::NEW_DOC && !filename.empty()) {
     if(!doOpenDocument(filename))
       return openOrCreateDocTagged(cancelable);
-    if(FSPath(filename).extension() == "html")
-      activeDoc()->saveDocument((IOStream*)NULL, Document::SAVE_MULTIFILE);
+    applyNewDocChoices(tagDocList->newDocChoices);
+    activeDoc()->saveDocument((IOStream*)NULL,
+        FSPath(filename).extension() == "html" ? Document::SAVE_MULTIFILE : Document::SAVE_NORMAL);
     askThemeForNewDoc();
   }
   else {  // canceled
@@ -2097,6 +2100,18 @@ void ScribbleApp::doNewDocument()
 //  file and opens it. Hooking only one of them is why this looked like it did nothing.
 // Not hooked in ScribbleDoc::newDocument(), which is also the reset path used by document close and by
 //  ScribbleTest - neither may open a dialog.
+// What the Create Notebook dialog chose.  The layout becomes the document's default as well as its first
+//  page's, so Add Page continues in it.  Saved straight away by the caller: the cover and the tags are what
+//  the document list shows for this notebook, and an untouched new document is otherwise never written.
+void ScribbleApp::applyNewDocChoices(const NewDocChoices& choices)
+{
+  ScribbleDoc* doc = activeDoc();
+  PageProperties props = AddPageMenu::layoutToProps(choices.layout, doc->cfg);
+  doc->setPageProperties(&props, true, true, false, false);
+  doc->cfg->set("coverColor", int(choices.coverColor.argb()));
+  doc->cfg->set("tags", TagStore::formatTagList(choices.tagIds).c_str());
+}
+
 void ScribbleApp::askThemeForNewDoc()
 {
   if(cfg->Bool("themeAskOnNew", true))

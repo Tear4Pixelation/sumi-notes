@@ -334,6 +334,10 @@ void ScribbleConfig::init()
 #endif
   // strftime format string for doc title
   cfgS["newDocTitleFmt"] = "%b %e %Hh%M";
+  // what the Create Notebook dialog offers first: the choices made for the last notebook (CreateNotebookDialog)
+  cfg["newDocCover"] = 1;
+  cfg["newDocCoverColor"] = 0;  // ARGB; 0 = the dialog's default
+  cfgS["newDocLayout"] = "";  // an AddPageMenu layout string; empty = the default page
   // fallback fonts (user specified for now; maybe we try to figure out from locale in the future)
   cfgS["userFonts"] = "";
   cfgS["shortcutKeys"] = "";
@@ -356,6 +360,9 @@ void ScribbleConfig::init()
   // sidebar's tag system - unrelated to the legacy single-string "docTags" above, which only
   // ever held one folder-derived name for the old folder->tag migration tool.
   cfgS["tags"] = "";
+  // the notebook's cover color (ARGB) - its seed only, the band is derived (cover.h); 0 = no cover, so
+  //  the document list shows the first page instead
+  cfg["coverColor"] = 0;
   //cfgS["backupFilename"] = "";
 
   // sync

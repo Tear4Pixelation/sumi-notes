@@ -1,4 +1,5 @@
 #include "tagdoclist.h"
+#include "cover.h"
 
 #include "scribbleapp.h"
 #include "scribbledoc.h"
@@ -313,9 +314,22 @@ void TagDocList::rebuildDocGrid()
     SvgContainerNode* container = item->selectFirst(".image-container")->containerNode();
     real itemWidth = iconSize.width();
     bool isNativeFormat = containsWord("svg svgz html htm", doc.path.extension().c_str());
-    Image thumbnail = isNativeFormat && ScribbleApp::cfg->Bool("showThumbnail")
+    // a notebook with a cover shows its cover rather than its first page (CreateNotebookDialog, cover.h)
+    int coverArgb = isNativeFormat
+        ? atoi(ScribbleDoc::extractDocConfigValue(doc.path.c_str(), "coverColor").c_str()) : 0;
+    Image thumbnail = !coverArgb && isNativeFormat && ScribbleApp::cfg->Bool("showThumbnail")
         ? ScribbleDoc::extractThumbnail(doc.path.c_str()) : Image(0, 0);
-    if(!thumbnail.isNull()) {
+    if(coverArgb) {
+      // notebook-shaped, standing on the title like a thumbnail does, in the same slot
+      SvgRect* spacer = new SvgRect(iconSize);
+      spacer->setAttribute("fill", "none");
+      container->addChild(spacer);
+      SvgNode* cover = loadSVGFragment(Cover::coverSVG(Color::fromArgb(coverArgb),
+          iconSize.width(), std::min(iconSize.height(), iconSize.width()*real(1.3))).c_str());
+      cover->setAttribute("box-anchor", "bottom");
+      container->addChild(cover);
+    }
+    else if(!thumbnail.isNull()) {
       container->addChild(new SvgImage(std::move(thumbnail), iconSize));
       itemWidth = iconSize.width();
     }
@@ -561,14 +575,21 @@ void TagDocList::newDoc()
   for(int ii = 2; docinfo.exists(); ii++)
     docinfo = docRoot.child(fstring(_("New Document %d.%s"), ii, docFileExt.c_str()));
 
-  TagNameDialog dialog(_("New Document"), docinfo.baseName().c_str());
+  // the tags being browsed are the likeliest ones for a notebook made from here
+  std::vector<std::string> initialTags(activeTags.begin(), activeTags.end());
+  CreateNotebookDialog dialog(docinfo.baseName().c_str(), &tagStore, initialTags);
   int res = Application::execDialog(&dialog);
-  std::string name = dialog.getName();
+  std::string name = dialog.name();
+  // the dialog may have made tags even if it was then cancelled
+  rebuildTagTree();
   if(res != Dialog::ACCEPTED || name.empty())
     return;
   docinfo = docRoot.child(name + "." + docFileExt);
   if(!FSPath(docinfo.c_str()).exists("wb"))
     return;
+  newDocChoices.coverColor = dialog.hasCover() ? dialog.coverColor() : Color(0);
+  newDocChoices.layout = dialog.pageLayout();
+  newDocChoices.tagIds = dialog.tagIds();
   selectedFile = docinfo.c_str();
   finish(NEW_DOC);
 }
