@@ -251,6 +251,18 @@ void ScribbleSync::startSession()
   doc->ensurePagesLoaded();
   MemStream ss;
   ss << "<undo uuid='1' user='" << syncUser << "'>";
+  // The layer table and the theme live in the document config, not in any page, so they need sending
+  //  explicitly - without this a client joining late never learns either, whatever is synced after.
+  //  Sent ahead of the pages so pages arrive into a table that knows their layers.  The history is
+  //  fully undone at this point, so this is the state the redone history below starts from.
+  {
+    XmlStreamWriter xmlwriter;
+    xmlwriter.writeStartElement("layersnapshot");
+    xmlwriter.writeAttribute("table", doc->layers.serialize());
+    xmlwriter.writeEndElement();
+    xmlwriter.save(ss);
+    ThemeChangedItem(scribbleDoc).serialize(ss);
+  }
   for(unsigned int pp = 0; pp < doc->pages.size(); pp++) {
     // now serialize the page w/ all strokes
     PageAddedItem item(doc->pages[pp], pp, doc);

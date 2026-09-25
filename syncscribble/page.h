@@ -90,8 +90,32 @@ public:
   void recalcTimeRange(bool force = false);
 
   Range<ElementIter> children() const;
-  void addStroke(Element* s, Element* next = NULL);
+  // `layer` defaults to LAYER_CURRENT, i.e. the element is stamped with the document's current
+  //  layer.  Every route by which the *user* adds content - a finished stroke, a shape, a pasted
+  //  selection, an inserted image, a scanned page - funnels through here, which is what makes "new
+  //  things land on the current layer" one rule rather than one per creation site.  Callers that
+  //  must preserve an existing layer (free-erase subpaths) pass it explicitly.
+  // With no `next`, the insertion point is the end of the element's own layer's run, not the end of
+  //  the page, so layers stack.  Undo and sync are unaffected: both express position as a sibling
+  //  node, which this only chooses differently.
+  void addStroke(Element* s, Element* next = NULL, int layer = LayerList::LAYER_CURRENT);
   void removeStroke(Element* s);
+  // first element that sorts above `layer` in z-order, i.e. where a new element on `layer` goes
+  Element* layerInsertPos(int layer) const;
+  // first element at or above `layer` - where a DRAW_UNDER pen puts its stroke, which must mean
+  //  "under everything on my layer", not under the whole page
+  Element* layerFirstElement(int layer) const;
+  // Move an element to another layer, restacking it into that layer's run (at `next` if given).
+  //  Returns the element it used to precede (NULL = it was last), which is exactly what an undo item
+  //  needs to put it back: a layer change is also a z-order change, so restoring only the layer id
+  //  would leave the element somewhere the user never moved it to.
+  Element* moveToLayer(Element* s, int layer, Element* next = NULL);
+  // push the layer table's hidden flags onto the nodes; drawing is a tree walk with no access to
+  //  the table, so visibility has to be expressed as SVG display
+  void applyLayerState();
+  // the one gate the editing paths consult: selection, all four erasers, insert space, group,
+  //  restyle.  An element on an unknown layer is editable - see LayerList's fail-open rule.
+  bool isEditable(const Element* s) const;
   void onAddStroke(Element* s);
   void onRemoveStroke(Element* s);
   const char* getHyperRef(Point pos) const;

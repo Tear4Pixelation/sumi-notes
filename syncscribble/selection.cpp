@@ -112,6 +112,8 @@ void Selection::selectAll()
   invalidateBBox();
   maxTimestamp = 0;
   for(Element* s : sourceNode->children()) {
+    if(!page->isEditable(s))
+      continue;  // Select All must not pick up a locked layer - the selection is an editing handle
     s->setSelected(this);
     strokes.push_back(s);
   }
@@ -125,6 +127,8 @@ void Selection::invertSelection()
   // invert selection flag and add newly selected strokes to list
   for(Element* s : sourceNode->children()) {
     if(!s->isSelected(this)) {
+      if(!page->isEditable(s))
+        continue;
       s->setSelected(this);
       strokes.push_back(s);
     }
@@ -201,6 +205,11 @@ void Selection::doSelect()
   }
   // set selected flag for selected strokes and add to list
   for(Element* node : sourceNode->children()) {
+    // An element on a locked or hidden layer is not selectable, and this one test is what makes the
+    //  stroke eraser and the ruled eraser respect a lock too: both are implemented as selections
+    //  (see the notes at the top of this file), so neither needs a check of its own.
+    if(!page->isEditable(node))
+      continue;
     // fetch bbox and compare ourselves or Stroke::isContained(...)
     // note that we don't steal elements from another selection (selection() must be NULL)
     if((!node->selection() || selMode == SELMODE_PASSIVE) && selector->selectHit(node)) {

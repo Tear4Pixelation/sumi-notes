@@ -2,6 +2,8 @@
 #define SCRIBBLEDOC_H
 
 #include "scribblearea.h"
+#include "syncundo.h"
+#include <functional>
 
 class ScribbleApp;
 class ScribbleMode;
@@ -69,6 +71,36 @@ public:
   //  Strokes that are not the old palette's colors are left untouched.
   int restyleToTheme(const PaletteRecipe& recipe, bool applyPages, bool globalDefault);
 
+  // the theme as undo and sync see it, and applying one (ThemeChangedItem)
+  ThemeState themeState() const;
+  void applyThemeState(const ThemeState& state);
+
+  // Layers (LAYERS_INVESTIGATION.md).  Three kinds of state:
+  //  - the *table* (names, order, locked, hidden) is persisted in the per-document config, exactly
+  //    as the theme recipe is, so it needs no file-format construct.  Every edit to it is a
+  //    LayerTableItem, one per layer touched, so it undoes and syncs.
+  //  - which layer is *current* is also in the config but is neither undone nor synced: it is where
+  //    this user's pen is, and two people on a whiteboard draw on different layers.
+  //  - which layer an *element* is on is on the element, and every change to it is a
+  //    StrokeLayerItem, so it undoes and syncs like any other stroke edit.
+  const LayerList& layers() const { return document->layers; }
+  int currentLayer() const { return document->layers.currentId; }
+  bool setCurrentLayer(int id);
+  // returns the new layer's id, or LayerList::DEFAULT_LAYER if it could not be added
+  int addLayer(const char* name = NULL, int aboveIdx = -1);
+  // Content on the removed layer is moved to `moveContentTo` (-1 = the layer that ends up current),
+  //  undoably, rather than left pointing at a layer that no longer exists.  It would still be
+  //  editable if it were - LayerList fails open - but it would be invisible in any layer UI.
+  bool removeLayer(int id, int moveContentTo = -1);
+  bool setLayerName(int id, const char* name);
+  bool setLayerLocked(int id, bool locked);
+  bool setLayerHidden(int id, bool hidden);
+  bool moveLayer(int fromIdx, int toIdx);
+  // move the current selection to a layer, as one undo action; returns the number of elements moved
+  int moveSelToLayer(int id);
+  // number of elements on a layer across all *loaded* pages
+  int layerElementCount(int id) const;
+
   Color getCurrPageColor() const;
   void scribbleDone();
   void pageSizeChanged();
@@ -119,6 +151,24 @@ public:
   void closeDocument();
   void doCancelAction();
   void updateDocConfig(Document::saveflags_t flags);
+  // write the layer table back to the document config and refresh views; called by every layer
+  //  table mutator above, which is what keeps "the config is the storage" a single fact;
+  //  dirty is false when an undo item is doing the dirtying.
+  void layersChanged(bool restack = false, bool dirty = true);
+  // apply one layer's state from a LayerTableItem (undo, redo, or a peer); see LayerList::setLayerState
+  void setLayerState(int id, const LayerInfo* info, int belowId);
+  // replace the whole table (a peer's snapshot on joining a whiteboard), keeping our current layer
+  void replaceLayerTable(const LayerList& table);
+  // sort each loaded page's elements by their layer's z-order (stable, so order within a layer is
+  //  untouched).  Only needed when the *table's* order changes; a single element's move is done by
+  //  StrokeLayerItem, which places the node itself.
+  void restackLayers();
+  // one undoable edit to one layer's table entry: `edit` runs on a copy, and the resulting state of
+  //  that layer is applied through setLayerState() with a LayerTableItem recording the prior state
+  bool editLayer(int id, const std::function<bool(LayerList&)>& edit);
+  // what a layer added now should be numbered - random in a shared session (LayerList::SHARED_ID_BASE)
+  int newLayerId() const;
+  void themeApplied();
 
   ScribbleApp* app;
   ScribbleMode* scribbleMode;

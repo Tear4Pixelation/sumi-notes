@@ -118,6 +118,15 @@ Page* Document::pageForElement(const Element* s) const
   return n >= 0 ? pages[n] : NULL;
 }
 
+void Document::applyLayerState()
+{
+  // deliberately only the loaded pages - a page that has never been loaded gets its layer state
+  //  from Page::loadSVG(), and loading the whole document to hide a layer is exactly the cost
+  //  Document::outline() documents as a known gap for the same reason
+  for(Page* page : pages)
+    page->applyLayerState();
+}
+
 bool Document::ensurePagesLoaded()
 {
   bool ok = true;

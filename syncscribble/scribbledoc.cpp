@@ -46,8 +46,233 @@ void ScribbleDoc::removeArea(ScribbleArea* area)
   area->scribbleDoc = NULL;
 }
 
+// --- Layers (LAYERS_INVESTIGATION.md) ---
+
+void ScribbleDoc::layersChanged(bool restack, bool dirty)
+{
+  cfg->set("layers", document->layers.serialize().c_str());
+  cfg->set("currentLayer", document->layers.currentId);
+  if(restack)
+    restackLayers();
+  document->applyLayerState();
+  // the current layer is not an undo item, so nothing else marks the document as needing to be written
+  if(dirty)
+    document->dirtyCount++;
+  uiChanged(UIState::SetPageProps);
+  doRefresh();
+}
+
+bool ScribbleDoc::editLayer(int id, const std::function<bool(LayerList&)>& edit)
+{
+  // the edit runs on a copy, and only the resulting state of the one layer is applied: that is what
+  //  the undo item records, so applying it any other way would let the two drift.  It also means a
+  //  refused edit leaves no empty action behind, and startAction() - which can block on a whiteboard
+  //  reconnect - is not reached for nothing.
+  LayerList trial = document->layers;
+  if(!edit(trial))
+    return false;
+  LayerInfo info;
+  int below = LayerList::BELOW_NONE;
+  bool present = trial.layerState(id, &info, &below);
+  startAction(activeArea->currPageNum);
+  LayerTableItem* item = new LayerTableItem(this, id);
+  setLayerState(id, present ? &info : NULL, below);
+  history->addItem(item);
+  endAction();
+  return true;
+}
+
+int ScribbleDoc::newLayerId() const
+{
+  if(!scribbleSync)
+    return -1;  // the counter
+  const LayerList& layers = document->layers;
+  int id;
+  do {
+    id = LayerList::SHARED_ID_BASE + int(UndoHistory::newUuid() % UUID_t(INT_MAX - LayerList::SHARED_ID_BASE));
+  } while(layers.find(id));
+  return id;
+}
+
+void ScribbleDoc::setLayerState(int id, const LayerInfo* info, int belowId)
+{
+  LayerList& layers = document->layers;
+  LayerInfo before;
+  int beforeBelow = LayerList::BELOW_NONE;
+  bool had = layers.layerState(id, &before, &beforeBelow);
+  layers.setLayerState(id, info, belowId);
+  // a layer appearing, disappearing or changing place changes the z-order of what is on it
+  bool restack = had != (info != NULL) || (info && beforeBelow != belowId);
+  // whatever is selected on a layer that just went out of reach has to be let go, exactly as it is
+  //  when the edit is made locally; this is also the path a peer's lock or hide arrives by
+  bool lostReach = !info || (info->hidden && !before.hidden)
+      || (info->locked && !before.locked && id != layers.currentId);
+  if(had && lostReach)
+    clearSelection();
+  layersChanged(restack, false);
+}
+
+void ScribbleDoc::replaceLayerTable(const LayerList& table)
+{
+  document->layers = LayerList::parse(table.serialize().c_str(), document->layers.currentId);
+  clearSelection();
+  layersChanged(true);
+}
+
+void ScribbleDoc::restackLayers()
+{
+  const LayerList& layers = document->layers;
+  for(Page* page : document->pages) {
+    if(page->loadStatus != Page::LOAD_OK)
+      continue;
+    std::vector<Element*> elements;
+    for(Element* s : page->children())
+      elements.push_back(s);
+    // stable, so the order elements were drawn in within one layer survives a reorder of the layers
+    std::stable_sort(elements.begin(), elements.end(), [&layers](const Element* a, const Element* b)
+        { return layers.zIndexOf(a->layer()) < layers.zIndexOf(b->layer()); });
+    // reinsert in the new order; this is a pure z-order change derived from the table, outside the
+    //  undo system for the same reason the table itself is
+    for(Element* s : elements) {
+      page->contentNode->removeChild(s->node);
+      page->contentNode->addChild(s->node);
+    }
+    page->dirtyCount++;
+  }
+}
+
+bool ScribbleDoc::setCurrentLayer(int id)
+{
+  int prevId = document->layers.currentId;
+  if(!document->layers.setCurrent(id))
+    return false;
+  // a locked layer is editable only while it is current, so leaving it puts anything selected on it
+  //  back out of reach - the selection has to be let go, as it is when a layer is locked
+  if(prevId != id && document->layers.isLocked(prevId))
+    clearSelection();
+  layersChanged();
+  return true;
+}
+
+int ScribbleDoc::addLayer(const char* name, int aboveIdx)
+{
+  int id = newLayerId();
+  if(id < 0)
+    id = document->layers.nextId();
+  std::string layername = name ? name : "";
+  if(!editLayer(id, [&](LayerList& layers) { return layers.addLayer(layername, aboveIdx, id) == id; }))
+    return LayerList::DEFAULT_LAYER;
+  return id;
+}
+
+int ScribbleDoc::layerElementCount(int id) const
+{
+  int count = 0;
+  for(Page* page : document->pages) {
+    if(page->loadStatus != Page::LOAD_OK)
+      continue;
+    for(Element* s : page->children())
+      count += s->layer() == id ? 1 : 0;
+  }
+  return count;
+}
+
+bool ScribbleDoc::removeLayer(int id, int moveContentTo)
+{
+  if(!document->layers.find(id) || document->layers.size() < 2)
+    return false;
+  // every page has to be loaded first: an unloaded page can still hold elements on this layer, and
+  //  they would be left pointing at a layer that no longer exists
+  document->ensurePagesLoaded();
+  LayerList after = document->layers;
+  if(!after.removeLayer(id))
+    return false;
+  int target = moveContentTo >= 0 && after.find(moveContentTo) ? moveContentTo : after.currentId;
+  startAction(activeArea->currPageNum | UndoHistory::MULTIPAGE);
+  for(Page* page : document->pages) {
+    std::vector<Element*> elements;
+    for(Element* s : page->children()) {
+      if(s->layer() == id)
+        elements.push_back(s);
+    }
+    for(Element* s : elements) {
+      // the item records the state to *restore*; the move itself is applied here, so addItem's
+      //  commit() is what dirties the page - calling redo() as well would count it twice
+      int oldlayer = s->layer();
+      Element* oldnext = page->moveToLayer(s, target);
+      history->addItem(new StrokeLayerItem(s, page, oldlayer, oldnext));
+    }
+  }
+  // the table entry goes *last* in the action, so undo restores the layer before the elements are
+  //  moved back onto it, and a peer receives the moves while the layer still exists
+  LayerTableItem* item = new LayerTableItem(this, id);
+  setLayerState(id, NULL, LayerList::BELOW_NONE);
+  history->addItem(item);
+  endAction();
+  return true;
+}
+
+bool ScribbleDoc::setLayerName(int id, const char* name)
+{
+  std::string layername = name ? name : "";
+  return editLayer(id, [&](LayerList& layers) { return layers.setName(id, layername); });
+}
+
+// Letting go of a selection on a layer that goes out of reach - anything selected on a layer being
+//  locked, unless it is current (which stays editable), and anything on a layer being hidden - is done
+//  in setLayerState(), which a peer's edit and an undo pass through as well.
+bool ScribbleDoc::setLayerLocked(int id, bool locked)
+{
+  return editLayer(id, [&](LayerList& layers) { return layers.setLocked(id, locked); });
+}
+
+bool ScribbleDoc::setLayerHidden(int id, bool hidden)
+{
+  return editLayer(id, [&](LayerList& layers) { return layers.setHidden(id, hidden); });
+}
+
+// recorded by id and the layer below it, not by index: a peer's concurrent add or remove shifts every
+//  index above it, and replaying an index would move a different layer
+bool ScribbleDoc::moveLayer(int fromIdx, int toIdx)
+{
+  const LayerInfo* layer = document->layers.byIndex(fromIdx);
+  if(!layer)
+    return false;
+  return editLayer(layer->id, [&](LayerList& layers) { return layers.moveLayer(fromIdx, toIdx); });
+}
+
+int ScribbleDoc::moveSelToLayer(int id)
+{
+  Selection* sel = activeArea ? activeArea->currSelection : NULL;
+  if(!sel || sel->strokes.empty() || !document->layers.find(id)
+      || !document->layers.isEditable(id))
+    return 0;
+  // copy the list: each move restacks the element, and StrokeLayerItem works off the page's node
+  //  order, which the selection's own list does not track
+  std::vector<Element*> elements(sel->strokes.begin(), sel->strokes.end());
+  int nmoved = 0;
+  startAction(activeArea->currPageNum);
+  for(Element* s : elements) {
+    if(s->layer() == id)
+      continue;
+    int oldlayer = s->layer();
+    Element* oldnext = sel->page->moveToLayer(s, id);
+    history->addItem(new StrokeLayerItem(s, sel->page, oldlayer, oldnext));
+    ++nmoved;
+  }
+  endAction();
+  if(nmoved)
+    doRefresh();
+  return nmoved;
+}
+
 void ScribbleDoc::loadConfig(bool refresh)
 {
+  // the layer table is stored in the document config, so this - the one point every cfg swap passes
+  //  through - is where it has to be read back, exactly as the theme palette is invalidated here
+  document->layers = LayerList::parse(cfg->String("layers", ""),
+      cfg->Int("currentLayer", LayerList::DEFAULT_LAYER));
+  document->applyLayerState();
   // every path that swaps cfg (newDocument, openDocument) calls this immediately afterwards, and a
   //  change to the global prefs can move the recipe too, so this is the one place the cached palette
   //  has to be dropped
@@ -318,6 +543,12 @@ void ScribbleDoc::doUndoRedo(bool redo)
   // handle case of pages added and removed w/ no change in page count (currently just deletion of sole page)
   int docdirty = document->dirtyCount;
   int pagenum = redo ? history->redo() : history->undo();
+  // An undone stroke stays in its view's recentStrokes, and the next undo item added - by any action,
+  //  e.g. a layer or page property edit - discards it and frees it, leaving groupStrokes() reading
+  //  freed memory.  Grouping only ever spans strokes just drawn, so after an undo there is nothing
+  //  worth keeping.  Local undo is the only way strokes are left undone; sync restores its position.
+  for(ScribbleArea* view : views)
+    view->recentStrokes.clear();
   undoRedoUpdate(pagenum, document->numPages() == prevpages && document->dirtyCount != docdirty ? 0 : prevpages);
 }
 
@@ -669,6 +900,11 @@ const Palette& ScribbleDoc::palette()
 
 void ScribbleDoc::setTheme(const PaletteRecipe& recipe, bool applyPages, bool globalDefault, bool ownAction)
 {
+  // One action for the recipe and the page recolor, so one Ctrl+Z puts both back - and so the recipe
+  //  reaches a whiteboard peer at all, since undo items are the sync protocol (COLORS_SPEC.md §8).
+  if(ownAction)
+    startAction(activeArea->currPageNum | (applyPages ? UndoHistory::MULTIPAGE : 0));
+  ThemeChangedItem* item = new ThemeChangedItem(this);  // the theme to restore
   cfg->setThemeRecipe(recipe);
   if(globalDefault)
     globalCfg->setThemeRecipe(recipe);
@@ -690,9 +926,7 @@ void ScribbleDoc::setTheme(const PaletteRecipe& recipe, bool applyPages, bool gl
     globalCfg->set("bookmarkColor", int(pal.bookmark.argb()));
     globalCfg->set("linkColor", int(pal.link.argb()));
   }
-  // ScribbleApp caches the bookmark color in a member, so the config write alone would not take
-  //  effect until the next restart
-  app->bookmarkColor = pal.bookmark;
+  history->addItem(item);
 
   if(applyPages) {
     // Deliberately not setPageProperties(): that applies one PageProperties to every page, and since
@@ -700,8 +934,6 @@ void ScribbleDoc::setTheme(const PaletteRecipe& recipe, bool applyPages, bool gl
     //  (for any page whose size differs) its dimensions onto the current page's. A theme changes two
     //  colors and must leave the rest of each page alone, so each page gets its own props back with
     //  only color and ruleColor replaced.
-    if(ownAction)
-      startAction(activeArea->currPageNum | UndoHistory::MULTIPAGE);
     for(Page* page : document->pages) {
       // Pages whose background is an image - PDF import, document scan - are skipped: their paper is
       //  the image, so recoloring underneath it does nothing visible and only dirties the page.
@@ -712,10 +944,44 @@ void ScribbleDoc::setTheme(const PaletteRecipe& recipe, bool applyPages, bool gl
       props.ruleColor = pal.rule;
       page->setProperties(&props);
     }
-    if(ownAction)
-      endAction();
-    pageSizeChanged();
   }
+  if(ownAction)
+    endAction();
+  if(applyPages)
+    pageSizeChanged();
+  themeApplied();
+}
+
+ThemeState ScribbleDoc::themeState() const
+{
+  ThemeState state;
+  state.recipe = cfg->themeRecipe();
+  state.pageColor = Color::fromArgb(cfg->Int("pageColor"));
+  state.ruleColor = Color::fromArgb(cfg->Int("ruleColor"));
+  state.bookmarkColor = Color::fromArgb(cfg->Int("bookmarkColor"));
+  state.linkColor = Color::fromArgb(cfg->Int("linkColor"));
+  return state;
+}
+
+// The document half of setTheme() only: the machine-wide default is this user's, and the pages are
+//  recolored by their own PageChangedItems.  Note that undoing the theming of a document that had
+//  none leaves it with an explicit recipe equal to the inherited one - the same palette, now pinned.
+void ScribbleDoc::applyThemeState(const ThemeState& state)
+{
+  cfg->setThemeRecipe(state.recipe);
+  cfg->set("pageColor", int(state.pageColor.argb()));
+  cfg->set("ruleColor", int(state.ruleColor.argb()));
+  cfg->set("bookmarkColor", int(state.bookmarkColor.argb()));
+  cfg->set("linkColor", int(state.linkColor.argb()));
+  themeApplied();
+}
+
+void ScribbleDoc::themeApplied()
+{
+  paletteValid = false;
+  // ScribbleApp caches the bookmark color in a member, so the config write alone would not take
+  //  effect until the next restart
+  app->bookmarkColor = Color::fromArgb(cfg->Int("bookmarkColor"));
   updateGhostPage();
   // the pen toolbar's swatches are generated from this palette, so they have to be rebuilt here -
   //  setPen() early-returns when the pen has not changed, which a theme change does not do
@@ -744,9 +1010,10 @@ int ScribbleDoc::restyleToTheme(const PaletteRecipe& recipe, bool applyPages, bo
   Palette oldPal = palette();
   document->ensurePagesLoaded();  // a delay-loaded page cannot be restyled
 
-  // One action around *both* halves.  setTheme() brackets its own page recolor, so letting it do that
-  //  here would make a restyle two undo steps - press Ctrl+Z once and the strokes revert while the
-  //  paper stays on the new theme, which looks like a bug and is one.
+  // One action around *both* halves.  setTheme() opens its own action for the recipe and the page
+  //  recolor, so letting it do that here would make a restyle two undo steps - press Ctrl+Z once and
+  //  the strokes revert while the paper and the recipe stay on the new theme, which looks like a bug
+  //  and is one.
   int nchanged = 0;
   startAction(activeArea->currPageNum | UndoHistory::MULTIPAGE);
   setTheme(recipe, applyPages, globalDefault, false);

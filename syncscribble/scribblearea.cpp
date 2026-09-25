@@ -1405,6 +1405,10 @@ void ScribbleArea::freeErase(Point prevpos, Point pos)
   auto strokes = currPage->children();
   for(auto ii = strokes.begin(); ii != strokes.end();) {
     Element* s = *ii++;
+    // the free eraser is the one erase path that is not a Selection, so the lock check that covers
+    //  the stroke and ruled erasers in Selection::doSelect does not reach it
+    if(!currPage->isEditable(s))
+      continue;
     if(!s->isSelected(tempSelection) && erasebox.intersects(s->bbox())) {
       if(s->isSelected(freeErasePieces)) {
         //Rect oldbbox = s->bbox();
@@ -2357,8 +2361,11 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
     // if page is clean, clear page dirty after adding normal stroke so we don't redraw it unnecessarily
     // addChild clears m_renderedBounds, so restore since these are needed if stroke is immediately changed
     Rect r = currStroke->node->m_renderedBounds;
-    if(currPen()->hasFlag(ScribblePen::DRAW_UNDER) && currPage->strokeCount() > 0)
-      currPage->addStroke(currStroke, *currPage->children().begin());
+    // DRAW_UNDER means under the other ink on this layer, not under the whole page: going under a
+    //  lower layer would put the stroke outside its own layer's run and break the stacking
+    Element* under = currPage->layerFirstElement(scribbleDoc->document->layers.currentId);
+    if(currPen()->hasFlag(ScribblePen::DRAW_UNDER) && under)
+      currPage->addStroke(currStroke, under);
     else if(currPage->getDirty().isValid())  // we expect page to usually be clean, so this call is cheap
       currPage->addStroke(currStroke);
     else {
@@ -2382,8 +2389,11 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
         s->setSelected(NULL);
         if(s->isPathElement() || s->isMultiStroke()) {
           currPage->contentNode->removeChild(s->node);
+          // the pieces of an erased stroke belong to the layer that stroke was on, which need not be
+          //  the current one - without the explicit layer, free-erasing on a two-layer page would
+          //  quietly migrate what it cut into whichever layer the pen happens to be on
           for(Element* ss : s->getEraseSubPaths())
-            currPage->addStroke(ss, nexts);
+            currPage->addStroke(ss, nexts, s->layer());
           freeErasePieces->removeStroke(s);
           s->deleteNode();
           ii = std::find(strokes.begin(), strokes.end(), nexts);
@@ -2541,7 +2551,9 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
       Element* s = tempSelection->strokes.front();
       Element* t = currSelection->strokes.front();
       currPage->contentNode->removeChild(t->node);
-      currPage->addStroke(t, s);
+      // the cropped copy replaces the original in place, so it keeps the original's layer rather
+      //  than being treated as newly drawn content
+      currPage->addStroke(t, s, s->layer());
       currPage->removeStroke(s);
     }
     // internalScale == 0 defeats check for identity tf in commitTransform()

@@ -70,6 +70,15 @@ public:
   pugi::xml_node resetConfigNode(pugi::xml_node newcfg = pugi::xml_node());
   pugi::xml_node getConfigNode();
 
+  // Build the outline in page order.  Nothing is cached: page numbers come from the pages' current
+  //  positions, so the result is correct by construction after any page insertion, deletion or undo
+  //  thereof.  loadpages=false skips pages that have never been loaded (they cannot be known to have
+  //  an entry); pages loaded once and since unloaded still count, from their cached title.
+  std::vector<OutlineEntry> outline(bool loadpages = true);
+
+  // push the layer table's hidden flags onto every loaded page's elements
+  void applyLayerState();
+
   SvgNode* findNamedNode(const char* idstr, int* pagenumout = NULL) const;
   Page* pageForElement(const Element* s) const;
   int pageNumForElement(const Element* s) const;

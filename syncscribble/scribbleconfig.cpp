@@ -346,6 +346,12 @@ void ScribbleConfig::init()
   // empty means "whatever generator this build considers current"; a themed document always writes an
   //  explicit id, so it keeps generating the palette it was authored with
   cfgS["themeGen"] = "";
+
+  // The document's layer table (LAYERS_INVESTIGATION.md), serialized by LayerList.  Empty means the
+  //  document has never been layered, which LayerList::parse() turns into the single default layer -
+  //  so every document written before layers existed reads back as one unlocked layer holding
+  //  everything, with no migration step anywhere.
+  cfgS["layers"] = "";
 }
 
 PaletteRecipe ScribbleConfig::themeRecipe() const

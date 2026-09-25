@@ -188,11 +188,20 @@ public:
   Timestamp timestamp() const { return m_timestamp; }
   void setTimestamp(Timestamp t) { m_timestamp = t; }
 
+  // The element's layer, serialized as __layer (LAYERS_INVESTIGATION.md).  This is only a tag: what
+  //  it means - locked, hidden, where in z-order - is the document's LayerList.  An element with no
+  //  __layer attribute, i.e. everything in every document written before layers existed, is on
+  //  LayerList::DEFAULT_LAYER.
+  int layer() const { return m_layer; }
+  void setLayer(int layer) { m_layer = layer; }
+
   void setNodeId(const char* id) { node->setXmlId(id); }
   const char* nodeId() const { return node->xmlId(); }
 
   bool freeErase(const Point& prevpos, const Point& pos, Dim radius);
   bool freeErase(const Rect& rect);
+  // erase against any polygon (page coordinates), e.g. a ruled line's band in a tilted region
+  bool freeErase(const std::vector<Point>& poly);
   std::vector<Element*> getEraseSubPaths();
 
   void updateFromNode();
@@ -219,6 +228,7 @@ private:
   void fromPenPoints(const std::vector<PenPoint>& pts);
 
   const Selection* m_selection;
+  int m_layer = LayerList::DEFAULT_LAYER;
   Timestamp m_timestamp;
   Point m_com;
   ScribbleTransform m_pendingTransform;

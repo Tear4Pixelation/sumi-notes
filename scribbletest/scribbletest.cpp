@@ -544,6 +544,422 @@ int ScribbleTest::outlineTest()
 // Layers (LAYERS_INVESTIGATION.md).  runLayerTests() in layertest.cpp covers the table's own logic;
 //  everything here needs a document: the lock actually blocking the editing paths, the undo item, the
 //  round trip through the document config, and the wire format.
+int ScribbleTest::layerTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: layer: %s\n", what); }
+  };
+  auto drawStroke = [&](Dim y) {
+    scribbleMode->setMode(MODE_STROKE);
+    ie(120, y, 0, pen, press);  ie(300, y, 0, pen);  ie(0, 0, 0, pen, release);
+  };
+  auto elementAt = [&](int idx) -> Element* {
+    int ii = 0;
+    for(Element* s : scribbleArea->currPage->children()) { if(ii++ == idx) return s; }
+    return NULL;
+  };
+
+  scribbleDoc->newDocument();
+  scribbleDoc->app->setPen(ScribblePen(Color::BLACK, 2, ScribblePen::TIP_ROUND));
+  const int base = scribbleDoc->currentLayer();
+  check(scribbleDoc->layers().size() == 1, "a fresh document has exactly one layer");
+
+  drawStroke(160);
+  check(elementAt(0) && elementAt(0)->layer() == base, "a stroke lands on the current layer");
+
+  int top = scribbleDoc->addLayer("Top");
+  check(scribbleDoc->layers().size() == 2, "a layer was added");
+  check(scribbleDoc->setCurrentLayer(top), "the new layer can be made current");
+  drawStroke(360);
+  check(elementAt(1) && elementAt(1)->layer() == top, "a stroke lands on the new current layer");
+  // an image is added by the same route (Clipboard::paste -> Page::addStroke), which is what makes
+  //  "new content goes on the current layer" one rule rather than one per creation site
+  scribbleArea->insertImage(Image(8, 8));
+  Element* img = NULL;
+  for(Element* s : scribbleArea->currPage->children()) {
+    if(s->node->type() == SvgNode::IMAGE) img = s;
+  }
+  check(img != NULL, "an image was inserted");
+  check(img && img->layer() == top, "an inserted image lands on the current layer too");
+
+  // Layers stack: a stroke drawn on the lower layer goes *under* what is already on the upper one,
+  //  even though it was drawn later.  Without this a layer would be only a tag, and moving content
+  //  between layers would not change what covers what.
+  // insertImage() leaves the image selected, and a press inside a selection moves it rather than
+  //  drawing - so the selection has to go before the next stroke
+  scribbleDoc->clearSelection();
+  check(scribbleDoc->setCurrentLayer(base), "back to the lower layer");
+  drawStroke(260);
+  check(elementAt(0) && elementAt(0)->layer() == base
+      && elementAt(1) && elementAt(1)->layer() == base,
+      "a stroke drawn later on the lower layer is placed under the upper layer's content");
+  check(elementAt(2) && elementAt(2)->layer() == top, "...which is still above it");
+  // undo has to take it back out again, or the rest of this test counts the wrong elements
+  scribbleDoc->doUndoRedo(false);
+  check(elementAt(1) && elementAt(1)->layer() == top, "undoing that stroke leaves the rest in order");
+
+  // *** the requirement: a locked layer is immune to selection and to erasing from other layers ***
+  // the pen has to be on another layer first - the current layer is editable even while locked
+  check(scribbleDoc->setCurrentLayer(top), "the pen is on the upper layer");
+  check(scribbleDoc->setLayerLocked(base, true), "locking the lower layer succeeds");
+  scribbleDoc->doCommand(ID_SELALL);
+  int nsel = scribbleArea->currSelection ? scribbleArea->currSelection->count() : 0;
+  check(nsel == 2, "Select All skips the locked layer and takes only the two unlocked elements");
+  scribbleDoc->clearSelection();
+
+  // a rect selection dragged right over the locked stroke must not pick it up either
+  scribbleMode->setMode(MODE_SELECTRECT);
+  ie(100, 140, 0, pen, press);  ie(320, 180, 0, pen);  ie(0, 0, 0, pen, release);
+  check(!scribbleArea->currSelection || scribbleArea->currSelection->count() == 0,
+      "a rect selection over a locked stroke selects nothing");
+  scribbleDoc->clearSelection();
+
+  int nstrokes = scribbleArea->currPage->strokeCount();
+  // the stroke eraser is a selection, so it is covered by the same gate...
+  scribbleMode->setMode(MODE_ERASESTROKE);
+  ie(120, 160, 0, pen, press);  ie(300, 160, 0, pen);  ie(0, 0, 0, pen, release);
+  check(scribbleArea->currPage->strokeCount() == nstrokes,
+      "the stroke eraser cannot erase a stroke on a locked layer");
+  // ...the free eraser is not, and needs its own check, because it does not build a Selection
+  scribbleMode->setMode(MODE_ERASEFREE);
+  ie(120, 160, 0, pen, press);  ie(300, 160, 0, pen);  ie(0, 0, 0, pen, release);
+  check(scribbleArea->currPage->strokeCount() == nstrokes,
+      "the free eraser cannot erase a stroke on a locked layer");
+  check(elementAt(0) && elementAt(0)->layer() == base,
+      "...and the locked stroke is still there, on its own layer");
+
+  // Picking the locked layer is how it is edited: once current, it is selectable like any other...
+  check(scribbleDoc->setCurrentLayer(base), "a locked layer can be picked as the current layer");
+  scribbleDoc->doCommand(ID_SELALL);
+  nsel = scribbleArea->currSelection ? scribbleArea->currSelection->count() : 0;
+  check(nsel == 3, "Select All on the locked current layer takes its stroke as well");
+  // ...and leaving it puts its ink back out of reach, including anything that was selected
+  check(scribbleDoc->setCurrentLayer(top), "picking another layer succeeds");
+  check(!scribbleArea->currSelection || scribbleArea->currSelection->count() == 0,
+      "leaving a locked layer lets go of the selection that held its ink");
+  scribbleDoc->doCommand(ID_SELALL);
+  nsel = scribbleArea->currSelection ? scribbleArea->currSelection->count() : 0;
+  check(nsel == 2, "...and Select All skips it again");
+  scribbleDoc->clearSelection();
+
+  // locking the layer the pen is on leaves the pen there, still able to write
+  check(scribbleDoc->setLayerLocked(top, true), "locking the current layer succeeds");
+  check(scribbleDoc->currentLayer() == top, "locking the current layer does not move the pen");
+  check(scribbleDoc->layers().isEditable(top), "...and the current layer stays editable");
+  scribbleDoc->setLayerLocked(top, false);
+  scribbleDoc->setLayerLocked(base, false);
+
+  // Moving an element between layers is one undoable action, and it restacks.  A *second* element on
+  //  the lower layer is what gives this check teeth: with only one, the element being restored is the
+  //  last of its layer's run either way, so recomputing the insertion point from the layer table
+  //  happens to land in the right place and an undo item that dropped the recorded sibling position
+  //  would still pass.  Moving the *first* of two makes the two answers differ.
+  scribbleDoc->setCurrentLayer(base);
+  drawStroke(260);
+  scribbleMode->setMode(MODE_SELECTRECT);
+  ie(100, 140, 0, pen, press);  ie(320, 180, 0, pen);  ie(0, 0, 0, pen, release);
+  check(scribbleArea->currSelection && scribbleArea->currSelection->count() == 1,
+      "just the first lower-layer stroke is selected");
+  size_t undoBefore = scribbleDoc->history->undoSteps();
+  Element* lower = elementAt(0);
+  check(elementAt(1) && elementAt(1)->layer() == base, "there is a second element on that layer");
+  int nmoved = scribbleDoc->moveSelToLayer(top);
+  check(nmoved == 1, "exactly the one element not already on the target layer moves");
+  check(lower->layer() == top, "the moved element reports the new layer");
+  check(scribbleDoc->history->undoSteps() == undoBefore + 1, "the move is a single undo step");
+  scribbleDoc->clearSelection();
+  scribbleDoc->doUndoRedo(false);
+  check(lower->layer() == base, "undo restores the element's layer");
+  // the z-order half: a layer change restacks, so undoing only the id would leave the element
+  //  somewhere the user never put it
+  check(elementAt(0) == lower, "undo restores the element's position in z-order too");
+  // undo the extra stroke as well, so what follows counts the three elements it expects
+  scribbleDoc->doUndoRedo(false);
+  check(scribbleArea->currPage->strokeCount() == 3, "back to one element per layer plus the image");
+
+  // a hidden layer is not drawn and not editable
+  check(scribbleDoc->setLayerHidden(top, true), "hiding a layer succeeds");
+  check(elementAt(1) && elementAt(1)->node->displayMode() == SvgNode::NoneMode,
+      "an element on a hidden layer is not drawn");
+  check(elementAt(0)->node->displayMode() != SvgNode::NoneMode,
+      "...while one on a visible layer still is");
+  scribbleDoc->doCommand(ID_SELALL);
+  check(scribbleArea->currSelection && scribbleArea->currSelection->count() == 1,
+      "Select All skips a hidden layer");
+  scribbleDoc->clearSelection();
+  scribbleDoc->setLayerHidden(top, false);
+  check(elementAt(1) && elementAt(1)->node->displayMode() != SvgNode::NoneMode,
+      "unhiding puts it back");
+
+  // reordering the layers restacks the page without touching a single element's layer id
+  int lowerLayer = elementAt(0)->layer();
+  check(scribbleDoc->moveLayer(1, 0), "moving the top layer to the bottom succeeds");
+  check(elementAt(0)->layer() != lowerLayer,
+      "the element that was at the bottom is no longer first after a reorder");
+  check(scribbleDoc->layers().zIndexOf(lowerLayer) == 1, "...because its layer moved, not its id");
+  scribbleDoc->moveLayer(1, 0);  // put it back
+
+  // save and reload: the table rides the document config, the ids ride the elements.  The pen goes to
+  //  the other layer first, since the current layer is editable even while locked.
+  scribbleDoc->setCurrentLayer(base);
+  scribbleDoc->setLayerLocked(top, true);
+  scribbleDoc->setLayerName(top, "Ink, notes; 100%");
+  LayerList saved = scribbleDoc->layers();
+  std::string file = outPath + "/layer_roundtrip_out.html";
+  check(scribbleDoc->saveDocument(file.c_str()), "saving the document should succeed");
+  scribbleDoc->newDocument();
+  check(scribbleDoc->openDocument(file.c_str()) == Document::LOAD_OK, "reloading should succeed");
+  removeFile(file.c_str());
+
+  check(scribbleDoc->layers() == saved, "the whole layer table survives save/reload");
+  check(scribbleDoc->layers().isLocked(top), "the locked flag survives save/reload");
+  check(scribbleDoc->layers().find(top)
+      && scribbleDoc->layers().find(top)->name == "Ink, notes; 100%",
+      "a name with the serializer's separators in it survives save/reload");
+  check(elementAt(0) && elementAt(0)->layer() == base, "an element keeps its layer across a reload");
+  check(elementAt(1) && elementAt(1)->layer() == top, "...and so does one on the other layer");
+  // and the lock still bites after a reload, which is the point of saving it at all
+  scribbleDoc->doCommand(ID_SELALL);
+  check(scribbleArea->currSelection && scribbleArea->currSelection->count() == 1,
+      "a layer locked before saving is still locked after reloading");
+  scribbleDoc->clearSelection();
+
+  // A document written before layers existed has no table and no __layer attributes; it must read
+  //  back as one unlocked layer holding everything, with nothing to migrate.
+  {
+    Page* page = scribbleArea->currPage;
+    LayerList none;
+    scribbleDoc->document->layers = none;
+    check(page->isEditable(elementAt(0)), "an element on an unknown layer is still editable");
+    check(page->isEditable(elementAt(1)), "...whichever unknown layer it is on");
+  }
+
+  // the sync wire format: undo items *are* the sync protocol, so the item has to parse back
+  {
+    scribbleDoc->newDocument();
+    scribbleDoc->app->setPen(ScribblePen(Color::BLACK, 2, ScribblePen::TIP_ROUND));
+    drawStroke(160);
+    Element* s = elementAt(0);
+    s->uuid = 12345;
+    MemStream strm;
+    StrokeLayerItem item(s, scribbleArea->currPage, 7);
+    item.serialize(strm);
+    std::string wire(strm.data(), strm.size());
+    pugi::xml_document wiredoc;
+    check(wiredoc.load_buffer(wire.data(), wire.size()),
+        "the serialized layer item is well-formed XML");
+    pugi::xml_node n = wiredoc.child("layerchanged");
+    check(!n.empty(), "the item serializes as <layerchanged>");
+    check(n.attribute("strokeuuid").as_ullong() == 12345, "the wire format carries the stroke uuid");
+    // serialize() reports the element's *current* layer, which is what a peer has to apply
+    check(n.attribute("layer").as_int(-1) == s->layer(), "the wire format carries the layer");
+  }
+  return nbad;
+}
+
+// The layer table and the theme as undo steps and on the sync wire.  Undo items *are* the sync
+//  protocol, so each edit is checked three ways: it is one undo step, undo and redo restore it, and
+//  what it serializes reproduces the edit when fed back through ScribbleSync::processItem() - the
+//  path a peer's client runs - after the edit has been undone locally.
+int ScribbleTest::docStateSyncTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: doc state sync: %s\n", what); }
+  };
+  auto drawStroke = [&](Dim y) {
+    scribbleMode->setMode(MODE_STROKE);
+    ie(120, y, 0, pen, press);  ie(300, y, 0, pen);  ie(0, 0, 0, pen, release);
+  };
+  auto elementAt = [&](int idx) -> Element* {
+    int ii = 0;
+    for(Element* s : scribbleArea->currPage->children()) { if(ii++ == idx) return s; }
+    return NULL;
+  };
+  auto steps = [&]() { return scribbleDoc->history->undoSteps(); };
+  auto undo = [&]() { scribbleDoc->doUndoRedo(false); };
+  auto redo = [&]() { scribbleDoc->doUndoRedo(true); };
+
+  scribbleDoc->newDocument();
+  // after newDocument(), which replaces the Document this refers into
+  const LayerList& layers = scribbleDoc->layers();
+  scribbleDoc->app->setPen(ScribblePen(Color::BLACK, 2, ScribblePen::TIP_ROUND));
+  const int base = scribbleDoc->currentLayer();
+  drawStroke(160);
+
+  // --- every table edit is one undo step, and undo/redo restore it ---
+  size_t before = steps();
+  int top = scribbleDoc->addLayer("Top");
+  check(steps() == before + 1, "adding a layer is one undo step");
+  undo();
+  check(!layers.find(top), "undo removes an added layer");
+  redo();
+  check(layers.find(top) && layers.find(top)->name == "Top", "redo restores it, with the same id");
+  scribbleDoc->setCurrentLayer(top);
+  drawStroke(360);
+  Element* onTop = elementAt(1);
+  check(onTop && onTop->layer() == top, "a stroke is on the new layer");
+  scribbleDoc->setCurrentLayer(base);
+
+  before = steps();
+  check(scribbleDoc->setLayerName(top, "Renamed"), "renaming succeeds");
+  check(steps() == before + 1, "a rename is one undo step");
+  check(!scribbleDoc->setLayerName(top, "Renamed") && steps() == before + 1,
+      "renaming to the same name is refused and adds no step");
+  undo();
+  check(layers.find(top)->name == "Top", "undo restores the old name");
+  redo();
+  check(layers.find(top)->name == "Renamed", "redo renames again");
+
+  scribbleDoc->setLayerLocked(top, true);
+  undo();
+  check(!layers.isLocked(top), "undo unlocks");
+  redo();
+  check(layers.isLocked(top), "redo locks again");
+  undo();
+
+  scribbleDoc->setLayerHidden(top, true);
+  check(onTop->node->displayMode() == SvgNode::NoneMode, "hiding hides the layer's stroke");
+  undo();
+  check(!layers.isHidden(top) && onTop->node->displayMode() != SvgNode::NoneMode,
+      "undo unhides the layer, and its stroke is drawn again");
+
+  scribbleDoc->moveLayer(1, 0);
+  check(elementAt(0) == onTop, "moving the layer to the bottom restacks its stroke");
+  undo();
+  check(elementAt(1) == onTop && layers.zIndexOf(top) == 1, "undo puts the layer and its stroke back on top");
+
+  // Removal moves the layer's content to another layer and removes the entry, as one step; undo has
+  //  to bring back the layer *before* the elements are moved back onto it
+  before = steps();
+  check(scribbleDoc->removeLayer(top), "removing a layer with content succeeds");
+  check(steps() == before + 1, "removing a layer, content and all, is one undo step");
+  check(!layers.find(top) && onTop->layer() == base, "its content moved to the remaining layer");
+  undo();
+  check(layers.find(top) && onTop->layer() == top, "undo restores the layer and its content's layer");
+  check(layers.zIndexOf(top) == 1 && elementAt(1) == onTop, "...in the same place in the stack");
+
+  // --- the receive path: what an edit serializes, applied as a peer would apply it ---
+  std::unique_ptr<ScribbleSync> sync(new ScribbleSync(scribbleDoc));
+  auto receive = [&](const std::string& wire) {
+    std::string xml = "<undo uuid='77' user='peer'>" + wire + "</undo>";
+    pugi::xml_document doc;
+    if(!doc.load_buffer(xml.data(), xml.size())) return false;
+    pugi::xml_node item = doc.child("undo").first_child();
+    sync->processItem(item);
+    return true;
+  };
+  auto layerWire = [&](int id) {
+    MemStream strm;
+    LayerTableItem(scribbleDoc, id).serialize(strm);  // reports the live state, as sendHist relies on
+    return std::string(strm.data(), strm.size());
+  };
+
+  // a name with every XML-significant character, since it is user text on the wire
+  const char* odd = "Peer & 'quoted' <name>";
+  scribbleDoc->setLayerName(top, odd);
+  scribbleDoc->setLayerLocked(top, true);
+  std::string wire = layerWire(top);
+  undo();  undo();
+  check(layers.find(top)->name == "Renamed" && !layers.isLocked(top), "the local edits are undone");
+  before = steps();
+  check(receive(wire), "a layer table item is well-formed XML");
+  check(layers.find(top) && layers.find(top)->name == odd, "a received rename applies, escaping and all");
+  check(layers.isLocked(top), "a received lock applies");
+  check(steps() == before, "a received edit is not added to the local undo history");
+  scribbleDoc->setLayerLocked(top, false);
+
+  // a peer's new layer arrives at the same place in the stack; its removal takes it away again
+  int added = scribbleDoc->addLayer("Peer layer", 0);  // directly above the bottom layer
+  wire = layerWire(added);
+  undo();
+  check(!layers.find(added), "the local add is undone");
+  receive(wire);
+  check(layers.find(added) && layers.zIndexOf(added) == 1, "a received layer lands at the same z position");
+  scribbleDoc->removeLayer(added);
+  wire = layerWire(added);
+  undo();
+  receive(wire);
+  check(!layers.find(added), "a received removal removes the layer");
+
+  // A peer hiding the layer our pen is on moves the pen: new ink has to land somewhere visible.  Our
+  //  current layer is otherwise not part of the wire format.
+  scribbleDoc->setCurrentLayer(top);
+  scribbleDoc->setLayerHidden(top, true);
+  wire = layerWire(top);
+  undo();
+  scribbleDoc->setCurrentLayer(top);
+  receive(wire);
+  check(layers.isHidden(top) && scribbleDoc->currentLayer() != top,
+      "a peer hiding our current layer moves the pen off it");
+
+  // A stroke a peer draws on a layer we have hidden must arrive hidden.  Visibility is otherwise only
+  //  applied when the table changes or a page loads, so it used to arrive drawn.
+  scribbleDoc->setLayerHidden(top, false);
+  scribbleDoc->setCurrentLayer(top);
+  drawStroke(460);
+  Element* peerStroke = elementAt(2);
+  MemStream strokeStrm;
+  StrokeAddedItem(peerStroke, scribbleArea->currPage, NULL).serialize(strokeStrm);
+  std::string strokeWire(strokeStrm.data(), strokeStrm.size());
+  undo();  // the stroke, which the peer now "draws"
+  scribbleDoc->setCurrentLayer(base);
+  scribbleDoc->setLayerHidden(top, true);
+  int nbefore = scribbleArea->currPage->strokeCount();
+  receive(strokeWire);
+  Element* arrived = scribbleArea->currPage->strokeCount() == nbefore + 1 ? elementAt(2) : NULL;
+  check(arrived && arrived->layer() == top, "the peer's stroke arrives on the peer's layer");
+  check(arrived && arrived->node->displayMode() == SvgNode::NoneMode,
+      "a peer's stroke on a layer we have hidden arrives hidden");
+  undo();  // our hide
+
+  // --- the joiner snapshot: the whole table, keeping the joiner's own current layer ---
+  {
+    LayerList table;
+    table.setName(table.layers[0].id, "Snap base");
+    int locked = table.addLayer("Snap locked");
+    table.setLocked(locked, true);
+    table.addLayer("Snap top");
+    XmlStreamWriter xmlwriter;
+    xmlwriter.writeStartElement("layersnapshot");
+    xmlwriter.writeAttribute("table", table.serialize());
+    xmlwriter.writeEndElement();
+    MemStream strm;
+    xmlwriter.save(strm);
+    receive(std::string(strm.data(), strm.size()));
+    check(layers.serialize() == table.serialize(), "a received snapshot replaces the whole table");
+    check(layers.isEditable(scribbleDoc->currentLayer()), "...and leaves the pen on a layer that takes ink");
+  }
+
+  // --- the theme ---
+  PaletteRecipe themeA;
+  themeA.gen = "cusp-walk-1";
+  themeA.seedHue = 200;
+  PaletteRecipe themeB = themeA;
+  themeB.seedHue = 40;
+  scribbleDoc->setTheme(themeA, true, false);
+  Color inkA = scribbleDoc->palette().families[2].base;
+  before = steps();
+  scribbleDoc->setTheme(themeB, true, false);
+  Color inkB = scribbleDoc->palette().families[2].base;
+  check(!(inkA == inkB), "the two themes differ");
+  check(steps() == before + 1, "a theme change is one undo step, pages and all");
+  MemStream themeStrm;
+  ThemeChangedItem(scribbleDoc).serialize(themeStrm);
+  undo();
+  check(scribbleDoc->palette().families[2].base == inkA, "undo of a theme change restores the recipe");
+  check(scribbleArea->currPage->props.color == scribbleDoc->palette().paper,
+      "...and the paper with it, in the same step");
+  receive(std::string(themeStrm.data(), themeStrm.size()));
+  check(scribbleDoc->palette().families[2].base == inkB, "a received theme applies the peer's recipe exactly");
+  check(steps() == before, "...without adding to the local undo history");
+
+  sync.reset();
+  scribbleDoc->newDocument();
+  return nbad;
+}
+
 int ScribbleTest::restyleTest()
 {
   int nbad = 0;
@@ -627,18 +1043,17 @@ int ScribbleTest::restyleTest()
   check(colorAt(0) == inkA, "undoing a restyle restores the original ink");
   check(colorAt(1) == offPalette, "undo leaves the untouched stroke untouched");
   check(colorAt(2) == darkA, "undo restores the dark variant too");
+  // ...and the recipe with them (ThemeChangedItem).  Without it the document is left holding theme B's
+  //  recipe and theme A's ink, and the next restyle finds nothing it recognises.  Compared through the
+  //  generated palette rather than the recipe, since the recipe is read back through float.
+  check(scribbleDoc->palette().families[2].base == inkA, "undoing a restyle restores the theme's recipe too");
 
   // COLORS_SPEC.md §10.1: inverting a themed document mirrors its paper rather than XOR-ing to a
   //  negative, so inverting twice must land exactly back where it started - ink, paper and all.
   //  A lossy mirror would be invisible until someone toggled it twice and found their colors drifted.
   {
-    // KNOWN DEFECT, and the reason for this line: undoing a restyle restores the stroke colors (they
-    //  are StrokeChangedItems) but *not* the recipe, which lives in the document config and is not an
-    //  undo item. So right now the document holds theme B's recipe and theme A's ink, and any restyle
-    //  from here would find nothing to map. Putting theme A back makes the state consistent again.
-    //  The real fix is COLORS_SPEC.md §8's ThemeChangedItem; see COLORS_HANDOFF.md §7.
-    scribbleDoc->setTheme(themeA, true, false);
-
+    // no setTheme(themeA) here: the undo above has to have left the document on theme A by itself,
+    //  and the restyles below find nothing to map if it did not
     PaletteRecipe lightA = scribbleDoc->cfg->themeRecipe();
     Color inkBefore = colorAt(0), offBefore = colorAt(1), paperBefore = scribbleDoc->palette().paper;
 

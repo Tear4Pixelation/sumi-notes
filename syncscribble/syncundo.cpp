@@ -2,6 +2,7 @@
 #include "document.h"
 #include "basics.h"
 #include "usvg/svgxml.h"
+#include "scribbledoc.h"
 
 StrokeUndoItem::StrokeUndoItem(Element* s_, Page* p_) : s(s_), page(p_) {}
 
@@ -36,9 +37,33 @@ void StrokeAddedItem::undo()
   page->contentNode->removeChild(s->node);
 }
 
+// A stroke put back into a page takes its layer's visibility: the layer may have been hidden while the
+//  stroke was out of the page (undo of a delete), or on this client only (a peer drawing on a layer we
+//  have hidden).  Visibility is otherwise applied only when the table changes or a page loads.
+static void applyLayerVisibility(Element* s, Page* page)
+{
+  if(page->document)
+    s->node->setDisplayMode(page->document->layers.isHidden(s->layer()) ?
+        SvgNode::NoneMode : SvgNode::BlockMode);
+}
+
+// Where a stroke goes back into its page.  Normally the recorded sibling; but a ruling region must end
+//  up below all ink, and its recorded sibling is not enough to guarantee that: a NULL `next` (it was
+//  the last element) means "on top", and under sync a peer's ink can have arrived since, or the sibling
+//  can have been deleted by a peer, which also appends.  Either would put an opaque region over ink.
+static SvgNode* reinsertPos(Element* s, Page* page, Element* next)
+{
+  if(s->isRulingRegion() && !(next && next->isRulingRegion() && next->node->parent() == page->contentNode)) {
+    Element* pos = page->layerInsertPos(LayerList::REGION_LAYER);
+    return pos ? pos->node : NULL;
+  }
+  return next ? next->node : NULL;
+}
+
 void StrokeAddedItem::redo()
 {
-  page->contentNode->addChild(s->node, next ? next->node : NULL);
+  applyLayerVisibility(s, page);
+  page->contentNode->addChild(s->node, reinsertPos(s, page, next));
   page->onAddStroke(s);
   StrokeUndoItem::redo();
 }
@@ -52,7 +77,8 @@ void StrokeAddedItem::discard(bool undone)
 
 void StrokeDeletedItem::undo()
 {
-  page->contentNode->addChild(s->node, next ? next->node : NULL);
+  applyLayerVisibility(s, page);
+  page->contentNode->addChild(s->node, reinsertPos(s, page, next));
   page->onAddStroke(s);
   StrokeUndoItem::undo();
 }
@@ -533,3 +559,124 @@ UndoHistoryItem* PageOutlineItem::inverse()
 
 // LayerTableItem
 
+LayerTableItem::LayerTableItem(ScribbleDoc* sd_, int id_) : sd(sd_), id(id_), belowId(LayerList::BELOW_NONE)
+{
+  present = sd->document->layers.layerState(id, &info, &belowId);
+}
+
+// the table is not in any page, so the document itself is what an edit to it dirties
+void LayerTableItem::commit()
+{
+  sd->document->dirtyCount++;
+}
+
+void LayerTableItem::swapState()
+{
+  LayerInfo live;
+  int liveBelow = LayerList::BELOW_NONE;
+  bool livePresent = sd->document->layers.layerState(id, &live, &liveBelow);
+  sd->setLayerState(id, present ? &info : NULL, belowId);
+  present = livePresent;
+  info = live;
+  belowId = liveBelow;
+}
+
+void LayerTableItem::undo()
+{
+  swapState();
+  sd->document->dirtyCount--;
+}
+
+void LayerTableItem::redo()
+{
+  swapState();
+  sd->document->dirtyCount++;
+}
+
+// A layer name is user text, so this goes through XmlStreamWriter for the same reason PageOutlineItem
+//  does: a name containing & or ' written with fstring would desync the stream.
+void LayerTableItem::serialize(IOStream& strm)
+{
+  LayerInfo live;
+  int liveBelow = LayerList::BELOW_NONE;
+  bool livePresent = sd->document->layers.layerState(id, &live, &liveBelow);
+  XmlStreamWriter xmlwriter;
+  xmlwriter.writeStartElement("layertable");
+  xmlwriter.writeAttribute("id", id);
+  xmlwriter.writeAttribute("present", livePresent ? 1 : 0);
+  if(livePresent) {
+    xmlwriter.writeAttribute("below", liveBelow);
+    xmlwriter.writeAttribute("locked", live.locked ? 1 : 0);
+    xmlwriter.writeAttribute("hidden", live.hidden ? 1 : 0);
+    xmlwriter.writeAttribute("name", live.name);
+  }
+  xmlwriter.writeEndElement();
+  xmlwriter.save(strm);
+}
+
+// serialize() reports the live state, so the inverse of an undone item is just the item
+UndoHistoryItem* LayerTableItem::inverse()
+{
+  return new LayerTableItem(*this);
+}
+
+// ThemeChangedItem - COLORS_SPEC.md 8.  Also what makes undoing a restyle put the recipe back, not
+//  just the stroke colors.
+
+ThemeChangedItem::ThemeChangedItem(ScribbleDoc* sd_) : sd(sd_), state(sd_->themeState()) {}
+
+void ThemeChangedItem::commit()
+{
+  sd->document->dirtyCount++;
+}
+
+void ThemeChangedItem::swapState()
+{
+  ThemeState live = sd->themeState();
+  sd->applyThemeState(state);
+  state = live;
+}
+
+void ThemeChangedItem::undo()
+{
+  swapState();
+  sd->document->dirtyCount--;
+}
+
+void ThemeChangedItem::redo()
+{
+  swapState();
+  sd->document->dirtyCount++;
+}
+
+void ThemeChangedItem::serialize(IOStream& strm)
+{
+  ThemeState live = sd->themeState();
+  const PaletteRecipe& r = live.recipe;
+  XmlStreamWriter xmlwriter;
+  xmlwriter.writeStartElement("themechanged");
+  // the generator id is a string, and an unknown one must survive the trip (COLORS_SPEC.md 3)
+  xmlwriter.writeAttribute("gen", r.gen);
+  // full float precision: the recipe is stored as float, and restyle recognises ink only by exact
+  //  color, so a recipe rounded on the wire would generate a palette a peer's ink is not drawn in
+  xmlwriter.writeAttribute("seedhue", r.seedHue, 9);
+  xmlwriter.writeAttribute("vividness", r.vividness, 9);
+  xmlwriter.writeAttribute("depth", r.depth, 9);
+  xmlwriter.writeAttribute("contrast", r.minContrast, 9);
+  xmlwriter.writeAttribute("jitter", r.jitter, 9);
+  xmlwriter.writeAttribute("paperl", r.paperL, 9);
+  xmlwriter.writeAttribute("paperwarm", r.paperWarm, 9);
+  xmlwriter.writeAttribute("families", r.families);
+  // colors as unsigned: ARGB with alpha set does not fit an int
+  xmlwriter.writeAttribute("pagecolor", fstring("%u", live.pageColor.argb()));
+  xmlwriter.writeAttribute("rulecolor", fstring("%u", live.ruleColor.argb()));
+  xmlwriter.writeAttribute("bookmarkcolor", fstring("%u", live.bookmarkColor.argb()));
+  xmlwriter.writeAttribute("linkcolor", fstring("%u", live.linkColor.argb()));
+  xmlwriter.writeEndElement();
+  xmlwriter.save(strm);
+}
+
+UndoHistoryItem* ThemeChangedItem::inverse()
+{
+  return new ThemeChangedItem(*this);
+}

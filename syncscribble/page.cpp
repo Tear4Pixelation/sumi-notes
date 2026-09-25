@@ -582,8 +582,77 @@ void Page::unload()
   loadStatus = NOT_LOADED;
 }
 
-void Page::addStroke(Element* s, Element* next)
+Element* Page::layerInsertPos(int layer) const
 {
+  if(!document)
+    return NULL;
+  int z = document->layers.zIndexOf(layer);
+  for(Element* s : children()) {
+    if(document->layers.zIndexOf(s->layer()) > z)
+      return s;
+  }
+  return NULL;
+}
+
+Element* Page::layerFirstElement(int layer) const
+{
+  if(!document)
+    return NULL;
+  int z = document->layers.zIndexOf(layer);
+  for(Element* s : children()) {
+    if(document->layers.zIndexOf(s->layer()) >= z)
+      return s;
+  }
+  return NULL;
+}
+
+Element* Page::moveToLayer(Element* s, int layer, Element* next)
+{
+  if(s->isRulingRegion())
+    layer = LayerList::REGION_LAYER;  // a region is on no layer, whatever the caller asked
+  SvgNode* nextNode = contentNode->removeChild(s->node);
+  Element* prevnext = nextNode ? static_cast<Element*>(nextNode->ext()) : NULL;
+  s->setLayer(layer);
+  if(document)
+    s->node->setDisplayMode(document->layers.isHidden(layer) ? SvgNode::NoneMode : SvgNode::BlockMode);
+  Element* at = next ? next : layerInsertPos(layer);
+  contentNode->addChild(s->node, at ? at->node : NULL);
+  return prevnext;
+}
+
+void Page::applyLayerState()
+{
+  if(!document || loadStatus != LOAD_OK)
+    return;
+  for(Element* s : children())
+    s->node->setDisplayMode(document->layers.isHidden(s->layer()) ?
+        SvgNode::NoneMode : SvgNode::BlockMode);
+}
+
+bool Page::isEditable(const Element* s) const
+{
+  // a ruling region is not ink: it is reached only through its own "..." button, never by ink
+  //  selection or an eraser.  This has to be explicit - REGION_LAYER is not in the layer table, and
+  //  an unknown layer fails open.
+  if(s && s->isRulingRegion())
+    return false;
+  // no document means the ghost page or a clipping, neither of which has a layer table
+  return !document || !s || document->layers.isEditable(s->layer());
+}
+
+void Page::addStroke(Element* s, Element* next, int layer)
+{
+  // a region is never stamped with a layer: it stays below every layer's ink
+  if(s->isRulingRegion())
+    s->setLayer(LayerList::REGION_LAYER);
+  else if(document)
+    s->setLayer(layer == LayerList::LAYER_CURRENT ? document->layers.currentId : layer);
+  // z-order within the page follows the layer table; an explicit `next` still wins, since the
+  //  callers that pass one (draw-under, free-erase subpaths, undo replay) are placing the element
+  //  relative to a sibling they already know is on the right layer
+  // a region goes below all ink even when a caller names a sibling that is ink
+  if(!next || s->isRulingRegion() != next->isRulingRegion())
+    next = layerInsertPos(s->layer());
   contentNode->addChild(s->node, next ? next->node : NULL);
   if(document->history->undoable())
     document->history->addItem(new StrokeAddedItem(s, this, next));

@@ -3,6 +3,10 @@
 
 #include "ulib/fileutil.h"
 #include "page.h"
+#include "layers.h"
+#include "ulib/palettegen.h"
+
+class ScribbleDoc;
 
 #define UNDO_ITEM_METHODS \
   void undo() override; \
@@ -214,6 +218,50 @@ public:
       : DocumentUndoItem(p_, pagenum_, document_) {}
   ADDRM_UNDO_ITEM_METHODS
   unsigned int type() const override { return PAGE_DELETED_ITEM; }
+};
+
+// Document config state (layer table, theme).  These are undo items for the same reason everything
+//  else is: undo items *are* the sync protocol, so state that is not one cannot reach a peer.  Both
+//  apply through ScribbleDoc, which owns the config they are persisted in and the UI that follows it.
+
+// One layer's entry in the table; see LayerList::layerState() for why it is per layer.  Like the
+//  stroke items, it holds the state to swap *in*, and serialize() reports the live state.
+class LayerTableItem : public UndoHistoryItem {
+public:
+  ScribbleDoc* sd;
+  int id;
+  bool present;
+  LayerInfo info;
+  int belowId;
+  void swapState();
+//public:
+  // captures the layer's current state, i.e. what undo restores
+  LayerTableItem(ScribbleDoc* sd_, int id_);
+  LayerTableItem(ScribbleDoc* sd_, int id_, bool present_, const LayerInfo& info_, int belowId_)
+      : sd(sd_), id(id_), present(present_), info(info_), belowId(belowId_) {}
+  void commit() override;
+  UNDO_ITEM_METHODS
+  unsigned int type() const override { return LAYER_TABLE_ITEM; }
+};
+
+// The theme recipe plus the document colors derived from it.  The machine-wide default a theme can
+//  also be saved as is not here: it is this user's preference, not the document's.
+struct ThemeState {
+  PaletteRecipe recipe;
+  Color pageColor, ruleColor, bookmarkColor, linkColor;
+};
+
+class ThemeChangedItem : public UndoHistoryItem {
+public:
+  ScribbleDoc* sd;
+  ThemeState state;
+  void swapState();
+//public:
+  ThemeChangedItem(ScribbleDoc* sd_);  // captures the current theme
+  ThemeChangedItem(ScribbleDoc* sd_, const ThemeState& state_) : sd(sd_), state(state_) {}
+  void commit() override;
+  UNDO_ITEM_METHODS
+  unsigned int type() const override { return THEME_CHANGE_ITEM; }
 };
 
 // undo list can easily get very big ... if we just limit to fixed number of items, we would have
