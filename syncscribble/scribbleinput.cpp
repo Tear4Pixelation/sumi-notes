@@ -56,6 +56,14 @@ bool ScribbleInput::sdlEvent(SvgGui* gui, SDL_Event* event)
     else if(event->tfinger.touchId == SDL_TOUCH_MOUSEID) {
       inputsrc = INPUTSOURCE_MOUSE;
       modemod = (event->tfinger.fingerId & SDL_BUTTON_RMASK) ? MODEMOD_PENBTN : 0;
+      // middle button drag pans, whatever the active tool is.  fingerId is the pressed/released button
+      //  for down/up and the full button mask for motion, so this is only ever read on down and up.
+      if(event->tfinger.fingerId & SDL_BUTTON_MMASK) {
+        if(event->type == SDL_FINGERDOWN && scribbling == NOT_SCRIBBLING)
+          midBtnPan = true;
+        else if(event->type == SDL_FINGERUP)
+          midBtnPan = false;  // safe to clear here: only the press branch of doInputEvent reads it
+      }
     }
     if(event->type != SDL_FINGERMOTION || enableHoverEvents
         || (scribbling != NOT_SCRIBBLING && currInputSource == inputsrc)) {
@@ -120,6 +128,7 @@ void ScribbleInput::cancelAction()
   else if(scribbling == SCRIBBLING_PAN)  // || cancelpan)
     parent->panZoomCancel();
   scribbling = NOT_SCRIBBLING;
+  midBtnPan = false;
 }
 
 // assumes cancelAction() has been called
@@ -175,7 +184,8 @@ void ScribbleInput::doInputEvent(InputEvent& event)
   // ignored events
   if(event.source == INPUTSOURCE_TOUCH && !isTouchAccepted())
     return;
-  if(event.source == INPUTSOURCE_MOUSE && mouseMode == INPUTMODE_NONE && (!enableHoverEvents || event.points[0].event == INPUTEVENT_PRESS))
+  if(event.source == INPUTSOURCE_MOUSE && mouseMode == INPUTMODE_NONE && !midBtnPan
+      && (!enableHoverEvents || event.points[0].event == INPUTEVENT_PRESS))
     return;
 #if PLATFORM_IOS || PLATFORM_ANDROID  // not tested on Android, but disabled by default
   // fat touch cancels input
@@ -252,7 +262,7 @@ void ScribbleInput::doInputEvent(InputEvent& event)
           || (npoints > 1 && multiTouchMode == INPUTMODE_NONE)))
         return;
       else if((event.source == INPUTSOURCE_TOUCH && (npoints > 1 || singleTouchMode != INPUTMODE_DRAW))
-          || (event.source == INPUTSOURCE_MOUSE && mouseMode == INPUTMODE_PAN)) {
+          || (event.source == INPUTSOURCE_MOUSE && (mouseMode == INPUTMODE_PAN || midBtnPan))) {
         scribbling = SCRIBBLING_PAN;
         parent->panZoomStart(event);
       }

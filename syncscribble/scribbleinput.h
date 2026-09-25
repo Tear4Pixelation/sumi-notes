@@ -49,6 +49,9 @@ public:
   scribbling_t scribbling = NOT_SCRIBBLING;
   inputsource_t currInputSource = INPUTSOURCE_NONE;
   bool panning = false;
+  // middle mouse button held: pan regardless of the active tool or of mouseMode.  Not a MODEMOD bit
+  //  because it must survive from the press to the release, and modemod is rebuilt per event.
+  bool midBtnPan = false;
   int currModeMod = 0;
   int expectedPoints = 0;
   Timestamp lastEventTime = 0;

@@ -727,11 +727,52 @@ ScribbleWidget* MainWindow::createScribbleAreaWidget(Widget* container, Scribble
 
   Button* zoomBtn = createToolbutton(SvgGui::useFile(":/icons/ic_menu_zoom.svg"));
   zoomBtn->onClicked = SLOT(doCommand(ID_RESETZOOM));
+
+  // typed zoom: right click or long press opens a percent field.  A typed value is applied without
+  //  snapping - roundZoom() would pull a deliberate 105% to fit-width - and out of range values are
+  //  clamped rather than refused, which is what SpinBox::updateValueFromText() would do
+  Dim minZoomPct = 100*ScribbleApp::cfg->Float("MIN_ZOOM");
+  Dim maxZoomPct = 100*ScribbleApp::cfg->Float("MAX_ZOOM");
+  ArrowPopup* zoomPopup = createArrowPopup(Menu::VERT_RIGHT | Menu::ABOVE);
+  SpinBox* zoomSpin = createTextSpinBox(100, 10, minZoomPct, maxZoomPct, "%.0f");
+  zoomSpin->onValueChanged = [area](real pct){ area->zoomCenter(pct/100, false); };
+  zoomSpin->addHandler([=](SvgGui* gui, SDL_Event* event){
+    if(event->type == SDL_KEYDOWN && event->key.keysym.sym == SDLK_RETURN) {
+      auto zoomEdit = static_cast<TextEdit*>(zoomSpin->selectFirst(".textbox"));
+      char* end = NULL;
+      std::string text = zoomEdit->text();
+      real pct = strtod(text.c_str(), &end);
+      if(end != text.c_str()) {
+        pct = std::min(std::max(pct, minZoomPct), maxZoomPct);
+        zoomSpin->setValue(pct);
+        area->zoomCenter(pct/100, false);  // even if the field already showed this value
+      }
+      closeAutoClosePopup(zoomPopup);
+      return true;
+    }
+    return false;
+  });
+  zoomPopup->addWidget(createTitledRow(_("Zoom %"), zoomSpin));
+  setupAutoClosePopup(zoomPopup);
+  // undo the statusbar's scale(0.5) hack, or the popup is half the size of every other one
+  zoomPopup->node->setTransform(Transform2D().scale(2));
+  zoomBtn->addWidget(zoomPopup);
+
   // press and drag on zoom label to zoom ... not sure if I'll keep this
   float initX = 0;
   Dim initZoom = 0;
   //Widget* zoomLabel = areaWidget->zoomLabel;  -- press-drag was previous on label instead of button
-  zoomBtn->addHandler([initX, initZoom, area, zoomBtn](SvgGui* gui, SDL_Event* event) mutable {
+  zoomBtn->addHandler([initX, initZoom, area, zoomBtn, zoomPopup, zoomSpin](SvgGui* gui, SDL_Event* event) mutable {
+    if(isLongPressOrRightClick(event)) {
+      zoomSpin->setValue(std::round(area->getZoom()*100));
+      // not gui->setPressed(zoomPopup), as the title button does with its menu: the release then lands
+      //  outside the popup and OUTSIDE_PRESSED closes it at once.  Swallowing the press is enough to keep
+      //  the release from clicking the button, i.e. resetting zoom
+      openAutoClosePopup(zoomPopup);
+      gui->setFocused(zoomSpin, SvgGui::REASON_MENU);
+      static_cast<TextEdit*>(zoomSpin->selectFirst(".textbox"))->selectAll();
+      return true;
+    }
     if(event->type == SDL_FINGERDOWN && event->tfinger.fingerId == SDL_BUTTON_LMASK) {
       initX = event->tfinger.x;   //gui->currInputPoint.x;
       initZoom = area->getZoom();
@@ -743,7 +784,7 @@ ScribbleWidget* MainWindow::createScribbleAreaWidget(Widget* container, Scribble
     }
     return false;  // continue to button handler
   });
-  setupTooltip(zoomBtn, _("Zoom"), Tooltips::LEFT | Tooltips::BOTTOM | Tooltips::ABOVE);
+  setupTooltip(zoomBtn, altTooltip(_("Zoom"), _("Enter Zoom")), Tooltips::LEFT | Tooltips::BOTTOM | Tooltips::ABOVE);
 
   areaWidget->prevPage = createToolbutton(SvgGui::useFile(":/icons/ic_menu_prev.svg"), _("Previous Page"));
   areaWidget->prevPage->onClicked = SLOT(doCommand(ID_PREVPAGE));
@@ -1008,25 +1049,29 @@ void MainWindow::createToolBars()
         </g>)";
 
         iapButton = new Button(loadSVGFragment(iapButtonSVG));
-        iapButton->setText(_("Upgrade Write"));  // for i18n
+        iapButton->setText(_("Upgrade Kaku"));  // for i18n
         iapButton->onClicked = [](){ iosRequestIAP(); };  //app->openURL("https://apps.apple.com/us/app/stylus-labs-write/id1498369428"); };
         dest->addWidget(iapButton);
         addTBWidget(iapButton, Action::NormalPriority - 10);
         addTBWidget(dest->addSeparator(), -100);
       }
 #endif
-      // if touch input disabled, show pan tool (add directly main toolbar for now)
-      if(ScribbleApp::cfg->Int("singleTouchMode") == 0 && ScribbleApp::cfg->Int("multiTouchMode") == 0)
-        addTBWidget(dest->addAction(actionPan), actionPan->priority, {actionPan});
+      // Pan is always offered (added directly to the main toolbar, ahead of the tools sub-toolbar).  It
+      //  used to appear only when both touch modes were off, which left a stylus-only user - who has no
+      //  second finger to pan with and no middle mouse button either - with no way to move the canvas
+      //  but the scroll handle.  It is not one of the tools (it edits nothing), so it keeps its own slot
+      //  and its own priority: at NormalPriority+1 it is dropped into the overflow menu before the tools
+      //  row is, which is what keeps it from crowding a narrow screen.
+      addTBWidget(dest->addAction(actionPan), actionPan->priority, {actionPan});
       // the six tools; submodes are on the options rows below instead of in floating menus
       toolsToolbar = vertToolbar ? createVertMenubar() : createMenubar();
       toolsToolbar->autoClose = true;  //ScribbleApp::cfg->Bool("pressOpenMenus");
       toolsToolbar->addAction(actionDraw);
-      toolsToolbar->addAction(actionHighlight);
-      toolsToolbar->addAction(actionEphemeral);
-      toolsToolbar->addAction(actionShapes);
       toolsToolbar->addAction(actionErase);
+      toolsToolbar->addAction(actionHighlight);
       toolsToolbar->addAction(actionSelect);
+      toolsToolbar->addAction(actionShapes);
+      toolsToolbar->addAction(actionEphemeral);
       toolsToolbar->addAction(actionInsert_Space);
       toolsToolbar->node->setAttribute("box-anchor", "");  // no stretching for this subtoolbar!
       // a sub-toolbar is not a surface of its own - the toolbar it sits in supplies the background (and,
@@ -1034,8 +1079,8 @@ void MainWindow::createToolBars()
       toolsToolbar->selectFirst(".toolbar-bg")->setVisible(false);
       dest->addWidget(toolsToolbar);
       // the tools are the point of the app, so the row is hidden only as a last resort (see adjFn)
-      addTBWidget(toolsToolbar, 4, {actionDraw, actionHighlight, actionEphemeral,
-          actionShapes, actionErase, actionSelect, actionInsert_Space});
+      addTBWidget(toolsToolbar, 4, {actionDraw, actionErase, actionHighlight,
+          actionSelect, actionShapes, actionEphemeral, actionInsert_Space});
   };
 
   // page ops, file ops and overflow are separate floating panels on desktop (see below), so the flat

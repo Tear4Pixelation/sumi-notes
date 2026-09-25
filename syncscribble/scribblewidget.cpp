@@ -112,7 +112,7 @@ ScribbleWidget::ScribbleWidget(ScribbleView* sv) : Widget(new SvgCustomNode), sc
       // since mouse wheel zooming was mainly added to support pinch zoom on Wacom tablets, we previously
       //  didn't do it if pinch zoom was disabled for touch
       //if(scribbleView->scribbleInput->multiTouchMode == INPUTMODE_ZOOM) {
-      uint32_t mods = (PLATFORM_WIN || PLATFORM_LINUX) ? (event->wheel.direction >> 16) : SDL_GetModState();
+      uint32_t mods = wheelModifiers(event);
       if(mods & KMOD_CTRL) {
         Dim speed = scribbleView->cfg->Float("wheelZoomSpeed")/120.0;
         Point p = window()->gui()->prevFingerPos - scribbleView->screenOrigin;

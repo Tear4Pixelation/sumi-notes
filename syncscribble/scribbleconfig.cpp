@@ -250,8 +250,8 @@ void ScribbleConfig::init()
   cfgF["horzBorder"] = 10;
   // autoscroll when selection dragged near edge of screen
   cfgF["autoScrollSpeed"] = 0.4f;
-  // mouse wheel scroll speed
-  cfgF["wheelScrollSpeed"] = 0.2f;
+  // mouse wheel scroll speed; wheel.y is in 1/120ths of a notch, so this is pixels per notch / 120
+  cfgF["wheelScrollSpeed"] = 0.5f;
   // Ctrl+mouse wheel zoom speed
   cfgF["wheelZoomSpeed"] = 1.0f;
   // minimum word break size, as fraction of Y ruling
