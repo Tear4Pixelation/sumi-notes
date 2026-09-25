@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- no page zoom: pinch and double tap belong to the canvas, not to Safari -->
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<!-- Add to Home Screen runs full screen, without Safari's toolbars -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Kaku">
+<title>Kaku</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden;
+    background: #1e1e1e;
+    overscroll-behavior: none;
+    /* long press on iOS: no text selection, no callout, no loupe */
+    -webkit-user-select: none; user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  /* SDL follows the canvas's CSS size when the window is resizable (SDL_emscriptenvideo.c) */
+  #canvas {
+    display: block; position: fixed; left: 0; top: 0; width: 100vw; height: 100vh;
+    border: 0; outline: none;
+    touch-action: none;  /* every pointer goes to Kaku, none to scrolling or zooming the page */
+  }
+  #status {
+    position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    font: 15px -apple-system, system-ui, sans-serif; color: #aaa; pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<canvas id="canvas" tabindex="-1"></canvas>
+<div id="status">Loading Kaku…</div>
+<script>
+  const canvas = document.getElementById('canvas');
+  const status = document.getElementById('status');
+  canvas.addEventListener('contextmenu', ev => ev.preventDefault());
+  // iOS Safari ignores user-scalable=no for gestures; stop them at the document too
+  for(const type of ['gesturestart', 'gesturechange', 'gestureend'])
+    document.addEventListener(type, ev => ev.preventDefault());
+  // WebGL context loss (iOS does this under memory pressure) is unrecoverable for SDL; say so
+  canvas.addEventListener('webglcontextlost', ev => {
+    status.textContent = 'Graphics context lost - reload the page';
+    status.style.display = '';
+  });
+  var Module = {
+    canvas: canvas,
+    print: text => console.log(text),
+    printErr: text => console.error(text),
+    setStatus: text => {
+      status.textContent = text;
+      status.style.display = text ? '' : 'none';
+    },
+    onAbort: what => {
+      status.textContent = 'Kaku stopped: ' + what;
+      status.style.display = '';
+    },
+  };
+</script>
+{{{ SCRIPT }}}
+</body>
+</html>

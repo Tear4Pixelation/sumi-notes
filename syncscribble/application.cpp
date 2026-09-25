@@ -164,6 +164,16 @@ static int sdlEventFilter(void* app, SDL_Event* event)
 
 static void wasmMainLoop()
 {
+  // SvgGui's timer thread does not exist without pthreads, so nothing would ever fire - long press, hold
+  //  to snap, history autorepeat.  Post the same event it would, at frame granularity; processTimers()
+  //  moves nextTimeout on, so it is posted once per due timer, not every frame.  0 means shutting down.
+  SvgGui* gui = Application::gui;
+  if(gui && gui->nextTimeout > 0 && gui->nextTimeout <= mSecSinceEpoch()) {
+    SDL_Event event = {};
+    event.type = SvgGui::TIMER;
+    event.user.timestamp = SDL_GetTicks();
+    SDL_PushEvent(&event);
+  }
   if(Application::processEvents())
     Application::layoutAndDraw();
   if(!Application::runApplication)

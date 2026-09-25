@@ -1963,7 +1963,7 @@ bool ScribbleApp::doSave(ScribbleDoc* doc)
 #if PLATFORM_EMSCRIPTEN
 #include "emscripten.h"
 
-EM_JS(void, jsSaveFile, (const char* filename, void* data, int len),
+EM_JS(void, jsSaveFile, (const char* filename, const void* data, int len),
 {
   const view = new Uint8Array(Module.HEAPU8.buffer, data, len);
   const blob = new Blob([view], { type: 'octet/stream' });

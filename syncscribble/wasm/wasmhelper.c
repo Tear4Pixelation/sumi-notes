@@ -50,9 +50,10 @@ EM_JS(void, jsSetupPtrEvents, (),
       null, ['string', 'number', 'number', 'number', 'number', 'number', 'number', 'number']);
   const ptrevent = function(ev, evtype) {
     //console.log(ev);
-    if(evtype == 0 && typeof ev.getCoalescedEvents === "function") {  // only for move events
-      const evs = ev.getCoalescedEvents();
-      //console.log(evs);
+    // coalesced list can be empty (always for synthetic events, and allowed by the spec for trusted ones), in
+    //  which case the event itself is the only sample - skipping it would drop the move entirely
+    const evs = (evtype == 0 && typeof ev.getCoalescedEvents === "function") ? ev.getCoalescedEvents() : [];
+    if(evs.length > 0) {  // only for move events
       for(const e of evs) {
         emPtrEvent(e.pointerType, evtype, e.pointerId, e.buttons, e.clientX, e.clientY, e.pressure, e.timeStamp);
       }

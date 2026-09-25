@@ -277,17 +277,36 @@ else ifneq ($(EMSDK),)
 # Emscripten
 
 SOURCES += wasm/wasmhelper.c
-INCSYS += ../SDL/include
+# SDL's write-wasm branch, built with `emconfigure ../configure && emmake make` in its build/ subdir;
+#  SDL_DIR allows keeping it in a separate worktree so ../SDL can stay on the desktop branch
+SDL_DIR ?= ../SDL
+INCSYS += $(SDL_DIR)/include
 #INCFILES = linux/force_glibc.h
 DEFS += SCRIBBLE_TEST_PATH='"$(CURDIR)/../scribbletest"'
+# MuPDF uses POSIX calls (fseeko, mkstemp, realpath, timegm) that --std=c99 hides, as on Linux
+DEFS += _GNU_SOURCE
+# the web build always renders in software (application.cpp), so no nanovg GL backend is linked
+DEFS += NO_PAINTER_GL
 DEBUG ?= 0
-LIBS = ../SDL/build/build/.libs/libSDL2.a  ../SDL/build/build/.libs/libSDL2main.a
+LIBS = $(SDL_DIR)/build/build/.libs/libSDL2.a  $(SDL_DIR)/build/build/.libs/libSDL2main.a
+INC += wasm
 
 include Makefile.wasm
 
+# full-window canvas with Safari's own gestures switched off; after the include, which assigns LDFLAGS
+LDFLAGS += --shell-file wasm/shell.html
+# relink when the page changes; not a prerequisite of $(TGT) itself, whose recipe links all of $^
+$(OBJDIR)/wasm/wasmhelper.o: wasm/shell.html
+
+# no filesystem to load the UI font from, so resources.cpp embeds it; xxd -i names the array after the
+#  file, which is why it runs in the font's own directory
+wasm/Roboto-Regular.c: ../scribbleres/fonts/Roboto-Regular.ttf
+	cd ../scribbleres/fonts && xxd -i Roboto-Regular.ttf > $(CURDIR)/$@
+$(OBJDIR)/resources.o: wasm/Roboto-Regular.c
+
 else
 
-SOURCES += linux/linuxtablet.c ../nanovgXC/glad/glad.c
+SOURCES += linux/linuxtablet.c linux/sdl3input.cpp ../nanovgXC/glad/glad.c
 DEFS += SCRIBBLE_TEST_PATH='"$(CURDIR)/../scribbletest"'
 DEBUG ?= 0
 USE_SYSTEM_SDL ?= 0
