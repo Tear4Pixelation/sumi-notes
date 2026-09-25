@@ -242,7 +242,8 @@ PenToolbar::PenToolbar(bool _compact)
   if (!widthProto)
     widthProto.reset(loadSVGFragment(
         compact ? compactWidthBtnSVG.c_str() : widthBtnSVG));
-  if (compact && !compactColorBtnNode)
+  // built even for a roomy toolbar: the single swatch (createSingleSwatch) always uses the compact cell
+  if (!compactColorBtnNode)
     compactColorBtnNode.reset(loadSVGFragment(compactColorBtnSVG.c_str()));
 
   const char *colorStr =
@@ -484,6 +485,8 @@ PenToolbar::PenToolbar(bool _compact)
   //  cell - setting a width on the container does *not* wrap it, which is the same mechanism
   //  PaletteWidget::addButton() already uses for the overflow menu.
   palettePopup = createArrowPopup(Menu::VERT_LEFT);
+  // the swatch cells carry their own spacing, so the popup's usual side padding would double up on it
+  palettePopup->selectFirst(".child-container")->setMargins(8);
   // Cancel and delete for the edit route.  They live on a header row rather than as two more cells in
   //  the grid because they are not colors: mixing a destructive action in among the swatches would put
   //  it one slip away from every ordinary pick.
@@ -743,9 +746,27 @@ void PenToolbar::openPaletteGrid(int editIdx) {
   // the row must keep at least one swatch, as the pen's color has to come from somewhere
   paletteDeleteBtn->setEnabled(editing && savedColors.size() > 1);
 
+  fillColorGrid(paletteGrid, [this](Color c) {
+    int idx = paletteEditIdx;
+    closeAutoClosePopup(palettePopup);
+    if (idx >= 0)
+      setSwatchColor(idx, c);
+    else
+      addSwatchColor(c);
+  }, [this]() { openCustomColor(paletteEditIdx); });
+  openAutoClosePopup(palettePopup);
+}
+
+// The theme's colors as a grid, plus a trailing "custom color" cell; shared by the "+" and the single
+//  swatch, which differ only in what a pick does.
+void PenToolbar::fillColorGrid(Widget *grid, const std::function<void(Color)> &onPick,
+    const std::function<void()> &onCustom) {
+  const Palette *pal = docPalette();
+  if (!pal)
+    return;
   SvgGui *gui = window() ? window()->gui() : NULL;
   if (gui)
-    gui->deleteContents(paletteGrid);
+    gui->deleteContents(grid);
   // Bases only. Offering each family's dark variant too was tried and measured: it is better on light
   //  paper (17 cells at min pairwise dE 0.067 against 13 cells at 0.041) and much worse on dark, where
   //  the generator's `dL = min(0.92, L + 0.13)` clamps a dark onto its own base and the grid falls to
@@ -766,33 +787,102 @@ void PenToolbar::openPaletteGrid(int editIdx) {
       double(PALETTE_CELL/2), double(PALETTE_DOT));
 
   int cell = 0;
-  auto addCell = [this, &cell](Button *btn) {
+  auto addCell = [grid, &cell](Button *btn) {
     if (cell > 0 && cell % PALETTE_GRID_COLS == 0)
       btn->node->setAttribute("flex-break", "before");
     btn->setMargins(0);
-    paletteGrid->addWidget(btn);
+    grid->addWidget(btn);
     ++cell;
   };
   for (Color c : offer) {
     Button *btn = new Button(loadSVGFragment(cellSVG.c_str()));
     btn->selectFirst(".btn-color")->node->setAttr<color_t>("fill", toolColor(c).color);
     setupTooltip(btn, colorToHex(c).c_str());
-    btn->onClicked = [this, c]() {
-      int idx = paletteEditIdx;
-      closeAutoClosePopup(palettePopup);
-      if (idx >= 0)
-        setSwatchColor(idx, c);
-      else
-        addSwatchColor(c);
-    };
+    btn->onClicked = [onPick, c]() { onPick(c); };
     addCell(btn);
   }
   // ...and the escape hatch, last, so it reads as "or something else"
   Button *customBtn = createToolbutton(
       SvgGui::useFile(":/icons/ic_menu_add_color.svg"), _("Custom Color"));
-  customBtn->onClicked = [this]() { openCustomColor(paletteEditIdx); };
+  customBtn->onClicked = onCustom;
   addCell(customBtn);
-  openAutoClosePopup(palettePopup);
+}
+
+Widget *PenToolbar::createSingleSwatch() {
+  singleSwatchBtn = new Button(compactColorBtnNode->clone());
+  singleSwatchBtn->setMargins(0);  // the swatch cell already includes the mockup's spacing
+  setupTooltip(singleSwatchBtn, _("Color"));
+  singleSwatchBtn->onClicked = [this]() { openSingleSwatch(); };
+
+  singlePalettePopup = createArrowPopup(Menu::VERT_LEFT);
+  singlePalettePopup->selectFirst(".child-container")->setMargins(8);  // as for palettePopup
+  singlePaletteGrid = createRow({}, "0 0", "flex-start");
+  singlePaletteGrid->node->setAttribute("flex-wrap", "wrap");
+  singlePaletteGrid->node->setAttribute("margin", "4 4");
+  singlePalettePopup->addWidget(singlePaletteGrid);
+  setupAutoClosePopup(singlePalettePopup);
+
+  // the custom color editor, as for a saved swatch, but setting the pen directly
+  singleCustomPopup = createArrowPopup(Menu::VERT_LEFT);
+  ColorSliders *sliders = new ColorSliders(new SvgG());
+  singleCustomPicker = createColorEditBox(true, sliders);
+  singleCustomPicker->setMargins(0, 0, 0, 4);
+  singleCustomPicker->onColorChanged = [this](Color c) { pickSingleSwatch(c); };
+  Widget *tabs = createTabBar({"RGB", "HSV"}, [sliders](int tabnum) {
+    sliders->setVisibleGroup(tabnum != 0);
+  });
+  tabs->setMargins(12, 0, 0, 0);
+  Widget *title = createTitledRow(_("Color"), singleCustomPicker);
+  title->selectFirst(".row-text")->node->addClass("color-popup-title");
+  singleCustomPopup->addWidget(title);
+  singleCustomPopup->addWidget(tabs);
+  singleCustomPopup->addWidget(sliders);
+  setupAutoClosePopup(singleCustomPopup);
+
+  Widget *group = createRow();
+  group->node->setAttribute("box-anchor", "");
+  group->addWidget(singleSwatchBtn);
+  group->addWidget(singlePalettePopup);
+  group->addWidget(singleCustomPopup);
+  updateSingleSwatch();
+  return group;
+}
+
+void PenToolbar::openSingleSwatch() {
+  if (singlePalettePopup->isVisible() || singleCustomPopup->isVisible()) {
+    closeAutoClosePopup(singlePalettePopup);
+    closeAutoClosePopup(singleCustomPopup);
+    return;
+  }
+  auto openCustom = [this]() {
+    closeAutoClosePopup(singlePalettePopup);
+    singleCustomPicker->setColor(pen.color);
+    openAutoClosePopup(singleCustomPopup);
+  };
+  const Palette *pal = docPalette();
+  // no theme: no grid to show, so straight to the color editor, as the "+" does
+  if (!pal || pal->families.empty()) {
+    openCustom();
+    return;
+  }
+  fillColorGrid(singlePaletteGrid, [this](Color c) {
+    closeAutoClosePopup(singlePalettePopup);
+    pickSingleSwatch(toolColor(c));
+  }, openCustom);
+  openAutoClosePopup(singlePalettePopup);
+}
+
+// updateColor() does the snapping and, in SELECTION_MODE, recolors the selection
+void PenToolbar::pickSingleSwatch(Color color) {
+  colorPicker->setColor(color);
+  updateColor();
+  if (onSingleSwatchPicked)
+    onSingleSwatchPicked(pen.color);
+}
+
+void PenToolbar::updateSingleSwatch() {
+  if (singleSwatchBtn)
+    singleSwatchBtn->selectFirst(".btn-color")->node->setAttr<color_t>("fill", pen.color.color);
 }
 
 void PenToolbar::rebuildGrids() {
@@ -908,6 +998,7 @@ void PenToolbar::updateSelected() {
   const std::vector<Dim> &widths = activeWidths();
   for (size_t ii = 0; ii < widthPalette->items.size() && ii < widths.size(); ++ii)
     widthPalette->items[ii]->setChecked(widths[ii] == pen.width);
+  updateSingleSwatch();
 }
 
 void PenToolbar::saveConfig(ScribbleConfig *cfg) const {

@@ -64,7 +64,20 @@ public:
   const Dim penWidthPreviewMax = 22;  // was 30 for circle instead of line; static constexpr only works for int
   const bool compact;
 
+  // A lone color swatch for an options row with no room for the saved list - the shape tool's.  It
+  //  shows the pen's color and opens the same theme grid as the "+"; a pick sets the pen's color (or
+  //  the selection's, in SELECTION_MODE) instead of adding a swatch.  Returns the swatch plus its
+  //  popups, which have to sit beside it in the tree.  Only one may be created.
+  Widget* createSingleSwatch();
+  // called after a pick through the single swatch, with the color as snapped to the theme
+  std::function<void(Color)> onSingleSwatchPicked;
+
 private:
+  void fillColorGrid(Widget* grid, const std::function<void(Color)>& onPick,
+      const std::function<void()>& onCustom);
+  void openSingleSwatch();
+  void pickSingleSwatch(Color color);
+  void updateSingleSwatch();
   void rebuildGrids();
   void selectWidth(int idx);
   void selectColor(int idx);
@@ -128,6 +141,11 @@ private:
   int colorPopupIdx = -1;
   Widget* colorGroup;
   Widget* widthGroup;
+  Button* singleSwatchBtn = NULL;
+  ArrowPopup* singlePalettePopup = NULL;
+  Widget* singlePaletteGrid = NULL;
+  ArrowPopup* singleCustomPopup = NULL;
+  ColorEditBox* singleCustomPicker = NULL;
 
   Button* overflowBtn;
   Button* selOverflowBtn;
