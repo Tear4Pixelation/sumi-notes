@@ -8,10 +8,13 @@
 #include "page.h"
 
 
-// the page thumbnail at the top of the dialog: big enough to read the ruling off, small enough to
-//  leave the controls visible on a phone
-static const Dim PREVIEW_W = 120;
-static const Dim PREVIEW_H = 150;
+// The page thumbnail.  Beside the controls it can be tall, since the controls already are; above
+//  them (the scrolling phone layout) it has to stay small enough to leave the controls visible.
+//  Either way it carries a magnifier showing the ruling at the size it will be on screen.
+static const Dim PREVIEW_SIDE_W = 240;
+static const Dim PREVIEW_SIDE_H = 330;
+static const Dim PREVIEW_TOP_W = 120;
+static const Dim PREVIEW_TOP_H = 150;
 
 // move to touchwidgets.cpp if needed elsewhere
 Widget* createTitledColumn(const char* title, Widget* control1, Widget* control2 = NULL)
@@ -29,7 +32,7 @@ Widget* createTitledColumn(const char* title, Widget* control1, Widget* control2
 }
 
 // TODO: don't want to pass in MainWindow ... move getScreenPageDims() somewhere else?
-RulingDialog::RulingDialog(ScribbleDoc* doc, const PageProperties* initProps)
+RulingDialog::RulingDialog(ScribbleDoc* doc, const PageProperties* initProps, bool layoutMode)
     : PopupDialog(createPopupDialogNode()), scribbleDoc(doc), newPageMode(initProps != NULL)
 {
   Page* currPage = doc->activeArea->getCurrPage();
@@ -50,7 +53,8 @@ RulingDialog::RulingDialog(ScribbleDoc* doc, const PageProperties* initProps)
   predefSizes[2][0] = screenh;  predefSizes[2][1] = screenw;
   // current ruling
   predefRulings[0][0] = xruling;  predefRulings[0][1] = yruling;
-  predefRulings[0][2] = marginLeft;  predefRulings[0][3] = ruleColor.color;
+  predefRulings[0][2] = marginLeft;
+  predefDotRadii[0] = props.dotRadius;
 
   clipWarning = new Widget(createTextNode(_("This page size will clip content!")));
   clipWarning->setVisible(false);
@@ -115,9 +119,27 @@ RulingDialog::RulingDialog(ScribbleDoc* doc, const PageProperties* initProps)
   auto createIndentRow = [](const char* title, Widget* w)
       { Widget* row = createTitledRow(title, w); row->setMargins(5, 0, 5, 20); return row; };
   dialogBody->setMargins(0, 8);
+  bool previewBeside = !scrollWidget;
+  previewW = previewBeside ? PREVIEW_SIDE_W : PREVIEW_TOP_W;
+  previewH = previewBeside ? PREVIEW_SIDE_H : PREVIEW_TOP_H;
   rulePreview = createRow({}, "8 0", "center");
-  rulePreview->addWidget(new Widget(AddPageMenu::createPagePreviewNode(props, PREVIEW_W, PREVIEW_H)));
-  dialogBody->addWidget(rulePreview);
+  rulePreview->addWidget(new Widget(
+      AddPageMenu::createPagePreviewNode(props, previewW, previewH, AddPageMenu::screenScale())));
+  SvgText* lensCaption = createTextNode(_("Magnified: actual size on screen"));
+  lensCaption->addClass("weak");
+  Widget* previewCol = createColumn({rulePreview, new Widget(lensCaption)}, "0 0 0 16", "", "top");
+  if(previewBeside) {
+    // the controls are much taller than wide, so a preview above them left almost no room for it;
+    //  beside them it gets the controls' own height
+    Widget* bodyRow = createRow({}, "0 0", "", "hfill");
+    Widget* controls = createColumn({}, "", "", "top");
+    bodyRow->addWidget(controls);
+    bodyRow->addWidget(previewCol);
+    dialogBody->addWidget(bodyRow);
+    dialogBody = controls;
+  }
+  else
+    dialogBody->addWidget(previewCol);
   dialogBody->addWidget(createTitledRow(_("Page size"), comboPaperSize));
   dialogBody->addWidget(createIndentRow(_("Width"), spinWidth));
   dialogBody->addWidget(createIndentRow(_("Height"), spinHeight));
@@ -126,13 +148,27 @@ RulingDialog::RulingDialog(ScribbleDoc* doc, const PageProperties* initProps)
   dialogBody->addWidget(createIndentRow(_("X Ruling"), spinXRuling));
   dialogBody->addWidget(createIndentRow(_("Y Ruling"), spinYRuling));
   dialogBody->addWidget(createIndentRow(_("Left Margin"), spinLeftMargin));
-  dialogBody->addWidget(colorbtns);
+  dialogBody->addWidget(createIndentRow(_("Dot Radius"), spinDotRadius));
   if(!newPageMode) {
     const char* strapply = doc->numSelPages > 0 ? "Apply to selected pages" : "Apply to all existing pages";
     dialogBody->addWidget(createTitledRow(_(strapply), cbApplyToAll));
     dialogBody->addWidget(createTitledRow(_("Document default"), cbDocDefault));
     dialogBody->addWidget(createTitledRow(_("Global default"), cbGlobalDefault));
   }
+  // The colors come from the document's theme, so choosing them here is the exception - kept behind
+  //  Advanced, collapsed, rather than a pair of color pickers in the way of the ruling controls.  A
+  //  layout has no colors of its own at all (see AddPageMenu::PageLayout), so there they never appear.
+  if(!layoutMode) {
+    CheckBox* cbAdvanced = createCheckBox();
+    cbAdvanced->onToggled = [this, colorbtns](bool checked){
+      if(!scrollWidget)  // height 0: let the dialog size itself to its new contents, as checkClipping does
+        setWinBounds(Rect::centerwh(winBounds().center(), winBounds().width(), 0));
+      colorbtns->setVisible(checked);
+    };
+    dialogBody->addWidget(createTitledRow(_("Advanced settings"), cbAdvanced));
+  }
+  dialogBody->addWidget(colorbtns);
+  colorbtns->setVisible(false);
 
   // color picker has to be added to document before setColor can be called
   pageColorPicker->setColor(props.color);
@@ -158,10 +194,12 @@ void RulingDialog::updatePreview()
   preview.xRuling = spinXRuling->value();
   preview.yRuling = spinYRuling->value();
   preview.marginLeft = spinLeftMargin->value();
+  preview.dotRadius = spinDotRadius->value();
   preview.color = pageColorPicker->color();
   preview.ruleColor = ruleColorPicker->color();
   gui->deleteContents(rulePreview);
-  rulePreview->addWidget(new Widget(AddPageMenu::createPagePreviewNode(preview, PREVIEW_W, PREVIEW_H)));
+  rulePreview->addWidget(new Widget(
+      AddPageMenu::createPagePreviewNode(preview, previewW, previewH, AddPageMenu::screenScale())));
 }
 
 void RulingDialog::checkClipping()

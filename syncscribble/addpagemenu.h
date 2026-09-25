@@ -1,5 +1,6 @@
 #pragma once
 
+#include <string>
 #include <vector>
 
 #include "ugui/widgets.h"
@@ -11,20 +12,48 @@ class ScribbleConfig;
 //
 // A page's ruling belongs to that page, so adding a page is also where a ruling is chosen.  Rather
 //  than a combo box of ruling names (which says nothing about what the page will look like), the
-//  popup shows small drawings of the actual pages: the document's default ruling first, then the
-//  three rulings most recently used to add a page, then a "+" that opens the page setup dialog for
-//  this one new page.  Presets are future work; the recents list is what makes the common case -
-//  "another one of those" - a single tap.
+//  popup shows the pages themselves.  It opens on a short row - the document default, the last layouts
+//  used, and a "+" - since "another one of those" should stay a single tap.  The "+" turns the popup
+//  into the full grid: three lined, three squared, three dotted and three special layouts, then the
+//  user's own custom layouts and a tile to make another.  Right-click or long press on any tile edits
+//  it; a built-in layout is fixed, so editing one saves a custom copy.
+//
+// Each tile is split in two: the whole page on the left, and the rest of the tile a window onto the
+//  ruling at 1:1 - the size it will actually be on screen at the current zoom - since "Medium ruled"
+//  at thumbnail size says nothing about whether it fits the user's handwriting.
 namespace AddPageMenu {
 
-// recently used rulings, most recent first, persisted in the global config as "recentPageRulings"
-std::vector<PageProperties> recentRulings(const ScribbleConfig* cfg);
-void addRecentRuling(ScribbleConfig* cfg, const PageProperties& props);
+// A layout is geometry only.  Paper and rule colors always come from the document (its theme), never
+//  from the layout, so a layout picked in a dark-paper document is dark - the same thing a theme
+//  switch does to existing pages.  A layout carrying its own colors would put light-theme blue rules
+//  on dark paper, which is exactly what the old presets did.
+struct PageLayout {
+  const char* name = "";  // built-in layouts only; custom ones are named from their geometry
+  Dim xRuling = 0;
+  Dim yRuling = 0;
+  Dim marginLeft = 0;
+  Dim dotRadius = 0;
+  // 0 = the document's default page size
+  Dim width = 0;
+  Dim height = 0;
+};
 
-// a page drawn at thumbnail size: paper, ruling lines and margin, exactly as the page will look.
-// one <g> at the origin, sized to fit boxw x boxh - the caller places it (the ruling dialog shows the
-//  same drawing at a larger size, so its numbers mean something while they are being typed)
-SvgNode* createPagePreviewNode(const PageProperties& props, Dim boxw, Dim boxh);
+PageLayout layoutFromProps(const PageProperties& props);
+// the page a layout makes in this document: default size where the layout has none, theme colors
+PageProperties layoutToProps(const PageLayout& layout, const ScribbleConfig* cfg);
+std::string layoutDescription(const PageLayout& layout);
+
+// custom layouts, persisted in the global config as "customPageLayouts"
+std::vector<PageLayout> customLayouts(const ScribbleConfig* cfg);
+void setCustomLayouts(ScribbleConfig* cfg, const std::vector<PageLayout>& layouts);
+
+// page units -> UI units in the active view, i.e. the scale at which "1:1" previews are drawn
+Dim screenScale();
+
+// a page drawn at thumbnail size: paper, ruling and margin, exactly as the page will look.  One <g> at
+//  the origin, sized to fit boxw x boxh - the caller places it.  lensScale > 0 adds a magnifying glass
+//  over the page showing the ruling at that scale (the ruling dialog passes screenScale()).
+SvgNode* createPagePreviewNode(const PageProperties& props, Dim boxw, Dim boxh, Dim lensScale = 0);
 
 // the button itself, popup and all; scanPageAction supplies the "scan as page" item
 Button* createAddPageButton(Action* scanPageAction);

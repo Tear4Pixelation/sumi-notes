@@ -227,6 +227,8 @@ void ScribbleConfig::init()
   cfg["syncMsgLevel"] = -100;  // only show messages w/ level >= this value
   cfg["perfTrace"] = 0;  // print performance traces?
   cfg["maxMemoryMB"] = 1024;  // start unloading pages when memory usage hits 1GB
+  // the Choose Layout checkbox: 0 drops the red margin line from the built-in layouts (AddPageMenu)
+  cfg["layoutMarginLine"] = 1;
 
   // floats
   // page defaults - initial values are determined from screen size on first run

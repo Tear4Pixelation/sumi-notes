@@ -13,12 +13,18 @@ public:
   //  properties for a page that does not exist yet, so accept() applies nothing to the document and
   //  the caller reads the result from properties().  The apply-to-all/default checkboxes are hidden,
   //  since there is no page to apply to and the point of the mode is a one-off ruling.
-  RulingDialog(ScribbleDoc* doc, const PageProperties* initProps = NULL);
+  // layoutMode (with initProps) edits a page layout rather than a page: geometry only, so the color
+  //  pickers are hidden - a layout takes its colors from the document's theme when it is used.
+  //  Otherwise they are behind a collapsed "Advanced settings" checkbox, since the theme sets them too.
+  RulingDialog(ScribbleDoc* doc, const PageProperties* initProps = NULL, bool layoutMode = false);
   void accept();
   const PageProperties& properties() const { return props; }
 
   static int predefSizes[][2];
-  static unsigned int predefRulings[][4];
+  // {x ruling, y ruling, left margin}; colors are not part of a preset - see setRuleType()
+  static unsigned int predefRulings[][3];
+  // dot radius for each predefRulings entry (0 = lines); kept apart because radii are fractional
+  static Dim predefDotRadii[];
 
 private:
   void setPaperType(int index);
@@ -46,6 +52,7 @@ private:
   ComboBox* comboPaperSize;
   Widget* clipWarning;
   Widget* rulePreview;
+  Dim previewW, previewH;
   ScrollWidget* scrollWidget = NULL;
 
   PageProperties props;
