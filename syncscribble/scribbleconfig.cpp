@@ -236,6 +236,8 @@ void ScribbleConfig::init()
   cfgF["xRuling"] = 0.0f;
   cfgF["yRuling"] = 40.0f;
   cfgF["marginLeft"] = 100.0f;
+  // > 0 draws the ruling as dots of this radius (see PageProperties::dotRadius)
+  cfgF["dotRadius"] = 0.0f;
 
   // ruling to be used by ruled selector on blank pages
   cfgF["blankYRuling"] = 60;

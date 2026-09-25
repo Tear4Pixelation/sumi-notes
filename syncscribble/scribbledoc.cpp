@@ -382,7 +382,7 @@ Page* ScribbleDoc::generatePage(int where, const PageProperties* props) const
   else {
     PageProperties defprops(cfg->Float("pageWidth"), cfg->Float("pageHeight"),
         cfg->Float("xRuling"), cfg->Float("yRuling"), cfg->Float("marginLeft"),
-        Color::fromRgb(cfg->Int("pageColor")), Color::fromArgb(cfg->Int("ruleColor")));
+        Color::fromRgb(cfg->Int("pageColor")), Color::fromArgb(cfg->Int("ruleColor")), cfg->Float("dotRadius"));
     newPage = new Page(defprops);
   }
   if(globalCfg->Bool("sRGB"))
@@ -602,6 +602,7 @@ void ScribbleDoc::setDefaultDims(ScribbleConfig* c, const PageProperties* props)
   c->set("xRuling", props->xRuling);
   c->set("yRuling", props->yRuling);
   c->set("marginLeft", props->marginLeft);
+  c->set("dotRadius", props->dotRadius);
   c->set("pageColor", int(props->color.argb()));
   c->set("ruleColor", int(props->ruleColor.argb()));
   //if(props->ruleLayer) {

@@ -608,9 +608,15 @@ void ScribbleSync::processItem(pugi::xml_node& node)
       PageProperties props(node.attribute("width").as_float(), node.attribute("height").as_float(),
           node.attribute("xruling").as_float(), node.attribute("yruling").as_float(),
           node.attribute("marginLeft").as_float(), Color::fromArgb(node.attribute("color").as_uint()),
-          Color::fromArgb(node.attribute("rulecolor").as_uint()));
+          Color::fromArgb(node.attribute("rulecolor").as_uint()), node.attribute("dotradius").as_float(0));
       item = new PageChangedItem(p, props);
     }
+  }
+  else if(nodename == "outlinechanged") {
+    unsigned int pagenum = node.attribute("pagenum").as_uint(-1);
+    if(pagenum < doc->pages.size())
+      item = new PageOutlineItem(doc->pages[pagenum], node.attribute("title").as_string(),
+          node.attribute("level").as_int(0));
   }
   else if(nodename == "addpage") {
     Page* p = new Page();

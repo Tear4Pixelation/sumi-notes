@@ -15,8 +15,12 @@ public:
   Dim yRuling;
   Dim marginLeft;
   Color ruleColor;
+  // > 0 draws the ruling as dots of this radius instead of lines: at the grid intersections when both
+  //  xRuling and yRuling are set, otherwise as dotted lines along the one ruling that is
+  Dim dotRadius;
 
-  PageProperties(Dim w=0, Dim h=0, Dim xr=0, Dim yr=0, Dim ml=0, Color c=Color::WHITE, Color rc=Color::BLUE);
+  PageProperties(Dim w=0, Dim h=0, Dim xr=0, Dim yr=0, Dim ml=0, Color c=Color::WHITE, Color rc=Color::BLUE,
+      Dim dr=0);
 };
 
 // 1 page = 1 <svg> node

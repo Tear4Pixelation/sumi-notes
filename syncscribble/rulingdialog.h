@@ -36,6 +36,7 @@ private:
   SpinBox* spinXRuling;
   SpinBox* spinYRuling;
   SpinBox* spinLeftMargin;
+  SpinBox* spinDotRadius;
   ColorEditBox* pageColorPicker;
   ColorEditBox* ruleColorPicker;
   CheckBox* cbApplyToAll;

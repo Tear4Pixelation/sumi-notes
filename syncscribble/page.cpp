@@ -9,8 +9,9 @@ Dim Page::BLANK_Y_RULING = 40;
 bool Page::enableDropShadow = true;
 
 // for legacy support (esp. ScribbleTest); note that we force paper to be opaque
-PageProperties::PageProperties(Dim w, Dim h, Dim xr, Dim yr, Dim ml, Color c, Color rc)
-    : width(w), height(h), color(c.opaque()), xRuling(xr), yRuling(yr), marginLeft(ml), ruleColor(rc) {}
+PageProperties::PageProperties(Dim w, Dim h, Dim xr, Dim yr, Dim ml, Color c, Color rc, Dim dr)
+    : width(w), height(h), color(c.opaque()), xRuling(xr), yRuling(yr), marginLeft(ml), ruleColor(rc),
+      dotRadius(dr) {}
 
 void Page::initDoc()
 {
@@ -128,6 +129,11 @@ void Page::onPageSizeChange()
   contentNode->setAttr<float>("xruling", props.xRuling);
   contentNode->setAttr<float>("yruling", props.yRuling);
   contentNode->setAttr<float>("marginLeft", props.marginLeft);
+  // only written when set, so a lined page's SVG is unchanged and older builds just see lines
+  if(props.dotRadius > 0)
+    contentNode->setAttr<float>("dotradius", props.dotRadius);
+  else
+    contentNode->removeAttr("dotradius");
   //contentNode->setAttr<color_t>("papercolor", props.color.color);
   // write colors as strings to simplify reading back when pasting pages
   contentNode->setAttr("papercolor", fstring("#%06X", props.color.rgb()).c_str());
@@ -177,7 +183,28 @@ void Page::generateRuleLayer(Color pageColor, Dim w, Dim h)
   s->addClass("pagerect");
   ruleNode->addChild(s);
 
-  if(props.xRuling > 0 || props.yRuling > 0) {
+  if(props.dotRadius > 0 && (props.xRuling > 0 || props.yRuling > 0)) {
+    // All dots are one filled path: a node per dot would be thousands of nodes on a fine grid.  With one
+    //  ruling set, the dots run along its lines at a pitch of a few radii, reading as a dotted line.
+    Dim r = props.dotRadius;
+    Dim linePitch = std::max(4*r, Dim(4));
+    Dim dx = props.xRuling > 0 ? props.xRuling : linePitch;
+    Dim dy = props.yRuling > 0 ? props.yRuling : linePitch;
+    Dim x0 = props.xRuling > 0 ? props.xRuling : dx/2;
+    Dim y0 = props.yRuling > 0 ? props.yRuling : dy/2;
+    Path2D dots;
+    for(Dim doty = y0; doty < h; doty += dy) {
+      for(Dim dotx = x0; dotx < w; dotx += dx)
+        dots.addEllipse(dotx, doty, r, r);
+    }
+    s = new SvgPath(dots);
+    setSvgFillColor(s, props.ruleColor);
+    setSvgStrokeColor(s, Color::NONE);
+    s->setAttribute("shape-rendering", "auto");  // the group's crispEdges would square the dots off
+    s->addClass("dotrule");
+    ruleNode->addChild(s);
+  }
+  else if(props.xRuling > 0 || props.yRuling > 0) {
     if(props.yRuling > 0) {
       for(Dim ruley = props.yRuling; ruley < h; ruley += props.yRuling) {
         s = new SvgPath(Path2D().addLine(Point(0, ruley), Point(w, ruley)));

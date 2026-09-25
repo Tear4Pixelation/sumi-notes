@@ -68,7 +68,8 @@ RulingDialog::RulingDialog(ScribbleDoc* doc, const PageProperties* initProps)
     comboRuling = createComboBox({_("Custom")});
   else {
     comboRuling = createComboBox({_("Current"), _("Plain"), _("Wide ruled"), _("Medium ruled"),
-        _("Narrow ruled"), _("Coarse grid"), _("Medium grid"), _("Fine grid")});
+        _("Narrow ruled"), _("Coarse grid"), _("Medium grid"), _("Fine grid"), _("Dotted ruled"),
+        _("Coarse dot grid"), _("Medium dot grid"), _("Fine dot grid")});
     comboRuling->onChanged = [this](const char* s){ setRuleType(comboRuling->index()); };
   }
 
@@ -78,6 +79,9 @@ RulingDialog::RulingDialog(ScribbleDoc* doc, const PageProperties* initProps)
   spinYRuling->onValueChanged = [this](Dim y){ updatePreview(); };
   spinLeftMargin = createTextSpinBox(marginLeft, 10, 0, 100000);
   spinLeftMargin->onValueChanged = [this](Dim m){ updatePreview(); };
+  // 0 draws lines; anything above turns the same X/Y ruling into dots of this radius
+  spinDotRadius = createTextSpinBox(props.dotRadius, 0.5, 0, 20, "%g");
+  spinDotRadius->onValueChanged = [this](Dim r){ updatePreview(); };
 
   cbApplyToAll = createCheckBox();
   cbDocDefault = createCheckBox();
@@ -184,6 +188,7 @@ void RulingDialog::accept()
   props.xRuling = spinXRuling->value();
   props.yRuling = spinYRuling->value();
   props.marginLeft = spinLeftMargin->value();
+  props.dotRadius = spinDotRadius->value();
   props.ruleColor = ruleColorPicker->color();
   // in new page mode props is the whole result; the page it describes does not exist yet
   if(newPageMode)
@@ -221,17 +226,25 @@ void RulingDialog::setPaperType(int index)
   updatePreview();
 }
 
-// {x ruling, y ruling, left margin, rule color}
-unsigned int RulingDialog::predefRulings[][4] = {
-  {0, 0, 0, 0},  // populated with current values
-  {0, 0, 0, 0},  // plain
-  {0, 45, 100, 0x9FFFFFFF & Color::BLUE},  // wide ruled
-  {0, 40, 100, 0x9FFFFFFF & Color::BLUE},  // medium ruled
-  {0, 35, 100, 0x9FFFFFFF & Color::BLUE},  // narrow ruled
-  {35, 35, 35, 0x7FFFFFFF & Color::BLUE},  // coarse grid
-  {30, 30, 30, 0x7FFFFFFF & Color::BLUE},  // medium grid
-  {20, 20, 20, 0x7FFFFFFF & Color::BLUE}  // fine grid
+// {x ruling, y ruling, left margin}
+unsigned int RulingDialog::predefRulings[][3] = {
+  {0, 0, 0},  // populated with current values
+  {0, 0, 0},  // plain
+  {0, 45, 100},  // wide ruled
+  {0, 40, 100},  // medium ruled
+  {0, 35, 100},  // narrow ruled
+  {35, 35, 35},  // coarse grid
+  {30, 30, 30},  // medium grid
+  {20, 20, 20},  // fine grid
+  // dotted: appended after the grids, since the document list indexes this table by its own 1-7.  Dot
+  //  grids have no margin - a red line through a dot grid is exactly what the layout exists to avoid
+  {0, 40, 100},  // dotted ruled
+  {35, 35, 0},  // coarse dot grid
+  {30, 30, 0},  // medium dot grid
+  {20, 20, 0}  // fine dot grid
 };
+
+Dim RulingDialog::predefDotRadii[] = {0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 1.5, 1.5};
 
 void RulingDialog::setRuleType(int index)
 {
@@ -239,7 +252,10 @@ void RulingDialog::setRuleType(int index)
   spinXRuling->setValue(predefRulings[index][0]);
   spinYRuling->setValue(predefRulings[index][1]);
   spinLeftMargin->setValue(predefRulings[index][2]);
-  if(predefRulings[index][3] != 0)
-    ruleColorPicker->setColor(predefRulings[index][3]);
+  spinDotRadius->setValue(predefDotRadii[index]);
+  // A preset is geometry only.  The rule color is the document's (i.e. its theme's), the same color a
+  //  theme switch gives existing pages - a preset carrying light-theme blue put blue rules on dark paper.
+  if(index > 0)
+    ruleColorPicker->setColor(Color::fromArgb(scribbleDoc->cfg->Int("ruleColor")));
   updatePreview();
 }
