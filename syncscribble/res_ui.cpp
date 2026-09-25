@@ -24,19 +24,6 @@ const char* mainWindowSVG = R"#(
         </g>
         <rect id="bookmark-splitter" class="background splitter" display="none" box-anchor="vfill" width="10" height="10"/>
 
-        <g id="clippings-panel" display="none" box-anchor="vfill" layout="flex" flex-direction="column">
-          <g class="panel-header" box-anchor="hfill" layout="box">
-            <rect class="background" box-anchor="fill" width="20" height="20"/>
-            <text class="title panel-title" box-anchor="left" margin="10 10">Clippings</text>
-            <g id="clippings-toolbar-container" box-anchor="right" layout="box"></g>
-          </g>
-          <rect class="hrule title background" box-anchor="hfill" width="20" height="2"/>
-          <g id="clippings-container" box-anchor="fill" layout="box">
-            <rect id="clippings-split-sizer" fill="none" box-anchor="vfill" width="320" height="20"/>
-          </g>
-        </g>
-        <rect id="clippings-splitter" class="background splitter" display="none" box-anchor="vfill" width="10" height="10"/>
-
         <g id="scribble-split-layout" box-anchor="fill" layout="flex" flex-direction="column">
           <g id="scribble-focus-container" box-anchor="fill" layout="flex" flex-direction="column">
             <rect id="scribble-focus" class="hrule title background" box-anchor="hfill" width="20" height="2"/>
@@ -81,13 +68,6 @@ const char* scribbleScrollerSVG = R"#(
 <g class="scribble-scroller" box-anchor="right top">
   <use class="icon" width="40" height="40" xlink:href="icons/ic_scroll_handle.svg" />
 </g>
-)#";
-
-const char* clippingsDelSVG = R"#(
-  <g>
-    <rect class="toolbar" fill-opacity="0.75" width="52" height="52"/>
-    <use class="icon" width="52" height="52" xlink:href="icons/ic_menu_discard.svg" />
-  </g>
 )#";
 
 // note that "exclude" attribute must be lower-case
@@ -231,52 +211,7 @@ const char* prefInfoXML = R"#(
   <pref name="showAdvPrefs" type="bool" level="1" group="Advanced" title="Show advanced preferences" description="" />
   <pref name="Config Edit" type="button" group="Advanced" />
   <pref name="Reset Prefs" type="button" group="Advanced" />
-  <pref name="About Write" type="button" level="1" group="Advanced" />
+  <pref name="About Kaku" type="button" level="1" group="Advanced" />
 
 </map>
-)#";
-
-const char* clippingDocHTML =
-R"#(<html xmlns="http://www.w3.org/1999/xhtml">
- <head>
-  <title>clippings</title>
-  <script type="text/writeconfig">
-   <int name="drawCursor" value="1" />
-   <int name="saveThumbnail" value="0" />
-   <int name="saveUnmodified" value="1" />
-   <float name="horzBorder" value="6" />
-   <float name="BORDER_SIZE" value="0.1" />
-  </script>
- </head>
- <body>
-
-<svg width='67.4px' height='67.4px'>
-<g class="write-content write-v3" xruling="0" yruling="0" marginLeft="0" papercolor="#FFFFFF">
-<circle transform='translate(18.7,18.7)' fill='none' stroke='#000000' stroke-width='1.4' cx='15' cy='15' r='30'/>
-</g>
-</svg>
-
-<svg width='67.4px' height='67.4px'>
-<g class="write-content write-v3" xruling="0" yruling="0" marginLeft="0" papercolor="#FFFFFF">
-<path class="write-stroke-pen" transform='translate(3.7,3.7)' fill='none' stroke='#000000' stroke-width='1.4'
-    stroke-linecap='round' stroke-linejoin='round' d='M0 0 l0 60 60 0 0 -60 -60 0'/>
-</g>
-</svg>
-
-<svg width='67.4px' height='67.4px'>
-<g class="write-content write-v3" xruling="0" yruling="0" marginLeft="0" papercolor="#FFFFFF">
-<path class="write-stroke-pen" transform='translate(3.7,3.7)' fill='none' stroke='#000000' stroke-width='1.4'
-    stroke-linecap='round' stroke-linejoin='round' d='M30 0 l-30 60 60 0 -30 -60'/>
-</g>
-</svg>
-
-<svg width='67.4px' height='67.4px'>
-<g class="write-content write-v3" xruling="0" yruling="0" marginLeft="0" papercolor="#FFFFFF">
-<path class="write-stroke-pen" transform='translate(3.7, 7.7)' fill='none' stroke='#000000' stroke-width='1.4'
-    stroke-linecap='round' stroke-linejoin='round' d='M0 25.98L15 0L45 0L60 25.98L45 51.96L15 51.96L0 25.98'/>
-</g>
-</svg>
-
- </body>
-</html>
 )#";

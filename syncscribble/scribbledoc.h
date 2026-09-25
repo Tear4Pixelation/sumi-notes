@@ -136,7 +136,6 @@ public:
   void deletePages();
   void deletePage(int where);
   void pastePages(Clipboard* clipboard, int where);
-  void movePage(int oldpagenum, int newpagenum);
   enum SelectPagesFlags { PAGESEL_INV=INT_MAX-1, PAGESEL_ALL=INT_MAX };
   void selectPages(int pagenum);
   void exitPageSelMode();

@@ -41,7 +41,6 @@ public:
 
   void togglePenToolbar();
   void toggleFullscreen();
-  void toggleClippings();
   void toggleBookmarks();
   void toggleDisableTouch();
   void toggleSyncView();
@@ -135,10 +134,6 @@ public:
   Action* actionSelect_Pages;
   Action* actionViewSync;
   Action* actionViewSyncMaster;
-  Action* actionShow_Clippings;
-  Action* actionClippingsUndo;
-  Action* actionClippingsClose;
-  Action* actionClippingsPin;
   Action* actionBookmarksClose;
   Action* actionBookmarksPin;
   Action* actionDisable_Touch;

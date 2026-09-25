@@ -109,9 +109,8 @@ void ScribbleConfig::init()
   cfg["centerPages"] = 1;
   // multiple document views
   cfg["splitLayout"] = -1;
-  // hide BookmarkView, ClippingView after use?
+  // hide BookmarkView after use?
   cfg["autoHideBookmarks"] = PLATFORM_MOBILE;
-  cfg["autoHideClippings"] = 0;
   // bookmark view mode: any margin content considered bookmark if 1
   cfg["bookmarkMode"] = 0;
   // after delay, completely hide scroller (1) or just dim (0)?
@@ -309,13 +308,13 @@ void ScribbleConfig::init()
 #if PLATFORM_ANDROID || PLATFORM_IOS  // we want save button for emscripten (which is PLATFORM_MOBILE)
   // this is really the small screen setup - iPad, e.g., should be same as desktop except save btn
   //cfgS["toolBars"] = "docTitle,stretch,tools,undoRedoBtn,"
-  //    "actionSelection_Menu,actionShow_Bookmarks,actionShow_Clippings,actionSplitView,actionOverflow_Menu";
+  //    "actionSelection_Menu,actionShow_Bookmarks,actionSplitView,actionOverflow_Menu";
   cfgS["toolBars2"] = "docTitle,stretch,addPage,tools,separator,undoRedoBtn,separator,seltools,"
-    "separator,actionShow_Bookmarks,actionShow_Clippings,actionSplitView,separator,actionOverflow_Menu";
+    "separator,actionShow_Bookmarks,actionSplitView,separator,actionOverflow_Menu";
 #else
   // appropriate for Surface Pro portrait display
   cfgS["toolBars2"] = "docTitle,stretch,addPage,actionSave,separator,tools,separator,undoRedoBtn,separator,seltools,"
-    "separator,actionShow_Bookmarks,actionShow_Clippings,actionSplitView,separator,actionOverflow_Menu";
+    "separator,actionShow_Bookmarks,actionSplitView,separator,actionOverflow_Menu";
 #endif
   // strftime format string for doc title
   cfgS["newDocTitleFmt"] = "%b %e %Hh%M";

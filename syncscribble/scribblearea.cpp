@@ -663,8 +663,8 @@ bool ScribbleArea::selectionDropped(Selection* selection, Point globalPos, Point
   selection->toSorted(&clip);  // this clones strokes, so use PasteMoveClipboard so we don't clone again
   if(replaceids) {
     clip.replaceIds();
-    // This has the effect of clearing timestamp for drops from clippings; are there other instances where
-    //  we should clear timestamp of pasted content?  Whenever ids are replaced?
+    // This has the effect of clearing timestamp for drops from another ScribbleArea; are there other
+    //  instances where we should clear timestamp of pasted content?  Whenever ids are replaced?
     // since clipbboard came from selection, we know every node has an Element
     for(SvgNode* node : clip.content->children())
       static_cast<Element*>(node->ext())->setTimestamp(0);
@@ -3034,7 +3034,7 @@ void ScribbleArea::drawImage(Painter* painter, const Rect& dirty)
   for(int ii = 0; ii <= numPages(); ii++) {
     bool ghost = ii == numPages();
     Page* pg = ghost ? scribbleDoc->ghostPage.get() : page(ii);
-    if(!pg) break;  // clipping area, e.g., has no ghost page
+    if(!pg) break;  // a read-only ScribbleArea, e.g., has no ghost page
     if((viewMode == VIEWMODE_VERT && h + pg->height() > dirty.top)
        || (viewMode == VIEWMODE_HORZ && w + pg->width() > dirty.left))  {
       // account for page centering

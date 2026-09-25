@@ -251,10 +251,6 @@ void ScribbleApp::init()
 
   bookmarkArea = new BookmarkView(cfg, doc);  //bookmarkArea->setScribbleDoc(doc);
 
-  clippingDoc = new ScribbleDoc(this, cfg, NULL);  // scribbleMode = NULL
-  clippingArea = new ClippingView();
-  clippingDoc->addArea(clippingArea);
-
   // create UI elements
   win->setupUI(this);
   // add window to SvgGui
@@ -272,10 +268,6 @@ void ScribbleApp::init()
   currPen = scribbleMode->currDrawPen();
   currPenIndex = 0;
   bookmarkColor = Color::fromArgb(cfg->Int("bookmarkColor"));
-
-  // loading clippings doc is deferred until dock is shown
-  clippingsPath = "";
-  clippingDoc->newDocument();
 
   const char* recentDocsStr = cfg->String("recentDocs");
   auto recentDocsSplit = splitStringRef(StringRef(recentDocsStr), ":::", true);
@@ -403,8 +395,6 @@ ScribbleApp::~ScribbleApp()
   // TODO: should use unique_ptr for these ... but then we need a bunch of get()s
   delete documentList;
   delete bookmarkArea;
-  delete clippingDoc;
-  delete clippingArea;
   for(ScribbleDoc* doc : scribbleDocs)
     delete doc;
   for(ScribbleArea* area : scribbleAreas)
@@ -519,11 +509,6 @@ void ScribbleApp::saveConfig()
     area->strokeCounter = 0;
   }
   cfg->set("strokeCounter", cfg->Int("strokeCounter") + nstrokes);
-
-  // save clipping file if modified or significant position change (or any pos change? - check yOffset?)
-  if(!clippingsPath.empty()
-       && (clippingDoc->isModified() || clippingDoc->cfg->Int("pageNum") != clippingArea->getPos().pagenum))
-    clippingDoc->saveDocument(clippingsPath.c_str());
 }
 
 void ScribbleApp::storagePermission(bool granted)
@@ -1436,10 +1421,7 @@ void ScribbleApp::repaintBookmarks(bool newdoc)
 
 void ScribbleApp::doCommand(int cmd)
 {
-  if(cmd & CLIPPING_CMD)
-    clippingDoc->doCommand(cmd & ~CLIPPING_CMD);
-  else
-    activeDoc()->doCommand(cmd);
+  activeDoc()->doCommand(cmd);
 }
 
 void ScribbleApp::setMode(int mode)
@@ -1465,12 +1447,6 @@ void ScribbleApp::hideBookmarks()
     win->toggleBookmarks();
 }
 
-void ScribbleApp::hideClippings()
-{
-  if(win->clippingsPanel->isVisible())
-    win->toggleClippings();
-}
-
 void ScribbleApp::showSelToolbar(Point pos)
 {
   // sel toolbar only opened on pen up, so don't make pressed (because outside_pressed event will invoke 2nd
@@ -1481,45 +1457,6 @@ void ScribbleApp::showSelToolbar(Point pos)
 bool ScribbleApp::oneTimeTip(const char* id, Point pos, const char* message)
 {
   return win->oneTimeTip(id, pos, message);
-}
-
-/// clippings ///
-
-extern const char* clippingDocHTML;
-
-// I think it is reasonable not to compress clippings doc since each page is likely to be small (but probably
-//  don't want to save as single file since user could add a large clipping)
-bool ScribbleApp::loadClippingsDoc()
-{
-  if(!clippingsPath.empty())
-    return true;  // already loaded
-  // load clippings doc
-  clippingsPath = cfg->String("clippingDoc", "");
-  if(clippingsPath.empty()) {
-    clippingsPath = savedPath + "clippings.html";
-    cfg->set("clippingDoc", clippingsPath.c_str());
-  }
-#if PLATFORM_IOS
-  // clippings path is relative to HOME on iOS (since HOME can change!)
-  clippingsPath = FSPath(getenv("HOME"), clippingsPath).c_str();
-#endif
-  Document::loadresult_t res = clippingDoc->openDocument(clippingsPath.c_str());
-  if(res != Document::LOAD_OK) {
-    // if file already exists, don't replace it (so user can try to recover)
-    if(FSPath(clippingsPath).exists()) {
-      messageBox(Warning, _("Damaged document"),
-          fstring(_("Error opening clipping document - please examine %s"), clippingsPath.c_str()));
-      clippingsPath = "";
-      return false;
-    }
-    else {
-      createPath(FSPath(clippingsPath).parent().c_str());
-      // MemStream will be freed when replaced by FileStream on save
-      clippingDoc->openDocument(new MemStream(clippingDocHTML, strlen(clippingDocHTML)));
-      clippingDoc->saveDocument(clippingsPath.c_str(), Document::SAVE_FORCE | Document::SAVE_MULTIFILE);
-    }
-  }
-  return true;
 }
 
 /// file handling ///
@@ -2470,7 +2407,6 @@ void ScribbleApp::reloadConfig()
   for(ScribbleDoc* doc : scribbleDocs)
     doc->loadConfig(true);
   bookmarkArea->loadConfig(cfg);
-  clippingDoc->loadConfig(true);
   // destroy doc list so that it will be recreated with new settings
   delete documentList;
   documentList = NULL;

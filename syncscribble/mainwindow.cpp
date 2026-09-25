@@ -301,11 +301,6 @@ void MainWindow::refreshCommonUI(ScribbleDoc* doc, const UIState* uiState)
 //  sure that there is no unnecessary layout or rendering
 void MainWindow::refreshUI(ScribbleDoc* doc, int reason)
 {
-  if(doc == app->clippingDoc) {
-    actionClippingsUndo->setEnabled(doc->canUndo());
-    return;
-  }
-
   UIState areaState;
   for(ScribbleArea* area : app->scribbleAreas) {
     ScribbleDoc* adoc = area->scribbleDoc;
@@ -518,28 +513,13 @@ void MainWindow::toggleBookmarks()
   actionShow_Bookmarks->setChecked(show);
   if(show) {
     // we must do this before showing panel, since it could make parent bounds too big!
-    Dim parentw = std::min(clippingsPanel->parent()->node->bounds().width(), winBounds().width());
+    Dim parentw = std::min(bookmarkPanel->parent()->node->bounds().width(), winBounds().width());
     if(bookmarkPanel->node->bounds().width() > 0.75*parentw)
       bookmarkSplitter->setSplitSize(0.75*parentw);
     app->repaintBookmarks();
   }
   bookmarkPanel->setVisible(show);
   bookmarkSplitter->setVisible(show);
-}
-
-void MainWindow::toggleClippings()
-{
-  bool show = !actionShow_Clippings->isChecked();
-  if(show && !app->loadClippingsDoc())
-    return;
-  if(show) {
-    Dim parentw = std::min(clippingsPanel->parent()->node->bounds().width(), winBounds().width());
-    if(clippingsPanel->node->bounds().width() > 0.75 * parentw)
-      clippingsSplitter->setSplitSize(0.75*parentw);
-  }
-  actionShow_Clippings->setChecked(show);
-  clippingsPanel->setVisible(show);
-  clippingsSplitter->setVisible(show);
 }
 
 void MainWindow::toggleFullscreen()
@@ -924,35 +904,18 @@ void MainWindow::setupUI(ScribbleApp* a)
   bkmkWidget->zoomLabel = createTextLabel("bottom left", 0, 0, 6, 6);
   selectFirst("#bookmark-container")->addWidget(bkmkWidget->zoomLabel);
 
-  clippingsSplitter = new Splitter(containerNode()->selectFirst("#clippings-splitter"),
-      containerNode()->selectFirst("#clippings-split-sizer"), Splitter::LEFT, 120);
-  clippingsPanel = selectFirst("#clippings-panel");
-  clippingsPanel->selectFirst(".panel-title")->setText(_("Clippings"));
-
-  Widget* clippingsContainer = selectFirst("#clippings-container");
-  ScribbleWidget* clippingWidget = ScribbleWidget::create(clippingsContainer, app->clippingArea);
-  clippingWidget->node->addClass("clippingView");  // needed for ClippingView drops
-  //clippingsContainer->addWidget(app->clippingArea->pageMenu);
-  Widget* clipdel = new Widget(loadSVGFragment(clippingsDelSVG));
-  clipdel->node->setAttribute("box-anchor", "bottom left");
-  clipdel->setMargins(0, 0, 6, 6);
-  clipdel->setLayoutIsolate(true);  // only visible when dragging clipping
-  clipdel->setVisible(false);
-  clippingsContainer->selectFirst(".scribble-content")->addWidget(clipdel);
-  app->clippingArea->delTarget = clipdel;
-
-  Toolbar* clippingstb = createToolbar();
-  clippingstb->addAction(actionClippingsUndo);
-  clippingstb->addAction(actionClippingsPin);
-  clippingstb->addAction(actionClippingsClose);
-  //clippingsTbContainer = selectFirst("#clippings-toolbar-container");
-  selectFirst("#clippings-toolbar-container")->addWidget(clippingstb);
-
   // overlay for rendering on top of everything else
   Widget* subWinLayout = selectFirst(".sub-window-layout");
   overlayWidget = new OverlayWidget(subWinLayout);
   overlayWidget->node->addClass("overlayWidget");
   selectFirst("#main-container")->addWidget(overlayWidget);
+
+  // The general-purpose sidebar (sidebar.h) parents itself into one of these two containers
+  //  depending on whether it is pinned, so it has to be created after both exist.
+  sidebar = new Sidebar(this);
+  if(ScribbleApp::cfg->Int("sidebarVisible"))
+    sidebar->setOpen(true);
+  updateSidebarButton();
 
   // popup selection toolbar
   Menubar* selToolbar = createMenubar();  // Menubar used instead of Toolbar so that popup closes after use
@@ -1570,7 +1533,7 @@ void MainWindow::setupActions()
   actionSplitView = createAction("actionSplitView",
       "&Split View", ":/icons/ic_menu_split_tb.svg", "Ctrl+T", [this](){ toggleSplitView(SPLIT_TOGGLE); });
   actionSplitView->setCheckable(true);
-  actionSplitView->setPriority(Action::NormalPriority - 2);  // below bookmarks and clippings
+  actionSplitView->setPriority(Action::NormalPriority - 2);  // below bookmarks
   splitState = -std::min(std::max(1, std::abs(ScribbleApp::cfg->Int("splitLayout"))), int(SPLIT_V21));
   toggleSplitView(splitState);  // set icon for actionSplitView
 
@@ -1653,23 +1616,6 @@ void MainWindow::setupActions()
       "Scan Document as Page...", ":/icons/ic_menu_append_page.svg", "", SLOT(scanDocument(true)));
   // insert pages from another document
   actionInsertDocument = createAction("actionInsertDocument", "Insert Document...", "", "", SLOT(insertDocument()));
-  actionShow_Clippings = createAction("actionShow_Clippings",
-      "Clippings", ":/icons/ic_menu_drawer.svg", "Ctrl+H", [this](){ toggleClippings(); });
-  actionShow_Clippings->setCheckable(true);
-  actionShow_Clippings->setPriority(Action::NormalPriority - 1);
-
-  // undo button for clippings
-  actionClippingsUndo = createAction("actionClippingsUndo",
-      "Undo", ":/icons/ic_menu_undo.svg", "", SLOT(doCommand(CLIPPING_CMD | ID_UNDO)));
-  actionClippingsClose = createAction("actionClippingsClose",
-      "Close", ":/icons/ic_menu_cancel.svg", "", [this](){ toggleClippings(); });
-  auto tgClipPin = [this](){
-    bool ah = !app->cfg->Bool("autoHideClippings");
-    app->cfg->set("autoHideClippings", ah);
-    actionClippingsPin->setChecked(!ah);
-  };
-  actionClippingsPin = createAction("actionClippingsPin", "Keep Open", ":/icons/ic_menu_pin.svg", "", tgClipPin);
-  actionClippingsPin->setChecked(!cfg->Bool("autoHideClippings"));
 
   actionBookmarksClose = createAction("actionBookmarksClose",
       "Close", ":/icons/ic_menu_cancel.svg", "", [this](){ toggleBookmarks(); });
@@ -1886,8 +1832,6 @@ void MainWindow::setupActions()
   Button* splitviewbtn = viewmenu->addAction(actionSplitView);
   splitviewbtn->mPopup->setAlign(Menu::HORZ_LEFT);
   viewmenu->addAction(actionShow_Bookmarks);  // in case hidden from toolbar
-  // not sure this is the best place...
-  viewmenu->addAction(actionShow_Clippings);
   // Qt uses immersive mode (sticky) for fullscreen on Android 4.4+; hides status bar on earlier versions
   viewmenu->addAction(actionFullscreen);
   viewmenu->addAction(actionInvertColors);
@@ -2107,15 +2051,6 @@ bool MainWindow::oneTimeTip(const char* id, Point pos, const char* message)
 
 void MainWindow::setupHelpTips()
 {
-  if(oneTimeTip("clippings")) {
-    clippingsPanel->addHandler([=](SvgGui* gui, SDL_Event* event) {
-      if(event->type == SvgGui::VISIBLE) {
-        oneTimeTip("clippings", Point(40, 90),
-            _("Drag and drop clippings to use, reorder, and remove.\nDrag and drop selection here to save clipping."));
-      }
-      return false;
-    });
-  }
 }
 #else
 bool MainWindow::oneTimeTip(const char* id, Point pos, const char* message) { return false; }

@@ -353,7 +353,7 @@ void ScribbleDoc::newDocument()
     view->gotoPos(0, Point(-10, -10), false);
   }
   pageSizeChanged();  // pageCountChanged() is only for changes due to editing
-  // scribbleMode == NULL indicates we are a read-only doc (e.g. clippings), so no ghost page
+  // scribbleMode == NULL indicates we are a read-only doc, so no ghost page
   if(scribbleMode)
     ghostPage.reset(generatePage(INT_MAX));
   //fileName = "";
@@ -761,25 +761,6 @@ void ScribbleDoc::selectPages(int pagenum)  //, Point toolpos)
   // popup tools not shown for stroke selection sel all/inv sel either (tools avail on overflow menu anyway)
   //if(numSelPages > 0 && cfg->Bool("popupToolbar"))  //&& !toolpos.isNaN()
   //  app->showSelToolbar(activeArea->screenToGlobal(toolpos.isNaN() ? activeArea->screenRect.center() : toolpos));
-}
-
-// used only for drag and drop of clippings pages
-void ScribbleDoc::movePage(int oldpagenum, int newpagenum)
-{
-  if(oldpagenum < 0 || oldpagenum >= document->numPages() || oldpagenum == newpagenum)
-    return;
-  clearSelection();  // otherwise Element.m_selection won't be cleared on copy!
-  Page* newpage = new Page;
-  // this replaces previous method of serializing and deserializing
-  newpage->loadSVG(document->pages[oldpagenum]->svgDoc->clone());
-  startAction(oldpagenum | UndoHistory::MULTIPAGE);
-  document->deletePage(oldpagenum);
-  document->insertPage(newpage, newpagenum);
-  endAction();
-  updateGhostPage();
-  document->bookmarksDirty = true;
-  pageCountChanged(MIN(newpagenum, oldpagenum));
-  uiChanged(UIState::MovePage);
 }
 
 void ScribbleDoc::deleteSelection()

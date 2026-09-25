@@ -97,7 +97,6 @@ public:
   void dismissNotify();
   void appSuspending();
   void hideBookmarks();
-  void hideClippings();
   void insertDocument();
   void penSelected(int penindex);
   void closeDocs(const FSPath& path);
@@ -130,8 +129,6 @@ public:
   ScribbleMode* scribbleMode = NULL;
   //ScribbleDoc* scribbleDoc = NULL;
   ScribbleArea* mActiveArea = NULL;
-  ScribbleDoc* clippingDoc = NULL;
-  ClippingView* clippingArea = NULL;
   BookmarkView* bookmarkArea = NULL;
   OverlayWidget* overlayWidget = NULL;
   std::vector<ScribbleDoc*> scribbleDocs;

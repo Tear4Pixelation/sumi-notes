@@ -318,7 +318,7 @@ void OverlayWidget::draw(SvgPainter* svgp) const
 ScribbleArea* OverlayWidget::getScribbleArea(Point gpos) const
 {
   SvgNode* n = underWidget->containerNode()->nodeAt(gpos);
-  bool hit = n && (n->hasClass("scribbleArea") || n->hasClass("clippingView"));
+  bool hit = n && n->hasClass("scribbleArea");
   return hit ? static_cast<ScribbleArea*>(static_cast<ScribbleWidget*>(n->ext())->scribbleView) : NULL;
 }
 
@@ -335,7 +335,6 @@ void OverlayWidget::drawSelection(Selection* sel, Point gpos, Point dr, Dim s)
   if(!sel)
     return;
 
-  // note that we always use original scale for clippingView
   SvgNode* n = underWidget->containerNode()->nodeAt(gpos);
   if(n && n->hasClass("scribbleArea")) {
     ScribbleArea* targetArea = static_cast<ScribbleArea*>(static_cast<ScribbleWidget*>(n->ext())->scribbleView);
