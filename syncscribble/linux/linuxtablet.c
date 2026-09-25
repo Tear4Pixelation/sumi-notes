@@ -409,6 +409,10 @@ int linuxInitTablet(SDL_Window* sdlwin)
   SDL_VERSION(&wmInfo.version)
   if(!SDL_GetWindowWMInfo(sdlwin, &wmInfo))
     return 0;
+  // on the Wayland backend (sdl2-compat with linuxWayland) there is no X display to talk to; touching
+  //  info.x11 there is what used to crash the app under SDL_VIDEODRIVER=wayland
+  if(wmInfo.subsystem != SDL_SYSWM_X11)
+    return 0;
   Display* xDisplay = wmInfo.info.x11.display;
   Window xWindow = wmInfo.info.x11.window;
 

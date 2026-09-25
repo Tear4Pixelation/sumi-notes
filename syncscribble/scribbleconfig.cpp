@@ -65,9 +65,20 @@ void ScribbleConfig::init()
   // smoothing: tau = 0.5*inputSmoothing/mZoom for single pole IIR (simple exponential filter)
   // (was (n + 1)/2, where n is window size of Savitzky-Golay filter used for stroke smoothing); 0 disables
   // 0.5/mZoom is sufficient for iPad, 1.0/mZoom for Galaxy Note 10
-  cfg["inputSmoothing"] = PLATFORM_IOS ? 1 : (PLATFORM_ANDROID ? 2 : (PLATFORM_EMSCRIPTEN ? 6 : 0));
+  // web was 6, from before the curve fit existed and for browsers that rounded input to whole pixels; on an
+  //  iPad it made strokes trail visibly behind the Pencil, so it now takes the native iOS value
+  cfg["inputSmoothing"] = PLATFORM_IOS || PLATFORM_EMSCRIPTEN ? 1 : (PLATFORM_ANDROID ? 2 : 0);
   // RDP line simplification threshold in 0.05 pixel steps
   cfg["inputSimplify"] = 0;
+  // fit incoming samples to a smooth curve instead of connecting them with straight segments.  The value
+  //  is the strength: how many times the B-spline relaxation is applied, each pass taking another factor
+  //  of 3 off the whole-pixel lattice noise in the input (1/3, 1/9, 1/27, 1/81) at the cost of one more
+  //  sample of lag and more rounding of genuinely sharp corners.  0 disables.
+  cfg["inputCurveFit"] = 2;
+  // Linux on sdl2-compat: use the Wayland backend when a Wayland compositor is present instead of the
+  //  X11 backend sdl2-compat picks (which runs under Xwayland and delivers whole-pixel pointer positions).
+  //  Off by default: the switch currently segfaults at startup - see CLAUDE.md "Sub-pixel input on Linux"
+  cfg["linuxWayland"] = 0;
   // volume button setup (Android only?) - see volUp/DownActions in mainwindow.cpp
   cfg["volButtonMode"] = 0;  //PLATFORM_MOBILE ? 3 : 0;  // 3 = Next Page/Prev Page
   // hidden option to disable back button to address accidental palm presses

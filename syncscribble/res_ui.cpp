@@ -118,14 +118,18 @@ const char* prefInfoXML = R"#(
       title="Pen pressure scaling" description="Default is 1" / -->
   <pref name="inputSmoothing" type="int" min="0" max="100" group="Input"
       title="Smoothing" description="0 disables smoothing; 6 is a typical value" />
+  <pref name="linuxWayland" type="bool" group="Input" exclude="mobile"
+      title="Use Wayland directly (Linux, experimental)" description="On sdl2-compat, talk to the Wayland compositor instead of Xwayland for sub-pixel pointer positions; restart to apply. Currently crashes at startup" />
   <pref name="inputSimplify" type="int" min="0" max="100" group="Input"
       title="Simplification" description="Simplification threshold in 0.05 pixel steps" />
+  <pref name="inputCurveFit" type="int" min="0" max="4" group="Input"
+      title="Curve fitting" description="Fit strokes to a smooth curve, compensating for whole-pixel input; 0 disables, 4 is strongest" />
   <pref name="useWintab" type="bool" group="Input"
       title="Use Wintab if available" description="Use Wacom Wintab tablet interface" exclude="mobile,linux,mac" />
 
   <!-- should be limited to the "chrome", i.e, excluding any behaviors of ScribbleArea -->
   <!-- pref type="label" group="User Interface"
-      title="Changes may not take effect until Write is restarted." / -->
+      title="Changes may not take effect until Kaku is restarted." / -->
   <pref name="uiTheme" type="int" group="User Interface"
       enum="Dark;Light" enumvals="1;2"
       title="Theme" description="User interface style" />

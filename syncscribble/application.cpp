@@ -12,6 +12,7 @@
 #include "SDL_syswm.h"
 #elif PLATFORM_LINUX
 #include "linux/linuxtablet.h"
+#include "linux/sdl3input.h"
 #elif PLATFORM_OSX
 #include "macos/macoshelper.h"
 #elif PLATFORM_EMSCRIPTEN
@@ -297,6 +298,20 @@ int SDL_main(int argc, char* argv[])
   SDL_SetEventFilter(sdlEventFilter, scribbleApp);  // for app lifecycle events
 #if PLATFORM_LINUX
   SDL_SetHint(SDL_HINT_VIDEO_X11_NET_WM_BYPASS_COMPOSITOR, "0");  // play nice with other apps
+  // On sdl2-compat, SDL3 picks the X11 backend for us because Write links libX11 (for linuxtablet.c),
+  //  so on a Wayland desktop the app runs under Xwayland - and Xwayland reports pointer positions in
+  //  whole pixels.  The Wayland backend delivers 1/256 px positions, which sdl3input.cpp recovers.
+  //  The X11 tablet path is dead on sdl2-compat anyway (no SDL_SYSWMEVENT), so nothing is given up.
+  //  Re-initializing the video subsystem here is fine: no window exists yet.
+  if(ScribbleApp::cfg->Int("linuxWayland") && sdl3InputOnCompat() && getenv("WAYLAND_DISPLAY")
+      && !getenv("SDL_VIDEODRIVER") && SDL_GetCurrentVideoDriver() && strcmp(SDL_GetCurrentVideoDriver(), "wayland") != 0) {
+    SDL_QuitSubSystem(SDL_INIT_VIDEO);
+    SDL_SetHint(SDL_HINT_VIDEODRIVER, "wayland");
+    if(SDL_InitSubSystem(SDL_INIT_VIDEO) != 0) {  // no Wayland after all: back to what worked
+      SDL_SetHint(SDL_HINT_VIDEODRIVER, "");
+      SDL_InitSubSystem(SDL_INIT_VIDEO);
+    }
+  }
 #elif PLATFORM_ANDROID
   if(AndroidHelper::doAction(A_GPU_BLACKLIST))  // try to catch some bad GPUs before even trying GL
     ScribbleApp::cfg->set("glRender", 0);
@@ -424,6 +439,8 @@ int SDL_main(int argc, char* argv[])
 #elif PLATFORM_LINUX
   linuxInitTablet(sdlWindow);
   SDL_EventState(SDL_SYSWMEVENT, SDL_ENABLE);  // linuxtablet.c handles touch events even if no pen
+  if(sdl3InputInit())  // running on sdl2-compat: recover the float positions it truncates
+    SvgGui::subpixelHook = sdl3SubpixelPoint;
 #elif PLATFORM_EMSCRIPTEN
   wasmSetupInput();
 #endif
