@@ -523,9 +523,22 @@ PenToolbar::PenToolbar(bool _compact)
       SvgGui::useFile(":/icons/ic_menu_add_color.svg"), _("Add Color"));
   addColorBtn->onClicked = [this]() { openPaletteGrid(-1); };
 
+  // The pen tip is a flag on the pen, not a pref, so it is passed as an extra row rather than by name.
+  // It picks the stroke builder: flat extrudes a quad per input segment and so has no defined direction
+  //  when the pen is not moving, round sweeps a disc and does not care, chisel is a fixed-aspect nib.
+  comboPenTip = createComboBox({_("Flat"), _("Round"), _("Chisel")});
+  comboPenTip->onChanged = [this](const char *) {
+    pen.setFlag(ScribblePen::TIP_MASK, false);
+    pen.setFlag(comboPenTip->index() == 0 ? ScribblePen::TIP_FLAT
+        : (comboPenTip->index() == 2 ? ScribblePen::TIP_CHISEL : ScribblePen::TIP_ROUND), true);
+    updatePen();
+  };
+  penTipRow = createTitledRow(_("Pen Tip"), comboPenTip);
+
   settingsBtn = createToolSettingsButton(
-      "Pen Settings", {"inputSmoothing", "inputSimplify", "applyPenToSel", "savePenMode"},
-      compact ? std::vector<Button *>{cbSnaptoGrid, cbLineDrawing} : std::vector<Button *>{});
+      "Pen Settings", {"inputSmoothing", "inputSimplify", "shapeSnapDelay", "applyPenToSel", "savePenMode"},
+      compact ? std::vector<Button *>{cbSnaptoGrid, cbLineDrawing} : std::vector<Button *>{},
+      {penTipRow});
 
   Button *helpBtn = createHelpButton(
       {{"ic_menu_add_color.svg", "Add Color",
@@ -948,6 +961,11 @@ void PenToolbar::setPen(const ScribblePen &newpen, Mode m) {
   spinWidth->setValue(pen.width);
   cbSnaptoGrid->setChecked(pen.hasFlag(ScribblePen::SNAP_TO_GRID));
   cbLineDrawing->setChecked(pen.hasFlag(ScribblePen::LINE_DRAWING));
+  // a pen carrying neither flag is drawn by StrokedStrokeBuilder, whose cap and join are round - so it
+  //  shows as Round, which is what it looks like.  setIndex() does not fire onChanged, unlike
+  //  updateIndex(), so this cannot write the pen back to itself.
+  comboPenTip->setIndex(pen.hasFlag(ScribblePen::TIP_FLAT) ? 0
+      : (pen.hasFlag(ScribblePen::TIP_CHISEL) ? 2 : 1));
   if (rebuild)
     // refreshPalette() rather than rebuildGrids(): switching to or from the marker changes which
     //  variant the swatches show, so the color list itself has to be rebuilt, not just redrawn

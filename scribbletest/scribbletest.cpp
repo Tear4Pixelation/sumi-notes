@@ -527,6 +527,148 @@ int ScribbleTest::restyleTest()
   return nbad;
 }
 
+// The curve fit exists to compensate for input that arrives on a whole-pixel lattice (CLAUDE.md,
+// "Curve fitting the input").  This drives the real input path with samples taken off a known circular
+// arc and *rounded to whole units* - which is exactly what the platform does to a real pen - and then
+// measures the committed stroke two ways:
+//   - the median turn angle between consecutive points.  A lattice staircase shows up here as tens of
+//     degrees, because at 1-2 unit spacing an integer grid only permits a few segment directions.
+//   - the worst deviation from the arc the samples were taken from, which is what says the fit is
+//     following the input rather than merely flattening it.
+// Both are measured at two sample spacings: the ~1.5 units a dense digitiser gives, and the ~10 units a
+// 125 Hz mouse gives at writing speed.  The sparse case is not a smaller version of the dense one - the
+// quantisation is the same half unit either way, so it is a far smaller *angle* when the samples are
+// further apart - and only measuring the dense case would leave the common one untested.
+int ScribbleTest::curveFitTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: curve fit: %s\n", what); }
+  };
+
+  const Point center(400, 420);
+  const Dim radius = 320;
+  const Dim a0 = 3.49, a1 = 4.36;  // a shallow arc, in radians
+
+  // draws the arc at `step` units between samples, with every sample snapped to the integer lattice,
+  // and returns the committed stroke's points
+  auto drawArc = [&](Dim step, int fit) {
+    scribbleDoc->cfg->set("inputCurveFit", fit);
+    scribbleMode->setMode(MODE_STROKE);
+    // a pen with no width flags and no chisel tip goes to StrokedStrokeBuilder, so the path *is* the
+    // centreline - no outline to unpick before measuring it
+    scribbleDoc->app->setPen(ScribblePen(Color::BLUE, 2, ScribblePen::TIP_ROUND));
+    Dim dtheta = step/radius;
+    bool first = true;
+    for(Dim th = a0; th <= a1; th += dtheta) {
+      Dim x = std::floor(center.x + radius*std::cos(th) + 0.5);
+      Dim y = std::floor(center.y + radius*std::sin(th) + 0.5);
+      ie(x, y, 0, pen, first ? press : 0);
+      first = false;
+    }
+    ie(0, 0, 0, pen, release);
+    std::vector<Point> pts;
+    Element* elem = NULL;
+    for(Element* s : scribbleArea->currPage->children())
+      elem = s;  // the stroke just drawn is the last child
+    if(elem && elem->isPathElement()) {
+      Path2D* path = static_cast<SvgPath*>(elem->node)->path();
+      for(int ii = 0; ii < path->size(); ++ii)
+        pts.push_back(path->point(ii));
+    }
+    return pts;
+  };
+
+  // median turn angle in degrees, and the RMS residual against a circle fitted to the points themselves.
+  // The residual is measured against a *fitted* circle rather than the arc the samples were taken from,
+  // because ie() takes screen coordinates while the committed path is in document coordinates - the view
+  // transform sits between them, so the original centre and radius do not describe the output at all.
+  // Fitting instead asks the question that actually matters: is the result still the arc it was, or has
+  // the fit cut the corner off it?
+  auto measure = [&](const std::vector<Point>& pts, Dim& medTurn, Dim& rmsDev) {
+    std::vector<Dim> turns;
+    for(size_t ii = 1; ii + 1 < pts.size(); ++ii) {
+      Point d0 = pts[ii] - pts[ii-1], d1 = pts[ii+1] - pts[ii];
+      if(d0.dist() < 1E-9 || d1.dist() < 1E-9) continue;
+      Dim c = std::min(Dim(1), std::max(Dim(-1), dot(d0.normalize(), d1.normalize())));
+      turns.push_back(std::acos(c)*180/M_PI);
+    }
+    std::sort(turns.begin(), turns.end());
+    medTurn = turns.empty() ? 0 : turns[turns.size()/2];
+    // least-squares circle (Kasa): the linear system in (a, b, c) for x^2 + y^2 + a x + b y + c = 0
+    rmsDev = 0;
+    int n = int(pts.size());
+    if(n < 4) return;
+    Dim sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0, sz = 0, sxz = 0, syz = 0;
+    for(const Point& p : pts) {
+      Dim z = p.x*p.x + p.y*p.y;
+      sx += p.x; sy += p.y; sxx += p.x*p.x; syy += p.y*p.y; sxy += p.x*p.y;
+      sz += z; sxz += p.x*z; syz += p.y*z;
+    }
+    Dim m[3][3] = {{sxx, sxy, sx}, {sxy, syy, sy}, {sx, sy, Dim(n)}};
+    Dim rhs[3] = {-sxz, -syz, -sz};
+    // Gaussian elimination with partial pivoting - three unknowns, so this is short enough to inline
+    for(int col = 0; col < 3; ++col) {
+      int piv = col;
+      for(int row = col + 1; row < 3; ++row)
+        if(std::abs(m[row][col]) > std::abs(m[piv][col])) piv = row;
+      if(std::abs(m[piv][col]) < 1E-12) return;
+      std::swap(m[col], m[piv]); std::swap(rhs[col], rhs[piv]);
+      for(int row = 0; row < 3; ++row) {
+        if(row == col) continue;
+        Dim f = m[row][col]/m[col][col];
+        for(int k = col; k < 3; ++k) m[row][k] -= f*m[col][k];
+        rhs[row] -= f*rhs[col];
+      }
+    }
+    Point fitCenter(-rhs[0]/m[0][0]/2, -rhs[1]/m[1][1]/2);
+    Dim fitR2 = fitCenter.x*fitCenter.x + fitCenter.y*fitCenter.y - rhs[2]/m[2][2];
+    if(fitR2 <= 0) return;
+    Dim fitR = std::sqrt(fitR2);
+    Dim sum = 0;
+    for(const Point& p : pts) { Dim d = p.dist(fitCenter) - fitR; sum += d*d; }
+    rmsDev = std::sqrt(sum/n);
+  };
+
+  char buf[256];
+  // every strength at the dense spacing, to show what each extra pass is actually worth
+  for(int lvl = 0; lvl <= 4; ++lvl) {
+    Dim t = 0, d = 0;
+    scribbleDoc->newDocument();
+    measure(drawArc(1.5, lvl), t, d);
+    printf("curve fit level %d: median turn %.1f deg, circle residual %.3f\n", lvl, double(t), double(d));
+  }
+  for(Dim step : {Dim(1.5), Dim(10)}) {
+    Dim offTurn = 0, offDev = 0, fitTurn = 0, fitDev = 0;
+    scribbleDoc->newDocument();
+    measure(drawArc(step, 0), offTurn, offDev);
+    scribbleDoc->newDocument();
+    measure(drawArc(step, 4), fitTurn, fitDev);
+
+    snprintf(buf, sizeof(buf), "curve fit @ %.1f unit spacing: median turn %.1f -> %.1f deg, "
+        "circle residual %.3f -> %.3f units\n", double(step),
+        double(offTurn), double(fitTurn), double(offDev), double(fitDev));
+    printf("%s", buf);
+
+    // The two spacings are different problems and are checked differently, which is the point of
+    // measuring both.  Quantisation is half a unit either way, so it is a large *angle* between samples
+    // 1.5 units apart and a small one between samples 10 units apart: the staircase is a slow-writing
+    // artifact.  Asserting a big improvement at both spacings would be asserting something untrue of
+    // the sparse case, where there is almost nothing there to remove.
+    if(step < 5) {
+      check(offTurn > 10, "samples this close together must show the lattice staircase without the fit");
+      check(fitTurn < 5, "and the fit must take them down to something that reads as a curve");
+    }
+    else
+      check(fitTurn <= offTurn, "the fit must never make a sparsely sampled stroke less smooth");
+    // Either way it must still be the arc it was drawn as: a fit that cut corners rather than removing
+    // noise would leave a *larger* residual against the circle its own points best fit.
+    check(fitDev <= offDev + 0.05, "the fit must not pull the stroke off the arc it was drawn as");
+  }
+  scribbleDoc->newDocument();
+  return nbad;
+}
+
 int ScribbleTest::shapeRoundTripTest()
 {
   int nbad = 0;

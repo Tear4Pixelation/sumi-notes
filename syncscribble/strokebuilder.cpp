@@ -575,6 +575,115 @@ void StreamStabilizer::finalize()
   next->finalize();
 }
 
+// curve fit - see comment in strokebuilder.h
+
+// the relaxed position of point ii, given that pts[0..n-1] is the stroke so far.  The pure uniform cubic
+//  B-spline would put its knot at (P[i-1] + 4P[i] + P[i+1])/6; relax is how far of the way there we go, so
+//  1 is the B-spline and 0 leaves the input points untouched.  Indices outside the stroke are reflected
+//  rather than clamped, which makes the curve's end tangent come out along the first/last segment; the two
+//  end points themselves are never relaxed, so a stroke starts and stops exactly where the pen did.
+StrokePoint CurveFitFilter::knotAt(int ii, int n, int level) const
+{
+  if(ii < 0 || ii > n - 1) {
+    int jj = ii < 0 ? 0 : n - 1, kk = ii < 0 ? std::min(1, n - 1) : std::max(0, n - 2);
+    StrokePoint a = knotAt(jj, n, level), b = knotAt(kk, n, level);
+    a.x = 2*a.x - b.x;
+    a.y = 2*a.y - b.y;
+    return a;
+  }
+  if(level <= 0)
+    return pts[ii];
+  StrokePoint k = knotAt(ii, n, level - 1);
+  if(relax > 0 && ii > 0 && ii < n - 1) {
+    StrokePoint prev = knotAt(ii - 1, n, level - 1), nxt = knotAt(ii + 1, n, level - 1);
+    Point bspline = (Point(prev) + 4*Point(k) + Point(nxt))/6;
+    k.x += relax*(bspline.x - k.x);
+    k.y += relax*(bspline.y - k.y);
+  }
+  return k;
+}
+
+// emit the curve from knot ii to knot ii+1 as chords; pressure, tilt and time are interpolated along it
+void CurveFitFilter::emitSegment(int ii, int n)
+{
+  StrokePoint s1 = knotAt(ii, n, passes), s2 = knotAt(ii + 1, n, passes);
+  Point p0 = knotAt(ii - 1, n, passes), p1 = s1, p2 = s2, p3 = knotAt(ii + 2, n, passes);
+  // knot spacing; 0.5 (i.e. sqrt of distance) is centripetal - uniform overshoots badly on the uneven
+  //  spacing that real input has, and chordal is loose at sharp turns
+  Dim d1 = std::sqrt((p1 - p0).dist()), d2 = std::sqrt((p2 - p1).dist()), d3 = std::sqrt((p3 - p2).dist());
+  Point m1, m2;
+  if(d1 < 1E-9 || d2 < 1E-9 || d3 < 1E-9) {  // coincident points collapse the parameterisation
+    m1 = (p2 - p0)/2;
+    m2 = (p3 - p1)/2;
+  }
+  else {
+    m1 = d2*((p1 - p0)/d1 - (p2 - p0)/(d1 + d2) + (p2 - p1)/d2);
+    m2 = d2*((p2 - p1)/d2 - (p3 - p1)/(d2 + d3) + (p3 - p2)/d3);
+  }
+  Point b1 = p1 + m1/3, b2 = p2 - m2/3;
+  // how far the curve strays from the chord we would otherwise have drawn; the error of an nsub-chord
+  //  approximation of a cubic falls off as 1/nsub^2, hence the sqrt
+  Dim dev = ((p1 + 3*b1 + 3*b2 + p2)/8 - (p1 + p2)/2).dist();
+  int nsub = std::min(16, std::max(1, int(std::ceil(std::sqrt(dev/tol)))));
+  for(int jj = 1; jj <= nsub; ++jj) {
+    Dim u = Dim(jj)/nsub, v = 1 - u;
+    Point c = v*v*v*p1 + 3*v*v*u*b1 + 3*v*u*u*b2 + u*u*u*p2;
+    next->addPoint(StrokePoint(c.x, c.y, s1.pr + u*(s2.pr - s1.pr), s1.tiltX + u*(s2.tiltX - s1.tiltX),
+        s1.tiltY + u*(s2.tiltY - s1.tiltY), Timestamp(s1.t + u*(s2.t - s1.t))));
+  }
+}
+
+void CurveFitFilter::addPoint(const StrokePoint& pt)
+{
+  InputProcessor* last = next;
+  while(last->next) last = last->next;
+
+  if(tipAdded) {
+    last->removePoints(1);
+    tipAdded = false;
+  }
+  pts.push_back(pt);
+  int n = int(pts.size());
+  if(emitted < 0) {
+    next->addPoint(pts[0]);
+    emitted = 0;
+  }
+  // segment ii..ii+1 needs knot ii+2, and a knot relaxed `passes` times reaches `passes` points either
+  //  side of itself - so the segment is only final 2 + passes samples later
+  while(emitted + 2 + passes <= n - 1)
+    emitSegment(emitted++, n);
+  // the stroke must reach the current pen position, so the raw point goes straight to the builder
+  if(emitted < n - 1) {
+    last->addPoint(pt);
+    tipAdded = true;
+  }
+}
+
+void CurveFitFilter::removePoints(int n)
+{
+  // one input point becomes several output points, so there is no mapping for a partial removal; this is
+  //  only reachable if the filter is installed somewhere other than first in the chain
+  pts.clear();
+  emitted = -1;
+  tipAdded = false;
+  next->removePoints(-1);
+}
+
+void CurveFitFilter::finalize()
+{
+  InputProcessor* last = next;
+  while(last->next) last = last->next;
+
+  if(tipAdded) {
+    last->removePoints(1);
+    tipAdded = false;
+  }
+  int n = int(pts.size());
+  while(emitted >= 0 && emitted < n - 1)
+    emitSegment(emitted++, n);
+  next->finalize();
+}
+
 // Savitzky-Golay seems to work better than Gaussian - e.g., shrinks loops less for given amount of overall
 //  smoothing (subjective).  But ideally, we would pass both filtertype and filterstrength parameters
 // Savitzky-Golay has the advantage of a very flat passband, so it preserves overall stroke shape very

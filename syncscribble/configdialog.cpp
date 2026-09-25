@@ -404,10 +404,14 @@ ArrowPopup* createToolSettingsPopup(const char* title, const std::vector<const c
 }
 
 Button* createToolSettingsButton(const char* title, const std::vector<const char*>& prefNames,
-    const std::vector<Button*>& extraItems)
+    const std::vector<Button*>& extraItems, const std::vector<Widget*>& extraRows)
 {
   Button* btn = createToolbutton(SvgGui::useFile(":/icons/ic_menu_settings2.svg"), _(title));
   ArrowPopup* popup = createToolSettingsPopup(title, prefNames);
+  for(Widget* row : extraRows) {
+    if(row)
+      popup->addWidget(row);
+  }
   for(Button* item : extraItems) {
     if(item)
       popup->addItem(item);

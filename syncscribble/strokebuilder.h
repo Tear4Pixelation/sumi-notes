@@ -1,6 +1,8 @@
 #ifndef STROKEBUILDER_H
 #define STROKEBUILDER_H
 
+#include <algorithm>
+
 #include "page.h"
 #include "scribblepen.h"
 
@@ -147,6 +149,47 @@ public:
   StrokePoint prevPt;
   StrokePoint filtPt;
   Dim radius;
+};
+
+// chord flatness tolerance, in document units at zoom 1 - divided by the zoom at construction, so
+//  drawing zoomed in gets more chords.  Not a user setting: it only trades output points for accuracy
+//  of the curve, where what anyone reaching for this wants is the strength (passes).
+static constexpr Dim CURVEFIT_TOL = 0.15;
+
+// replaces the straight segments between input samples with a smooth curve
+// input positions arrive on a whole-pixel lattice on most platforms, and at the 1-2 px spacing a mouse
+//  delivers, a polyline through them can only step in the handful of directions that lattice allows - so
+//  the stroke reads as a staircase rather than a line.  Each interior point is relaxed towards its uniform
+//  cubic B-spline knot (which attenuates lattice noise to a third of its amplitude while leaving the shape
+//  of the stroke alone), then a centripetal Catmull-Rom curve through the relaxed points is emitted as
+//  chords flat to `tol`.  This is a curve fit, not a low pass: nothing is averaged over time and the
+//  stroke does not trail the pen.
+// A curve segment is only final once two further samples have arrived, so the raw current point is
+//  appended to the builder as a provisional tip and retracted on the next call - the same trick LowPassIIR
+//  uses.  Because this filter turns one input point into several output points, it cannot map a
+//  removePoints(n) from upstream, so it must be installed first in the chain (i.e. added last).
+// `passes` is the strength: how many times the relaxation is applied, each pass taking another factor
+//  of 3 off the lattice noise.  `tol` is not a user knob - see CURVEFIT_TOL.
+class CurveFitFilter : public InputProcessor
+{
+public:
+  CurveFitFilter(Dim _tol = 0.15, int _passes = 1, Dim _relax = 1.0)
+      : tol(std::max(_tol, Dim(1E-4))), passes(std::min(4, std::max(0, _passes))),
+        relax(std::min(Dim(1), std::max(Dim(0), _relax))) {}
+  void addPoint(const StrokePoint& pt) override;
+  void removePoints(int n) override;
+  void finalize() override;
+
+private:
+  StrokePoint knotAt(int ii, int n, int level) const;
+  void emitSegment(int ii, int n);
+
+  std::vector<StrokePoint> pts;
+  int emitted = -1;  // index of the last point up to which the curve has been emitted
+  bool tipAdded = false;
+  Dim tol;
+  int passes;
+  Dim relax;
 };
 
 class SymmetricFIR : public InputProcessor
