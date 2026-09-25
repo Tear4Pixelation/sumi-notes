@@ -61,7 +61,7 @@ private:
   std::string docName;
   std::string startURL;
   bool blockingClearUndone = false;
-  volatile enum { SYNC_OFF=0, SYNC_CONNECTING, SYNC_CONNECTED, SYNC_DISCONNECTED } syncState;
+  volatile enum { SYNC_OFF=0, SYNC_CONNECTING, SYNC_CONNECTED, SYNC_DISCONNECTED } syncState = SYNC_OFF;
 
   bool syncDoc;
   bool deletePlaceholderPage;

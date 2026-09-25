@@ -297,6 +297,9 @@ ifneq ($(USE_SYSTEM_SDL),0)
 else
   # Linux - uses SDL 2.0.10 (branch write-linux); see scribbleres/SDL-Makefile.unix
   INCSYS += ../SDL/Release/include
+  # `pkg-config --cflags sdl2` supplies this on the system-SDL path; MuPDF's C sources (built with
+  #  --std=c99) need it for POSIX declarations such as mkstemp, so supply it here too
+  DEFS += _GNU_SOURCE
   #INCFILES = ../scribbleres/force_link_glibc_2.14.h  -- doesn't work anymore, build in chroot instead
   ifneq ($(DEBUG), 0)
     LIBS = ../SDL/Debug/libSDL2d.a

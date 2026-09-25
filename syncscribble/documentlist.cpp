@@ -977,7 +977,7 @@ bool DocumentList::convertDocuments(FSPath src)
         delete strm;
       }
 
-      SDL_Event event = {0};
+      SDL_Event event = {};
       event.type = ScribbleApp::app->scribbleSDLEvent;
       event.user.code = ScribbleApp::DISMISS_DIALOG;
       event.user.data1 = (void*)-1;

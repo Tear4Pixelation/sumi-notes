@@ -908,7 +908,7 @@ bool ScribbleApp::keyPressEvent(SDL_Event* event)
 void pencilBarrelTap(void)
 {
   // I don't think this is called from a separate thread, but we need an event so that processEvents loop runs
-  SDL_Event event = {0};
+  SDL_Event event = {};
   event.type = ScribbleApp::scribbleSDLEvent;
   event.user.code = ScribbleApp::SIMULATE_PEN_BTN;
   event.user.timestamp = SDL_GetTicks();
@@ -927,7 +927,7 @@ const char* getCfgString(const char* name, const char* dflt) { return ScribbleAp
 void iapCompleted(void)
 {
   // I don't think this is called from a separate thread, but we need an event so that processEvents loop runs
-  SDL_Event event = {0};
+  SDL_Event event = {};
   event.type = ScribbleApp::scribbleSDLEvent;
   event.user.code = ScribbleApp::IAP_COMPLETE;
   event.user.timestamp = SDL_GetTicks();

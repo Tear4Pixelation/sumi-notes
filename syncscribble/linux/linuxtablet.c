@@ -125,7 +125,7 @@ static void xi2ReportTabletEvent(XIDeviceEvent* xevent, TabletData* device)
   if((device->buttons & SDL_BUTTON_LMASK) != (device->prevButtons & SDL_BUTTON_LMASK))
     eventtype = (device->buttons & SDL_BUTTON_LMASK) ? SDL_FINGERDOWN : SDL_FINGERUP;
 
-  SDL_Event event = {0};
+  SDL_Event event = {};
   event.type = eventtype;
   event.tfinger.timestamp = xevent->time;  //SDL_GetTicks()
   event.tfinger.touchId = device->type == XI2_ERASER ? PenPointerEraser : PenPointerPen;
@@ -160,7 +160,7 @@ static void xi2ReportMouseEvent(XIDeviceEvent* xevent, TabletData* device)
     eventtype = (device->buttons & button) ? SDL_FINGERDOWN : SDL_FINGERUP;
   device->prevButtons = device->buttons;
 
-  SDL_Event event = {0};
+  SDL_Event event = {};
   event.type = eventtype;
   event.tfinger.timestamp = SDL_GetTicks(); // normally done by SDL_PushEvent()
   event.tfinger.touchId = SDL_TOUCH_MOUSEID;
@@ -177,7 +177,7 @@ static void xi2ReportMouseEvent(XIDeviceEvent* xevent, TabletData* device)
 static void xi2ReportWheelEvent(XIDeviceEvent* xevent, TabletData* device)
 {
   int b = xevent->detail;
-  SDL_Event event = {0};
+  SDL_Event event = {};
   event.type = SDL_MOUSEWHEEL;
   event.wheel.timestamp = SDL_GetTicks();
   //event.wheel.windowID = 0;
@@ -192,7 +192,7 @@ static void xi2ReportWheelEvent(XIDeviceEvent* xevent, TabletData* device)
 
 void xi2ReportTouchEvent(XIDeviceEvent* xevent, uint32_t evtype)
 {
-  SDL_Event event = {0};
+  SDL_Event event = {};
   event.type = evtype;
   event.tfinger.timestamp = SDL_GetTicks();  // normally done by SDL_PushEvent()
   event.tfinger.touchId = 0;  //xev->sourceid
@@ -302,8 +302,12 @@ static void processXinput2Event(XGenericEventCookie* cookie)
     // we could maybe use xiDeviceEvent->buttons.mask >> 1 instead of tracking button state ourselves
     if(cookie->evtype == XI_ButtonPress)
       devinfo->buttons |= xiToSDLButton(xiDeviceEvent->detail);
+    // Clear, never toggle: a press that never reached this window (the click that focused it, taken by
+    //  the compositor; a press in a popup) followed by its release would otherwise flip the bit on, so
+    //  the release reads as a press, hovering draws, and every later press/release stays inverted.
+    //  Clearing an already-clear bit is no change, so an orphaned release is simply ignored.
     else if(cookie->evtype == XI_ButtonRelease)
-      devinfo->buttons ^= xiToSDLButton(xiDeviceEvent->detail);
+      devinfo->buttons &= ~xiToSDLButton(xiDeviceEvent->detail);
     // AbsX, AbsY don't seem to be set for pen press/release events, so wait for next motion event if pen
     if(devinfo->type == XI2_MOUSE)
       xi2ReportMouseEvent(xiDeviceEvent, devinfo);

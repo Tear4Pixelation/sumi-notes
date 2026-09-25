@@ -30,7 +30,13 @@ SOURCES = \
 
 
 INC = ./include
-INCSYS = /usr/include/dbus-1.0 /usr/lib/x86_64-linux-gnu/dbus-1.0/include /usr/include/ibus-1.0 /usr/include/glib-2.0 /usr/lib/x86_64-linux-gnu/glib-2.0/include
+# dbus/ibus/glib headers: ask pkg-config, since the arch-specific include dirs differ between distros
+#  (Debian: /usr/lib/x86_64-linux-gnu/dbus-1.0/include, Arch: /usr/lib/dbus-1.0/include); fall back to
+#  the Debian layout if pkg-config is unavailable
+INCSYS = $(shell pkg-config --cflags-only-I dbus-1 ibus-1.0 glib-2.0 2>/dev/null | sed 's/-I//g')
+ifeq ($(INCSYS),)
+  INCSYS = /usr/include/dbus-1.0 /usr/lib/x86_64-linux-gnu/dbus-1.0/include /usr/include/ibus-1.0 /usr/include/glib-2.0 /usr/lib/x86_64-linux-gnu/glib-2.0/include
+endif
 #INCFILES = ../scribbleres/force_link_glibc_2.14.h  -- have to build in older chroot environment instead
 # SDL_*_DISABLED are defined in SDL_config_linux.h
 

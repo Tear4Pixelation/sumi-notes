@@ -75,7 +75,7 @@ static void pushSyncEvent(SDL_Event* event)
 int ScribbleSync::netThreadFn(void* _self)
 {
   ScribbleSync* self = static_cast<ScribbleSync*>(_self);
-  SDL_Event event = {0};
+  SDL_Event event = {};
   event.type = self->sdlEventType;
   event.user.data1 = self->scribbleDoc;
   event.user.data2 = self;
@@ -157,7 +157,9 @@ void ScribbleSync::disconnectSync()
   ssyncTimer = NULL;
 
   syncState = SYNC_OFF;
-  netSem->post();  //SDL_SemPost(netSem);
+  // no semaphore means connectSync() never ran (ScribbleTest drives processItem() on a bare instance)
+  if(netSem)
+    netSem->post();  //SDL_SemPost(netSem);
   if(socket != -1) {
     double dt, timeout = 4.0, t0 = mSecSinceEpoch();
     const char* s = "/end\n";
