@@ -1085,7 +1085,8 @@ hidden, and content on one cannot be selected, erased, moved or otherwise edited
 wrong), this is the summary. The entry points are
 `ScribbleDoc::addLayer`/`removeLayer`/`setLayerLocked`/`setLayerHidden`/`setCurrentLayer`/
 `moveLayer`/`moveSelToLayer`; the UI over them is the layers view of "The general-purpose sidebar"
-below, which so far reaches only `addLayer`, `setCurrentLayer` and `setLayerLocked`.
+below, which so far reaches `addLayer`, `setCurrentLayer`, `setLayerLocked`, and through a row's
+right-click menu `setLayerName` and `removeLayer`.
 
 **A layer is a tag on the element, not a `<g>` in the SVG.** `Element::layer()` serializes as
 `__layer`, the same custom-attribute convention as `__shape`/`__comx`/`__timestamp`. That buys the
@@ -1178,8 +1179,8 @@ layer and drop the rest on save. The attribute has no such failure mode.
   elements on the layer being removed and they must be reassigned undoably rather than orphaned.
 
 Known gaps: hiding a layer in a large delay-loaded document only
-affects loaded pages until the rest are loaded; and `setLayerHidden`, `setLayerName`, `removeLayer`,
-`moveLayer` and `moveSelToLayer` have no UI yet (see the sidebar's own gaps below).
+affects loaded pages until the rest are loaded; and `setLayerHidden`, `moveLayer` and
+`moveSelToLayer` have no UI yet (see the sidebar's own gaps below).
 
 ## The general-purpose sidebar
 
@@ -1269,10 +1270,46 @@ the summary. `syncscribble/sidebar.cpp`.
   contents after opening another, ignored undo and peers' edits, and came up empty when open at
   startup: `MainWindow`'s constructor opens it before there is an `SvgGui` to build rows through.
 
+- **Right click / long press on a row** opens an ArrowPopup reparented onto that row (the tag browser's
+  pattern, and its trap: `rebuildList()` detaches both popups before deleting rows, because their own
+  items rebuild the list mid-click). Outline: Rename, Move to Top Level, Delete (removes the entry,
+  never the page). Layer: Rename, Delete (disabled on the last layer; `removeLayer` moves the ink onto
+  the current layer, it does not delete it). Rename reuses `TagNameDialog`, and passes the page's
+  *stored* level back, not the normalized one.
+- **Dragging an outline row onto another nests it there** (`ScribbleDoc::nestOutlineEntry`, one undo
+  step, tested by `ScribbleTest::outlineNestTest()`, mutation-checked). Nesting is positional, so it
+  moves pages: the entry's section - its page through the page before the next entry not nested under
+  it, untitled pages included - goes to the end of the new parent's section, and its subtree's levels
+  shift by the same amount. Two traps: **clones are inserted, never the deleted pages** (a
+  `PageDeletedItem` frees its page when history is discarded - paste does the same), and **levels are
+  set after the move**, since `<outlinechanged>` names its page by its *current* number. Moving to the
+  top level goes after the top-level section rather than staying put, or it would adopt its following
+  siblings. Collapsed state is cleared on a drop: it is keyed by page number and the pages just moved.
+- **Dropping an entry on its own parent takes it back out** (`OUTLINE_OUTDENT`): one level up, placed
+  straight after the parent's section, so it becomes the parent's next sibling. Without this, dropping
+  on the parent would only re-file it as the last child, and the one way out was the menu.
+
 Known gaps: the lock toggle is drawn on every layer row (dimmed when unlocked) rather than only on
 locked ones as designed, because the design leaves an unlocked row no way to lock it; the layer
-preview is a plain block, since a layer spans every page and has no single thumbnail; and hide,
-rename, delete and reorder exist in `LayerList` but have no place in the design yet.
+preview is a plain block, since a layer spans every page and has no single thumbnail; hide and
+reorder exist in `LayerList` but have no place in the design yet; and a drag does not autoscroll a
+list longer than the panel.
+
+### Dragging list rows (`rowdrag.cpp`)
+
+`RowDrag` is the one drag-onto-a-row gesture, shared by the sidebar's outline and the tag browser
+(tag onto tag = subtag, onto its own supertag = back out one level, listed right below that supertag
+via `reparentTag`'s `afterId`, onto All Documents = root tag, `TagDocList::moveTagUnder`). A press then a
+release is still the Button's click; past `DRAG_START_DIST` it is a drag and the release is swallowed.
+With a **pen or finger the list's `ScrollWidget` owns the gesture** and passes a drag to the row only
+when it starts sideways (its filter's "axis it cannot scroll" rule), so vertical drags still scroll; for
+the same reason the row must accept motion events even below the threshold, or the scroll view takes the
+gesture back. Only the mouse path has been exercised (agent-pointer is a mouse). The drop is delivered on
+a 1 ms timer, since it rebuilds the list that owns the row still dispatching; keys must therefore stay
+valid across a rebuild - page numbers for the outline, and for tags a per-window id table that is never
+cleared. Feedback is class-based: `.drop-target` fills the row's sizing rect with an opaque dark blue (a
+stroke nudged the list, as it grows the bounds), `.dragging` greys the label (`opacity`, as a CSS rule
+or an attribute, did not show).
 
 ## Moving around the canvas
 

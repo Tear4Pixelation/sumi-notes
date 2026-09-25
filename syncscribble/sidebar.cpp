@@ -6,6 +6,8 @@
 #include "scribblearea.h"
 #include "scribbleconfig.h"
 #include "layers.h"
+#include "tagdoclist.h"  // TagNameDialog, the app's small "enter a name" prompt
+#include "application.h"
 #include "ulib/stringutil.h"
 #include <algorithm>
 
@@ -162,6 +164,49 @@ void Sidebar::createUI()
   listContainer->setMargins(sbPad, 0, 0, 0);
   listContainer->addWidget(listScroll);
   panelContent->addWidget(listContainer);
+
+  // drag an outline row onto another to nest it there (layers have no nesting)
+  outlineDrag.reset(new RowDrag(this));
+  outlineDrag->onDrop = [this](int src, int dst){ nestOutline(src, dst); };
+  outlineDrag->canDrop = [this](int src, int dst){
+    // not onto itself or anything nested under it
+    for(size_t ii = 0; ii < shownEntries.size(); ++ii) {
+      if(shownEntries[ii].pagenum != src)
+        continue;
+      for(size_t jj = ii + 1; jj < shownEntries.size() && shownEntries[jj].level > shownEntries[ii].level; ++jj) {
+        if(shownEntries[jj].pagenum == dst)
+          return false;
+      }
+    }
+    return src != dst;
+  };
+
+  outlineMenu = createArrowPopup(Menu::VERT_LEFT);
+  outlineMenu->addItem(_("Rename"), NULL, [this](){ renameOutline(menuPage); });
+  // Dragging nests an entry; this is the way back out, since there is no row to drop on for "none"
+  outlineTopLevelItem = outlineMenu->addItem(_("Move to Top Level"), NULL, [this](){
+    closeRowMenus();
+    nestOutline(menuPage, RowDrag::ROOT);
+  });
+  outlineMenu->addItem(_("Delete"), NULL, [this](){
+    closeRowMenus();
+    // removes the entry only; the page and everything on it stay
+    if(scribbleDoc)
+      scribbleDoc->setPageOutline(menuPage, NULL);
+    rebuildList();
+  });
+  setupAutoClosePopup(outlineMenu);
+
+  layerMenu = createArrowPopup(Menu::VERT_LEFT);
+  layerMenu->addItem(_("Rename"), NULL, [this](){ renameLayer(menuLayer); });
+  layerDeleteItem = layerMenu->addItem(_("Delete"), NULL, [this](){
+    closeRowMenus();
+    // the layer's ink is not deleted with it: removeLayer moves it onto the current layer, undoably
+    if(scribbleDoc)
+      scribbleDoc->removeLayer(menuLayer);
+    rebuildList();
+  });
+  setupAutoClosePopup(layerMenu);
 
   // ---- search: hidden until the search button is pressed, exactly like TagDocList::toggleDocSearch ----
   std::string searchSvg = fstring(R"(
@@ -461,6 +506,13 @@ void Sidebar::rebuildList()
   //  refreshIfChanged() after the window is up builds the list instead of leaving it blank.
   if(!window() || !window()->gui() || !listView)
     return;
+  // The row menus are parented to the row that opened them and would be deleted with it - and this runs
+  //  from their own items (rename, delete), mid-click.  Detached, they are only parentless until the
+  //  next show reparents them.  Same fix as TagDocList::rebuildTagTree.
+  closeRowMenus();
+  outlineMenu->removeFromParent();
+  layerMenu->removeFromParent();
+  outlineDrag->clear();
   window()->gui()->deleteContents(listView);
   // Building the outline loads every page not yet loaded, so the list is complete the moment it is
   //  shown.  With outline(false) here it held only the pages that happened to be loaded, and entries
@@ -470,6 +522,7 @@ void Sidebar::rebuildList()
   std::vector<OutlineEntry> entries;
   if(scribbleDoc && currView == OUTLINE)
     entries = scribbleDoc->outline(true);
+  shownEntries = entries;
   shownState = docState(scribbleDoc);
   if(!scribbleDoc)
     return;
@@ -543,6 +596,17 @@ void Sidebar::buildOutlineRows(const std::vector<OutlineEntry>& entries)
       if(!pinned)
         setOpen(false);
     };
+    outlineDrag->addRow(static_cast<Button*>(row), pagenum);
+    SvgGui::setupRightClick(row, [this, pagenum, row](SvgGui*, Widget*, Point){
+      menuPage = pagenum;
+      int level = 0;
+      for(const OutlineEntry& shown : shownEntries) {
+        if(shown.pagenum == pagenum)
+          level = shown.level;
+      }
+      outlineTopLevelItem->setEnabled(level > 0);
+      showRowMenu(outlineMenu, row);
+    });
     listView->addWidget(row);
   }
 }
@@ -603,6 +667,12 @@ void Sidebar::buildLayerRows()
       scribbleDoc->setCurrentLayer(layerId);
       rebuildList();
     };
+    SvgGui::setupRightClick(row, [this, layerId, row](SvgGui*, Widget*, Point){
+      menuLayer = layerId;
+      // a document always keeps one layer (ScribbleDoc::removeLayer refuses the last)
+      layerDeleteItem->setEnabled(scribbleDoc && scribbleDoc->layers().size() > 1);
+      showRowMenu(layerMenu, row);
+    });
     listView->addWidget(row);
   }
 }
@@ -623,4 +693,83 @@ void Sidebar::onAdd()
     scribbleDoc->setPageOutline(area->getCurrPageNum(), _("Untitled"), 0);
     rebuildList();
   }
+}
+
+// An ArrowPopup has no point anchoring - it positions itself against its parent - so it is moved onto
+//  the row it is for before each show, exactly as TagDocList::showTagMenu does.
+void Sidebar::showRowMenu(ArrowPopup* popup, Widget* row)
+{
+  closeRowMenus();
+  popup->removeFromParent();
+  row->addWidget(popup);
+  openAutoClosePopup(popup);
+}
+
+// A modal dialog does not close a popup still open behind it, which then takes the dialog's first
+//  keystroke (see TagDocList::closeAllContextPopups), so this runs before every rename dialog too.
+void Sidebar::closeRowMenus()
+{
+  closeAutoClosePopup(outlineMenu);
+  closeAutoClosePopup(layerMenu);
+}
+
+void Sidebar::renameOutline(int pagenum)
+{
+  if(!scribbleDoc)
+    return;
+  const OutlineEntry* entry = NULL;
+  for(const OutlineEntry& shown : shownEntries) {
+    if(shown.pagenum == pagenum)
+      entry = &shown;
+  }
+  if(!entry)
+    return;
+  closeRowMenus();
+  TagNameDialog dialog(_("Rename"), entry->title.c_str());
+  std::string title = Application::execDialog(&dialog) == Dialog::ACCEPTED ? dialog.getName() : "";
+  // an empty title would delete the entry, which is Delete's job, not Rename's.  The stored level is
+  //  passed back unchanged rather than the displayed one, which is normalized (Document::outline)
+  if(!title.empty() && pagenum < scribbleDoc->document->numPages())
+    scribbleDoc->setPageOutline(pagenum, title.c_str(), scribbleDoc->document->pages[pagenum]->outlineLevel);
+  rebuildList();
+}
+
+void Sidebar::renameLayer(int layerId)
+{
+  if(!scribbleDoc)
+    return;
+  const LayerInfo* info = scribbleDoc->layers().find(layerId);
+  if(!info)
+    return;
+  closeRowMenus();
+  TagNameDialog dialog(_("Rename Layer"), info->name.empty() ? _("Layer") : info->name.c_str());
+  std::string name = Application::execDialog(&dialog) == Dialog::ACCEPTED ? dialog.getName() : "";
+  if(!name.empty())
+    scribbleDoc->setLayerName(layerId, name.c_str());
+  rebuildList();
+}
+
+void Sidebar::nestOutline(int src, int dst)
+{
+  if(!scribbleDoc)
+    return;
+  // dropped on its own parent = take it back out of that parent, the way to undo a nesting by dragging
+  int parentPage = -1;
+  for(size_t ii = 0; ii < shownEntries.size(); ++ii) {
+    if(shownEntries[ii].pagenum != src)
+      continue;
+    for(size_t jj = ii; jj-- > 0;) {
+      if(shownEntries[jj].level < shownEntries[ii].level) {
+        parentPage = shownEntries[jj].pagenum;
+        break;
+      }
+    }
+  }
+  int target = dst == RowDrag::ROOT ? -1 : (dst == parentPage ? ScribbleDoc::OUTLINE_OUTDENT : dst);
+  if(scribbleDoc->nestOutlineEntry(src, target)) {
+    // Collapsed rows are remembered by page number, and the pages have just moved; the new parent in
+    //  particular must not be collapsed over the entry that was dropped on it, where it would vanish.
+    collapsedPages.clear();
+  }
+  rebuildList();
 }

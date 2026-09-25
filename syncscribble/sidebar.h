@@ -16,6 +16,8 @@
 #include "ugui/widgets.h"
 #include "ugui/textedit.h"
 #include "document.h"
+#include "rowdrag.h"
+#include <memory>
 #include <set>
 #include <string>
 #include <vector>
@@ -69,6 +71,13 @@ private:
   void onAdd();
   // true if `text` survives the current search query
   bool matchesSearch(const std::string& text) const;
+  // right-click / long press on a row
+  void showRowMenu(ArrowPopup* popup, Widget* row);
+  void closeRowMenus();
+  void renameOutline(int pagenum);
+  void renameLayer(int layerId);
+  // drop of the outline row on page `src` onto the row on page `dst`, or RowDrag::ROOT
+  void nestOutline(int src, int dst);
   // a signature of the document state the list is built from, for refreshIfChanged
   std::string docState(ScribbleDoc* doc) const;
 
@@ -96,4 +105,17 @@ private:
   //  itself is keyed by - it is ephemeral view state, so an entry whose page moved simply comes back
   //  expanded rather than following the wrong row.
   std::set<int> collapsedPages;
+
+  // the outline as last built, for canDrop's "not onto its own descendant"
+  std::vector<OutlineEntry> shownEntries;
+  std::unique_ptr<RowDrag> outlineDrag;
+
+  // One persistent popup per row kind, reparented onto the row that opened it (TagDocList::showTagMenu
+  //  explains why), and what it was opened for.
+  ArrowPopup* outlineMenu = NULL;
+  ArrowPopup* layerMenu = NULL;
+  Button* outlineTopLevelItem = NULL;
+  Button* layerDeleteItem = NULL;
+  int menuPage = -1;
+  int menuLayer = -1;
 };

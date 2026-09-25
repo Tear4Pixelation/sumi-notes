@@ -22,6 +22,7 @@ public:
   // restyling moves the theme's own ink, leaves everything else alone, and undoes in one step
   int restyleTest();
   int outlineTest();
+  int outlineNestTest();
   // a locked layer must be immune to selection and to every eraser, and moving an element between
   // layers must undo both the layer and the restacking it caused
   int layerTest();

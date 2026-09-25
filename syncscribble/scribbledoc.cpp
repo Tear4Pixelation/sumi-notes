@@ -1102,6 +1102,118 @@ bool ScribbleDoc::setPageOutline(int pagenum, const char* title, int level)
   return true;
 }
 
+bool ScribbleDoc::nestOutlineEntry(int srcpage, int parentpage)
+{
+  std::vector<OutlineEntry> entries = outline(true);
+  int nentries = int(entries.size());
+  auto indexOf = [&](int pagenum){
+    for(int ii = 0; ii < nentries; ++ii) {
+      if(entries[ii].pagenum == pagenum)
+        return ii;
+    }
+    return -1;
+  };
+  // one past the last entry nested under entries[idx]
+  auto subtreeEnd = [&](int idx){
+    int end = idx + 1;
+    while(end < nentries && entries[end].level > entries[idx].level)
+      ++end;
+    return end;
+  };
+  // the page an entry's section ends at: that of the next entry not nested under it
+  auto sectionEndPage = [&](int idx){
+    int end = subtreeEnd(idx);
+    return end < nentries ? entries[end].pagenum : document->numPages();
+  };
+
+  int src = indexOf(srcpage);
+  if(src < 0)
+    return false;
+  int srcend = subtreeEnd(src);
+  int newlevel, insertat;
+  if(parentpage == OUTLINE_OUTDENT) {
+    // out of its parent, to straight after the parent's section - where dragging it out of a group puts it
+    int parent = src - 1;
+    while(parent >= 0 && entries[parent].level >= entries[src].level)
+      --parent;
+    if(parent < 0)
+      return false;
+    newlevel = entries[parent].level;
+    insertat = sectionEndPage(parent);
+  }
+  else if(parentpage >= 0) {
+    int parent = indexOf(parentpage);
+    if(parent < 0 || (parent >= src && parent < srcend))
+      return false;
+    newlevel = std::min(entries[parent].level + 1, int(Page::MAX_OUTLINE_LEVEL));
+    insertat = sectionEndPage(parent);
+  }
+  else {
+    if(entries[src].level == 0)
+      return false;
+    // After the top-level section it sits in, not where it is: promoted in place, it would adopt every
+    //  sibling that follows it, since nesting is only ever positional.
+    int top = src;
+    while(top > 0 && entries[top].level > 0)
+      --top;
+    newlevel = 0;
+    insertat = sectionEndPage(top);
+  }
+
+  int firstpage = entries[src].pagenum;
+  int npages = sectionEndPage(src) - firstpage;
+  int delta = newlevel - entries[src].level;
+  // insertat == firstpage + npages means the section already ends where it is going
+  bool movepages = insertat < firstpage || insertat > firstpage + npages;
+  if(delta == 0 && !movepages)
+    return false;
+
+  clearSelection();
+  int dest = movepages && insertat > firstpage ? insertat - npages : (movepages ? insertat : firstpage);
+  startAction(std::min(firstpage, dest) | UndoHistory::MULTIPAGE);
+  if(movepages) {
+    // Clones are inserted, never the pages just deleted: PageDeletedItem frees its page when the history
+    //  is discarded, so a page both deleted and re-added would be freed while still in the document.
+    //  This is what cut and paste of pages does too (pastePages).
+    std::vector<Page*> clones;
+    for(int ii = firstpage; ii < firstpage + npages; ++ii) {
+      Page* page = document->pages[ii];
+      page->ensureLoaded();
+      SvgNode* svg = page->svgDoc->clone();
+      if(!svg->hasClass("write-page"))
+        svg->addClass("write-page");
+      Page* clone = new Page;
+      clone->loadSVG(static_cast<SvgDocument*>(svg));
+      clones.push_back(clone);
+    }
+    for(int ii = 0; ii < npages; ++ii)
+      document->deletePage(firstpage);
+    for(int ii = 0; ii < npages; ++ii)
+      document->insertPage(clones[ii], dest + ii);
+  }
+  // Levels are changed after the move, on pages that are in the document: <outlinechanged> names its
+  //  page by its current page number, which a page already deleted no longer has.
+  for(int ii = src; ii < srcend; ++ii) {
+    Page* page = document->pages[entries[ii].pagenum - firstpage + dest];
+    int level = std::min(std::max(0, entries[ii].level + delta), int(Page::MAX_OUTLINE_LEVEL));
+    if(page->outlineLevel == level)
+      continue;
+    if(history->undoable())
+      history->addItem(new PageOutlineItem(page));
+    page->setOutlineEntry(page->outlineTitle.c_str(), level);
+  }
+  endAction();
+
+  if(movepages) {
+    document->bookmarksDirty = true;
+    pageCountChanged(std::min(firstpage, dest), document->numPages());
+    activeArea->gotoPage(dest);
+    uiChanged(UIState::InsertPage);
+  }
+  doRefresh();
+  return true;
+}
+
 void ScribbleDoc::openURL(const char* url)
 {
   // address starting with a '.' (so '.' or '..') is assumed to point to a local file

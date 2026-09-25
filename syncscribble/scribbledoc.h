@@ -47,6 +47,15 @@ public:
   // A NULL or empty title removes the entry.  Returns false if pagenum is out of range or the
   // entry is already exactly this, so a no-op cannot push an empty step onto the undo history.
   bool setPageOutline(int pagenum, const char* title, int level = 0);
+  // Make the entry on page `srcpage`, with everything nested under it, the last child of the entry on
+  // `parentpage` - or, for parentpage < 0, a top-level entry right after the top-level section it is in.
+  // The outline is in page order, so this moves the entry's pages (its own through the page before the
+  // next entry not nested under it) to the end of the new parent's section.  One undo step.  Returns
+  // false if nothing changed or the move is impossible (onto itself or its own descendant).
+  // parentpage == OUTLINE_OUTDENT instead moves it out of its parent: one level up, straight after the
+  // parent's section.
+  bool nestOutlineEntry(int srcpage, int parentpage);
+  static constexpr int OUTLINE_OUTDENT = -2;
   std::vector<OutlineEntry> outline(bool loadpages = true) { return document->outline(loadpages); }
   void bookmarkHit(int pagenum, Element* bookmark);
 

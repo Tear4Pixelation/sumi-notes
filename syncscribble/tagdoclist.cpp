@@ -178,7 +178,35 @@ Widget* TagDocList::createTagRow(const std::string& tagId, int depth)
   SvgGui::setupRightClick(row, [this, tagId, row](SvgGui* gui, Widget* w, Point p){
     showTagMenu(tagId, row);
   });
+  auto key = dragTagKeys.emplace(tagId, int(dragTagIds.size()));
+  if(key.second)
+    dragTagIds.push_back(tagId);
+  tagDrag->addRow(row, key.first->second);
   return row;
+}
+
+bool TagDocList::isTagDescendant(const std::string& tagId, const std::string& ancestorId) const
+{
+  for(const TagNode* node = tagStore.tag(tagId); node && !node->parentId.empty(); node = tagStore.tag(node->parentId)) {
+    if(node->parentId == ancestorId)
+      return true;
+  }
+  return false;
+}
+
+// parentId empty = make it a root tag.  A tag's documents are untouched: they carry the tag's id, and
+//  moving a tag in the tree changes nothing about which documents have it.
+void TagDocList::moveTagUnder(const std::string& tagId, const std::string& parentId, const std::string& afterId)
+{
+  const TagNode* node = tagStore.tag(tagId);
+  if(!node || node->parentId == parentId || tagId == parentId || isTagDescendant(parentId, tagId))
+    return;
+  tagStore.reparentTag(tagId, parentId, afterId);
+  // show the tag where it went rather than folding it away under a collapsed parent
+  if(!parentId.empty())
+    expandedTags.insert(parentId);
+  tagStore.save();
+  rebuildTagTree();
 }
 
 void TagDocList::rebuildTagTree()
@@ -191,6 +219,7 @@ void TagDocList::rebuildTagTree()
   // next show() call reparents it again) instead of destroyed.
   closeAutoClosePopup(tagContextPopup);
   tagContextPopup->removeFromParent();
+  tagDrag->clear();
   if(gui())
     gui()->deleteContents(tagTreeView, ".listitem");
 
@@ -878,6 +907,37 @@ void TagDocList::createUI()
   allDocumentsBtn = static_cast<Button*>(createNavRow("icons/ic_menu_doctext.svg", _("All Documents")));
   allDocumentsBtn->onClicked = [this](){ activeTags.clear(); refresh(); };
   sidebarContent->addWidget(allDocumentsBtn);
+
+  tagDrag.reset(new RowDrag(this));
+  // All Documents stands for "no parent": dropping a subtag there makes it a root tag again
+  tagDrag->setRootTarget(allDocumentsBtn);
+  tagDrag->canDrop = [this](int src, int dst){
+    const std::string& srcId = dragTagIds[src];
+    const TagNode* node = tagStore.tag(srcId);
+    if(!node)
+      return false;
+    if(dst == RowDrag::ROOT)
+      return !node->parentId.empty();
+    const std::string& dstId = dragTagIds[dst];
+    // its own supertag is allowed: that is how a subtag is dragged back out (see onDrop)
+    return dstId != srcId && !isTagDescendant(dstId, srcId);
+  };
+  tagDrag->onDrop = [this](int src, int dst){
+    if(src < 0 || src >= int(dragTagIds.size()) || dst >= int(dragTagIds.size()))
+      return;
+    const TagNode* node = tagStore.tag(dragTagIds[src]);
+    if(!node)
+      return;
+    std::string parentId = dst == RowDrag::ROOT ? std::string() : dragTagIds[dst];
+    std::string afterId;
+    // dropped on its own supertag: out of it, one level up, listed right below the supertag it left
+    if(!parentId.empty() && parentId == node->parentId) {
+      const TagNode* parent = tagStore.tag(parentId);
+      afterId = parentId;
+      parentId = parent ? parent->parentId : std::string();
+    }
+    moveTagUnder(dragTagIds[src], parentId, afterId);
+  };
 
   // no top margin here: allDocumentsBtn's own bottom margin (from createNavRow, matching its top
   // margin) already provides the gap, symmetric with the gap between sep1 and the row above it

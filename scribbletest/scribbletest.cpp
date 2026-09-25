@@ -546,6 +546,97 @@ int ScribbleTest::outlineTest()
   return nbad;
 }
 
+// Dragging an outline entry onto another (Sidebar -> ScribbleDoc::nestOutlineEntry).  Nesting is
+//  positional, so this moves pages; the checks are that each entry ends up at the right page *and*
+//  level, that its whole section (untitled pages included) travels with it, and that it is one undo step.
+int ScribbleTest::outlineNestTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: outline nest: %s\n", what); }
+  };
+  // the outline as "title@page:level ..." - one string to compare, and printed on failure
+  auto shape = [&](){
+    std::string result;
+    for(const OutlineEntry& entry : scribbleDoc->outline())
+      result += fstring("%s@%d:%d ", entry.title.c_str(), entry.pagenum, entry.level);
+    return result;
+  };
+  auto expect = [&](const char* want, const char* what){
+    std::string got = shape();
+    check(got == want, what);
+    if(got != want)
+      printf("  expected '%s'\n  got      '%s'\n", want, got.c_str());
+  };
+
+  scribbleDoc->newDocument();
+  for(int ii = 0; ii < 5; ++ii)
+    scribbleDoc->newPage();  // 6 pages
+  // an untitled page inside a section: pages 2 and 4 carry no entry and must move with theirs.  Their
+  //  width marks them, since a title cannot
+  PageProperties marked = scribbleDoc->document->pages[2]->getProperties();
+  scribbleDoc->startAction(2 | UndoHistory::MULTIPAGE);  // setProperties records an undo item
+  marked.width += 100;
+  scribbleDoc->document->pages[2]->setProperties(&marked);
+  marked.width += 100;
+  scribbleDoc->document->pages[4]->setProperties(&marked);
+  scribbleDoc->endAction();
+  Dim width2 = scribbleDoc->document->pages[2]->width(), width4 = scribbleDoc->document->pages[4]->width();
+  scribbleDoc->setPageOutline(0, "A", 0);
+  scribbleDoc->setPageOutline(1, "A1", 1);
+  scribbleDoc->setPageOutline(3, "B", 0);
+  scribbleDoc->setPageOutline(5, "C", 0);
+  const char* start = "A@0:0 A1@1:1 B@3:0 C@5:0 ";
+  expect(start, "the starting outline");
+
+  // a later entry under an earlier one: C goes to the end of A1's section, i.e. before B
+  check(scribbleDoc->nestOutlineEntry(5, 1), "nesting C under A1 succeeds");
+  expect("A@0:0 A1@1:1 C@3:2 B@4:0 ", "C lands at the end of A1's section, one level below it");
+  check(scribbleDoc->document->numPages() == 6, "a move neither adds nor loses pages");
+  check(scribbleDoc->document->pages[2]->width() == width2, "A1's untitled page stays in A1's section");
+  check(scribbleDoc->document->pages[5]->width() == width4, "B's untitled page stays with B");
+
+  scribbleDoc->doCommand(ID_UNDO);
+  expect(start, "one undo puts the pages and the levels back");
+  check(scribbleDoc->document->pages[4]->width() == width4, "undo puts the untitled page back too");
+  scribbleDoc->doCommand(ID_REDO);
+  expect("A@0:0 A1@1:1 C@3:2 B@4:0 ", "redo moves it again");
+  scribbleDoc->doCommand(ID_UNDO);
+
+  // an earlier entry, with its subtree, under a later one: A's section is pages 0-2
+  check(scribbleDoc->nestOutlineEntry(0, 3), "nesting A under B succeeds");
+  expect("B@0:0 A@2:1 A1@3:2 C@5:0 ", "A and its child move under B and both go one level deeper");
+  check(scribbleDoc->document->pages[1]->width() == width4, "B's own untitled page stays first in its section");
+  check(scribbleDoc->document->pages[4]->width() == width2, "A's untitled page travels with A");
+
+  check(!scribbleDoc->nestOutlineEntry(2, 3), "an entry cannot go under its own child");
+  check(!scribbleDoc->nestOutlineEntry(2, 2), "an entry cannot go under itself");
+  check(!scribbleDoc->nestOutlineEntry(0, -1), "a top-level entry cannot be moved to the top level");
+  expect("B@0:0 A@2:1 A1@3:2 C@5:0 ", "a refused move changes nothing");
+
+  // to the top level: after the top-level section it was in, so it does not adopt what follows it
+  check(scribbleDoc->nestOutlineEntry(2, -1), "moving A to the top level succeeds");
+  expect("B@0:0 A@2:0 A1@3:1 C@5:0 ", "A, already last in B's section, only changes level");
+  scribbleDoc->doCommand(ID_UNDO);
+  scribbleDoc->setPageOutline(1, "B1", 1);  // now A is not last in B's section
+  expect("B@0:0 B1@1:1 A@2:1 A1@3:2 C@5:0 ", "B1 inserted ahead of A, as its sibling");
+  check(scribbleDoc->nestOutlineEntry(1, -1), "moving B1 to the top level succeeds");
+  expect("B@0:0 A@1:1 A1@2:2 B1@4:0 C@5:0 ", "B1 moves past the rest of B's section, keeping A under B");
+
+  // out of its parent (dragging it onto that parent): one level up, straight after the parent's section
+  check(scribbleDoc->nestOutlineEntry(5, 1), "nesting C under A succeeds");
+  expect("B@0:0 A@1:1 A1@2:2 C@4:2 B1@5:0 ", "C is now A's last child, after A1's section");
+  check(scribbleDoc->nestOutlineEntry(2, ScribbleDoc::OUTLINE_OUTDENT), "moving A1 out of A succeeds");
+  expect("B@0:0 A@1:1 C@2:2 A1@3:1 B1@5:0 ", "A1 lands after A's section, as A's sibling, leaving C under A");
+  check(scribbleDoc->document->pages[4]->width() == width2, "A1's untitled page moves out with it");
+  check(!scribbleDoc->nestOutlineEntry(0, ScribbleDoc::OUTLINE_OUTDENT), "a top-level entry has no parent to leave");
+  scribbleDoc->doCommand(ID_UNDO);
+  expect("B@0:0 A@1:1 A1@2:2 C@4:2 B1@5:0 ", "moving out is one undo step");
+
+  scribbleDoc->newDocument();
+  return nbad;
+}
+
 // Phase 5: restyling must move the theme's own ink and nothing else, and must undo in one step.
 // Layers (LAYERS_INVESTIGATION.md).  runLayerTests() in layertest.cpp covers the table's own logic;
 //  everything here needs a document: the lock actually blocking the editing paths, the undo item, the
@@ -1832,6 +1923,7 @@ void ScribbleTest::runAll(bool runsynctest)
   nUnitFailed += themeRoundTripTest();
   nUnitFailed += restyleTest();
   nUnitFailed += outlineTest();
+  nUnitFailed += outlineNestTest();
   nUnitFailed += layerTest();
   nUnitFailed += docStateSyncTest();
   nUnitFailed += curveFitTest();

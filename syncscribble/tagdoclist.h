@@ -6,6 +6,9 @@
 #include "basics.h"
 #include "tagstore.h"
 #include "newdocdialog.h"
+#include "rowdrag.h"
+#include <map>
+#include <memory>
 #include <set>
 
 // Small prompt for naming a new tag or renaming an existing one -- deliberately not NewDocDialog,
@@ -99,6 +102,16 @@ private:
   std::string tagSearchQuery;
   std::string docSearchQuery;
   std::set<std::string> expandedTags;    // supertags currently showing their children
+
+  // Drag a tag row onto another to make it a subtag, or onto All Documents to make it a root tag.
+  //  RowDrag identifies rows by int; a tag's key is its index in dragTagIds, and it keeps that key for
+  //  the life of the window, since the drop is delivered after the event (RowDrag::drop) and a rebuild
+  //  in between must not make a key name a different tag.
+  std::unique_ptr<RowDrag> tagDrag;
+  std::vector<std::string> dragTagIds;
+  std::map<std::string, int> dragTagKeys;
+  void moveTagUnder(const std::string& tagId, const std::string& parentId, const std::string& afterId = "");
+  bool isTagDescendant(const std::string& tagId, const std::string& ancestorId) const;
 
   // Undo for the last tag deletion (see tagstore.h's restoreTag()/reparentTag() for how the tree
   // itself is put back); nothing about documents' own tag lists needs undoing since deleteTag()

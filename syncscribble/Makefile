@@ -35,6 +35,7 @@ SOURCES = \
   tagdoclist.cpp \
   doclibrary.cpp \
   sidebar.cpp \
+  rowdrag.cpp \
   rulingdialog.cpp \
   themedialog.cpp \
   cover.cpp \

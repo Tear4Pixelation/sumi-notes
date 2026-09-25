@@ -104,17 +104,22 @@ void TagStore::restoreTag(const TagNode& node)
     tags[restored.parentId].childIds.push_back(restored.id);
 }
 
-void TagStore::reparentTag(const std::string& id, const std::string& newParentId)
+void TagStore::reparentTag(const std::string& id, const std::string& newParentId, const std::string& afterId)
 {
   auto it = tags.find(id);
   if(it == tags.end())
     return;
   unlinkFromParent(it->second);
   it->second.parentId = newParentId;
+  std::vector<std::string>* siblings = NULL;
   if(newParentId.empty())
-    rootIds.push_back(id);
+    siblings = &rootIds;
   else if(tags.count(newParentId))
-    tags[newParentId].childIds.push_back(id);
+    siblings = &tags[newParentId].childIds;
+  if(!siblings)
+    return;
+  auto after = std::find(siblings->begin(), siblings->end(), afterId);
+  siblings->insert(after == siblings->end() ? siblings->end() : after + 1, id);
 }
 
 void TagStore::setDocTags(const std::string& relPath, time_t mtime, const std::vector<std::string>& tagIds)

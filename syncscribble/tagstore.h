@@ -50,8 +50,9 @@ public:
   // like addTag() does for a brand new tag) and replays them here to put the tree back.
   void restoreTag(const TagNode& node);
   // Moves an existing tag to a different parent, used by undo to put reparented children back under
-  // the tag that was deleted (and restored) around them.
-  void reparentTag(const std::string& id, const std::string& newParentId);
+  // the tag that was deleted (and restored) around them, and by dragging tags.  It goes right after
+  // `afterId` among its new siblings if that is one of them, else last.
+  void reparentTag(const std::string& id, const std::string& newParentId, const std::string& afterId = "");
 
   // Per-document tag cache, keyed by path relative to the index file's own directory.
   void setDocTags(const std::string& relPath, time_t mtime, const std::vector<std::string>& tagIds);
