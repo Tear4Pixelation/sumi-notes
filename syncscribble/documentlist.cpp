@@ -907,7 +907,7 @@ bool DocumentList::convertDocuments(FSPath src)
   FSPath dest = src.parent().child(src.baseName() + "_converted/");
 
   auto confirm = ScribbleApp::messageBox(ScribbleApp::Info, _("Convert Documents"), fstring(
-      _("Write documents in this folder will be converted to %s format (the default set in Preferences) in folder \"%s\""),
+      _("Kaku documents in this folder will be converted to %s format (the default set in Preferences) in folder \"%s\""),
       docFileExt.c_str(), dest.baseName().c_str()), {_("Convert"), _("Cancel")});
   if(confirm != _("Convert"))
     return false;

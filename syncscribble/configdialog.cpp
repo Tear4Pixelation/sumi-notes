@@ -203,7 +203,7 @@ void ConfigDialog::init()
         allprops.push_back(appresetbtn);
         appresetbtn->node->addClass(pref.attribute("level").as_int(0) ? "basic" : "advanced");
       }
-      else if(n == "About Write") {
+      else if(n == "About Kaku") {
         // add a couple items that would otherwise be on the Help menu
         Widget* helpbtns = createRow({}, "5 0", "space-between");
         helpbtns->node->addClass("button-container");
@@ -216,7 +216,7 @@ void ConfigDialog::init()
         helpbtn->onClicked = [mw, this](){ mw->openHelp(); finish(CANCELLED); };
         helpbtns->addWidget(helpbtn);
 #endif
-        Button* aboutbtn = createPushbutton(_("About Write"));
+        Button* aboutbtn = createPushbutton(_("About Kaku"));
         aboutbtn->onClicked = [mw](){ mw->about(); };
         helpbtns->addWidget(aboutbtn);
         propGroups[group]->addWidget(helpbtns);

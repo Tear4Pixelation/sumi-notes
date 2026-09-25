@@ -89,7 +89,7 @@
   <string name="pref_smoothing">Smoothing</string>
   <string name="pref_simplification">Simplification</string>
   <string name="pref_uisection">User Interface</string>
-  <string name="pref_changesrestart">Changes may not take effect until Write is restarted.</string>
+  <string name="pref_changesrestart">Changes may not take effect until Kaku is restarted.</string>
   <string name="pref_returnprevtool">Return to previous tool</string>
   <string name="pref_popupseltools">Popup selection tools</string>
   <string name="pref_hidescroller">Hide scroll handle</string>
@@ -123,7 +123,7 @@
   <string name="pref_gpurender">GPU rendering (reopen)</string>
 
   <string name="conv_convert">Convert</string>
-  <string name="conv_convertprompt">Write documents in this folder will be converted to %s format (the default set in Preferences) in folder "%s"</string>
+  <string name="conv_convertprompt">Kaku documents in this folder will be converted to %s format (the default set in Preferences) in folder "%s"</string>
   <string name="conv_converting2">Converting...</string>
   <string name="conv_convertingprog">Converting Documents: %d%%</string>
   <string name="conv_convertingname">Converting %s</string>
@@ -247,7 +247,7 @@
 
 
   <!-- old translations -->
-  <string name="app_name">Write</string>
+  <string name="app_name">Kaku</string>
   <string name="no_notes">No Documents Yet</string>
   <string name="menu_viewasgrid">View as Grid</string>
   <string name="menu_viewaslist">View as List</string>
@@ -384,7 +384,7 @@
 
     <!-- About dialog -->
   <string name="about_title">About</string>
-  <string name="about_summary">About Write</string>
+  <string name="about_summary">About Kaku</string>
   <string name="about_text">Created by: Stylus Labs\nWeb: http://www.styluslabs.com\nEmail: support@styluslabs.com\n\nWrite is a word processor for handwriting.\nAlso available for Windows tablet PCs.</string>
 
 </resources>

@@ -111,7 +111,7 @@ void ScribbleArea::loadConfig(ScribbleConfig* _cfg)
     wmpaint.rotate(-45*M_PI/180.0);
     for(Dim y = 0; y < h + w; y += 40) {
       for(Dim x = 0; x < 2*y && x < 1.414*w; x += 400)
-        wmpaint.drawText(x - y + 20, y, "Stylus Labs Write");
+        wmpaint.drawText(x - y + 20, y, "Kaku");
     }
     wmpaint.endFrame();
     // fill + stroke w/ alpha < 1 doesn't give desired effect...

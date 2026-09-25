@@ -37,7 +37,7 @@ int PdfImport::pageCount(const char*, const char*) { return -1; }
 int PdfImport::importPdf(Document*, const char*, const Options&, std::string* errorOut)
 {
   if(errorOut)
-    *errorOut = _("This build of Write does not include PDF support.");
+    *errorOut = _("This build of Kaku does not include PDF support.");
   return -1;
 }
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """PreToolUse guard: keep agent app launches off the user's real display.
 
-Write is a GUI app. Launching it directly puts a window on the user's session
+Kaku is a GUI app. Launching it directly puts a window on the user's session
 and steals focus. Everything must go through tools/agent-display.sh, which runs
 it in a nested/headless cage compositor. CLAUDE.md says so, but an instruction
 is only an instruction - this makes it actually hold.
@@ -14,8 +14,8 @@ import json
 import re
 import sys
 
-# ./Release/Write, syncscribble/Debug/Write, absolute paths, with or without args.
-LAUNCH = re.compile(r"(?:^|[\s;&|(`])[^\s;&|]*(?:Release|Debug)/Write\b")
+# ./Release/Kaku, syncscribble/Debug/Kaku (or a leftover Write build), absolute paths, with or without args.
+LAUNCH = re.compile(r"(?:^|[\s;&|(`])[^\s;&|]*(?:Release|Debug)/(?:Kaku|Write)\b")
 # Anything routed through the wrapper is fine, as is merely talking about the
 # path (grep, ls, test -x, rm) rather than executing it.
 ALLOWED = re.compile(
@@ -41,12 +41,12 @@ def main() -> int:
         return 0
 
     reason = (
-        "Launching Write directly would open a window on the user's own niri "
+        "Launching Kaku directly would open a window on the user's own niri "
         "session and steal focus. Use the isolated compositor instead:\n"
         "  tools/agent-display.sh run          # headless cage session\n"
         "  tools/agent-display.sh shot out.png # look at it\n"
         "  tools/agent-display.sh click X Y | type TEXT | key ctrl+s\n"
-        "  tools/agent-display.sh test         # ./Debug/Write --test\n"
+        "  tools/agent-display.sh test         # ./Debug/Kaku --test\n"
         "  tools/agent-display.sh stop\n"
         "If the user explicitly asked for a visible window, add --windowed."
     )

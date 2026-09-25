@@ -41,7 +41,7 @@ Uint32 ScribbleApp::scribbleSDLEvent = 0;
 ScribbleApp::ScribbleApp(int argc, char* argv[])
 {
   // print the current version to aid investigating errors reported by users
-  PLATFORM_LOG("Write r" PPVALUE_TO_STRING(SCRIBBLE_REV_NUMBER) "\n");
+  PLATFORM_LOG("Kaku r" PPVALUE_TO_STRING(SCRIBBLE_REV_NUMBER) "\n");
   // seed RNG (only applies to this thread)
   srandpp(mSecSinceEpoch());
   srand(randpp());
@@ -235,7 +235,7 @@ void ScribbleApp::init()
   fileExt = cfg->String("docFileExt");
   //nameFilter = "Write Document (*" + fileExt + ")";
   // user agent string for http requests
-  httpUserAgent = std::string("Mozilla/5.0 (") + PLATFORM_NAME + ") Write r" + PPVALUE_TO_STRING(SCRIBBLE_REV_NUMBER);
+  httpUserAgent = std::string("Mozilla/5.0 (") + PLATFORM_NAME + ") Kaku r" + PPVALUE_TO_STRING(SCRIBBLE_REV_NUMBER);
 
   /// UI creation
 
@@ -684,7 +684,7 @@ bool ScribbleApp::sdlEventHandler(SDL_Event* event)
       if(cfg->Int("strokeCounter") > 10000 && cfg->Int("lastReviewPrompt") == 0) {
         cfg->set("lastReviewPrompt", int(mSecSinceEpoch()/1000));
         auto choice = messageBox(Question, _("Leave a review?"),
-            _("You can support the development of Write by leaving a review."), {_("OK"), _("Cancel")});
+            _("You can support the development of Kaku by leaving a review."), {_("OK"), _("Cancel")});
         if(choice == _("OK"))
           openURL("http://play.google.com/store/apps/details?id=com.styluslabs.writeqt");
       }
@@ -948,7 +948,7 @@ bool ScribbleApp::requestAndroidPermission()
   if(hasAndroidPermission())
     return false;  // already has permission
   auto choice = messageBox(Question, _("Storage Access"),
-      _("To open documents in shared folders, enable storage access for Write."), {_("OK"), _("Cancel")});
+      _("To open documents in shared folders, enable storage access for Kaku."), {_("OK"), _("Cancel")});
   if(choice != _("OK"))
     return false;
   AndroidHelper::doAction(A_REQ_PERM);
@@ -1034,7 +1034,7 @@ void ScribbleApp::dropEvent(SDL_Event* event)
           docstrm->uiDocument = NULL;
           if(doc->openDocument(strm) == Document::LOAD_OK)
             messageBox(Info, _("Document reloaded"),
-                fstring(_("%s has been reloaded due to modification outside of Write."),
+                fstring(_("%s has been reloaded due to modification outside of Kaku."),
                 docShortName(strm->name()).c_str()));
         }
         break;
@@ -1609,7 +1609,7 @@ std::string ScribbleApp::docShortName(const std::string& filename, int maxwidth)
 void ScribbleApp::setWinTitle(const std::string& filename)
 {
   const char* winTitle =
-      SCRIBBLE_DEBUG ? (" - Write (r" PPVALUE_TO_STRING(SCRIBBLE_REV_NUMBER) ")") : " - Stylus Labs Write";
+      SCRIBBLE_DEBUG ? (" - Kaku (r" PPVALUE_TO_STRING(SCRIBBLE_REV_NUMBER) ")") : " - Kaku";
   win->setTitle((docDisplayName(filename) + winTitle).c_str());
   win->titleStr = docShortName(filename);  // storage for full title string, since button text may be elided
   win->titleButton->setText(win->titleStr.c_str());
@@ -1789,7 +1789,7 @@ bool ScribbleApp::doOpenDocument(IOStream* filestrm)
     onLoadFile(activeDoc()->fileName());
     if(res == Document::LOAD_NEWERVERSION) {
       messageBox(Warning, _("Newer document"), _("This document was created with a more recent"
-          " version of Write. Saving with this version may result in data loss."));
+          " version of Kaku. Saving with this version may result in data loss."));
     }
     else if(res == Document::LOAD_NONWRITE) {
       return openExternalDoc();
@@ -1815,8 +1815,8 @@ bool ScribbleApp::doOpenDocument(IOStream* filestrm)
 // handle opening external SVG (vs. importExternalDoc, which handles loading external doc to Clipboard)
 bool ScribbleApp::openExternalDoc()
 {
-  auto choice = messageBox(Warning, _("Foreign document"), _("This file does not appear to be a Write document."
-      "  Saving with Write could result in data loss - you will be prompted to save a copy."),
+  auto choice = messageBox(Warning, _("Foreign document"), _("This file does not appear to be a Kaku document."
+      "  Saving with Kaku could result in data loss - you will be prompted to save a copy."),
       {_("Use as background"), _("Ungroup all"), _("No change")});
   if(choice == _("Ungroup all")) {
     for(Page* page : activeDoc()->document->pages) {
@@ -1914,7 +1914,7 @@ bool ScribbleApp::checkExtModified(ScribbleDoc* doc)
       // don't bother displaying message if doc list is on top
       if(documentList == NULL || !documentList->isVisible()) {
         messageBox(Info, _("Document reloaded"),
-            fstring(_("%s has been reloaded due to modification outside of Write."), docShortName(filename).c_str()));
+            fstring(_("%s has been reloaded due to modification outside of Kaku."), docShortName(filename).c_str()));
       }
       return true;
     }
@@ -1923,14 +1923,14 @@ bool ScribbleApp::checkExtModified(ScribbleDoc* doc)
   // if we can't display a message box, just save to new file
   if(QGuiApplication::applicationState() == Qt::ApplicationSuspended) {
     doSaveAs();
-    QMessageBox::information(this, "Stylus Labs Write",
-        "Document was saved to new file because original was modified outside Write.");
+    QMessageBox::information(this, "Kaku",
+        "Document was saved to new file because original was modified outside Kaku.");
     return true;
   }
 #endif
   // the bad case: conflict between local and disk versions
   auto choice = messageBox(Warning, _("Save conflict"),
-      fstring(_("%s has been modified outside Write.\nWhat would you like to do?"), docDisplayName(filename).c_str()),
+      fstring(_("%s has been modified outside Kaku.\nWhat would you like to do?"), docDisplayName(filename).c_str()),
       {_("Keep Both"), _("Discard Other"), _("Discard Current")});
   if(choice == _("Discard Other") && doc->saveDocument(filename.c_str())) {}
   else if(choice == _("Discard Current") && doc->openDocument(filename.c_str()) == Document::LOAD_OK) {}
@@ -2087,7 +2087,7 @@ void ScribbleApp::openRecentFile(const std::string& filename)
 void ScribbleApp::importPDF()
 {
   if(!PdfImport::isAvailable()) {
-    messageBox(Warning, _("Import PDF"), _("This build of Write does not include PDF support."));
+    messageBox(Warning, _("Import PDF"), _("This build of Kaku does not include PDF support."));
     return;
   }
   if(!maybeSave())
@@ -2421,14 +2421,16 @@ void ScribbleApp::about()
   static const int maint = ver % 100;
   static const int minor = (ver/100) % 100;
   static const int major = (ver/10000) % 100;
-  messageBox(Info, _("About Write"),
-      //fstring("Write v%d.%d.%d\nBuild ID: ", major, minor, maint) + PPVALUE_TO_STRING(SCRIBBLE_REV_NUMBER)
-      fstring("Write %d\nBuild ID: ", major) + PPVALUE_TO_STRING(SCRIBBLE_REV_NUMBER)
+  // Kaku is a modified version of Write; the AGPL (section 5) requires saying so and keeping the credit
+  messageBox(Info, _("About Kaku"),
+      //fstring("Kaku v%d.%d.%d\nBuild ID: ", major, minor, maint) + PPVALUE_TO_STRING(SCRIBBLE_REV_NUMBER)
+      fstring("Kaku %d\nBuild ID: ", major) + PPVALUE_TO_STRING(SCRIBBLE_REV_NUMBER)
       + "; " + __DATE__ + (IS_DEBUG ? " DEBUG" : "") +
-      "\nCreated by: Stylus Labs\nhttp://www.styluslabs.com"
-      "\nsupport@styluslabs.com\n\nWrite is a word processor for handwriting."
+      "\nBased on Write by Stylus Labs\nhttp://www.styluslabs.com"
+      "\nFree software under the GNU Affero General Public License v3"
+      "\n\nKaku is a word processor for handwriting."
 #if PLATFORM_IOS
-      "\nPrivacy: Write does not collect any personal data."
+      "\nPrivacy: Kaku does not collect any personal data."
 #else
       "\nAvailable for iOS, Android, Windows, Mac, and Linux."
 #endif
@@ -2567,11 +2569,11 @@ void ScribbleApp::updateInfoReceived(char* updateData)
     cfg->set("lastUpdateCheck", int(mSecSinceEpoch()/1000));
     // see if a new version is available
     if(node.child("sl:version").text().as_int(0) <= SCRIBBLE_VERSION_SERIAL)
-      updateNotify(_("You have the latest version of Write."), 0);
+      updateNotify(_("You have the latest version of Kaku."), 0);
     else {
       // no automatic update for now - just prompt to go to download page
-      auto choice = messageBox(Question, _("Write Update"),
-          _("A new version of Write is available.  Would you like to open the download page?"), {_("Yes"), _("No")});
+      auto choice = messageBox(Question, _("Kaku Update"),
+          _("A new version of Kaku is available.  Would you like to open the download page?"), {_("Yes"), _("No")});
       if(choice == _("Yes"))
         openURL("http://www.styluslabs.com/download/");
     }
@@ -2936,7 +2938,7 @@ void MainWindow::updateDownloaded()
     QFile file(updaterpath);
     if(!file.open(QIODevice::WriteOnly)) {
       updateNotify("Error saving update installer to " + updaterpath
-            + ". You may need to run Write as an administrator to perform update.");
+            + ". You may need to run Kaku as an administrator to perform update.");
       goto cleanup;
     }
     file.write(reply->readAll());
@@ -2946,7 +2948,7 @@ void MainWindow::updateDownloaded()
     // ask user if they want to install update
     pugi::xml_node node = updateInfo.child("rss").child("channel").child("item");
     QMessageBox msgbox(QMessageBox::Question, tr("Update Available"),
-        tr("A new version of Write is available, would you like to update now?\n\n")
+        tr("A new version of Kaku is available, would you like to update now?\n\n")
         + node.child_value("description"));
     QPushButton* updatebtn = msgbox.addButton(tr("Update Now"), QMessageBox::AcceptRole);
     msgbox.addButton(tr("Skip Update"), QMessageBox::RejectRole);

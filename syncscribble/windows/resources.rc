@@ -13,12 +13,12 @@ BEGIN
         BLOCK "040904E4"
         BEGIN
             VALUE "CompanyName",        "Stylus Labs"
-            VALUE "FileDescription",    "Write"
+            VALUE "FileDescription",    "Kaku"
             VALUE "FileVersion",        VERSIONSTR
-            VALUE "InternalName",       "Write"
+            VALUE "InternalName",       "Kaku"
             VALUE "LegalCopyright",     "Copyright 2020 Stylus Labs"
             VALUE "OriginalFilename",   "write.exe"
-            VALUE "ProductName",        "Write"
+            VALUE "ProductName",        "Kaku"
             VALUE "ProductVersion",     VERSIONSTR
         END
     END

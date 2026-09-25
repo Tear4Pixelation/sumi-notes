@@ -1,11 +1,11 @@
-# cross-platform C/C++ makefile for Write
+# cross-platform C/C++ makefile for Kaku
 # - platform-specific, project-independent stuff moved to Makefile.msvc, .ios, .unix
 # - generates files in ./Release (default) or ./Debug (with DEBUG=1 passed to make)
 # - while it is tempting to try to move generic code to a shared file, the complete make file
 #   is part of a project and should be included with it
 # useful ref: https://www.gnu.org/software/make/manual/html_node/Quick-Reference.html
 
-TARGET = Write
+TARGET = Kaku
 # build application.cpp first since that contains impl. for single header libraries
 SOURCES = \
   application.cpp \
@@ -146,9 +146,9 @@ LIBS += $(SDL_LIB)
 FORCECPP = ../layout/layout.obj
 
 # distribution package
-MSIFILE = write-$(GITREV).msi
-ZIPFILE = write-$(GITREV).zip
-ZIPDIR = Write
+MSIFILE = kaku-$(GITREV).msi
+ZIPFILE = kaku-$(GITREV).zip
+ZIPDIR = Kaku
 DISTRES = \
   ..\scribbleres\fonts\Roboto-Regular.ttf \
   ..\scribbleres\fonts\DroidSansFallback.ttf \
@@ -161,7 +161,7 @@ include Makefile.msvc
 else ifneq ($(MACOS),)
 # pass MACOS=1 to make to force macOS build (instead of default of iOS on mac)
 
-APPDIR = Write.app
+APPDIR = Kaku.app
 SOURCES += macos/macoshelper.m ../nanovgXC/glad/glad.c
 INCSYS += ../SDL/include
 DEFS += SCRIBBLE_TEST_PATH='"$(CURDIR)/../scribbletest"'
@@ -202,7 +202,7 @@ PLISTENV = CURRENT_PROJECT_VERSION=1.5 MARKETING_VERSION=1.5
 
 DIST ?= 0
 ifeq ($(DIST), 0)
-  APPDIR = Write.app
+  APPDIR = Kaku.app
   PROVISIONING_PROFILE = /Users/mwhite/Documents/mwhite_iOS_Dev_2024.mobileprovision
   XCENT = ios/Dev.app.xcent
   CODESIGN = /usr/bin/codesign --force --sign 9E6635D070FC516CD66467812DDFA3CFDD010E3D --timestamp=none
@@ -210,7 +210,7 @@ else
   ifneq ($(DEBUG), 0)
     $(error DIST build requires DEBUG=0)
   endif
-  APPDIR = Payload/Write.app
+  APPDIR = Payload/Kaku.app
   ifeq ("$(DIST)", "appstore")
     PROVISIONING_PROFILE = /Users/mwhite/Documents/Stylus_Labs_App_Store_2024.mobileprovision
     XCENT = ios/AppStore.app.xcent
@@ -320,8 +320,8 @@ DISTRES = \
   ../scribbleres/fonts/Roboto-Regular.ttf \
   ../scribbleres/fonts/DroidSansFallback.ttf \
   ../scribbleres/Intro.svg \
-  ../scribbleres/linux/Write.desktop \
-  ../scribbleres/linux/Write144x144.png \
+  ../scribbleres/linux/Kaku.desktop \
+  ../scribbleres/linux/Kaku144x144.png \
   ../scribbleres/linux/setup.sh \
   ../scribbleres/linux/INSTALL
 

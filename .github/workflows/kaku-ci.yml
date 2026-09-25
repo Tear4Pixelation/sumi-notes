@@ -1,4 +1,4 @@
-name: Write CI
+name: Kaku CI
 
 on:
   push:
@@ -38,7 +38,7 @@ jobs:
     # test doesn't work because SDL init fails due to no video device
     #- run: make DEBUG=1 SANITIZE=0 USE_SYSTEM_SDL=0
     #  working-directory: syncscribble
-    #- run: ./Debug/Write --glRender=0 --test
+    #- run: ./Debug/Kaku --glRender=0 --test
     #  working-directory: syncscribble
     - run: make DEBUG=0 USE_SYSTEM_SDL=0 real_tgz
       working-directory: Write/syncscribble
@@ -73,7 +73,7 @@ jobs:
       run: |
         git switch write-win
         ..\..\make.exe -f ..\scribbleres\SDL-Makefile.msvc SHELL=cmd.exe
-    - name: Build Write
+    - name: Build Kaku
       shell: cmd
       working-directory: Write/syncscribble
       run: ..\..\make.exe SHELL=cmd.exe DEBUG=0 zip

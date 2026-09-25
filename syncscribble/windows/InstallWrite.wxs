@@ -1,17 +1,17 @@
 <?xml version="1.0"?>
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
 <Product Id="*" UpgradeCode="44B96A92-2120-4254-9F21-5813284F53E9"
-    Name="Write" Version="$(var.ProductVersion)" Manufacturer="Stylus Labs" Language="1033">
+    Name="Kaku" Version="$(var.ProductVersion)" Manufacturer="Stylus Labs" Language="1033">
   <Package InstallerVersion="200" Compressed="yes" Comments="Windows Installer Package"/>
   <Media Id="1" Cabinet="product.cab" EmbedCab="yes"/>
   <MajorUpgrade AllowDowngrades="no" AllowSameVersionUpgrades="yes"
-      DowngradeErrorMessage="A newer version of Write is already installed." />
+      DowngradeErrorMessage="A newer version of Kaku is already installed." />
 
   <Directory Id="TARGETDIR" Name="SourceDir">
     <Directory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLPRODUCTDIR" Name="Stylus Labs">
         <Component Id="Write_exe" Guid="*">
-         <File Id="Write_exe_File" Source="Write.exe"/>
+         <File Id="Write_exe_File" Source="Kaku.exe"/>
          <RemoveFile Id='RmConfigFile_File' On='uninstall' Name='write.xml'/>
         </Component>
         <Component Id="Intro_svg" Guid="*">
@@ -29,8 +29,8 @@
     <Directory Id="ProgramMenuFolder">
       <Directory Id="ProgramMenuSubfolder" Name="Stylus Labs">
         <Component Id="ApplicationShortcuts" Guid="*">
-         <Shortcut Id="ApplicationShortcut1" Name="Write" Description="Stylus Labs Write"
-              Target="[INSTALLPRODUCTDIR]Write.exe" WorkingDirectory="INSTALLPRODUCTDIR"/>
+         <Shortcut Id="ApplicationShortcut1" Name="Kaku" Description="Kaku"
+              Target="[INSTALLPRODUCTDIR]Kaku.exe" WorkingDirectory="INSTALLPRODUCTDIR"/>
          <RegistryValue Root="HKCU" Key="Software\Stylus Labs\Write"
               Name="installed" Type="integer" Value="1" KeyPath="yes"/>
          <RemoveFolder Id="ProgramMenuSubfolder" On="uninstall"/>
