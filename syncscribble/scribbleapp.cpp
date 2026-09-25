@@ -1342,6 +1342,84 @@ void ScribbleApp::getScreenPageDims(int* w, int* h)
   *h = 2*int((std::max(r.w, r.h)*ScribbleView::unitsPerPx - 24)/2);
 }
 
+// the choices for the default size of new pages; paper sizes are Page Setup's own (RulingDialog::predefSizes)
+std::vector<ScribbleApp::PageSizePreset> ScribbleApp::pageSizePresets()
+{
+  int screenw, screenh;
+  getScreenPageDims(&screenw, &screenh);
+  auto paper = [](const char* title, int index) {
+    return PageSizePreset{title, RulingDialog::predefSizes[index][0], RulingDialog::predefSizes[index][1]};
+  };
+  return {paper(_("A4"), 5), paper(_("A4 (landscape)"), 6), paper(_("Letter"), 3), paper(_("Letter (landscape)"), 4),
+      {_("Screen"), screenw, screenh}, {_("Screen (landscape)"), screenh, screenw}};
+}
+
+// Letter is the paper of the Americas (and the Philippines); everywhere else it is A4
+static bool regionUsesLetter(const char* region, size_t len)
+{
+  static const char* letterRegions[] = {"US", "CA", "MX", "PH", "CL", "CO", "VE", "CR", "GT", "SV", "PR", "PA",
+      "DO", "NI", "BZ"};
+  if(len != 2)
+    return false;
+  for(const char* letterRegion : letterRegions) {
+    if(strncmp(region, letterRegion, 2) == 0)
+      return true;
+  }
+  return false;
+}
+
+// Only a hint for which answer to offer first, so an unknown locale simply means A4.  The POSIX variables
+//  come first, in their order of precedence - LC_PAPER is the setting for exactly this question.  SDL's
+//  locale API covers Windows and Android, but the Windows and macOS SDL branches predate it.
+bool ScribbleApp::localeUsesLetter()
+{
+  for(const char* var : {"LC_ALL", "LC_PAPER", "LANG"}) {
+    const char* locale = getenv(var);
+    if(!locale || !locale[0])
+      continue;
+    // ll_CC[.encoding][@modifier]; "C" and "POSIX" name no region
+    const char* region = strchr(locale, '_');
+    if(!region)
+      return false;
+    ++region;
+    return regionUsesLetter(region, strcspn(region, ".@"));
+  }
+#if SDL_VERSION_ATLEAST(2, 0, 14)
+  SDL_Locale* locales = SDL_GetPreferredLocales();
+  bool letter = locales && locales[0].language && locales[0].country
+      && regionUsesLetter(locales[0].country, strlen(locales[0].country));
+  SDL_free(locales);
+  return letter;
+#else
+  return false;
+#endif
+}
+
+// Once, on first start (or the first start of a build that has this).  The default used to be the screen
+//  turned on its side, which on a 16:9 monitor is a 0.56 strip narrower than any paper - and since pages
+//  grow as they are written on, the width, i.e. the shape, is all a default size really decides.
+void ScribbleApp::askDefaultPageSize()
+{
+  if(cfg->Bool("pageSizeAsked"))
+    return;
+  cfg->set("pageSizeAsked", true);
+  bool letterFirst = localeUsesLetter();
+  std::string a4 = _("A4 (210 × 297 mm)"), letter = _("Letter (8.5 × 11 in)");
+  std::vector<std::string> buttons = letterFirst ? std::vector<std::string>{letter, a4} : std::vector<std::string>{a4, letter};
+  std::string choice = messageBox(Question, _("Page size"),
+      _("Which paper size should new pages use?\n\nThis can be changed later under Preferences > General."), buttons);
+  // dismissed without an answer: the size the locale suggests is still better than the screen's
+  bool useLetter = choice == letter || (choice != a4 && letterFirst);
+  int preset = useLetter ? 3 : 5;
+  cfg->set("pageWidth", Dim(RulingDialog::predefSizes[preset][0]));
+  cfg->set("pageHeight", Dim(RulingDialog::predefSizes[preset][1]));
+  // the startup document was created before the question, so its first page still has the old size
+  if(!activeDoc()->fileName()[0] && !activeDoc()->isModified())
+    activeDoc()->newDocument();
+  else
+    activeDoc()->updateGhostPage();
+}
+
 void ScribbleApp::refreshUI(ScribbleDoc* doc, int reason)
 {
   win->refreshUI(doc, reason);

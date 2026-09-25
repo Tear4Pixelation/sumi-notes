@@ -195,6 +195,9 @@ public:
       MessageType type, std::string title, std::string message, std::vector<std::string> buttons = {"OK"});
   static Dim getPreScale();
   static void getScreenPageDims(int* w, int* h);
+  struct PageSizePreset { std::string title; int width, height; };
+  static std::vector<PageSizePreset> pageSizePresets();
+  static bool localeUsesLetter();
   static bool openURL(const char* url);
 #if PLATFORM_ANDROID
   static bool hasAndroidPermission();

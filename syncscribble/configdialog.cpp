@@ -91,6 +91,26 @@ void ConfigDialog::init()
       e->setText(cfg->String(name));
       p = e;
     }
+    else if(type == "pagesize") {
+      // a size set some other way (Page Setup's "Global default", or an old screen-derived default) is
+      //  shown as Custom, so opening and OKing the dialog cannot silently replace it
+      pageSizes = ScribbleApp::pageSizePresets();
+      int currw = int(cfg->Float("pageWidth") + 0.5f), currh = int(cfg->Float("pageHeight") + 0.5f);
+      int currIndex = -1;
+      std::vector<std::string> titles;
+      for(size_t ii = 0; ii < pageSizes.size(); ++ii) {
+        titles.push_back(pageSizes[ii].title);
+        if(currIndex < 0 && std::abs(pageSizes[ii].width - currw) <= 1 && std::abs(pageSizes[ii].height - currh) <= 1)
+          currIndex = int(ii);
+      }
+      if(currIndex < 0) {
+        currIndex = int(titles.size());
+        titles.push_back(fstring(_("Custom (%d × %d)"), currw, currh));
+      }
+      pageSizeCombo = createComboBox(titles);
+      pageSizeCombo->setIndex(currIndex);
+      p = pageSizeCombo;
+    }
     else if(type == "label" || type == "button") {
       p = NULL;
     }
@@ -265,7 +285,14 @@ void ConfigDialog::accept()
     Widget* p = allprops[ii];
     const char* name = p->node->getStringAttr("__prefname", NULL);
     if(!name) continue;
-    if(p->node->hasClass("checkbox") && cfg->isInt(name)) {
+    if(p == pageSizeCombo) {
+      int index = pageSizeCombo->index();
+      if(index >= 0 && index < int(pageSizes.size())) {  // past the presets is Custom: leave it alone
+        cfg->set("pageWidth", Dim(pageSizes[index].width));
+        cfg->set("pageHeight", Dim(pageSizes[index].height));
+      }
+    }
+    else if(p->node->hasClass("checkbox") && cfg->isInt(name)) {
       // don't write bool unless changed - for bool prefs that support additional values (e.g. =2 to force)
       if(static_cast<CheckBox*>(p)->isChecked() != cfg->Bool(name))
         cfg->set(name, static_cast<CheckBox*>(p)->isChecked());
