@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# agent-display.sh - run Write in an isolated compositor so an agent can drive it
+# agent-display.sh - run Kaku in an isolated compositor so an agent can drive it
 # without touching the user's real session.
 #
 # Two separate isolated displays are involved, and which one a command uses is
@@ -12,20 +12,20 @@
 # session. Do NOT replace either with ydotool/dotool: those inject through kernel
 # uinput, which is seat-global, and would land in the user's windows instead.
 #
-# Keyboard goes through Xwayland because Write is an X11 client here - SDL's
+# Keyboard goes through Xwayland because Kaku is an X11 client here - SDL's
 # Wayland video driver segfaults it (verified: exit 139), so SDL falls back to
 # x11, and wtype's virtual-keyboard keymap does not survive the Xwayland
 # translation. xdotool talks to cage's own X server and does work.
 #
 # Usage:
 #   agent-display.sh run [--windowed] [--debug] [-- <app args>]
-#   agent-display.sh test                 # ./Debug/Write --test
+#   agent-display.sh test                 # ./Debug/Kaku --test
 #   agent-display.sh shot [out.png]
 #   agent-display.sh click <x> <y> [left|right|middle]
 #   agent-display.sh move <x> <y>
-#   agent-display.sh drag <x1> <y1> <x2> <y2>
+#   agent-display.sh drag <x1> <y1> <x2> <y2> [<steps>] [left|right|middle]
 #   agent-display.sh stroke <x1> <y1> <x2> <y2> [<x3> <y3> ...]
-#   agent-display.sh scroll <dy> [<dx>]
+#   agent-display.sh scroll [<x> <y>] <dy> [<dx>]   (wheel notches)
 #   agent-display.sh type <text>
 #   agent-display.sh key <keyname>        # e.g. ctrl+z, Escape, Return
 #   agent-display.sh record start|stop [out.mp4]
@@ -42,6 +42,7 @@ DISPLAY_FILE="$RUNDIR/wayland-display"
 XDISPLAY_FILE="$RUNDIR/x-display"
 PID_FILE="$RUNDIR/compositor.pid"
 REC_PID_FILE="$RUNDIR/recorder.pid"
+APP_PID_FILE="$RUNDIR/app.pid"
 LOG_FILE="$RUNDIR/session.log"
 SHOT_DIR="${AGENT_DISPLAY_SHOT_DIR:-$RUNDIR/shots}"
 
@@ -108,6 +109,7 @@ cmd_run() {
     case "$1" in
       --windowed) windowed=1; shift ;;
       --debug)    build=Debug; shift ;;
+      --build)    build="$2"; shift 2 ;;   # any BUILDDIR under syncscribble/, e.g. --build ReleaseSDL
       --)         shift; break ;;
       *)          break ;;
     esac
@@ -115,16 +117,17 @@ cmd_run() {
 
   is_running && die "an agent display is already running (pid $(cat "$PID_FILE")); stop it first"
 
-  local app="$APP_DIR/$build/Write"
+  local app="$APP_DIR/$build/Kaku"
   [[ -x "$app" ]] || die "no binary at $app - build it first"
   need cage "install with: sudo pacman -S cage"
 
   rm -f "$DISPLAY_FILE" "$XDISPLAY_FILE"
 
   # Both socket names are assigned by cage and cannot be queried from outside,
-  # so the child reports them before exec'ing the app.
+  # so the child reports them before exec'ing the app - and its own pid, which
+  # exec keeps, so stop can reap exactly this app and never the user's own copy.
   local inner="printf '%s' \"\$WAYLAND_DISPLAY\" > '$DISPLAY_FILE'; \
-printf '%s' \"\$DISPLAY\" > '$XDISPLAY_FILE'; exec '$app' $*"
+printf '%s' \"\$DISPLAY\" > '$XDISPLAY_FILE'; printf '%s' \"\$\$\" > '$APP_PID_FILE'; exec '$app' $*"
 
   if (( windowed )); then
     WLR_BACKENDS=wayland cage -- bash -c "$inner" >"$LOG_FILE" 2>&1 &
@@ -141,7 +144,7 @@ pid=$(cat "$PID_FILE") mode=$([[ $windowed == 1 ]] && echo windowed || echo head
 }
 
 cmd_test() {
-  local app="$APP_DIR/Debug/Write"
+  local app="$APP_DIR/Debug/Kaku"
   [[ -x "$app" ]] || die "no binary at $app - build with: cd syncscribble && make DEBUG=1"
   need cage "install with: sudo pacman -S cage"
 
@@ -149,7 +152,7 @@ cmd_test() {
   # ScribbleTest exits with the number of failed thumbnails, which is the signal
   # worth having. ASan's leak check overrides that with its own exitcode (1), and
   # every leak it reports here is inside NVIDIA's GL driver and libdbus, not
-  # Write - so leak detection is off by default. Set AGENT_DISPLAY_ASAN_LEAKS=1
+  # Kaku - so leak detection is off by default. Set AGENT_DISPLAY_ASAN_LEAKS=1
   # to get it back when the leaks are the point.
   local asan="${ASAN_OPTIONS:-}"
   [[ "${AGENT_DISPLAY_ASAN_LEAKS:-0}" == "1" ]] || asan="detect_leaks=0${asan:+,$asan}"
@@ -185,7 +188,7 @@ cmd_shot() {
 }
 
 cmd_move()   { [[ $# -ge 2 ]] || die "usage: $0 move <x> <y>"; require_pointer; in_session "$POINTER" move "$@"; }
-cmd_scroll() { [[ $# -ge 1 ]] || die "usage: $0 scroll <dy> [<dx>]"; require_pointer; in_session "$POINTER" scroll "$@"; }
+cmd_scroll() { [[ $# -ge 1 ]] || die "usage: $0 scroll [<x> <y>] <dy> [<dx>]"; require_pointer; in_session "$POINTER" scroll "$@"; }
 
 # Position and button must be one invocation - see the note in agent-pointer.c.
 cmd_click() {
@@ -195,7 +198,7 @@ cmd_click() {
 }
 
 cmd_drag() {
-  [[ $# -ge 4 ]] || die "usage: $0 drag <x1> <y1> <x2> <y2>"
+  [[ $# -ge 4 ]] || die "usage: $0 drag <x1> <y1> <x2> <y2> [<steps>] [left|right|middle]"
   require_pointer
   in_session "$POINTER" drag "$@"
 }
@@ -212,10 +215,39 @@ cmd_type() {
   in_session_x xdotool type --clearmodifiers -- "$*"
 }
 
+# Keystrokes for a *native Wayland* client (Kaku built on sdl2-compat with linuxWayland=1 is one);
+#  xdotool only reaches X clients.  Same syntax as `key`: modifiers and key joined by '+'.
+cmd_wkey() {
+  [[ $# -ge 1 ]] || die "usage: $0 wkey <keyname>   e.g. ctrl+s, Escape"
+  need wtype "install with: sudo pacman -S wtype"
+  local chord="$1" args=() mods=() part
+  IFS='+' read -ra parts <<< "$chord"
+  local key="${parts[-1]}"
+  unset 'parts[-1]'
+  for part in "${parts[@]}"; do args+=(-M "$part"); mods+=("$part"); done
+  args+=(-k "$key")
+  for part in "${mods[@]}"; do args+=(-m "$part"); done
+  in_session wtype "${args[@]}"
+}
+
 cmd_key() {
   [[ $# -ge 1 ]] || die "usage: $0 key <keyname>   e.g. ctrl+z, Escape, Return"
   need xdotool "install with: sudo pacman -S xdotool"
   in_session_x xdotool key --clearmodifiers "$@"
+}
+
+# keydown/keyup exist so a modifier can be *held* across other commands - the only way to exercise
+# Ctrl+wheel or Shift+wheel, since `key` sends a complete chord.  Always pair them: a modifier left
+# down stays down for the rest of the session.
+cmd_keydown() {
+  [[ $# -ge 1 ]] || die "usage: $0 keydown <keyname>   e.g. ctrl, shift"
+  need xdotool "install with: sudo pacman -S xdotool"
+  in_session_x xdotool keydown "$@"
+}
+cmd_keyup() {
+  [[ $# -ge 1 ]] || die "usage: $0 keyup <keyname>   e.g. ctrl, shift"
+  need xdotool "install with: sudo pacman -S xdotool"
+  in_session_x xdotool keyup "$@"
 }
 
 cmd_record() {
@@ -251,8 +283,8 @@ cmd_status() {
     echo "not running"
   fi
   local stray
-  stray="$(pgrep -cx Write 2>/dev/null || true)"
-  [[ "${stray:-0}" != "0" ]] && echo "Write processes alive: $stray"
+  stray="$(pgrep -cx 'Kaku|Write' 2>/dev/null || true)"
+  [[ "${stray:-0}" != "0" ]] && echo "Kaku processes alive: $stray"
   return 0
 }
 
@@ -263,14 +295,18 @@ cmd_stop() {
     sleep 0.5
     kill -9 "$(cat "$PID_FILE")" 2>/dev/null || true
   fi
-  # Killing cage does not necessarily take the app with it: a Write that
+  # Killing cage does not necessarily take the app with it: a Kaku that
   # outlives its compositor keeps running headless forever, holding the document
-  # and its lock. Reap it explicitly, by exact process name so this never
-  # matches the command line that started it.
-  pkill -x Write 2>/dev/null || true
-  sleep 0.3
-  pkill -9 -x Write 2>/dev/null || true
-  rm -f "$PID_FILE" "$DISPLAY_FILE" "$XDISPLAY_FILE"
+  # and its lock. Reap it explicitly - by the pid the session recorded, never by
+  # name: the user may have their own Kaku open, and a name match killed it.
+  local app_pid
+  app_pid="$(cat "$APP_PID_FILE" 2>/dev/null || true)"
+  if [[ -n "$app_pid" ]] && [[ "$(ps -o comm= -p "$app_pid" 2>/dev/null)" =~ ^(Kaku|Write)$ ]]; then
+    kill "$app_pid" 2>/dev/null || true
+    sleep 0.3
+    kill -9 "$app_pid" 2>/dev/null || true
+  fi
+  rm -f "$PID_FILE" "$APP_PID_FILE" "$DISPLAY_FILE" "$XDISPLAY_FILE"
   echo "stopped"
 }
 
@@ -285,6 +321,9 @@ case "${1:-}" in
   scroll) shift; cmd_scroll "$@" ;;
   type)   shift; cmd_type "$@" ;;
   key)    shift; cmd_key "$@" ;;
+  wkey)   shift; cmd_wkey "$@" ;;
+  keydown) shift; cmd_keydown "$@" ;;
+  keyup)  shift; cmd_keyup "$@" ;;
   record) shift; cmd_record "$@" ;;
   status) shift; cmd_status "$@" ;;
   stop)   shift; cmd_stop "$@" ;;
