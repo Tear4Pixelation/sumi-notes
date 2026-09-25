@@ -550,9 +550,24 @@ PenToolbar::PenToolbar(bool _compact)
         "Sets stroke width; tap the selected preset again to edit its value."},
        {"ic_menu_settings2.svg", "Pen Settings",
         "Smoothing, simplification and other pen preferences."},
+       {"ic_menu_toggle_ruled.svg", "Center on Line",
+        "Marker only: draws a straight line along the middle of the ruled line you start in."},
        {"ic_menu_overflow.svg", "More Options",
         "Snap strokes to the grid or draw straight lines."},
        {"ic_menu_cancel.svg", "Close", "Hides this options row."}});
+
+  // a marker covers a line of text, so it can be made to run straight along the middle of one wherever
+  //  the stroke is started within it; a toggle on the row itself, like the ruled eraser's
+  centerLineToggle = createToolbutton(SvgGui::useFile(":/icons/ic_menu_toggle_ruled.svg"),
+                                      _("Center on Line"));
+  centerLineToggle->onClicked = [this]() {
+    centerLineToggle->setChecked(!centerLineToggle->isChecked());
+    pen.setFlag(ScribblePen::CENTER_ON_LINE, centerLineToggle->isChecked());
+    if (onChanged)
+      onChanged(PEN_CHANGED);
+  };
+  setupTooltip(centerLineToggle, _("Draw along the middle of the ruled line"));
+  centerLineToggle->setVisible(false);
 
   static const char *spacerSVG =
       R"(<rect fill="none" width="12" height="20"/>)";
@@ -585,6 +600,7 @@ PenToolbar::PenToolbar(bool _compact)
   addWidget(colorGroup);
   addSeparator();
   addWidget(widthGroup);
+  addWidget(centerLineToggle);
   if (!compact)
     addSeparator();
   if (!compact)
@@ -1038,6 +1054,8 @@ void PenToolbar::setPen(const ScribblePen &newpen, Mode m) {
   // each tool keeps its own thickness presets, in its own unit, so switching tools (or loading a pen
   //  whose relative size setting differs) rebuilds the palette rather than just re-checking it
   int tool = drawToolForMode(m);
+  centerLineToggle->setVisible(mode == PEN_MODE && tool == ScribbleMode::DRAWTOOL_HIGHLIGHT);
+  centerLineToggle->setChecked(newpen.hasFlag(ScribblePen::CENTER_ON_LINE));
   if (newpen == pen && tool == widthsTool)
     return;
   bool rebuild = tool != widthsTool

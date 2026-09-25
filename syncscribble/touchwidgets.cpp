@@ -55,7 +55,8 @@ void PenPreview::draw(SvgPainter* svgp) const
   p->fillRect(Rect::wh(w, h), bgColor);  //doc->getCurrPageColor());
   drawCheckerboard(p, w, h, 4, 0x18000000);
   // draw the pen stroke
-  bool isLine = pen->hasFlag(ScribblePen::SNAP_TO_GRID) || pen->hasFlag(ScribblePen::LINE_DRAWING);
+  bool isLine = pen->hasFlag(ScribblePen::SNAP_TO_GRID) || pen->hasFlag(ScribblePen::LINE_DRAWING)
+      || pen->hasFlag(ScribblePen::CENTER_ON_LINE);
   Path2D path;
   path.moveTo(0.1f*w, 0.5f*h);
   isLine ? path.lineTo(Point(0.9f*w, 0.5f*h)) : path.cubicTo(0.3f*w, 0.2f*h, 0.7f*w, 0.8f*h, 0.9f*w, 0.5f*h);

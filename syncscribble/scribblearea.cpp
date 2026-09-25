@@ -2338,16 +2338,20 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
     break;
   case MODE_STROKE:
   {
-    ScribblePen resolved = resolvedPen();  // the marker's relative width has to be in document units
+    ScribblePen resolved = resolvedPen(pos);  // the marker's relative width has to be in document units
     const ScribblePen* pen = &resolved;
-    if(pen->hasFlag(ScribblePen::SNAP_TO_GRID)) {
-      Dim yr = currPage->yruling(true);
-      Dim xr = currPage->xruling() > 0 ? currPage->xruling() : yr;
-      pos.x = floor(pos.x/xr + 0.5) * xr;
-      pos.y = floor(pos.y/yr + 0.5) * yr;
+    if(pen->hasFlag(ScribblePen::SNAP_TO_GRID))
+      pos = gridFrame.snapToGrid(pos, Page::BLANK_Y_RULING);
+    // the whole stroke runs along the middle of the ruled line the press lands in - in a tilted region,
+    //  that line is tilted too, and so is the stroke
+    if(pen->hasFlag(ScribblePen::CENTER_ON_LINE)) {
+      Dim yr = gestureFrame.yrulingOr(Page::BLANK_Y_RULING);
+      centerLineLocalY = gestureFrame.yForLine(prevLine, Page::BLANK_Y_RULING) + yr/2;
+      pos = gestureFrame.toPage(Point(lx, centerLineLocalY));
     }
     //Dim w = cfg->Bool("scalePenWithZoom") ? pen->width/mZoom : pen->width;
-    bool lineDrawing = pen->hasFlag(ScribblePen::LINE_DRAWING) || pen->hasFlag(ScribblePen::SNAP_TO_GRID);
+    bool straightLine = pen->hasFlag(ScribblePen::LINE_DRAWING) || pen->hasFlag(ScribblePen::CENTER_ON_LINE);
+    bool lineDrawing = straightLine || pen->hasFlag(ScribblePen::SNAP_TO_GRID);
     StrokeBuilder* builder = StrokeBuilder::create(*pen);
     // install filters
     if(!lineDrawing) {
@@ -2359,20 +2363,37 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
       int smooth = cfg->Int("inputSmoothing");
       if(smooth > 0)
         builder->addFilter(new LowPassIIR(smooth*0.5/mZoom));   //SymmetricFIR(smooth));
+      // added last so it runs first: it has to see the raw samples, and simplify - which retracts points
+      //  it has already emitted - cannot be upstream of a filter that turns one point into several
+      // inputCurveFit is the *strength* (how many times the relaxation is applied); the chord flatness
+      //  tolerance is not a user knob - it only trades points for accuracy and has no visible effect
+      int fit = cfg->Int("inputCurveFit");
+      if(fit > 0)
+        builder->addFilter(new CurveFitFilter(CURVEFIT_TOL/mZoom, fit));
     }
     if(!cfg->Bool("dropFirstPenPoint") || event.source != INPUTSOURCE_PEN) {
       // add two points for line drawing, since second will be removed
-      if(pen->hasFlag(ScribblePen::LINE_DRAWING))
+      if(straightLine)
         builder->addInputPoint(StrokePoint(pos.x, pos.y, lineDrawPressure, 0, 0, event.t));
       builder->addInputPoint(StrokePoint(pos.x, pos.y,
           event.points[0].pressure, event.points[0].tiltX, event.points[0].tiltY, event.t));
     }
     scribbleDoc->strokeBuilder = builder;
     scribbleDoc->updateCurrStroke(builder->getDirty());  // necessary for single point stroke to show up
+    startShapeSnap(pos);
     break;
   }
   case MODE_DRAWSHAPE:
   {
+    if(scribbleDoc->scribbleMode->drawRegion) {
+      // the region tool is a drag, like the box: the region is live (painted each frame) until release
+      finishShape();
+      Dim yr = currPage->yruling() > 0 ? currPage->yruling() : Page::BLANK_Y_RULING;
+      RulingRegionParams params = RulingRegionParams::fromRect(Rect::corners(pos, pos), currPage->xruling(),
+          yr, currPage->props.dotRadius);
+      regionInProgress = Element::createRulingRegion(params, currPage->props.color, currPage->props.ruleColor);
+      break;
+    }
     int shapeid = scribbleDoc->scribbleMode->shapeId;
     const ShapeDef* def = shapeDef(shapeid);
     if(!def)
@@ -2590,22 +2611,35 @@ void ScribbleArea::doMoveEvent(const InputEvent& event)
 
   Dim dx = pos.x - prevPos.x;
   Dim dy = pos.y - prevPos.y;
-  int line = currPage->getLine(pos.y);
+  // ruled modes work in the ruling the gesture started in (see gestureFrame)
+  int line = gestureFrame.line(pos, Page::BLANK_Y_RULING);
+  const Dim lx = gestureFrame.toLocal(pos).x;
+  const Dim ldx = lx - gestureFrame.toLocal(prevPos).x;
+  const Dim marginLeft = gestureFrame.region ? MIN_DIM : currPage->marginLeft();
   switch(currMode) {
   case MODE_PAN:
     panZoomMove(event, event.points.size(), event.points.size());
     break;
   case MODE_STROKE:
+    if(snapActive) {
+      scaleSnapShape(pos);
+      break;
+    }
     if(currPen()->hasFlag(ScribblePen::SNAP_TO_GRID)) {
-      Dim yr = currPage->yruling(true);
-      Dim xr = currPage->xruling() > 0 ? currPage->xruling() : yr;
-      Point snappos(floor(pos.x/xr + 0.5) * xr, floor(pos.y/yr + 0.5) * yr);
+      Point snappos = gridFrame.snapToGrid(pos, Page::BLANK_Y_RULING);
       // second check provides some hysteresis
-      if((snappos.x == prevPos.x && snappos.y == prevPos.y) || 3*pos.dist(snappos) > pos.dist(prevPos))
+      if(approxEq(snappos, prevPos, 1E-9) || 3*pos.dist(snappos) > pos.dist(prevPos))
         return;
       pos = snappos;
     }
-    if(currPen()->hasFlag(ScribblePen::LINE_DRAWING)) {
+    if(currPen()->hasFlag(ScribblePen::CENTER_ON_LINE))
+      pos = gestureFrame.toPage(Point(lx, centerLineLocalY));
+    // A stroke begun in a region stays in it, as against a ruler.  Ink belongs to the ruling its centre
+    //  is on and the ruled tools only reach ink inside that ruling's outline, so a stroke running past
+    //  the edge could be reached by neither the region's ruled tools nor the page's.
+    if(gestureFrame.region)
+      pos = static_cast<const Element*>(gestureFrame.region)->regionParams().clampInside(pos);
+    if(currPen()->hasFlag(ScribblePen::LINE_DRAWING) || currPen()->hasFlag(ScribblePen::CENTER_ON_LINE)) {
       // some stuff to facilitate debugging of stroke builder
       if(ScribbleInput::pressedKey == SDLK_LEFTBRACKET)
         lineDrawPressure = std::max(Dim(0), 0.8*lineDrawPressure);

@@ -120,6 +120,13 @@ private:
   Widget* widthSpinRow;
   CheckBox* cbRelWidth;
   Widget* relWidthRow;
+  // marker only: draw along the centre of the ruled line (ScribblePen::CENTER_ON_LINE)
+  Button* centerLineToggle;
+  // the pen tip picks the stroke builder: flat extrudes a quad per input segment, round sweeps a disc,
+  //  chisel a fixed-aspect nib.  A flag on the pen rather than a pref, so it lives in Pen Settings as
+  //  an extra row rather than coming from prefNames.
+  ComboBox* comboPenTip;
+  Widget* penTipRow;
   Widget* rulingPreview;
   Button* addColorBtn;
   // the + opens this: a grid of the theme's own colors, with a trailing "custom color" button.  The

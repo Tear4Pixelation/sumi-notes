@@ -21,7 +21,10 @@ public:
       TIP_FLAT = 0x100, TIP_ROUND = 0x200, TIP_CHISEL = 0x400, TIP_MASK = 0xF00,
       // width is a multiple of the page's line height instead of an absolute size (text marker); see
       //  ScribbleArea::resolvedPen(), which is the only place the multiplication is done
-      WIDTH_RELATIVE = 0x1000;
+      WIDTH_RELATIVE = 0x1000,
+      // draws a straight horizontal stroke through the vertical centre of the ruled line the press lands
+      //  in (text marker); implies line drawing
+      CENTER_ON_LINE = 0x2000;
 
   ScribblePen(Color c, Dim w, unsigned int _flags = 0, Dim wr = 0, Dim pr = 0, Dim spd = 0, Dim angle = 0, Dim _dash = 0, Dim _gap = 0)
       : color(c), width(w), wRatio(wr), prParam(pr), spdMax(spd), dirAngle(angle), dash(_dash), gap(_gap), flags(_flags) {}

@@ -200,6 +200,14 @@ protected:
   int cursorMode = 0;  // CURSORMODE_SYSTEM
   int drawCursor = 0;
   Dim lineDrawPressure = 1;
+  Dim centerLineLocalY = 0;  // local y (in gestureFrame) of a CENTER_ON_LINE stroke, fixed at the press
+  // The ruling a gesture works in, fixed at the press: a ruling region's if the press lands in one, else
+  //  the page's.  Every ruled mode reads lines and along-the-line positions from this, never from the
+  //  page directly, so a gesture that wanders out of a region keeps the region's lines.
+  RulingFrame gestureFrame;
+  // gestureFrame without the blank-page phase, for snapping to the grid (the page's grid is anchored at
+  //  its origin, not at the press)
+  RulingFrame gridFrame;
   bool showHelpTips = false;
 
   // for erase ruled
