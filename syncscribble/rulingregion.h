@@ -1,0 +1,111 @@
+#pragma once
+
+// Ruling regions: an area of a page with its own ruling, overriding the page's inside it.
+//
+// The motivating case is a scanned or imported page whose printed lines are uneven or tilted: an
+//  opaque region covers them with clean paper and draws its own lines, and every ruled tool - the
+//  centre-on-line marker, ruled select and erase, insert space ruled, snap to grid - follows the
+//  region's lines while the pen is inside it.
+//
+// This file is the geometry only, with no dependency on Element/Page, so it tests standalone like
+//  shape.cpp.  The region itself is an Element (see Element::isRulingRegion()); what a ruled tool asks
+//  is Page::rulingAt(point), which answers with a RulingFrame - the region's, or the page's own.
+//
+// Two separate things describe a region, deliberately:
+//  - the outline (`corners`), where the region applies and what its paper covers.  Its corners are
+//    dragged freely, so it can fit whatever space the page leaves.
+//  - the ruling (`origin`, `angle`, pitches), which way the lines run.  Lines are always parallel and
+//    evenly spaced: bending them to follow a skewed outline would give "line N" no single height, and
+//    every ruled tool depends on that.
+//  Reshaping the outline therefore never moves a line; transforming the region (move, rotate, scale)
+//  moves both, together with the ink on it, so handwriting stays registered to its lines.
+
+#include "basics.h"
+#include "ulib/path2d.h"
+
+// The ruling in effect at a point.  Local coordinates are the frame's own: lines of the y ruling are
+//  horizontal there, at local y = k*yRuling, and the x ruling's are vertical at local x = k*xRuling.
+//  The page's own ruling is the frame with angle 0 and origin (0, yRuleOffset).
+struct RulingFrame
+{
+  Point origin;
+  Dim angle = 0;  // radians, direction of the y ruling's lines
+  Dim xRuling = 0;
+  Dim yRuling = 0;
+  Dim dotRadius = 0;
+  // the region this frame belongs to (an Element*, opaque here); NULL for the page's own ruling
+  const void* region = NULL;
+
+  RulingFrame() {}
+  RulingFrame(Point o, Dim a, Dim xr, Dim yr, Dim dr = 0, const void* rg = NULL)
+      : origin(o), angle(a), xRuling(xr), yRuling(yr), dotRadius(dr), region(rg) {}
+
+  Point toLocal(Point p) const;
+  Point toPage(Point local) const;
+  // a direction (not a position) in page coords, e.g. toPageDir(Point(0, 1)) is "down the lines"
+  Point toPageDir(Point localdir) const;
+  Point toLocalDir(Point pagedir) const;
+  // the same maps as transforms, for PathPointIter and friends
+  Transform2D localTransform() const;
+  Transform2D pageTransform() const;
+  // bounding box, in local coordinates, of a page-space rect (exact for an unrotated frame)
+  Rect localBBox(const Rect& pagerect) const;
+  // bounding box, in page coordinates, of a local rect
+  Rect pageBBox(const Rect& localrect) const;
+  bool isRotated() const { return angle != 0; }
+  // line height, with the blank-page fallback every ruled tool has always used
+  Dim yrulingOr(Dim fallback) const { return yRuling > 0 ? yRuling : fallback; }
+  // index of the line band containing p: band k is local y in [k*yr, (k+1)*yr)
+  int line(Point p, Dim fallback) const;
+  // local y of the top of band `line`
+  Dim yForLine(int line, Dim fallback) const { return line*yrulingOr(fallback); }
+  // the four page-space corners of band `line` spanning local x in [x0, x1]
+  std::vector<Point> bandPolygon(int line, Dim x0, Dim x1, Dim fallback) const;
+  // nearest grid point, in page coords; pitches <= 0 fall back to yr
+  Point snapToGrid(Point p, Dim fallback) const;
+};
+
+struct RulingRegionParams
+{
+  std::vector<Point> corners;  // outline, in order around it; normally 4
+  Point origin;                // a point every y ruling line is an integer number of pitches from
+  Dim angle = 0;
+  Dim xRuling = 0;
+  Dim yRuling = 0;
+  Dim dotRadius = 0;
+  bool opaque = true;          // paper-colored fill hides the page's ruling (or scan) behind it
+  bool outline = false;        // a border in the rule color, a little heavier than a rule line
+
+  bool isValid() const { return corners.size() >= 3; }
+  // Clamp what came from a file or a peer to something drawable: finite numbers, and a pitch no finer
+  //  than MIN_PITCH (a pitch of 1e-9 would otherwise ask for billions of lines).  A non-finite outline
+  //  is cleared, which makes the params invalid.
+  void sanitize();
+  static constexpr Dim MIN_PITCH = 2;
+  RulingFrame frame(const void* region = NULL) const
+      { return RulingFrame(origin, angle, xRuling, yRuling, dotRadius, region); }
+  bool contains(Point p) const;
+  // p itself when inside the outline, else the nearest point on it - what keeps a stroke begun in the
+  //  region from leaving it
+  Point clampInside(Point p) const;
+  Rect bounds() const;
+  // the outline as a closed path (the paper fill)
+  Path2D outlinePath() const;
+  // rule lines clipped to the outline, as a path to be stroked; empty when dotRadius > 0
+  Path2D linesPath() const;
+  // dots clipped to the outline, as a path to be filled; empty when dotRadius <= 0
+  Path2D dotsPath() const;
+  // apply a similarity transform (move/rotate/uniform scale) to outline and ruling alike
+  void transform(const Transform2D& tf);
+  // corner index (0-3) of the outline's bottom-right corner as seen in the ruling's frame - where the
+  //  region's "..." button sits
+  int bottomRightCorner() const;
+
+  // an axis-aligned region over `r` with the given ruling, lines phased from r's top-left corner; new
+  //  regions are outlined, so they can be told apart from the page
+  static RulingRegionParams fromRect(const Rect& r, Dim xr, Dim yr, Dim dotr = 0);
+};
+
+// serialization helpers for the __rr* attributes
+std::string serializeRegionPoints(const std::vector<Point>& points);
+void parseRegionPoints(const char* str, std::vector<Point>& points);

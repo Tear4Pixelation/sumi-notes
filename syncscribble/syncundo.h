@@ -42,12 +42,21 @@ public:
   static constexpr unsigned int STROKE_TRANSLATE_ITEM  = 0x00040002;
   static constexpr unsigned int STROKE_CHANGE_ITEM     = 0x00050002;
   static constexpr unsigned int SHAPE_CHANGE_ITEM      = 0x00060002;
+  static constexpr unsigned int STROKE_LAYER_ITEM      = 0x00070002;
+  // carries the STROKE_ITEM bit so ScribbleSync::removeItems() disables it when a peer deletes the region
+  static constexpr unsigned int REGION_CHANGE_ITEM     = 0x00080002;
   static constexpr unsigned int STROKES_ITEM           = 0x00000004;
   static constexpr unsigned int PAGE_ITEM              = 0x00000008;
   static constexpr unsigned int PAGE_CHANGED_ITEM      = 0x00010008;
+  static constexpr unsigned int PAGE_OUTLINE_ITEM      = 0x00020008;
   static constexpr unsigned int DOCUMENT_ITEM          = 0x00000010;
   static constexpr unsigned int PAGE_ADDED_ITEM        = 0x00010010;
   static constexpr unsigned int PAGE_DELETED_ITEM      = 0x00020010;
+  // document state that lives in the document config rather than in the SVG tree; deliberately not
+  //  DOCUMENT_ITEM, which ScribbleSync::removeItems() treats as a DocumentUndoItem holding a page
+  static constexpr unsigned int DOC_STATE_ITEM         = 0x00000020;
+  static constexpr unsigned int LAYER_TABLE_ITEM       = 0x00010020;
+  static constexpr unsigned int THEME_CHANGE_ITEM      = 0x00020020;
   static constexpr unsigned int DISABLED_ITEM          = 0x00008000;
   virtual unsigned int type() const { return 0; }
 
@@ -132,6 +141,38 @@ public:
       : StrokeUndoItem(s_, p_), params(params_) {}
   UNDO_ITEM_METHODS
   unsigned int type() const override { return SHAPE_CHANGE_ITEM; }
+};
+
+// records a change to a ruling region's parameters (outline, ruling, paper); the counterpart of
+//  ShapeChangedItem.  Moving, rotating or scaling a region is a StrokeTransformItem instead, like any
+//  element - applyTransform() maps the parameters - so this is only for edits a transform cannot express.
+class RegionChangedItem : public StrokeUndoItem {
+private:
+  RulingRegionParams params;
+  void swapParams();
+public:
+  RegionChangedItem(Element* s_, Page* p_) : StrokeUndoItem(s_, p_), params(s_->regionParams()) {}
+  RegionChangedItem(Element* s_, Page* p_, const RulingRegionParams& params_)
+      : StrokeUndoItem(s_, p_), params(params_) {}
+  UNDO_ITEM_METHODS
+  unsigned int type() const override { return REGION_CHANGE_ITEM; }
+};
+
+// Moves one element to another layer (LAYERS_INVESTIGATION.md).  It carries the sibling position as
+//  well as the layer id because the two are not independent: z-order within a page follows the layer
+//  table, so changing an element's layer restacks it.  Recording only the id would undo the layer and
+//  leave the element where the redo had moved it, which is a change the user never asked for and
+//  cannot see a reason for.
+class StrokeLayerItem : public StrokeUndoItem {
+private:
+  int layer;
+  Element* next;
+  void swapLayer();
+public:
+  StrokeLayerItem(Element* s_, Page* p_, int layer_, Element* next_ = NULL)
+      : StrokeUndoItem(s_, p_), layer(layer_), next(next_) {}
+  UNDO_ITEM_METHODS
+  unsigned int type() const override { return STROKE_LAYER_ITEM; }
 };
 
 class StrokeTranslateItem : public StrokeUndoItem {

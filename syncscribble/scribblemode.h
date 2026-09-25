@@ -63,6 +63,9 @@ public:
   int insSpaceMode;
   int moveSelMode;
   int drawTool;
+  // the shape row's Ruling Region tool: MODE_DRAWSHAPE draws a ruling region instead of shapeId.  Not
+  //  saved - it is a one-off, not a tool anyone keeps in hand
+  bool drawRegion = false;
   // active shape for MODE_DRAWSHAPE; one of ShapeId (see shape.h)
   int shapeId;
   // SHAPEFLAG_HEADSTART/HEADEND from the head toggles on the shape options row; applied to new shapes

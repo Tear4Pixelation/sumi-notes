@@ -195,6 +195,7 @@ void BookmarkView::drawPageBookmarks(Painter* painter, Page* page, Dim ypos, Dim
   std::unique_ptr<Selection> selection(new Selection(page, Selection::STROKEDRAW_NORMAL));
   selection->selMode = Selection::SELMODE_PASSIVE;
   RuledSelector* selector = new RuledSelector(selection.get());
+  selector->sameRulingOnly = false;  // a bookmark's row shows its line whatever ruling it sits on
   // ensure bookmarks are sorted (see note above)
   Dim rowh = bookmarkRowHeight(page);
   page->maxBookmarkWidth = 0;

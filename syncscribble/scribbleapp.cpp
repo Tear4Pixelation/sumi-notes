@@ -1336,7 +1336,9 @@ void ScribbleApp::setDrawTool(int tool)
 
 void ScribbleApp::updatePenToolbar()
 {
-  if(activeArea()->hasSelection())
+  // a selected ruling region is not ink: picking a color then must not recolor the region or the ink it
+  //  carries, so the toolbar stays on the pen
+  if(activeArea()->hasSelection() && !activeArea()->selectedRegion())
     penToolbar->setPen(activeArea()->getPenForSelection(), PenToolbar::SELECTION_MODE);
   else if(scribbleMode->getMode() == MODE_BOOKMARK)
     penToolbar->setPen(ScribblePen(bookmarkColor, -1), PenToolbar::BOOKMARK_MODE);
@@ -1495,7 +1497,16 @@ void ScribbleApp::setMode(int mode)
   // a multi-point shape has to be committed before the tool that created it goes away (spec 4)
   for(ScribbleDoc* doc : scribbleDocs)
     doc->finishShapes();
+  // ruling regions show their "..." button only while the select tool is in hand, so taking it up or
+  //  putting it down has to repaint the pages
+  bool wasSelect = ScribbleMode::getModeType(scribbleMode->getMode()) == MODE_SELECT;
   scribbleMode->setMode(mode);
+  if(wasSelect != (ScribbleMode::getModeType(scribbleMode->getMode()) == MODE_SELECT)) {
+    for(ScribbleDoc* doc : scribbleDocs) {
+      doc->repaintAll();
+      doc->doRefresh();
+    }
+  }
   win->updateMode();
 }
 

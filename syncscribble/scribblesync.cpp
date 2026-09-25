@@ -607,6 +607,74 @@ void ScribbleSync::processItem(pugi::xml_node& node)
       }
     }
   }
+  else if(nodename == "regionchanged") {
+    // RegionChangedItem; values are sanitized by the same clamp a file load uses, so a peer cannot send
+    //  a pitch that would make the line generator run away
+    if(mpage && mstroke && mstroke->isRulingRegion()) {
+      RulingRegionParams params;
+      parseRegionPoints(node.attribute("pts").as_string(), params.corners);
+      std::vector<Point> origin;
+      parseRegionPoints(node.attribute("origin").as_string(), origin);
+      params.origin = origin.empty() ? Point(0, 0) : origin[0];
+      params.angle = node.attribute("angle").as_double();
+      params.xRuling = node.attribute("xruling").as_double();
+      params.yRuling = node.attribute("yruling").as_double();
+      params.dotRadius = node.attribute("dotradius").as_double();
+      params.opaque = node.attribute("opaque").as_int(1) != 0;
+      params.outline = node.attribute("outline").as_int(0) != 0;
+      params.sanitize();
+      if(params.isValid()) {
+        item = new RegionChangedItem(mstroke, mpage, params);
+        scribbleDoc->invalidateStroke(mstroke);
+      }
+    }
+  }
+  else if(nodename == "layerchanged") {
+    // StrokeLayerItem - which layer an element is on.  The table itself arrives as <layertable>.
+    if(mpage) {
+      item = new StrokeLayerItem(mstroke, mpage, node.attribute("layer").as_int(),
+          findStroke(node.attribute("nextstrokeuuid").as_string()));
+      scribbleDoc->invalidateStroke(mstroke);  // restacked, so drop it from any selection
+    }
+  }
+  else if(nodename == "layertable") {
+    // LayerTableItem: one layer's entry.  Our current layer is deliberately not part of it - it is
+    //  where this user's pen is - but it is moved off a layer the peer removed or hid.
+    int id = node.attribute("id").as_int(-1);
+    if(id >= 0) {
+      LayerInfo info(id, node.attribute("name").as_string());
+      info.locked = node.attribute("locked").as_bool();
+      info.hidden = node.attribute("hidden").as_bool();
+      item = new LayerTableItem(scribbleDoc, id, node.attribute("present").as_bool(), info,
+          node.attribute("below").as_int(LayerList::BELOW_NONE));
+    }
+  }
+  else if(nodename == "layersnapshot") {
+    // the whole table, sent once at the start of a session so a client joining late gets the layers
+    //  that were set up before it connected; outside the undo system, like the pages sent with it
+    scribbleDoc->replaceLayerTable(LayerList::parse(node.attribute("table").as_string()));
+  }
+  else if(nodename == "themechanged") {
+    // ThemeChangedItem (COLORS_SPEC.md 8).  Only the document's theme: whether it is also this user's
+    //  default for new documents is their own business.
+    ThemeState state;
+    PaletteRecipe& r = state.recipe;
+    r.gen = node.attribute("gen").as_string();
+    r.seedHue = node.attribute("seedhue").as_double(r.seedHue);
+    r.vividness = node.attribute("vividness").as_double(r.vividness);
+    r.depth = node.attribute("depth").as_double(r.depth);
+    r.minContrast = node.attribute("contrast").as_double(r.minContrast);
+    r.jitter = node.attribute("jitter").as_double(r.jitter);
+    r.paperL = node.attribute("paperl").as_double(r.paperL);
+    r.paperWarm = node.attribute("paperwarm").as_double(r.paperWarm);
+    // the one field that sizes an allocation; a peer must not be able to ask for a million families
+    r.families = std::min(std::max(node.attribute("families").as_int(r.families), 1), 64);
+    state.pageColor = Color::fromArgb(node.attribute("pagecolor").as_uint());
+    state.ruleColor = Color::fromArgb(node.attribute("rulecolor").as_uint());
+    state.bookmarkColor = Color::fromArgb(node.attribute("bookmarkcolor").as_uint());
+    state.linkColor = Color::fromArgb(node.attribute("linkcolor").as_uint());
+    item = new ThemeChangedItem(scribbleDoc, state);
+  }
   else if(nodename == "updatestroke") {
     // this handles the special case of a change to stroke outside the undo system, currently limited to
     //  update of COM by groupStrokes

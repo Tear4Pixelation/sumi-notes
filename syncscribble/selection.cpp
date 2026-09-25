@@ -41,6 +41,7 @@ Selection::Selection(Page* source, StrokeDrawType drawtype) : m_drawType(drawtyp
 {
   page = source;
   sourceNode = static_cast<Element*>(page->contentNode->ext());
+  ruling = page->pageFrame();
 }
 
 /*Selection::Selection(const Selection* sel, Page* page) : Selection(page)
@@ -449,12 +450,43 @@ void Selection::draw(Painter* painter, StrokeDrawType drawtype)  //const Rect& d
 
 // stuff for reflow
 
+// All the ruled operations below work in `ruling`'s local coordinates, where its lines are horizontal:
+//  for the page's own ruling that is the page shifted by yRuleOffset, so behaviour there is exactly what
+//  it always was; for a ruling region it is the region's frame, rotated or not.
+static Dim rulingYr(const RulingFrame& f) { return f.yrulingOr(Page::BLANK_Y_RULING); }
+static int rulingLine(const RulingFrame& f, const Element* s) { return f.line(s->com(), Page::BLANK_Y_RULING); }
+
+// An element's bounding box in a frame's local coordinates.  Unrotated, that is the page bbox shifted,
+//  exactly as before.  Tilted, rotating the page bbox would inflate it - a stroke written along a tilted
+//  line would get a box several lines tall and fail every "is it on this line" test - so a path's box
+//  is taken from its own points in the frame instead.
+static Rect localElementBBox(const RulingFrame& f, Element* s)
+{
+  if(!f.isRotated() || !s->isPathElement())
+    return f.localBBox(s->bbox());
+  Path2D path = *static_cast<SvgPath*>(s->node)->path();
+  if(path.empty())
+    return f.localBBox(s->bbox());
+  // a deferred pending move (a translate mid-gesture) is in bbox() but not in the path, so add it here
+  //  too, or reflow - which subtracts the pending offset from this box - would subtract it twice
+  Transform2D pending = s->pendingDeferred() ? s->pendingTransform().tf() : Transform2D();
+  path.transform(f.localTransform() * pending * s->node->totalTransform());
+  Rect r = path.getBBox();
+  Dim sw = s->node->getFloatAttr("stroke-width", 0);
+  return sw > 0 ? r.pad(sw/2) : r;
+}
+
 // this is a bit of a hack ... we return the ruleline of the first stroke after sorting
 int Selection::sortRuled()
 {
   if(strokes.empty()) return -1;
-  strokes.sort(page->cmpRuled());
-  return page->getLine(strokes.front());
+  const RulingFrame& f = ruling;
+  strokes.sort([&f](const Element* a, const Element* b) {
+    int linea = rulingLine(f, a), lineb = rulingLine(f, b);
+    return linea == lineb ? localElementBBox(f, const_cast<Element*>(a)).left
+        < localElementBBox(f, const_cast<Element*>(b)).left : linea < lineb;
+  });
+  return rulingLine(ruling, strokes.front());
 }
 
 // strokes should be sorted if dx != 0
@@ -462,27 +494,34 @@ void Selection::insertSpace(Dim dx, int dline)
 {
   if(strokes.size() > 0 && dx != 0) {
     auto ii = strokes.begin();
-    int currline = page->getLine(*ii);
-    ScribbleTransform tf(Transform2D::translating(dx, 0));
-    for(; ii != strokes.end() && page->getLine(*ii) == currline; ++ii)
+    int currline = rulingLine(ruling, *ii);
+    ScribbleTransform tf(Transform2D::translating(ruling.toPageDir(Point(dx, 0))));
+    for(; ii != strokes.end() && rulingLine(ruling, *ii) == currline; ++ii)
       (*ii)->applyTransform(tf);  //translateStroke(*ii, dx, 0);
     invalidateBBox();
   }
-  translate(0, dline * page->yruling(true));
+  Point down = ruling.toPageDir(Point(0, dline * rulingYr(ruling)));
+  translate(down.x, down.y);
 }
 
 // To enable realtime reflow w/o unnecessary drawing and bounds update, we use Element.scratch to store offset
-//  for in-progress reflow, then compare to previous offset (from pendingTransform), updating iff different
-static Rect workingBBox(Element* s)
+//  for in-progress reflow, then compare to previous offset (from pendingTransform), updating iff different.
+//  scratch is in the ruling's local coordinates; the pending transform is a page-space translation.
+static Point pendingLocalOffset(Element* s, const RulingFrame& f)
 {
   const ScribbleTransform& oldtf = s->pendingTransform();
-  return s->bbox().translate(s->scratch.x - oldtf.xoffset(), s->scratch.y - oldtf.yoffset());
+  return f.toLocalDir(Point(oldtf.xoffset(), oldtf.yoffset()));
 }
 
-static int workingLine(Element* s, Page* page)
+static Rect workingBBox(Element* s, const RulingFrame& f)
 {
-  const ScribbleTransform& oldtf = s->pendingTransform();
-  return page->getLine(s->com().y + s->scratch.y - oldtf.yoffset());
+  return localElementBBox(f, s).translate(s->scratch - pendingLocalOffset(s, f));
+}
+
+static int workingLine(Element* s, const RulingFrame& f)
+{
+  Point local = f.toLocal(s->com()) + s->scratch - pendingLocalOffset(s, f);
+  return int(std::floor(local.y/rulingYr(f)));
 }
 
 // Although reflow might not work well for long paragraphs on unruled pages, don't really see any harm
@@ -490,12 +529,12 @@ static int workingLine(Element* s, Page* page)
 // TODO: consider rounding dx, nextdx to integers!
 void Selection::reflowStrokes(Dim dx, int dline, Dim minWordSep)
 {
-  const Dim yruling = page->yruling(true);
-  if(yruling == 0 || strokes.empty() || workingLine(strokes.front(), page) + dline < 0)
+  const Dim yruling = rulingYr(ruling);
+  if(yruling == 0 || strokes.empty() || workingLine(strokes.front(), ruling) + dline < 0)
     return;
   if(dx != 0) {
-    int currline = workingLine(strokes.front(), page);
-    for(auto ii = strokes.begin(); ii != strokes.end() && workingLine(*ii, page) == currline; ++ii)
+    int currline = workingLine(strokes.front(), ruling);
+    for(auto ii = strokes.begin(); ii != strokes.end() && workingLine(*ii, ruling) == currline; ++ii)
       (*ii)->scratch.x = dx;
   }
   if(dline != 0) {
@@ -511,24 +550,27 @@ void Selection::reflowStrokes(Dim dx, int dline, Dim minWordSep)
   dx = 0;
   Dim nextdx = 0, currRight = 0;
   // rule line of first stroke
-  int currline = workingLine(*curr, page);
-  Dim left = page->props.marginLeft;
-  Dim right = page->width() - 0.5*minWordGap;
+  int currline = workingLine(*curr, ruling);
+  // a region has no margin; its extent is the page's width for its lines
+  Rect extent = page->frameExtent(ruling);
+  Dim marginLeft = ruling.region ? extent.left : page->props.marginLeft;
+  Dim left = marginLeft;
+  Dim right = extent.right - 0.5*minWordGap;
   while(1) {
     if(currline+1 < int(((RuledSelector*)selector)->lstops.size())) {
-      left = MAX(page->props.marginLeft, static_cast<RuledSelector*>(selector)->lstops[currline+1]);
+      left = MAX(marginLeft, static_cast<RuledSelector*>(selector)->lstops[currline+1]);
       right = static_cast<RuledSelector*>(selector)->rstops[currline] - 0.5*minWordGap;
     }
     // Step 1: find last word break before overflow
     while(1) {
-      currRight = MAX(currRight, workingBBox(*curr).right);
+      currRight = MAX(currRight, workingBBox(*curr, ruling).right);
       if(currRight >= right)
         break;
       curr++;
       // no strokes beyond right on this line means we are all done reflowing
-      if(curr == strokes.end() || workingLine(*curr, page) != currline)
+      if(curr == strokes.end() || workingLine(*curr, ruling) != currline)
         goto alldone;
-      if(workingBBox(*curr).left - currRight >= minWordGap)
+      if(workingBBox(*curr, ruling).left - currRight >= minWordGap)
         wordbreak = curr;
     }
     // no word break found - abort; probably should notify user
@@ -538,32 +580,32 @@ void Selection::reflowStrokes(Dim dx, int dline, Dim minWordSep)
     //  if the next line is empty, we'll start strokes moved down at (left + minWordGap)
     dx = left + minWordGap;
     while(++curr != strokes.end()) {
-      if(workingLine(*curr, page) == currline)
+      if(workingLine(*curr, ruling) == currline)
         continue;
-      if(workingLine(*curr, page) == currline + 1)
-        dx = workingBBox(*curr).left;
+      if(workingLine(*curr, ruling) == currline + 1)
+        dx = workingBBox(*curr, ruling).left;
       break;
     }
     // Step 2: move all strokes incl and beyond wordbreak down to next line
     curr = wordbreak;
-    dx -= workingBBox(*wordbreak).left;
+    dx -= workingBBox(*wordbreak, ruling).left;
     nextdx = 0;
     bool insblankline = false;
-    while(curr != strokes.end() && workingLine(*curr, page) == currline) {
+    while(curr != strokes.end() && workingLine(*curr, ruling) == currline) {
       (*curr)->scratch += Point(dx, yruling);  //translateStroke(*curr, dx, yruling);
       // note we want post-translation bbox here
-      nextdx = MAX(nextdx, workingBBox(*curr).right);
+      nextdx = MAX(nextdx, workingBBox(*curr, ruling).right);
       curr++;
       insblankline = true;  // 1 or more strokes moved down
     }
     // Step 3: shift all strokes on next line right to accommodate strokes moved down
     currline++;
-    while(curr != strokes.end() && workingLine(*curr, page) == currline) {
+    while(curr != strokes.end() && workingLine(*curr, ruling) == currline) {
       // we use insblankline here to test for first pass through loop.  We insert a 1.25*minWordGap space
       //  between strokes moved down (which end at nextdx) and strokes already on the line. Recall that
       //  strokes are sorted by bbox.left
       if(insblankline)
-        nextdx += (1.25*minWordGap) - workingBBox(*curr).left;
+        nextdx += (1.25*minWordGap) - workingBBox(*curr, ruling).left;
       (*curr)->scratch.x += nextdx;  //translateStroke(*curr, nextdx, 0);
       curr++;
       insblankline = false;  // line is not blank
@@ -582,8 +624,9 @@ void Selection::reflowStrokes(Dim dx, int dline, Dim minWordSep)
 alldone:
   for(Element* s : strokes) {
     Point olddr = Point(s->pendingTransform().xoffset(), s->pendingTransform().yoffset());
-    if(!approxEq(s->scratch, olddr, 0.01))  // numerical errors seem to accumulate for x
-      s->applyTransform(ScribbleTransform().translate(s->scratch - olddr));
+    Point newdr = ruling.toPageDir(s->scratch);
+    if(!approxEq(newdr, olddr, 0.01))  // numerical errors seem to accumulate for x
+      s->applyTransform(ScribbleTransform().translate(newdr - olddr));
     s->scratch = Point(0, 0);
   }
   invalidateBBox();
@@ -879,7 +922,7 @@ static bool containedRuled(const RuledRange& range, Element* s)
         return false;
     return true;
   }
-  Rect bbox = s->bbox();
+  Rect bbox = localElementBBox(range.frame, s);
   if(!s->isPathElement()) {
     if(bbox.top < range.ymin || bbox.bottom >= range.ymax)
       return false;
@@ -894,14 +937,14 @@ static bool containedRuled(const RuledRange& range, Element* s)
   }
 
   if(bbox.height() < 1.75*range.yruling) {
-    int dl = floor((s->com().y - range.ymin)/range.yruling);
+    int dl = floor((range.frame.toLocal(s->com()).y - range.ymin)/range.yruling);
     return dl >= 0 && dl < range.nlines() && bbox.left >= range.lstop(dl) && bbox.right <= range.rstop(dl);
   }
   if(bbox.top < range.ymin - 0.25*range.yruling || bbox.bottom > range.ymax + 0.25*range.yruling)
     return false;
 
   const Path2D& path = *static_cast<SvgPath*>(s->node)->path();
-  PathPointIter pts(path, s->node->totalTransform(), range.yruling/8);
+  PathPointIter pts(path, range.frame.localTransform() * s->node->totalTransform(), range.yruling/8);
   while(pts.hasNext()) {
     Point p = pts.next();
     if(p.y < range.ymin || p.y >= range.ymax) {
@@ -926,7 +969,7 @@ static bool overlapRuled(const RuledRange& range, Element* s)
         return true;
     return false;
   }
-  Rect bbox = s->bbox();
+  Rect bbox = localElementBBox(range.frame, s);
   if(!s->isPathElement()) {
     if(bbox.bottom < range.ymin || bbox.top >= range.ymax)
       return false;
@@ -945,14 +988,14 @@ static bool overlapRuled(const RuledRange& range, Element* s)
   }
 
   if(bbox.height() < 1.75*range.yruling) {
-    int dl = floor((s->com().y - range.ymin)/range.yruling);
+    int dl = floor((range.frame.toLocal(s->com()).y - range.ymin)/range.yruling);
     return dl >= 0 && dl < range.nlines() && bbox.left < range.rstop(dl) && bbox.right > range.lstop(dl);
   }
   if(bbox.bottom < range.ymin + 0.25*range.yruling || bbox.top > range.ymax - 0.25*range.yruling)
     return false;
 
   const Path2D& path = *static_cast<SvgPath*>(s->node)->path();
-  PathPointIter pts(path, s->node->totalTransform(), range.yruling/8);
+  PathPointIter pts(path, range.frame.localTransform() * s->node->totalTransform(), range.yruling/8);
   while(pts.hasNext()) {
     Point p = pts.next();
     if(p.y >= range.ymin && p.y < range.ymax) {
@@ -966,6 +1009,10 @@ static bool overlapRuled(const RuledRange& range, Element* s)
 
 bool RuledSelector::selectHit(Element* s)
 {
+  // ink belongs to the ruling it was written on: a ruled gesture in a region acts on that region's ink
+  //  only, and one on the page's ruling leaves every region's ink alone
+  if(sameRulingOnly && selRange.frame.region != selection->page->regionAt(s->com()))
+    return false;
   switch(selMode) {
   case SEL_CONTAINED:
     return containedRuled(selRange, s);
@@ -977,10 +1024,11 @@ bool RuledSelector::selectHit(Element* s)
 
 Rect RuledSelector::getBGBBox()
 {
+  const RulingFrame& f = selRange.frame;
   if(selRange.isSingleLine())
-    return Rect::ltrb(selRange.x0, selRange.ymin, selRange.x1, selRange.ymax);
-  else
-    return Rect::ltrb(0, selRange.ymin, selection->page->width(), selRange.ymax);
+    return f.pageBBox(Rect::ltrb(selRange.x0, selRange.ymin, selRange.x1, selRange.ymax));
+  Rect extent = selection->page->frameExtent(f);
+  return f.pageBBox(Rect::ltrb(extent.left, selRange.ymin, extent.right, selRange.ymax));
 }
 
 void RuledSelector::selectRuled(Dim x0, int line0, Dim x1, int line1)
@@ -994,8 +1042,9 @@ void RuledSelector::selectRuled(Dim x0, int line0, Dim x1, int line1)
     return;
   }
 
-  Page* p = selection->page;
-  selRange = RuledRange(x0, p->getYforLine(line0), x1, p->getYforLine(line1 + 1), p->props.xRuling, p->yruling(true));
+  const RulingFrame& f = selection->ruling;
+  selRange = RuledRange(x0, f.yForLine(line0, Page::BLANK_Y_RULING), x1, f.yForLine(line1 + 1, Page::BLANK_Y_RULING),
+      f.xRuling, f.yrulingOr(Page::BLANK_Y_RULING), f);
   // if stops are present, add to range
   if(line0 >= 0 && line1 >= 0 && line0 < int(lstops.size())) {
     if(line1 >= int(rstops.size())) {
@@ -1034,45 +1083,57 @@ void RuledSelector::selectRuledAfter(Dim x, int linenum)
 void RuledSelector::findStops(Dim x, int linenum)
 {
   Page* page = selection->page;
+  const RulingFrame& f = selection->ruling;
+  // a region has no margin
+  Dim marginLeft = f.region ? MIN_DIM : page->props.marginLeft;
   // preserve old behavior (applying to entire line) when cursor down in left margin and don't run twice
   // also, disable stops for eraser (SELMODE_UNION)
   if(colMode == COL_NONE || selection->selMode == Selection::SELMODE_UNION
-      || x < page->props.marginLeft || !lstops.empty())
+      || x < marginLeft || !lstops.empty())
     return;
 
-  Rect margins = Rect::ltrb(0, 0, page->width(), page->height());
-  // = page->ruleLayer->getMargins(x, page->getYforLine(linenum), Rect(0, 0, page->width, page->height));
-  const Dim yruling = page->yruling(true);
-  const int nlines = page->height()/yruling;
+  // everything here is in the frame's local coordinates; for the page's own ruling that is the page
+  Rect margins = page->frameExtent(f);
+  const Dim yruling = f.yrulingOr(Page::BLANK_Y_RULING);
+  // lstops/rstops are indexed by line number from 0, so lines above the frame's origin (only possible
+  //  for a region whose ruling was dragged down inside it) cannot take stops
+  //  (the page's own table keeps its old size, page height over pitch, whatever yRuleOffset is)
+  const int nlines = f.region ? int(margins.bottom/yruling) : int(page->height()/yruling);
   if(nlines < 1) return;
   lstops.resize(nlines, margins.left);
   rstops.resize(nlines, margins.right);
+  auto localLine = [&](Dim localy) { return int(std::floor(localy/yruling)); };
+  const Transform2D localtf = f.localTransform();
   // only want to scan stroke list once
   for(Element* s : selection->sourceNode->children()) {
-    if(s->bbox().height() > MIN_DIV_HEIGHT*yruling) {
+    // a region is not a barrier, and ink on another ruling is not in this one's columns
+    if(s->isRulingRegion() || page->regionAt(s->com()) != f.region)
+      continue;
+    Rect bbox = localElementBBox(f, s);
+    if(bbox.height() > MIN_DIV_HEIGHT*yruling) {
       // conservative mode requires that stroke passes through linenum
       if((colMode == COL_NORMAL)
-          && (page->getLine(s->bbox().top) > linenum || page->getLine(s->bbox().bottom) < linenum))
+          && (localLine(bbox.top) > linenum || localLine(bbox.bottom) < linenum))
         continue;  // go to next stroke
       // require stroke extend at least 1/4 of the way into line to form a barrier
-      int line0 = MAX(0, page->getLine(s->bbox().top + 0.25*yruling));
-      int line1 = MIN((int)lstops.size()-1, page->getLine(s->bbox().bottom - 0.25*yruling));
+      int line0 = MAX(0, localLine(bbox.top + 0.25*yruling));
+      int line1 = MIN((int)lstops.size()-1, localLine(bbox.bottom - 0.25*yruling));
       for(int ll = line0; ll <= line1; ll++) {
         if(!s->isPathElement()) {
-          if(s->bbox().left > x)
-            rstops[ll] = MIN(s->bbox().left, rstops[ll]);
-          else if(s->bbox().right < x)
-            lstops[ll] = MAX(s->bbox().right, lstops[ll]);
+          if(bbox.left > x)
+            rstops[ll] = MIN(bbox.left, rstops[ll]);
+          else if(bbox.right < x)
+            lstops[ll] = MAX(bbox.right, lstops[ll]);
           else
             break;  // go to next stroke
         }
         // before processing each point of stroke, check bbox to see if it can move bounds
-        else if(s->bbox().left < rstops[ll] || s->bbox().right > lstops[ll]) {
+        else if(bbox.left < rstops[ll] || bbox.right > lstops[ll]) {
           const Path2D& path = *static_cast<SvgPath*>(s->node)->path();
-          PathPointIter pts(path, s->node->totalTransform(), yruling/8);
+          PathPointIter pts(path, localtf * s->node->totalTransform(), yruling/8);
           while(pts.hasNext()) {
             Point p = pts.next();
-            int pline = page->getLine(p.y);
+            int pline = localLine(p.y);
             if(pline >= line0 && pline <= line1) {
               if(p.x > x)
                 rstops[pline] = MIN(p.x, rstops[pline]);
@@ -1088,7 +1149,7 @@ void RuledSelector::findStops(Dim x, int linenum)
   // post processing - clear all stops below a line w/o stops
   // TODO: we may want to set stops so nothing below end of column is selected!
   bool clearstops = false;
-  for(unsigned int ll = linenum; ll < lstops.size(); ll++) {
+  for(int ll = std::max(0, linenum); ll < int(lstops.size()); ll++) {
     if(clearstops) {
       lstops[ll] = margins.left;
       rstops[ll] = margins.right;
@@ -1294,22 +1355,24 @@ void RuledSelector::drawBG(Painter* painter)
   painter->setStroke(bgStroke, 0);
   // note that we're assuming ruled sel doesn't coexist with scaling
   painter->translate(selection->transform.xoffset(), selection->transform.yoffset());
-  bool antialias = painter->setAntiAlias(false);
+  // the staircase is built in the frame's local coordinates; only a tilted one wants antialiasing
+  painter->transform(selRange.frame.pageTransform());
+  bool antialias = painter->setAntiAlias(selRange.frame.isRotated());
 
-  Page* page = selection->page;
+  Rect extent = selection->page->frameExtent(selRange.frame);
   Path2D path;
   int nlines = selRange.nlines();
   Dim x;
   Dim y = selRange.ymin;
   int ii = 0;
   for(; ii < nlines; ++ii) {
-    x = MIN(page->width(), MAX(Dim(0), selRange.lstop(ii)));
+    x = MIN(extent.right, MAX(extent.left, selRange.lstop(ii)));
     path.addPoint(x, y);
     y += selRange.yruling;
     path.addPoint(x, y);
   }
   for(--ii; ii >= 0; --ii) {
-    x = MIN(page->width(), MAX(Dim(0), selRange.rstop(ii)));
+    x = MIN(extent.right, MAX(extent.left, selRange.rstop(ii)));
     path.addPoint(x, y);
     y -= selRange.yruling;
     path.addPoint(x, y);
@@ -1470,4 +1533,138 @@ void ShapeSelector::drawBG(Painter* painter)
     }
   }
   painter->restore();
+}
+
+// RegionSelector
+
+Dim RegionSelector::HANDLE_SIZE = 4;
+
+bool RegionSelector::carries(const RulingRegionParams& params, Element* s)
+{
+  return !s->isRulingRegion() && params.contains(s->bbox().center());
+}
+
+// used by ScribbleArea::selectionHit() to decide whether a press starts a move: anywhere inside the outline
+bool RegionSelector::selectHit(Element* s)
+{
+  return s == region || region->regionParams().contains(s->bbox().center());
+}
+
+// the local bounding box of the outline, in the region's own frame
+static Rect regionLocalBBox(const RulingRegionParams& params)
+{
+  RulingFrame f = params.frame();
+  Rect r;
+  for(const Point& p : params.corners)
+    r.rectUnion(f.toLocal(p));
+  return r;
+}
+
+Point RegionSelector::rotHandlePos() const
+{
+  const RulingRegionParams& params = region->regionParams();
+  RulingFrame f = params.frame();
+  Rect r = regionLocalBBox(params);
+  // above the middle of the top edge, as seen in the region's frame, so it turns with the region
+  return f.toPage(Point(r.center().x, r.top - 6*HANDLE_SIZE/mZoom));
+}
+
+Point RegionSelector::scaleHandlePos() const
+{
+  const RulingRegionParams& params = region->regionParams();
+  RulingFrame f = params.frame();
+  Rect r = regionLocalBBox(params);
+  // just past the bottom-right corner, clear of the "..." button that sits inside it
+  Dim d = 4*HANDLE_SIZE/mZoom;
+  return f.toPage(Point(r.right + d, r.bottom + d));
+}
+
+// the origin handle sits on the left edge, on the first line inside the region, and drags the lines
+static Point originHandlePos(const RulingRegionParams& params)
+{
+  RulingFrame f = params.frame();
+  Rect r = regionLocalBBox(params);
+  Dim yr = f.yrulingOr(Page::BLANK_Y_RULING);
+  Dim firstLine = (std::floor(r.top/yr) + 1)*yr;
+  return f.toPage(Point(r.left, firstLine < r.bottom ? firstLine : r.top));
+}
+
+Rect RegionSelector::getBGBBox()
+{
+  Rect r = region->regionParams().bounds();
+  r.rectUnion(rotHandlePos());
+  r.rectUnion(scaleHandlePos());
+  r.rectUnion(originHandlePos(region->regionParams()));
+  return r.pad(2*(HANDLE_SIZE + 3)/mZoom);
+}
+
+int RegionSelector::shapeHandleHit(Point pos, bool touch)
+{
+  const RulingRegionParams& params = region->regionParams();
+  Dim a = ((touch ? 2*HANDLE_SIZE : HANDLE_SIZE) + 3)/mZoom;
+  // the origin handle wins over a corner it happens to sit on: a corner can also be reached by
+  //  dragging along its edges, the origin cannot
+  if((pos - originHandlePos(params)).dist() <= a*1.2)
+    return originHandleIndex();
+  for(int ii = int(params.corners.size()); ii-- > 0;) {
+    if(std::abs(pos.x - params.corners[ii].x) <= a && std::abs(pos.y - params.corners[ii].y) <= a)
+      return ii;
+  }
+  return -1;
+}
+
+Point RegionSelector::rotHandleHit(Point pos, bool touch)
+{
+  Dim a = ((touch ? 2*HANDLE_SIZE : HANDLE_SIZE) + 3)/mZoom;
+  if((pos - rotHandlePos()).dist() <= a*1.2) {
+    // rotate about the centre of the outline
+    Rect r = regionLocalBBox(region->regionParams());
+    return region->regionParams().frame().toPage(r.center());
+  }
+  return Point(NaN, NaN);
+}
+
+Point RegionSelector::scaleHandleHit(Point pos, bool touch)
+{
+  Dim a = ((touch ? 2*HANDLE_SIZE : HANDLE_SIZE) + 3)/mZoom;
+  if((pos - scaleHandlePos()).dist() <= a*1.2) {
+    // scale about the opposite (top-left) corner of the outline's box
+    Rect r = regionLocalBBox(region->regionParams());
+    return region->regionParams().frame().toPage(Point(r.left, r.top));
+  }
+  return Point(NaN, NaN);
+}
+
+void RegionSelector::drawBG(Painter* painter)
+{
+  const RulingRegionParams& params = region->regionParams();
+  if(!params.isValid())
+    return;
+  Dim a = HANDLE_SIZE/mZoom;
+  painter->save();
+  painter->setAntiAlias(true);
+  // the outline, so a region with no paper is still visible as a thing while selected
+  painter->setFillBrush(Color::NONE);
+  painter->setStroke(bgStroke, 1.5/mZoom);
+  painter->drawPath(params.outlinePath());
+  // stem to the rotate handle, from the middle of the top edge
+  RulingFrame f = params.frame();
+  Rect r = regionLocalBBox(params);
+  painter->drawLine(f.toPage(Point(r.center().x, r.top)), rotHandlePos());
+  // corner handles (reshape only): black squares, as for a shape's point handles
+  for(const Point& p : params.corners)
+    painter->fillRect(Rect::centerwh(p, 2*a, 2*a), Color::BLACK);
+  // the origin handle moves a number (the lines' phase), so it is red like the shape parameter handles
+  Point o = originHandlePos(params);
+  painter->setStrokeBrush(Color::NONE);
+  painter->setFillBrush(Color::RED);
+  painter->drawPath(Path2D().addEllipse(o.x, o.y, a, a));
+  // rotate and scale: hollow circles, which RectSelector's handles also are
+  painter->setFillBrush(Color::WHITE);
+  painter->setStroke(Color::BLACK, 1/mZoom);
+  Point rh = rotHandlePos(), sh = scaleHandlePos();
+  painter->drawPath(Path2D().addEllipse(rh.x, rh.y, 1.5*a, 1.5*a));
+  painter->drawPath(Path2D().addEllipse(sh.x, sh.y, 1.5*a, 1.5*a));
+  painter->restore();
+  bgDirty = false;
 }

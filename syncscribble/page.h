@@ -77,6 +77,28 @@ public:
   Dim height() const;
   Dim width() const;
   Dim yruling(bool usedefault = false) const;
+  // The ruling in effect at `pos`: the topmost ruling region containing it, else the page's own.  This
+  //  is what every ruled tool should ask, with the gesture's anchor point (usually where it was pressed),
+  //  rather than yruling()/getLine(y), which only know the page's ruling.
+  RulingFrame rulingAt(Point pos) const;
+  RulingFrame pageFrame() const;
+  // the topmost region containing `pos`, or NULL
+  Element* regionAt(Point pos) const;
+  std::vector<Element*> regions() const;
+  // the area a frame's ruled tools may act over, in the frame's local coordinates: the page for the
+  //  page's own ruling, the region's bounding box for a region's
+  Rect frameExtent(const RulingFrame& frame) const;
+  // the frame a ruled gesture starting at `pos` works in: rulingAt(pos), and on an unruled page (or
+  //  region) the blank line height phased so `pos` sits in the middle of a line - what yRuleOffset
+  //  does for the page's own ruling
+  //  `nearLines` > 0 lets a press that misses every region still take the frame of one whose outline is
+  //  within that many of its own line heights (regionNear)
+  RulingFrame gestureFrame(Point pos, Dim nearLines = 0) const;
+  // the topmost region whose outline, grown by `lines` of its own line height, contains `pos`
+  Element* regionNear(Point pos, Dim lines) const;
+  RulingFrame regionFrame(Element* region) const;
+  // re-color every region from the page's paper and rule colors (theme change, invert, load)
+  void refreshRegions();
   Dim xruling() const { return props.xRuling; }
   Dim marginLeft() const { return props.marginLeft; }
   Rect rect() const { return Rect::ltwh(0, 0, width(), height()); }

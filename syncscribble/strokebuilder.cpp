@@ -53,6 +53,21 @@ Point StrokeBuilder::calcCom(SvgNode* node, Path2D* path)
   return Point(bbox.center().x, (comy/path->size() + path->point(0).y + bbox.top)/3.0);
 }
 
+Point StrokeBuilder::calcCom(SvgNode* node, Path2D* path, const Transform2D& toLocal, const Transform2D& toPage)
+{
+  if(path->empty()) return Point(NaN, NaN);
+  Path2D local = *path;
+  local.transform(toLocal);
+  Rect bbox = local.getBBox();
+  Dim sw = node->getFloatAttr("stroke-width", 0);
+  if(sw > 0)
+    bbox.pad(sw/2);
+  Dim comy = 0;
+  for(int ii = 0; ii < local.size(); ++ii)
+    comy += local.point(ii).y;
+  return toPage.map(Point(bbox.center().x, (comy/local.size() + local.point(0).y + bbox.top)/3.0));
+}
+
 void StrokeBuilder::finalize()
 {
   if(!stroke->empty())

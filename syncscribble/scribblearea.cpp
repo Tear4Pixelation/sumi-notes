@@ -411,7 +411,8 @@ void ScribbleArea::growPage(Rect bbox, Dim maxdx, Dim maxdy, bool pending)
 
 void ScribbleArea::setStrokeProperties(const StrokeProperties& props, bool undoable)
 {
-  if(!currSelection)
+  // a region's selection carries ink but is not an ink selection: nothing here recolors it
+  if(!currSelection || regionSelector)
     return;
   viewSelection();
   if(undoable) {
@@ -447,6 +448,18 @@ void ScribbleArea::invalidateStroke(Element* s)
   RecentStrokesIter it = std::find(recentStrokes.begin(), recentStrokes.end(), s);
   if(it != recentStrokes.end())
     recentStrokes.erase(it);
+  // A peer edited or deleted the region selected here.  Its selection also holds the ink it carries, so
+  //  it would not empty below and would be left pointing at a region it no longer holds - drop it all,
+  //  and any gesture on it, so no undo item is made for a region that may be gone.
+  if(s && s == selectedRegion()) {
+    regionHandleStart = RulingRegionParams();
+    int modetype = ScribbleMode::getModeType(currMode);
+    if(currMode == MODE_SHAPEHANDLE || modetype == MODE_MOVESEL || currMode == MODE_SCALESEL
+        || currMode == MODE_SCALESELW || currMode == MODE_ROTATESEL || currMode == MODE_ROTATESELW)
+      currMode = MODE_NONE;
+    clearSelection();
+    return;
+  }
   if(currSelection && currSelection->removeStroke(s)) {
     if(currSelection->count() == 0)
       clearSelection();
@@ -479,9 +492,17 @@ bool ScribbleArea::clearSelection()
   //  uses pageDimToDim
   dirtyScreen(selBGRect.rectUnion(currSelection->getBGBBox()));
   selBGRect = Rect();
+  bool hadRegion = regionSelector != NULL;
   delete currSelection;
   currSelection = NULL;
   shapeSelector = NULL;
+  regionSelector = NULL;
+  if(hadRegion) {
+    uiChanged(UIState::SelChange);  // the region options row goes away with it
+    // outside select mode the "..." chips were shown only because a region was selected
+    if(!regionButtonsShown())
+      scribbleDoc->repaintAll();
+  }
   if(pagenum != currPageNum) {
     scribbleDoc->dirtyPage(currPageNum);
     setPageNum(pagenum);
@@ -542,6 +563,9 @@ void ScribbleArea::selectSimilar()
 
 void ScribbleArea::invertSelection()
 {
+  // inverting a region's selection would hand the region all the ink outside it
+  if(regionSelector)
+    clearSelection();
   if(currSelection) {
     //doCancelAction();
     viewSelection();
@@ -558,6 +582,17 @@ void ScribbleArea::invertSelection()
 
 void ScribbleArea::deleteSelection()
 {
+  // deleting a region deletes the region only: the ink it carried stays where it is, and the page's
+  //  own lines come back under it
+  if(Element* region = selectedRegion()) {
+    Page* page = currSelection->page;
+    scribbleDoc->startAction(currSelPageNum);
+    page->removeStroke(region);
+    scribbleDoc->endAction();
+    currSelection->removeStroke(region);
+    clearSelection();
+    return;
+  }
   if(currSelection) {
     viewSelection();
     scribbleDoc->startAction(currPageNum);
@@ -584,8 +619,8 @@ bool ScribbleArea::recentStrokeSelect()
       && (!(item = scribbleDoc->history->hist[--recentStrokeSelPos])->isA(UndoHistoryItem::HEADER) || !strokeadded)) {
     if(item->isA(UndoHistoryItem::STROKE_ADDED_ITEM)) {
       Element* s = static_cast<StrokeAddedItem*>(item)->getStroke();
-      // we may have skipped over a StrokeDeletedItem for this stroke
-      if(!s->parent())
+      // we may have skipped over a StrokeDeletedItem for this stroke; a ruling region is not ink
+      if(!s->parent() || s->isRulingRegion())
         continue;
       if(!currSelection) {
         // need to get page number from stroke - we could have skipped over add/delete page items, so page
@@ -811,6 +846,190 @@ ShapeParams ScribbleArea::newShapeParams(int shapeid, Point pos) const
 
 // spec 5: leave a newly drawn shape selected with its handles up, so the parameters can be adjusted
 //  while the shape is still the thing being thought about
+// ruling regions
+
+// the "..." button: a chip in screen units, sitting inside the region's bottom-right corner (as seen in
+//  the region's own frame, so it follows a turned region round), drawn upright
+static constexpr Dim REGION_BTN_SIZE = 22;
+static constexpr Dim REGION_BTN_INSET = 4;
+// how far outside a region, in its own line heights, a ruled insert space or select press still counts
+//  as in it
+static constexpr Dim REGION_PRESS_SLOP = 0.5;
+
+Element* ScribbleArea::selectedRegion() const
+{
+  return regionSelector ? regionSelector->region : NULL;
+}
+
+bool ScribbleArea::regionButtonsShown() const
+{
+  return regionSelector || ScribbleMode::getModeType(scribbleDoc->scribbleMode->getMode()) == MODE_SELECT;
+}
+
+Point ScribbleArea::regionButtonPos(const Element* region) const
+{
+  const RulingRegionParams& params = region->regionParams();
+  RulingFrame f = params.frame();
+  Point corner = f.toLocal(params.corners[params.bottomRightCorner()]);
+  Dim inset = (REGION_BTN_SIZE/2 + REGION_BTN_INSET)/mZoom;
+  return f.toPage(corner - Point(inset, inset));
+}
+
+Element* ScribbleArea::regionButtonHit(Point pos, bool touch) const
+{
+  Dim reach = (REGION_BTN_SIZE/2 + (touch ? 6 : 2))/mZoom;
+  // topmost region first, as it is the one drawn over the others
+  std::vector<Element*> regions = currPage->regions();
+  for(auto it = regions.rbegin(); it != regions.rend(); ++it) {
+    Point c = regionButtonPos(*it);
+    if(std::abs(pos.x - c.x) <= reach && std::abs(pos.y - c.y) <= reach)
+      return *it;
+  }
+  return NULL;
+}
+
+void ScribbleArea::drawRegionButtons(Painter* painter)
+{
+  if(!regionButtonsShown())
+    return;
+  // the pages either side of the current one can be on screen too in a scrolling view
+  int first = viewMode == VIEWMODE_SINGLE ? currPageNum : std::max(0, currPageNum - 1);
+  int last = viewMode == VIEWMODE_SINGLE ? currPageNum : std::min(numPages() - 1, currPageNum + 1);
+  Dim half = REGION_BTN_SIZE/2/mZoom;
+  for(int pagenum = first; pagenum <= last; ++pagenum) {
+    Page* pg = page(pagenum);
+    if(!pg || pg->loadStatus != Page::LOAD_OK)
+      continue;
+    std::vector<Element*> regions = pg->regions();
+    if(regions.empty())
+      continue;
+    painter->save();
+    if(pagenum != currPageNum) {
+      Point origin = getPageOrigin(pagenum);
+      painter->translate(origin.x - currPageXOrigin, origin.y - currPageYOrigin);
+    }
+    painter->setAntiAlias(true);
+    for(Element* region : regions) {
+      Point c = regionButtonPos(region);
+      bool selected = region == selectedRegion();
+      // a dark chip with its own border reads the same over paper, a scan or ink - the page behind it is
+      //  never known to be one color
+      painter->setFillBrush(selected ? Color(0x20, 0x60, 0xC0, 230) : Color(0x30, 0x30, 0x30, 230));
+      painter->setStroke(Color::WHITE, 1.25/mZoom);
+      painter->drawPath(Path2D().addRect(Rect::centerwh(c, 2*half, 2*half)));
+      painter->setStrokeBrush(Color::NONE);
+      painter->setFillBrush(Color::WHITE);
+      Dim dotr = 1.6/mZoom, gap = 5/mZoom;
+      for(int ii = -1; ii <= 1; ++ii)
+        painter->drawPath(Path2D().addEllipse(c.x + ii*gap, c.y, dotr, dotr));
+    }
+    painter->restore();
+  }
+}
+
+void ScribbleArea::refreshRegionSelection()
+{
+  Element* region = selectedRegion();
+  if(!region)
+    return;
+  const RulingRegionParams& params = region->regionParams();
+  std::vector<Element*> gone;
+  for(Element* s : currSelection->strokes) {
+    if(s != region && !RegionSelector::carries(params, s))
+      gone.push_back(s);
+  }
+  for(Element* s : gone) {
+    s->setSelected(NULL);
+    currSelection->removeStroke(s);
+  }
+  Page* pg = currSelection->page;
+  for(Element* s : pg->children()) {
+    // ink on a locked layer stays where it is, as it would under any other selection
+    // as doSelect: never take an element another selection (another view's) holds
+    if(s != region && !s->selection() && pg->isEditable(s) && RegionSelector::carries(params, s))
+      currSelection->addStroke(s);
+  }
+  currSelection->invalidateBBox();
+}
+
+void ScribbleArea::selectRegion(Element* region)
+{
+  // every view's selection, not only this one's: another view may hold the region or its ink
+  scribbleDoc->clearSelection();
+  clearSelection();
+  bool chipsWereShown = regionButtonsShown();
+  // the ink comes along but is not shown as selected: it is being carried, not picked
+  currSelection = new Selection(currPage, Selection::STROKEDRAW_NORMAL);
+  currSelPageNum = currPageNum;
+  regionSelector = new RegionSelector(currSelection, region, mZoom);
+  currSelection->addStroke(region);
+  refreshRegionSelection();
+  dirtyScreen(currSelection->getBGBBox());
+  if(!chipsWereShown)
+    scribbleDoc->repaintAll();  // the chips appear on every region, not only this one
+  uiChanged(UIState::SelChange);
+}
+
+void ScribbleArea::setSelRegionParams(const RulingRegionParams& params)
+{
+  Element* region = selectedRegion();
+  if(!region)
+    return;
+  doCancelAction();
+  dirtyScreen(currSelection->getBGBBox());
+  scribbleDoc->startAction(currSelPageNum);
+  // the item holds the parameters as they were; undo swaps them back
+  scribbleDoc->history->addItem(new RegionChangedItem(region, currSelection->page));
+  region->setRegionParams(params);
+  scribbleDoc->endAction();
+  currSelection->invalidateBBox();
+  currSelection->xchgBGDirty(true);
+  dirtyScreen(currSelection->getBGBBox());
+  uiChanged(UIState::SetSelProps);
+  doRefresh();  // edits come from the region panel, not from input on the canvas, which would refresh
+}
+
+void ScribbleArea::previewSelRegionParams(const RulingRegionParams& params)
+{
+  Element* region = selectedRegion();
+  if(!region)
+    return;
+  dirtyScreen(currSelection->getBGBBox());
+  region->setRegionParams(params);
+  currSelection->invalidateBBox();
+  currSelection->xchgBGDirty(true);
+  dirtyScreen(currSelection->getBGBBox());
+  doRefresh();
+}
+
+Rect ScribbleArea::selRegionGlobalRect() const
+{
+  Element* region = selectedRegion();
+  if(!region)
+    return Rect();
+  Rect bounds;
+  for(const Point& corner : region->regionParams().corners)
+    bounds.rectUnion(screenToGlobal(dimToScreen(pageDimToDim(corner))));
+  return bounds;
+}
+
+Rect ScribbleArea::globalViewRect() const
+{
+  return Rect::corners(screenToGlobal(Point(0, 0)), screenToGlobal(Point(getViewWidth(), getViewHeight())));
+}
+
+Element* ScribbleArea::addRulingRegion(const Rect& r)
+{
+  Dim yr = currPage->yruling() > 0 ? currPage->yruling() : Page::BLANK_Y_RULING;
+  RulingRegionParams params = RulingRegionParams::fromRect(r, currPage->xruling(), yr, currPage->props.dotRadius);
+  Element* region = Element::createRulingRegion(params, currPage->props.color, currPage->props.ruleColor);
+  scribbleDoc->startAction(currPageNum);
+  currPage->addStroke(region);
+  scribbleDoc->endAction();
+  selectRegion(region);
+  return region;
+}
+
 void ScribbleArea::editShapeAfterDraw(Element* shape)
 {
   if(!shape || !shape->isShape() || !cfg->Bool("shapeEditAfterDraw"))
@@ -830,7 +1049,8 @@ void ScribbleArea::editShapeAfterDraw(Element* shape)
 //  selection toolbar already knows how to edit (spec 5, 10)
 Element* ScribbleArea::createShapeElement(const ShapeParams& params)
 {
-  ScribblePen resolved = resolvedPen();  // the marker's relative width has to be in document units
+  // the marker's relative width has to be in document units
+  ScribblePen resolved = resolvedPen(params.points.empty() ? Point(NaN, NaN) : params.points.front());
   const ScribblePen* pen = &resolved;
   SvgPath* svgPath = new SvgPath();
   svgPath->setAttr<color_t>("fill", Color::NONE);
@@ -928,7 +1148,10 @@ void ScribbleArea::groupStrokes(Element* b)
 
   if(!recentStrokes.empty()) {
     const Timestamp GROUP_DT_MAX = 2500;  // 2.5 seconds
-    const Dim yruling = currPage->yruling(true);
+    // a group is measured against the ruling it was written on, and a stroke on a different ruling (in
+    //  or out of a region) ends it
+    const RulingFrame groupFrame = currPage->rulingAt(recentStrokes.front()->com());
+    const Dim yruling = groupFrame.yrulingOr(Page::BLANK_Y_RULING);
     const Dim GROUP_DX_MIN = -0.25*yruling;
     const Dim GROUP_DX_MAX = 1.5*yruling;
     const Dim GROUP_DY_MIN = -1.25*yruling;
@@ -942,13 +1165,15 @@ void ScribbleArea::groupStrokes(Element* b)
     Dim miny = ycenter + (recentStrokes.size() > 3 ? TIGHT_DY_MIN : GROUP_DY_MIN);
     Dim maxy = ycenter + (recentStrokes.size() > 3 ? TIGHT_DY_MAX : GROUP_DY_MAX);
     if(!b || a->timestamp() + GROUP_DT_MAX < b->timestamp()
+          || currPage->regionAt(b->com()) != groupFrame.region
           || a->bbox().right + GROUP_DX_MAX < b->bbox().left
           || a->bbox().left + GROUP_DX_MIN > b->bbox().right
           || b->bbox().top < miny
           || b->bbox().bottom > maxy) {
       // end of group ... set com.y for each stroke to group's average
-      // group must contain at least 4 strokes
-      if(recentStrokes.size() > 3) {
+      // group must contain at least 4 strokes; the page-y alignment below means nothing on tilted lines,
+      //  so a tilted region's handwriting is left ungrouped
+      if(recentStrokes.size() > 3 && !groupFrame.isRotated()) {
         for(Element* s : recentStrokes)
           s->setCom(Point(s->com().x, ycenter));
         // special handling needed for whiteboarding since we are making a change outside the undo system
@@ -970,6 +1195,14 @@ void ScribbleArea::groupStrokes(Element* b)
   }
   if(b)
     recentStrokes.push_back(b);
+}
+
+void ScribbleArea::addRegionsToInsertSpace(Selection* sel, const std::function<bool(const Rect&)>& past)
+{
+  for(Element* region : sel->page->regions()) {
+    if(past(region->bbox()))
+      sel->addStroke(region);
+  }
 }
 
 int ScribbleArea::dimToPageNum(const Point& pos) const
@@ -1445,20 +1678,29 @@ void ScribbleArea::freeErase(Point prevpos, Point pos)
 void ScribbleArea::freeEraseRuled(Dim xmin, Dim xmax, int line)
 {
   Dim radius = ERASEFREE_RADIUS/mZoom;
-  Dim ytop = currPage->getYforLine(line);
-  Dim ybottom = ytop + currPage->yruling(true);
-  Rect erasebox = Rect::ltrb(xmin - radius, ytop, xmax + radius, ybottom);
+  // the line's band in the gesture's ruling (xmin/xmax are along its lines); a plain rect for the page's
+  //  own ruling, a tilted quad in a tilted region
+  std::vector<Point> band = gestureFrame.bandPolygon(line, xmin - radius, xmax + radius, Page::BLANK_Y_RULING);
+  Rect erasebox;
+  for(const Point& p : band)
+    erasebox.rectUnion(p);
   bool touched = false;
   auto strokes = currPage->children();
   for(auto ii = strokes.begin(); ii != strokes.end();) {
     Element* s = *ii++;
+    if(!currPage->isEditable(s))
+      continue;  // see freeErase()
+    // ink belongs to the ruling it sits on, as for RuledSelector::selectHit; pieces this gesture already
+    //  cut are exempt, since cutting can move a piece's centre across a region's edge
+    if(!s->isSelected(freeErasePieces) && currPage->regionAt(s->com()) != gestureFrame.region)
+      continue;
     if(!s->isSelected(tempSelection) && erasebox.intersects(s->bbox())) {
       if(s->isSelected(freeErasePieces)) {
-        touched = s->freeErase(erasebox) || touched;
+        touched = s->freeErase(band) || touched;
       }
       else {
         Element* s2 = s->cloneNode();
-        if(s2->freeErase(erasebox)) {
+        if(s2->freeErase(band)) {
           Element* nexts = ii != strokes.end() ? *ii : NULL;
           currPage->contentNode->addChild(s2->node, nexts ? nexts->node : NULL);
           ii = std::find(strokes.begin(), strokes.end(), nexts);
@@ -1535,7 +1777,9 @@ void ScribbleArea::updateUIState(UIState* state)
   // move,invert selection, select similar, delete, copy require an active selection
   state->activeSel = (currSelection != NULL);
   state->pageSel = scribbleDoc->numSelPages > 0;
-  state->selHasGroup = currSelection && currSelection->containsGroup();
+  state->regionSel = regionSelector != NULL;
+  // a region's selection holds a <g> (the region), which is not a group the user can ungroup
+  state->selHasGroup = currSelection && !regionSelector && currSelection->containsGroup();
   state->pagemodified = (currPage->dirtyCount != 0);
   state->pageNum = currPageNum+1;
   state->totalPages = numPages();
@@ -1570,11 +1814,17 @@ const ScribblePen* ScribbleArea::currPen() const
 //  document units, so this is the single place the multiplication happens.  Note the resolved width is
 //  what lands in the document: strokes are always saved with an absolute stroke-width, so nothing in
 //  the file format, the undo history or sync has to know about relative widths.
-ScribblePen ScribbleArea::resolvedPen() const
+ScribblePen ScribbleArea::resolvedPen(Point at) const
 {
   ScribblePen pen = *currPen();
-  if(pen.hasFlag(ScribblePen::WIDTH_RELATIVE))
-    pen.width *= currPage ? currPage->yruling(true) : Page::BLANK_Y_RULING;
+  if(pen.hasFlag(ScribblePen::WIDTH_RELATIVE)) {
+    if(!currPage)
+      pen.width *= Page::BLANK_Y_RULING;
+    else if(at.isNaN())
+      pen.width *= currPage->yruling(true);
+    else  // inside a ruling region, "a line" means the region's line
+      pen.width *= currPage->rulingAt(at).yrulingOr(Page::BLANK_Y_RULING);
+  }
   return pen;
 }
 
@@ -1589,8 +1839,10 @@ int ScribbleArea::selectionHit(Point pos, bool touch)
   // check for selection scale handle hit
   scaleOrigin = currSelection->selector->scaleHandleHit(pos, touch);
   if(!scaleOrigin.isNaN()) {
-    // bottom right corner scales with fixed aspect ratio; others scale freely
-    scaleLockRatio = scaleOrigin.x < pos.x && scaleOrigin.y < pos.y;
+    // bottom right corner scales with fixed aspect ratio; others scale freely.  A region always scales
+    //  uniformly: its ruling has one pitch per direction, and a stretch would have to change the pitch
+    //  of lines the ink is already written on.
+    scaleLockRatio = regionSelector || (scaleOrigin.x < pos.x && scaleOrigin.y < pos.y);
     prevXScale = 1;
     prevYScale = 1;
     return MODEMOD_SCALESEL;
@@ -1679,6 +1931,19 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
     scribbleInput->cancelAction();
     scribbleInput->forcePanMode(event);
   }
+  // Ruled insert space and ruled select pressed just outside a region still act on it: with the top line
+  //  on the region's edge, a press must otherwise land inside the edge yet not below that line.  The
+  //  press keeps its real position, so it is on line -1 of the region - "this line and everything after"
+  //  then takes the top line too, and the drag is measured in the same frame, so nothing jumps.
+  if(!gestureFrame.region && (currMode == MODE_INSSPACERULED || currMode == MODE_SELECTRULED)) {
+    RulingFrame nearFrame = currPage->gestureFrame(pos, REGION_PRESS_SLOP);
+    if(nearFrame.region) {
+      gestureFrame = nearFrame;
+      prevLine = initialLine = gestureFrame.line(pos, Page::BLANK_Y_RULING);
+      lx = gestureFrame.toLocal(pos).x;
+      marginLeft = MIN_DIM;
+    }
+  }
   if(currSelection) {
     // clear selection depending on mode
     switch(currMode) {
@@ -1703,6 +1968,13 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
       break;
     case MODE_MOVESEL:
       currMode = currSelection->selector->drawHandles ? MODE_MOVESELFREE : MODE_MOVESELRULED;
+      // ruled move steps in the ruling of the ink being moved, not of wherever it was grabbed
+      if(currSelection->ruling.region)
+        gridFrame = currSelection->ruling;
+      else {
+        gridFrame = currPage->pageFrame();
+        gridFrame.origin = Point(0, 0);
+      }
       break;
     default:
       break;
@@ -1798,7 +2070,11 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
   }
   case MODE_SHAPEHANDLE:
     // remember the descriptor so the whole drag collapses into a single undo item
-    if(shapeSelector && shapeSelector->shapeElement())
+    if(regionSelector) {
+      regionHandleStart = regionSelector->region->regionParams();
+      regionHandleStartPos = pos;
+    }
+    else if(shapeSelector && shapeSelector->shapeElement())
       shapeHandleStart = shapeSelector->shapeElement()->shapeParams();
     break;
   case MODE_BOOKMARK:
@@ -1839,12 +2115,13 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
   case MODE_ERASERULED:
     tempSelection = new Selection(selsource, Selection::STROKEDRAW_NONE);
     tempSelection->selMode = Selection::SELMODE_UNION;
+    tempSelection->ruling = gestureFrame;
     ruledSelector = new RuledSelector(tempSelection, selColMode);
     if(cfg->Bool("greedyRuledErase"))
       ruledSelector->selMode = RuledSelector::SEL_OVERLAP;
     eraseCurrLine = prevLine;
-    eraseXmax = pos.x;
-    eraseXmin = pos.x;
+    eraseXmax = lx;
+    eraseXmin = lx;
     break;
   case MODE_ERASEFREE:
     // use tempSelection to track strokes touched by free eraser
@@ -1859,8 +2136,8 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
     tempSelection->selMode = Selection::SELMODE_UNION;
     freeErasePieces = new Selection(selsource, Selection::STROKEDRAW_NORMAL);
     eraseCurrLine = prevLine;
-    eraseXmax = pos.x;
-    eraseXmin = pos.x;
+    eraseXmax = lx;
+    eraseXmin = lx;
     freeEraseRuled(eraseXmin, eraseXmax, eraseCurrLine);
     break;
   case MODE_SELECTRECT:
@@ -1869,6 +2146,7 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
     break;
   case MODE_SELECTRULED:
     currSelection = new Selection(currPage);
+    currSelection->ruling = gestureFrame;
     ruledSelector = new RuledSelector(currSelection, selColMode);
     break;
   case MODE_SELECTLASSO:
@@ -1914,25 +2192,31 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
     // protect against crash if UI allows move sel mode when it shouldn't
     if(!currSelection)
       currMode = MODE_NONE;
+    // a region carries whatever ink is inside it *now*
+    else if(regionSelector)
+      refreshRegionSelection();
     // nothing to do until mouse actually moves
     break;
   case MODE_INSSPACEVERT:
     tempSelection = new Selection(selsource);
     rectSelector = new RectSelector(tempSelection);
     rectSelector->selectRect(MIN_DIM, pos.y, MAX_DIM, MAX_DIM);
+    addRegionsToInsertSpace(tempSelection, [&](const Rect& r) { return r.top >= pos.y; });
     break;
   case MODE_INSSPACEHORZ:
     tempSelection = new Selection(selsource);
     rectSelector = new RectSelector(tempSelection);
     rectSelector->selectRect(pos.x, MIN_DIM, MAX_DIM, MAX_DIM);
+    addRegionsToInsertSpace(tempSelection, [&](const Rect& r) { return r.left >= pos.x; });
     break;
   case MODE_INSSPACERULED:
     tempSelection = new Selection(selsource);
+    tempSelection->ruling = gestureFrame;
     ruledSelector = new RuledSelector(tempSelection, selColMode);
-    ruledSelector->selectRuledAfter(pos.x, prevLine);
+    ruledSelector->selectRuledAfter(lx, prevLine);
     // if cursor down past left margin, we sort strokes, but we'll only
     //  enable inserting horz space if there are strokes on the first line
-    if(pos.x > currPage->marginLeft() && tempSelection->sortRuled() == prevLine)
+    if(lx > marginLeft && tempSelection->sortRuled() == prevLine)
       insertSpaceX = true;
     else
       insertSpaceX = false;
@@ -1940,6 +2224,7 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
     if(cfg->Bool("insSpaceErase")) {
       // second ruled selector for erasing strokes covered by negative insert space
       insSpaceEraseSelection = new Selection(selsource, Selection::STROKEDRAW_NONE);
+      insSpaceEraseSelection->ruling = gestureFrame;
       insSpaceEraseSelector = new RuledSelector(insSpaceEraseSelection, selColMode);
     }
   default:
@@ -2026,13 +2311,13 @@ void ScribbleArea::doMoveEvent(const InputEvent& event)
     break;
   case MODE_ERASEFREERULED:
     if(eraseCurrLine == line) {
-      eraseXmax = std::max(eraseXmax, pos.x);
-      eraseXmin = std::min(eraseXmin, pos.x);
+      eraseXmax = std::max(eraseXmax, lx);
+      eraseXmin = std::min(eraseXmin, lx);
     }
     else {
       eraseCurrLine = line;
-      eraseXmax = pos.x;
-      eraseXmin = pos.x;
+      eraseXmax = lx;
+      eraseXmin = lx;
     }
     freeEraseRuled(eraseXmin, eraseXmax, eraseCurrLine);
     break;
@@ -2042,7 +2327,7 @@ void ScribbleArea::doMoveEvent(const InputEvent& event)
     break;
   case MODE_SELECTRULED:
     // force redraw of selection BG
-    ruledSelector->selectRuled(initialPos.x, initialLine, pos.x, line);
+    ruledSelector->selectRuled(gestureFrame.toLocal(initialPos).x, initialLine, lx, line);
     break;
   case MODE_SELECTLASSO:
     // limit number of points in lasso and number of calls to doSelect
@@ -2059,7 +2344,13 @@ void ScribbleArea::doMoveEvent(const InputEvent& event)
   {
     Dim xscale = (pos.x - scaleOrigin.x)/(initialPos.x - scaleOrigin.x);
     Dim yscale = (pos.y - scaleOrigin.y)/(initialPos.y - scaleOrigin.y);
-    if(scaleLockRatio) {
+    if(regionSelector) {
+      // one positive factor, from the drag projected on the handle's diagonal: a region's ruling can
+      //  neither stretch one way nor be mirrored
+      Point d0 = initialPos - scaleOrigin;
+      xscale = yscale = std::max(Dim(0.01), dot(pos - scaleOrigin, d0)/std::max(dot(d0, d0), Dim(1E-9)));
+    }
+    else if(scaleLockRatio) {
       Dim scale = std::max(Dim(0.01), std::min(std::abs(xscale), std::abs(yscale)));
       xscale = SGN(xscale)*scale;
       yscale = SGN(yscale)*scale;
@@ -2114,6 +2405,17 @@ void ScribbleArea::doMoveEvent(const InputEvent& event)
   }
   case MODE_DRAWSHAPE:
   {
+    if(regionInProgress) {
+      scribbleDoc->updateCurrStroke(regionInProgress->bbox());
+      RulingRegionParams params = regionInProgress->regionParams();
+      Rect r = Rect::corners(initialPos, pos);
+      params.corners = { Point(r.left, r.top), Point(r.right, r.top), Point(r.right, r.bottom), Point(r.left, r.bottom) };
+      // lines are phased from the top edge, so the first line sits one pitch below it
+      params.origin = Point(r.left, r.top);
+      regionInProgress->setRegionParams(params);
+      scribbleDoc->updateCurrStroke(regionInProgress->bbox());
+      break;
+    }
     Element* shape = currStroke ? currStroke : shapeInProgress;
     if(!shape || shape->shapeParams().points.size() < 2)
       break;
@@ -2170,15 +2472,21 @@ void ScribbleArea::doMoveEvent(const InputEvent& event)
       app->overlayWidget->drawSelection(currSelection, screenToGlobal(rawpos), -pos, mScale);
       break;
     }
-    if(currSelection->drawType() != Selection::STROKEDRAW_SEL) {
-      currSelection->setDrawType(Selection::STROKEDRAW_SEL);
+    if(currSelection->drawType() == Selection::STROKEDRAW_NONE) {
+      // a region's ink is not shown as selected - it is being carried, not picked
+      currSelection->setDrawType(regionSelector ? Selection::STROKEDRAW_NORMAL : Selection::STROKEDRAW_SEL);
       app->overlayWidget->drawSelection(NULL);
     }
     if(currMode == MODE_MOVESELRULED) {
-      if(currPage->xruling() > 0)
-        dx = currPage->xruling() * (int(pos.x/currPage->xruling()) - int(initialPos.x/currPage->xruling()));
-      if(currPage->yruling() > 0)
-        dy = currPage->yruling() * (int(pos.y/currPage->yruling()) - int(initialPos.y/currPage->yruling()));
+      // quantized in the ruling the drag started in; for the page's own that is exactly the old
+      //  int(pos/ruling) arithmetic, and in a tilted region the steps run along its lines
+      const RulingFrame& f = gridFrame;
+      Point l = f.toLocal(pos), l0 = f.toLocal(initialPos);
+      Point step(f.xRuling > 0 ? f.xRuling * (int(l.x/f.xRuling) - int(l0.x/f.xRuling)) : l.x - l0.x,
+          f.yRuling > 0 ? f.yRuling * (int(l.y/f.yRuling) - int(l0.y/f.yRuling)) : l.y - l0.y);
+      Point d = f.toPageDir(step);
+      dx = d.x;
+      dy = d.y;
     }
     currSelection->setOffset(dx, dy);
     break;
@@ -2206,11 +2514,13 @@ void ScribbleArea::doMoveEvent(const InputEvent& event)
   {
     Dim dy0 = tempSelection->count() > 0 ? tempSelection->strokes.back()->pendingTransform().yoffset() : 0;
     if(insertSpaceX && cfg->Bool("reflow"))
-      tempSelection->reflowStrokes(pos.x - initialPos.x, line - initialLine, reflowWordSep);
+      tempSelection->reflowStrokes(lx - gestureFrame.toLocal(initialPos).x, line - initialLine, reflowWordSep);
     else
-      tempSelection->insertSpace(insertSpaceX ? dx : 0, line - prevLine);
-    // resizing page
-    if(tempSelection->count() > 0) {
+      tempSelection->insertSpace(insertSpaceX ? ldx : 0, line - prevLine);
+    // resizing page - a region's lines say nothing about the page's height, so only the page's own
+    //  ruling grows the page by lines
+    if(gestureFrame.region) {}
+    else if(tempSelection->count() > 0) {
       // this could be greater due to reflow
       Dim maxdy = tempSelection->strokes.back()->pendingTransform().yoffset();
       if(dy0 != maxdy) {
@@ -2222,8 +2532,9 @@ void ScribbleArea::doMoveEvent(const InputEvent& event)
       setPageDims(-1, initialPageSize.height() + currPage->yruling(true) * (line - initialLine), true);
     // erase for negative insert space
     if(insSpaceEraseSelection) {
-      if(line < initialLine || (line == initialLine && pos.x < initialPos.x))
-        insSpaceEraseSelector->selectRuled(pos.x, line, initialPos.x, initialLine);
+      Dim lx0 = gestureFrame.toLocal(initialPos).x;
+      if(line < initialLine || (line == initialLine && lx < lx0))
+        insSpaceEraseSelector->selectRuled(lx, line, lx0, initialLine);
       else
         insSpaceEraseSelection->clear();
     }
@@ -2279,6 +2590,26 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
     }
     break;
   case MODE_DRAWSHAPE:
+    if(regionInProgress) {
+      Element* region = regionInProgress;
+      regionInProgress = NULL;
+      scribbleDoc->updateCurrStroke(region->bbox());
+      Rect r = region->regionParams().bounds();
+      // a tap, or a sliver no line fits in, is not a region
+      Dim yr = region->regionParams().yRuling;
+      if(!r.isValid() || r.width() < 2*RegionSelector::HANDLE_SIZE/mZoom || r.height() < std::max(yr, Dim(8)/mZoom)
+          || !currPage->rect().intersects(r)) {
+        region->deleteNode();
+        break;
+      }
+      currPage->addStroke(region);
+      // a region is edited right after it is drawn: its lines usually need lining up with the page's
+      selectRegion(region);
+      // the region tool is single use - a second region is rare, and the next press is almost always
+      //  writing in the one just made
+      scribbleDoc->scribbleMode->drawRegion = false;
+      break;
+    }
     // the multi-point gesture deliberately survives the release; only drag gestures commit here
     if(currStroke) {
       scribbleDoc->updateCurrStroke(currStroke->bbox());
@@ -2306,6 +2637,13 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
     break;
   case MODE_SHAPEHANDLE:
   {
+    if(regionSelector) {
+      if(regionHandleStart.isValid())
+        scribbleDoc->history->addItem(new RegionChangedItem(regionSelector->region, currPage, regionHandleStart));
+      regionHandleStart = RulingRegionParams();
+      shapeHandleIdx = -1;
+      break;
+    }
     Element* shape = shapeSelector ? shapeSelector->shapeElement() : NULL;
     // one undo item for the whole drag: we mutated live, and record the starting descriptor here
     if(shape && shapeHandleStart.isValid())
@@ -2447,8 +2785,16 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
   {
     // NOTE: move sel modes must handle undo (startAction, endAction) explicitly!
     // remove from overlay
-    currSelection->setDrawType(Selection::STROKEDRAW_SEL);
+    currSelection->setDrawType(regionSelector ? Selection::STROKEDRAW_NORMAL : Selection::STROKEDRAW_SEL);
     app->overlayWidget->drawSelection(NULL);
+    // A region is part of its page: a tap does not toggle ruled move, and a drop outside the window or on
+    //  another page is not a move at all (the cut-and-paste those do would lose the region's identity).
+    if(regionSelector && ((event.modemod & MODEMOD_FASTCLICK) || !screenRect.contains(prevRawPos)
+        || dimToPageNum(screenToDim(prevRawPos)) != currPageNum)) {
+      currSelection->setOffset(0, 0);
+      currSelection->xchgBGDirty(true);
+      break;
+    }
     // use fast click thresholds to minimize interference with small intentional movements
     if(event.modemod & MODEMOD_FASTCLICK) {
       // tap selection to toggle move free/ruled
@@ -2589,7 +2935,7 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
       tempSelection->commitTransform();
       growPage(tempSelection->getBBox(), 0, std::max(Dim(0), maxdy));
     }
-    else
+    else if(!gestureFrame.region)  // a region's lines say nothing about the page's height
       setPageDims(-1, currPage->height() + currPage->yruling(true) * (prevLine - initialLine));
     if(insSpaceEraseSelection)
       insSpaceEraseSelection->deleteStrokes();
@@ -2653,9 +2999,24 @@ void ScribbleArea::doCancelAction(bool refresh)
       currStroke->deleteNode();
       currStroke = NULL;
     }
+    if(regionInProgress) {
+      scribbleDoc->updateCurrStroke(regionInProgress->bbox());
+      regionInProgress->deleteNode();
+      regionInProgress = NULL;
+    }
     break;
   case MODE_SHAPEHANDLE:
   {
+    if(regionSelector && regionHandleStart.isValid()) {
+      dirtyScreen(currSelection->getBGBBox());
+      regionSelector->region->setRegionParams(regionHandleStart);
+      currSelection->invalidateBBox();
+      currSelection->xchgBGDirty(true);
+      dirtyScreen(currSelection->getBGBBox());
+      regionHandleStart = RulingRegionParams();
+      shapeHandleIdx = -1;
+      break;
+    }
     Element* shape = shapeSelector ? shapeSelector->shapeElement() : NULL;
     if(shape && shapeHandleStart.isValid()) {
       dirtyScreen(currSelection->getBGBBox());
@@ -3098,8 +3459,12 @@ void ScribbleArea::drawScreen(Painter* painter, const Rect& dirty)
     SvgPainter(painter).drawNode(currStroke->node);
   if(shapeInProgress)
     SvgPainter(painter).drawNode(shapeInProgress->node);
+  if(regionInProgress)
+    SvgPainter(painter).drawNode(regionInProgress->node);
+  drawRegionButtons(painter);
 
-  if(currSelection && currSelection->drawType() == Selection::STROKEDRAW_SEL
+  // a region's selection draws its ink normally but still has handles
+  if(currSelection && (currSelection->drawType() == Selection::STROKEDRAW_SEL || regionSelector)
       && (currSelPageNum == currPageNum || viewMode != VIEWMODE_SINGLE)) {
     if(currSelPageNum != currPageNum) {
       Point origin = getPageOrigin(currSelPageNum);

@@ -13,6 +13,7 @@ const char* Element::STROKE_PEN_CLASS = "write-stroke-pen";
 const char* Element::FLAT_PEN_CLASS = "write-flat-pen";
 const char* Element::ROUND_PEN_CLASS = "write-round-pen";
 const char* Element::CHISEL_PEN_CLASS = "write-chisel-pen";
+const char* Element::RULING_REGION_CLASS = "write-ruling-region";
 
 Element::Element(SvgNode* n)
     : SvgNodeExtension(n), m_selection(NULL), m_timestamp(0), m_com(NaN, NaN)
@@ -140,6 +141,9 @@ static bool applyProperties(const StrokeProperties& props, SvgNode* node)
 
 bool Element::setProperties(const StrokeProperties& props)
 {
+  // a region's colors are the page's paper and rule colors (Page::refreshRegions), never ink colors
+  if(isRulingRegion())
+    return false;
   // applyProperties will only set color if fill or stroke is already present, so make sure one is!
   if(props.color.alpha() > 0 && !node->getAttr("fill") && !isMultiStroke())
     setSvgFillColor(node, Color::BLACK);
@@ -407,18 +411,23 @@ bool Element::freeErase(const Point& prevpos, const Point& pos, Dim radius)
 //  falling within the current ruled line's row (so e.g. a descender dipping into the next line is left alone)
 bool Element::freeErase(const Rect& rect)
 {
+  return freeErase(std::vector<Point>{ Point(rect.left, rect.top), Point(rect.right, rect.top),
+      Point(rect.right, rect.bottom), Point(rect.left, rect.bottom) });
+}
+
+bool Element::freeErase(const std::vector<Point>& poly)
+{
   bool touched = false;
 
   if(isMultiStroke()) {
     for(Element* s : children())
-      touched = s->freeErase(rect) || touched;
+      touched = s->freeErase(poly) || touched;
   }
-  else if(isPathElement()) {
+  else if(isPathElement() && poly.size() >= 3) {
     Path2D eraser;
-    eraser.moveTo(Point(rect.left, rect.top));
-    eraser.lineTo(Point(rect.right, rect.top));
-    eraser.lineTo(Point(rect.right, rect.bottom));
-    eraser.lineTo(Point(rect.left, rect.bottom));
+    eraser.moveTo(poly[0]);
+    for(size_t ii = 1; ii < poly.size(); ++ii)
+      eraser.lineTo(poly[ii]);
     eraser.closeSubpath();
     eraser.transform(node->getTransform().inverse());
     if(polygonArea(eraser.points) > 0)
@@ -580,6 +589,15 @@ void Element::applyTransform(const ScribbleTransform& tf)
     svgimg->m_bounds = tf.mapRect(svgimg->m_bounds);
     svgimg->srcRect = srctf.mapRect(svgimg->m_bounds);
   }
+  else if(isRulingRegion()) {
+    // like a shape, the parameters are transformed and the children regenerated; the region UI only makes
+    //  similarities without reflection (move/rotate/uniform positive scale), which the parameters express
+    //  exactly - anything else is approximated by RulingRegionParams::transform()
+    Transform2D pttf = node->getTransform().inverse() * tf.tf() * node->getTransform();
+    RulingRegionParams params = m_region;
+    params.transform(pttf);
+    setRegionParams(params);
+  }
   else if(isShape()) {
     // spec 7.8: the generic path branch below would rewrite the geometry and leave the descriptor stale,
     //  so the shape must never reach it - the descriptor itself is transformed and the path regenerated
@@ -652,6 +670,36 @@ void Element::updateFromNode()
   const char* ts = node->getStringAttr("__timestamp");
   if(ts && ts[0])
     m_timestamp = strtoull(ts, NULL, 0);
+  // absent __layer means the default layer, which is what every document written before layers
+  //  existed - and every element of one - is on
+  const char* layerstr = node->getStringAttr("__layer");
+  m_layer = layerstr && layerstr[0] ? int(strtol(layerstr, NULL, 0)) : LayerList::DEFAULT_LAYER;
+  if(node->type() == SvgNode::G && node->hasClass(RULING_REGION_CLASS)) {
+    RulingRegionParams params;
+    parseRegionPoints(node->getStringAttr("__rrpts"), params.corners);
+    std::vector<Point> origin;
+    parseRegionPoints(node->getStringAttr("__rrorigin"), origin);
+    params.origin = origin.empty() ? (params.corners.empty() ? Point(0, 0) : params.corners[0]) : origin[0];
+    params.angle = toReal(node->getStringAttr("__rrangle"), 0)*M_PI/180;
+    params.xRuling = std::max(Dim(0), toReal(node->getStringAttr("__rrxruling"), 0));
+    params.yRuling = std::max(Dim(0), toReal(node->getStringAttr("__rryruling"), 0));
+    params.dotRadius = std::max(Dim(0), toReal(node->getStringAttr("__rrdotradius"), 0));
+    params.opaque = toReal(node->getStringAttr("__rropaque"), 1) != 0;
+    params.outline = toReal(node->getStringAttr("__rroutline"), 0) != 0;
+    // a build that saw only a plain <g> may have moved it with a transform attribute; fold that into the
+    //  parameters, which are otherwise always in page coordinates
+    if(node->hasTransform()) {
+      params.transform(node->getTransform());
+      node->setTransform(Transform2D());
+    }
+    params.sanitize();
+    if(params.isValid()) {
+      m_region = params;
+      m_layer = LayerList::REGION_LAYER;
+      rebuildRegion();
+    }
+    return;
+  }
   // shape descriptor; when present the rendered path is regenerated from it rather than trusted
   int aliasFlags = 0;
   Dim aliasTight = -1;
@@ -690,6 +738,106 @@ void Element::setShapeParams(const ShapeParams& params)
 {
   m_shape = params;
   rebuildShapePath();
+}
+
+void Element::setRegionParams(const RulingRegionParams& params)
+{
+  m_region = params;
+  m_layer = LayerList::REGION_LAYER;
+  rebuildRegion();
+}
+
+// The children: [0] the paper, filled in the page color when opaque, [1] the rule lines (stroked) or
+//  dots (filled) in the rule color, [2] the border, stroked in the rule color when outline is on (an
+//  empty path otherwise).  They are what an older build of Write draws, so a document with
+//  regions still looks right there - it just treats the region as an ordinary group.
+void Element::rebuildRegion(Color paper, Color rule)
+{
+  SvgContainerNode* g = containerNode();
+  if(!g || !m_region.isValid())
+    return;
+  SvgPath* paperNode = NULL;
+  SvgPath* rulesNode = NULL;
+  SvgPath* outlineNode = NULL;
+  for(SvgNode* child : g->children()) {
+    if(child->type() != SvgNode::PATH) continue;
+    if(child->hasClass("rr-paper")) paperNode = static_cast<SvgPath*>(child);
+    else if(child->hasClass("rr-rules")) rulesNode = static_cast<SvgPath*>(child);
+    else if(child->hasClass("rr-outline")) outlineNode = static_cast<SvgPath*>(child);
+  }
+  if(!paper.isValid())
+    paper = paperNode ? parseColor(paperNode->getStringAttr("__rrpaper", "#fff")) : Color(Color::WHITE);
+  // the rule color keeps its alpha (the page's rule lines are usually translucent), which the stroke or
+  //  fill attribute alone would drop, so it is kept whole beside the paper color
+  if(!rule.isValid())
+    rule = rulesNode ? parseColor(rulesNode->getStringAttr("__rrrule", "#ff0000ff")) : Color(Color::BLUE);
+  if(!paperNode) {
+    paperNode = new SvgPath;
+    paperNode->addClass("rr-paper");
+    g->addChild(paperNode, g->firstChild());
+  }
+  if(!rulesNode) {
+    rulesNode = new SvgPath;
+    rulesNode->addClass("rr-rules");
+    g->addChild(rulesNode);
+  }
+
+  *paperNode->path() = m_region.outlinePath();
+  // the paper color is kept on the node even when transparent, so toggling opaque back on restores it
+  paperNode->setAttr("__rrpaper", fstring("#%06X", paper.rgb()).c_str());
+  setSvgFillColor(paperNode, m_region.opaque ? paper.opaque() : Color(Color::NONE));
+  setSvgStrokeColor(paperNode, Color::NONE);
+  paperNode->invalidate(false);
+
+  rulesNode->setAttr("__rrrule", fstring("#%08X", rule.argb()).c_str());
+  bool dots = m_region.dotRadius > 0;
+  *rulesNode->path() = dots ? m_region.dotsPath() : m_region.linesPath();
+  if(dots) {
+    setSvgFillColor(rulesNode, rule);
+    setSvgStrokeColor(rulesNode, Color::NONE);
+    rulesNode->removeAttr("stroke-width");
+    rulesNode->removeAttr("vector-effect");
+    rulesNode->setAttribute("shape-rendering", "auto");
+  }
+  else {
+    setSvgFillColor(rulesNode, Color::NONE);
+    setSvgStrokeColor(rulesNode, rule);
+    rulesNode->setAttr<float>("stroke-width", 1);
+    rulesNode->setAttribute("vector-effect", "non-scaling-stroke");
+    // crisp edges only while the lines are on the pixel grid; a tilted region wants antialiasing
+    rulesNode->setAttribute("shape-rendering", std::abs(std::sin(m_region.angle)) < 1E-9 ? "crispEdges" : "auto");
+  }
+  rulesNode->invalidate(false);
+
+  if(m_region.outline && !outlineNode) {
+    outlineNode = new SvgPath;
+    outlineNode->addClass("rr-outline");
+    g->addChild(outlineNode);
+  }
+  if(outlineNode) {
+    // twice a rule line's width, in screen pixels like the lines, so it reads as the region's edge
+    //  rather than as one more line at any zoom
+    *outlineNode->path() = m_region.outline ? m_region.outlinePath() : Path2D();
+    setSvgFillColor(outlineNode, Color::NONE);
+    setSvgStrokeColor(outlineNode, rule);
+    outlineNode->setAttr<float>("stroke-width", 2);
+    outlineNode->setAttribute("vector-effect", "non-scaling-stroke");
+    outlineNode->setAttribute("stroke-linejoin", "round");
+    outlineNode->invalidate(false);
+  }
+  // rule lines fade when zoomed out, exactly as the page's do (see applyStyle)
+  node->addClass("write-scale-down");
+  node->invalidate(true);
+}
+
+Element* Element::createRulingRegion(const RulingRegionParams& params, Color paper, Color rule)
+{
+  SvgG* g = new SvgG;
+  g->addClass(RULING_REGION_CLASS);
+  Element* region = new Element(g);
+  region->setRegionParams(params);
+  region->rebuildRegion(paper, rule);
+  return region;
 }
 
 void Element::dropShape()
@@ -731,6 +879,29 @@ void Element::serializeAttr(SvgWriter* writer)
     node->setAttr<Dim>("__comx", m_com.x);
     node->setAttr<Dim>("__comy", m_com.y);
   }
+  if(isRulingRegion()) {
+    node->setAttr("__rrpts", serializeRegionPoints(m_region.corners).c_str());
+    node->setAttr("__rrorigin", serializeRegionPoints({m_region.origin}).c_str());
+    // degrees, so a hand-edited file reads naturally; full precision, since sync compares nothing here
+    //  but a region transformed by a peer must land exactly where it did locally
+    node->setAttr("__rrangle", fstring("%.9g", double(m_region.angle*180/M_PI)).c_str());
+    node->setAttr<Dim>("__rrxruling", m_region.xRuling);
+    node->setAttr<Dim>("__rryruling", m_region.yRuling);
+    if(m_region.dotRadius > 0)
+      node->setAttr<Dim>("__rrdotradius", m_region.dotRadius);
+    else
+      node->removeAttr("__rrdotradius");
+    node->setAttr("__rropaque", m_region.opaque ? "1" : "0");
+    // written only when on, so a region without one is byte-identical to before
+    if(m_region.outline)
+      node->setAttr("__rroutline", "1");
+    else
+      node->removeAttr("__rroutline");
+  }
+  // written only when non-default, so an unlayered document gains no attributes at all; a region's
+  //  REGION_LAYER is never written - the class is what identifies it
+  else if(m_layer != LayerList::DEFAULT_LAYER)
+    node->setAttr("__layer", fstring("%d", m_layer).c_str());
   if(m_timestamp > 0 && !SVG_NO_TIMESTAMP)
     node->setAttr("__timestamp",
         fstring("0x%x%08x", uint32_t(m_timestamp >> 32), uint32_t(m_timestamp)).c_str());

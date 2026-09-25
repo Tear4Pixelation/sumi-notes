@@ -3,16 +3,19 @@
 #include <map>
 
 #include "ugui/widgets.h"
+#include "rulingregion.h"
 #include "shape.h"
 
 class ScribbleApp;
 struct UIState;
+class RegionPanel;
 
 class ScribbleWidget;
 class ScribbleView;
 class ScribbleArea;
 class ScribbleDoc;
 class OverlayWidget;
+class Sidebar;
 class AutoAdjContainer;
 
 class MainWindow : public Window
@@ -114,6 +117,7 @@ public:
   Action* actionPath_Select;
   Action* actionShapes;
   Action* actionShape[SHAPE_COUNT];
+  Action* actionRulingRegion;
   Action* actionExport_PDF;
   Action* actionImport_PDF;
   Action* actionPreferences;
@@ -162,6 +166,21 @@ public:
   Widget* selectOptsRow;
   Widget* insSpaceOptsRow;
   Widget* shapeOptsRow;
+  // floating column of panels beside the selected ruling region (see buildRegionPanel)
+  RegionPanel* regionPanel = NULL;
+  Button* regionKindBtn = NULL;
+  Slider* regionSpacingSlider = NULL;
+  TextBox* regionSpacingText = NULL;
+  Button* regionPaperToggle = NULL;
+  // the checkboxes inside the Background and Outline buttons
+  SvgNode* regionPaperCheck = NULL;
+  SvgNode* regionOutlineCheck = NULL;
+  Button* regionStraightenBtn = NULL;
+  // parameters from before a spacing slider drag, which is previewed and committed as one step on release
+  std::unique_ptr<RulingRegionParams> regionSlideStart;
+  void buildRegionPanel();
+  void syncRegionRow();
+  void editSelRegion(const std::function<void(RulingRegionParams&)>& change);
   Button* shapeHeadStartToggle = NULL;
   Button* shapeHeadEndToggle = NULL;
   Button* shapeRoundedToggle = NULL;

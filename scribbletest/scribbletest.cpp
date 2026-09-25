@@ -11,6 +11,9 @@
 #include "scantest.cpp"
 #include "shapetest.cpp"
 #include "colortest.cpp"
+#include "layertest.cpp"
+#include "regiontest.cpp"
+#include "librarytest.cpp"
 
 // Ideally, these tests should be run under valgrind to help check for memory leaks
 // renaming out files to refs (Linux):  for i in {0..13}; do mv "test${i}_out.html" "test${i}_ref.html"; done;
@@ -1292,11 +1295,242 @@ int ScribbleTest::shapeRoundTripTest()
   return nbad;
 }
 
+int ScribbleTest::rulingRegionTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: ruling region: %s\n", what); }
+  };
+  // input is in screen coordinates; everything checked is in page coordinates
+  auto at = [&](Point pagept, int ev) {
+    Point scr = scribbleArea->dimToScreen(scribbleArea->pageDimToDim(pagept));
+    ie(scr.x, scr.y, 0, pen, ev);
+  };
+  auto elementAt = [&](int idx) -> Element* {
+    int ii = 0;
+    for(Element* s : scribbleArea->currPage->children()) { if(ii++ == idx) return s; }
+    return NULL;
+  };
+  auto stroke = [&](const std::vector<Point>& pts) -> Element* {
+    scribbleMode->setMode(MODE_STROKE);
+    at(pts.front(), press);
+    for(size_t ii = 1; ii < pts.size(); ++ii) at(pts[ii], INPUTEVENT_MOVE);
+    at(pts.back(), release);
+    Element* last = NULL;
+    for(Element* s : scribbleArea->currPage->children()) last = s;
+    return last;
+  };
+  auto pathOf = [](Element* s) { return *static_cast<SvgPath*>(s->node)->path(); };
+
+  scribbleDoc->newDocument();
+  Page* page = scribbleArea->currPage;
+  scribbleDoc->app->setPen(ScribblePen(Color::BLACK, 2, ScribblePen::TIP_ROUND));
+  // ink written before the region: the region must still go *under* it
+  Element* before = stroke({Point(150, 300), Point(250, 305)});
+
+  Element* region = scribbleArea->addRulingRegion(Rect::ltrb(100, 200, 400, 440));
+  check(region && region->isRulingRegion(), "the region tool makes a ruling region");
+  if(!region) return nbad;
+  // tilt it by 0.3 rad about its centre, with a 30 unit pitch; the ink written before it stays where it is
+  RulingRegionParams params = region->regionParams();
+  params.yRuling = 30;
+  params.transform(Transform2D().rotate(0.3, Point(250, 320)));
+  scribbleArea->setSelRegionParams(params);
+  scribbleDoc->clearSelection();
+  check(elementAt(0) == region && elementAt(1) == before, "a region goes below ink written before it");
+  check(region->layer() == LayerList::REGION_LAYER, "a region is on no layer");
+
+  RulingFrame frame = region->regionParams().frame(region);
+  Point inside = frame.toPage(frame.toLocal(Point(250, 320)));
+  check(page->rulingAt(inside).region == region, "rulingAt() inside the region is the region's ruling");
+  check(page->rulingAt(Point(700, 800)).region == NULL, "rulingAt() outside it is the page's");
+
+  // *** the requirement: a centre-on-line stroke in a tilted region runs along the region's line ***
+  int line = frame.line(inside, Page::BLANK_Y_RULING);
+  Dim centre = (line + 0.5)*30;
+  scribbleDoc->app->setPen(ScribblePen(Color::BLACK, 2, ScribblePen::TIP_ROUND | ScribblePen::CENTER_ON_LINE));
+  Element* centred = stroke({frame.toPage(Point(60, centre - 9)), frame.toPage(Point(160, centre + 11)),
+      frame.toPage(Point(220, centre + 4))});
+  {
+    Path2D path = pathOf(centred);
+    bool ok = path.size() >= 2;
+    for(int ii = 0; ii < path.size(); ++ii)
+      ok = ok && std::abs(frame.toLocal(path.point(ii)).y - centre) < 1E-3;
+    check(ok, "a centre-on-line stroke in a tilted region lies on the middle of the region's line");
+    check(ok && std::abs(frame.toLocal(path.point(path.size()-1)).x - 220) < 1E-3,
+        "...and still follows the pen along the line");
+  }
+
+  // snap to grid: onto the region's grid, not the page's
+  scribbleDoc->app->setPen(ScribblePen(Color::BLACK, 2, ScribblePen::TIP_ROUND | ScribblePen::SNAP_TO_GRID));
+  Element* snapped = stroke({frame.toPage(Point(47, 71)), frame.toPage(Point(107, 131))});
+  {
+    Path2D path = pathOf(snapped);
+    Point l0 = frame.toLocal(path.point(0));
+    // the region has no x ruling, so the grid is square at the y pitch
+    check(std::abs(l0.x - 30*std::round(l0.x/30)) < 1E-3 && std::abs(l0.y - 30*std::round(l0.y/30)) < 1E-3,
+        "a snap-to-grid stroke in a region snaps to the region's (tilted) grid");
+  }
+  scribbleDoc->app->setPen(ScribblePen(Color::BLACK, 2, ScribblePen::TIP_ROUND));
+
+  // a second stroke two lines down, for ruled select to leave alone
+  scribbleDoc->app->setPen(ScribblePen(Color::BLACK, 2, ScribblePen::TIP_ROUND | ScribblePen::CENTER_ON_LINE));
+  Element* lower = stroke({frame.toPage(Point(60, centre + 60)), frame.toPage(Point(200, centre + 60))});
+  scribbleDoc->app->setPen(ScribblePen(Color::BLACK, 2, ScribblePen::TIP_ROUND));
+
+  // ruled select along one of the region's (tilted) lines takes that line's ink and nothing else
+  scribbleMode->setMode(MODE_SELECTRULED);
+  at(frame.toPage(Point(40, centre)), press);
+  at(frame.toPage(Point(150, centre)), INPUTEVENT_MOVE);
+  at(frame.toPage(Point(260, centre)), INPUTEVENT_MOVE);
+  at(frame.toPage(Point(260, centre)), release);
+  {
+    Selection* sel = scribbleArea->currSelection;
+    bool hasCentred = sel && centred->isSelected(sel);
+    check(hasCentred, "ruled select along a tilted region line selects the ink on that line");
+    check(sel && !lower->isSelected(sel), "...but not the ink two lines further down the region");
+    check(sel && !region->isSelected(sel), "...and never the region itself");
+  }
+  scribbleDoc->clearSelection();
+
+  // the region is out of reach of ink selection and erasers
+  scribbleDoc->doCommand(ID_SELALL);
+  check(scribbleArea->currSelection && !region->isSelected(scribbleArea->currSelection),
+      "Select All takes the ink but not the region");
+  scribbleDoc->clearSelection();
+  int ncount = page->strokeCount();
+  scribbleMode->setMode(MODE_ERASESTROKE);
+  // across a stretch of the region's paper with no ink on it
+  at(frame.toPage(Point(250, 200)), press);  at(frame.toPage(Point(290, 205)), INPUTEVENT_MOVE);
+  at(frame.toPage(Point(290, 205)), release);
+  check(page->strokeCount() == ncount && region->node->parent(), "the stroke eraser does not erase a region");
+
+  // moving the region carries its ink, as one undo step; undo takes both back
+  Point centredStart = pathOf(centred).point(0);
+  Point cornerStart = region->regionParams().corners[0];
+  Point beforeStart = pathOf(before).point(0);
+  scribbleArea->selectRegion(region);
+  size_t steps = scribbleDoc->history->undoSteps();
+  scribbleMode->setMode(MODE_STROKE);
+  // press away from every handle and from the button: the middle of the region
+  Point grab = frame.toPage(Point(150, 90));
+  at(grab, press);
+  at(grab + Point(20, 30), INPUTEVENT_MOVE);
+  at(grab + Point(40, 60), INPUTEVENT_MOVE);
+  at(grab + Point(40, 60), release);
+  auto offsetOf = [&](Element* s, Point start) { return pathOf(s).point(0) + Point(s->node->getTransform().xoffset(),
+      s->node->getTransform().yoffset()) - start; };
+  check(approxEq(region->regionParams().corners[0] - cornerStart, Point(40, 60), 1E-3), "the region moved");
+  check(approxEq(offsetOf(centred, centredStart), Point(40, 60), 1E-3), "...and carried the ink inside it");
+  check(approxEq(offsetOf(before, beforeStart), Point(40, 60), 1E-3),
+      "...including ink written before the region was made");
+  check(scribbleDoc->history->undoSteps() == steps + 1, "moving a region and its ink is one undo step");
+  scribbleDoc->clearSelection();
+  scribbleDoc->doUndoRedo(false);
+  check(approxEq(region->regionParams().corners[0], cornerStart, 1E-3)
+      && approxEq(offsetOf(centred, centredStart), Point(0, 0), 1E-3), "undo puts the region and its ink back");
+
+  // deleting a region keeps its ink
+  ncount = page->strokeCount();
+  scribbleArea->selectRegion(region);
+  scribbleArea->deleteSelection();
+  check(!region->node->parent() && page->strokeCount() == ncount - 1, "deleting a region removes the region only");
+  check(page->rulingAt(inside).region == NULL, "...and the page's ruling applies there again");
+  scribbleDoc->doUndoRedo(false);
+  check(elementAt(0) == region, "undoing the delete puts the region back below the ink");
+
+  // Replaying a region's add with no recorded sibling - what a sync rebase does when the region was added
+  //  to an empty page - must still put it below ink that arrived since, not on top of it.
+  {
+    scribbleDoc->newDocument();
+    Page* pg = scribbleArea->currPage;
+    Element* rg = scribbleArea->addRulingRegion(Rect::ltrb(100, 200, 400, 440));
+    scribbleDoc->clearSelection();
+    Element* ink = stroke({Point(150, 300), Point(250, 305)});
+    // the item a region added to an empty page records: no sibling to go before
+    StrokeAddedItem added(rg, pg, NULL);
+    added.undo();
+    added.redo();
+    int ii = 0;
+    for(Element* s : pg->children()) { if(s == rg) break; ++ii; }
+    check(ii == 0 && ink->node->parent(), "a region re-added with no recorded sibling lands below ink, not on top");
+  }
+
+  // save and reload
+  {
+    scribbleDoc->newDocument();
+    Element* rg = scribbleArea->addRulingRegion(Rect::ltrb(100, 200, 400, 440));
+    RulingRegionParams p = rg->regionParams();
+    p.transform(Transform2D().rotate(-0.2, Point(250, 320)));
+    p.xRuling = 25;
+    p.dotRadius = 1.5;
+    p.opaque = false;
+    p.outline = true;
+    scribbleArea->setSelRegionParams(p);
+    scribbleDoc->clearSelection();
+    stroke({Point(150, 300), Point(250, 305)});
+    std::string file = outPath + "/region_roundtrip_out.html";
+    check(scribbleDoc->saveDocument(file.c_str()), "saving a document with a region succeeds");
+    scribbleDoc->newDocument();
+    check(scribbleDoc->openDocument(file.c_str()) == Document::LOAD_OK, "reloading it succeeds");
+    removeFile(file.c_str());
+    Element* back = elementAt(0);
+    check(back && back->isRulingRegion(), "the region is still a region, and still first, after a reload");
+    if(back && back->isRulingRegion()) {
+      const RulingRegionParams& q = back->regionParams();
+      bool same = q.corners.size() == p.corners.size() && std::abs(q.angle - p.angle) < 1E-6
+          && std::abs(q.xRuling - 25) < 1E-4 && std::abs(q.yRuling - p.yRuling) < 1E-4
+          && std::abs(q.dotRadius - 1.5) < 1E-4 && !q.opaque && q.outline && approxEq(q.origin, p.origin, 1E-3);
+      for(size_t ii = 0; same && ii < q.corners.size(); ++ii)
+        same = approxEq(q.corners[ii], p.corners[ii], 1E-3);
+      check(same, "outline, ruling, dots, paper and border all survive save/reload");
+      scribbleDoc->doCommand(ID_SELALL);
+      check(scribbleArea->currSelection && !back->isSelected(scribbleArea->currSelection),
+          "a reloaded region is still out of reach of Select All");
+      scribbleDoc->clearSelection();
+    }
+  }
+
+  // the sync wire: what a region edit serializes reproduces it on the receive path
+  {
+    Element* rg = elementAt(0);
+    if(rg && rg->isRulingRegion()) {
+      rg->uuid = 424242;
+      std::unique_ptr<ScribbleSync> sync(new ScribbleSync(scribbleDoc));
+      sync->strokemap[rg->uuid] = rg;
+      RulingRegionParams p = rg->regionParams();
+      p.yRuling = 44;
+      p.corners[2] = p.corners[2] + Point(30, 20);
+      scribbleArea->selectRegion(rg);
+      scribbleArea->setSelRegionParams(p);
+      scribbleDoc->clearSelection();
+      MemStream strm;
+      RegionChangedItem(rg, scribbleArea->currPage).serialize(strm);  // the live (edited) state
+      std::string wire(strm.data(), strm.size());
+      scribbleDoc->doUndoRedo(false);
+      check(std::abs(rg->regionParams().yRuling - 44) > 1, "the local edit is undone");
+      std::string xml = "<undo uuid='78' user='peer'>" + wire + "</undo>";
+      pugi::xml_document doc;
+      check(doc.load_buffer(xml.data(), xml.size()), "the region item is well-formed XML");
+      pugi::xml_node itemnode = doc.child("undo").first_child();
+      sync->processItem(itemnode);
+      check(std::abs(rg->regionParams().yRuling - 44) < 1E-6
+          && approxEq(rg->regionParams().corners[2], p.corners[2], 1E-3), "a peer's region edit applies");
+    }
+    else
+      check(false, "no region to test sync with");
+  }
+
+  scribbleDoc->newDocument();
+  return nbad;
+}
+
 void ScribbleTest::runAll(bool runsynctest)
 {
   nFailed = 0;
   int nThumbsFailed = 0;
-  int nUnitFailed = runScanTests() + runShapeTests() + runColorTests();
+  int nUnitFailed = runScanTests() + runShapeTests() + runColorTests() + runLayerTests() + runLibraryTests()
+      + runRegionTests();
   std::vector<std::string> slFailed;
   void (ScribbleTest::*tests[])() = {
     &ScribbleTest::test0,

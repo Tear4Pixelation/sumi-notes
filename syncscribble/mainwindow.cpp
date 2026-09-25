@@ -243,13 +243,15 @@ void MainWindow::refreshCommonUI(ScribbleDoc* doc, const UIState* uiState)
     historyTip->setVisible(true);
   }
 
-  actionCut->setEnabled(uiState->activeSel || uiState->pageSel);
-  actionCopy->setEnabled(uiState->activeSel || uiState->pageSel);
+  // a selected ruling region can only be deleted (which keeps its ink); the rest act on ink
+  bool inkSel = uiState->activeSel && !uiState->regionSel;
+  actionCut->setEnabled(inkSel || uiState->pageSel);
+  actionCopy->setEnabled(inkSel || uiState->pageSel);
   actionDelete_Selection->setEnabled(uiState->activeSel || uiState->pageSel);
-  actionDupSel->setEnabled(uiState->activeSel || uiState->pageSel);  // maybe only enable if 1 page selected?
+  actionDupSel->setEnabled(inkSel || uiState->pageSel);  // maybe only enable if 1 page selected?
   //actionSelect_Similar->setEnabled(uiState->activeSel);
-  actionInvert_Selection->setEnabled(uiState->activeSel || uiState->pageSel);
-  actionCreate_Link->setEnabled(uiState->activeSel);
+  actionInvert_Selection->setEnabled(inkSel || uiState->pageSel);
+  actionCreate_Link->setEnabled(inkSel);
   actionUngroup->setEnabled(uiState->selHasGroup);
   actionPaste->setEnabled(app->clipboard != NULL || !ScribbleApp::cfg->Bool("preloadClipboard"));
 
@@ -315,6 +317,9 @@ void MainWindow::refreshUI(ScribbleDoc* doc, int reason)
   areaState.zoom = app->bookmarkArea->getZoom();
   refreshScribbleWidget(app->bookmarkArea->widget, &areaState);
   updateMode();
+  syncRegionRow();
+  if(sidebar)
+    sidebar->refreshIfChanged();
 
   // if a pen was released, may need to save pen to recent pens list
   if(reason & (1 << UIState::PenRelease)) {
@@ -392,10 +397,13 @@ void MainWindow::updateMode()
     checkedSubMode = NULL;
   }
   // the active shape is shown on the shape options row, like the eraser submodes below
+  bool drawRegion = app->scribbleMode->drawRegion;
   for(int ii = 0; ii < SHAPE_COUNT; ++ii)
-    actionShape[ii]->setChecked(ii == app->scribbleMode->shapeId);
+    actionShape[ii]->setChecked(!drawRegion && ii == app->scribbleMode->shapeId);
+  actionRulingRegion->setChecked(drawRegion && mode == MODE_DRAWSHAPE);
   int shapeFlags = app->scribbleMode->shapeFlags;
-  const ShapeDef* shapedef = shapeDef(app->scribbleMode->shapeId);
+  // the region tool draws no shape, so no shape option applies to it
+  const ShapeDef* shapedef = drawRegion ? NULL : shapeDef(app->scribbleMode->shapeId);
   bool heads = shapedef && shapedef->allowsHeads;
   bool rounding = shapedef && shapedef->allowsRounding;
   shapeHeadStartToggle->setChecked(heads && (shapeFlags & SHAPEFLAG_HEADSTART));
@@ -468,8 +476,9 @@ void MainWindow::selectDrawTool(int tool)
 void MainWindow::selectShape(int shapeid)
 {
   ScribbleMode* scribbleMode = app->scribbleMode;
-  bool close = openOptionsRow == MODE_DRAWSHAPE
+  bool close = openOptionsRow == MODE_DRAWSHAPE && !scribbleMode->drawRegion
       && scribbleMode->getMode() == MODE_DRAWSHAPE && scribbleMode->shapeId == shapeid;
+  scribbleMode->drawRegion = false;
   scribbleMode->shapeId = shapeid;
   app->setMode(MODE_DRAWSHAPE);
   showOptionsRow(close ? 0 : MODE_DRAWSHAPE);
@@ -477,6 +486,303 @@ void MainWindow::selectShape(int shapeid)
 
 // the three option toggles (start head, end head, rounded corners) are a single set of flags, applied
 //  to the shape about to be drawn and - if one is selected - to that shape as well
+// The ruling region panel: a column of small floating panels beside the selected region - the kind of
+//  ruling, its spacing, whether it covers what is behind it, "level" and delete.  Every change is one
+//  undo step (ScribbleArea::setSelRegionParams); a spacing drag is previewed and recorded on release.
+void MainWindow::editSelRegion(const std::function<void(RulingRegionParams&)>& change)
+{
+  ScribbleArea* area = app->activeArea();
+  Element* region = area ? area->selectedRegion() : NULL;
+  if(!region)
+    return;
+  RulingRegionParams params = region->regionParams();
+  change(params);
+  params.sanitize();
+  area->setSelRegionParams(params);
+}
+
+// Placed on whichever side of the region has room - right, then left, below, above - which can only
+//  be decided at layout time, since that is when the panel's own size is known.
+class RegionPanel : public AbsPosWidget
+{
+public:
+  using AbsPosWidget::AbsPosWidget;
+  Rect anchor;  // the region's outline, in window coordinates
+  Rect view;    // the part of the canvas the panel may cover
+
+  void place(const Rect& anchorrect, const Rect& viewrect)
+  {
+    if(anchorrect == anchor && viewrect == view)
+      return;
+    anchor = anchorrect;
+    view = viewrect;
+    node->setDirty(SvgNode::BOUNDS_DIRTY);  // gets calcOffset called again
+  }
+
+  Point calcOffset(const Rect& parentbbox) const override
+  {
+    if(!anchor.isValid() || !view.isValid())
+      return AbsPosWidget::calcOffset(parentbbox);
+    Rect bbox = node->bounds();
+    Dim width = bbox.width(), height = bbox.height(), gap = floatInset;
+    auto clampX = [&](Dim x){ return std::max(view.left + gap, std::min(x, view.right - gap - width)); };
+    auto clampY = [&](Dim y){ return std::max(view.top + gap, std::min(y, view.bottom - gap - height)); };
+    Point pos;
+    if(anchor.right + gap + width <= view.right - gap)
+      pos = Point(anchor.right + gap, clampY(anchor.top));
+    else if(anchor.left - gap - width >= view.left + gap)
+      pos = Point(anchor.left - gap - width, clampY(anchor.top));
+    else if(anchor.bottom + gap + height <= view.bottom - gap)
+      pos = Point(clampX(anchor.left), anchor.bottom + gap);
+    else if(anchor.top - gap - height >= view.top + gap)
+      pos = Point(clampX(anchor.left), anchor.top - gap - height);
+    else  // the region fills the view: over it, against the right edge
+      pos = Point(view.right - gap - width, clampY(anchor.top));
+    return pos - bbox.origin();
+  }
+};
+
+enum { REGION_LINED = 0, REGION_SQUARED, REGION_DOTTED };
+
+static int regionKind(const RulingRegionParams& params)
+{
+  return params.dotRadius > 0 ? REGION_DOTTED : params.xRuling > 0 ? REGION_SQUARED : REGION_LINED;
+}
+
+static const char* regionKindTitle(int kind)
+{
+  return kind == REGION_DOTTED ? _("Dotted") : kind == REGION_SQUARED ? _("Squared") : _("Lined");
+}
+
+// lined reuses the ruled icon; there is no squared or dotted glyph among the icons, so those two are
+//  drawn to the same 24 unit grid here
+static const SvgNode* regionKindIcon(int kind)
+{
+  static const char* squaredSVG = R"(<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+    <g class="icon" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+      <path d="M3 7.5H21M3 12H21M3 16.5H21M7.5 3V21M12 3V21M16.5 3V21"/>
+    </g></svg>)";
+  static const char* dottedSVG = R"(<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+    <g class="icon" fill="currentColor" stroke="none">
+      <circle cx="6" cy="6" r="1.6"/><circle cx="12" cy="6" r="1.6"/><circle cx="18" cy="6" r="1.6"/>
+      <circle cx="6" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="18" cy="12" r="1.6"/>
+      <circle cx="6" cy="18" r="1.6"/><circle cx="12" cy="18" r="1.6"/><circle cx="18" cy="18" r="1.6"/>
+    </g></svg>)";
+  static const SvgDocument* squared =
+      SvgGui::useFile("region-kind-squared", std::unique_ptr<SvgDocument>(SvgParser().parseString(squaredSVG)));
+  static const SvgDocument* dotted =
+      SvgGui::useFile("region-kind-dotted", std::unique_ptr<SvgDocument>(SvgParser().parseString(dottedSVG)));
+  if(kind == REGION_SQUARED)
+    return squared;
+  if(kind == REGION_DOTTED)
+    return dotted;
+  return SvgGui::useFile(":/icons/ic_menu_toggle_ruled.svg");
+}
+
+// the slider is logarithmic: the useful spacings bunch up at the fine end
+static const Dim regionMinSpacing = 10;
+static const Dim regionMaxSpacing = 120;
+
+static Dim regionSliderToSpacing(real pos)
+{
+  pos = std::min(std::max(pos, real(0)), real(1));
+  return std::round(regionMinSpacing*std::pow(regionMaxSpacing/regionMinSpacing, pos));
+}
+
+static real regionSpacingToSlider(Dim spacing)
+{
+  spacing = std::min(std::max(spacing, regionMinSpacing), regionMaxSpacing);
+  return std::log(spacing/regionMinSpacing)/std::log(regionMaxSpacing/regionMinSpacing);
+}
+
+void MainWindow::buildRegionPanel()
+{
+  regionPanel = new RegionPanel(loadSVGFragment(
+      "<g class='region-panel' position='absolute' layout='flex' flex-direction='column'></g>"));
+
+  // each control is its own panel, rounded like the toolbar's, with a gap between them
+  auto addPanel = [this](std::initializer_list<Widget*> contents) {
+    Toolbar* panel = createToolbar();
+    panel->node->setAttribute("box-anchor", "hfill");
+    SvgRect* bg = static_cast<SvgRect*>(panel->selectFirst(".toolbar-bg")->node);
+    bg->setRect(bg->getRect(), floatCorner, floatCorner);
+    panel->selectFirst(".child-container")->setMargins(0, floatPad, 0, floatPad);
+    for(Widget* widget : contents)
+      panel->addWidget(widget);
+    scaleFloatPanel(panel, floatIconSize);
+    if(!regionPanel->containerNode()->children().empty())
+      panel->setMargins(floatInset/2, 0, 0, 0);
+    regionPanel->addWidget(panel);
+  };
+  auto titledButton = [](const SvgNode* icon, const char* title) {
+    Button* btn = createToolbutton(icon, title, true);
+    btn->node->addClass("float-wide-btn");  // sized by its label, as the document title is
+    return btn;
+  };
+
+  // kind of ruling, a dropdown
+  regionKindBtn = titledButton(regionKindIcon(REGION_LINED), regionKindTitle(REGION_LINED));
+  SvgUse* chevron = new SvgUse(Rect::wh(floatSmallIconSize, floatSmallIconSize), "",
+      SvgGui::useFile(":/icons/chevron_down.svg"));
+  chevron->addClass("icon");
+  regionKindBtn->selectFirst(".title")->node->parent()->asContainerNode()->addChild(chevron);
+  ArrowPopup* kindMenu = createArrowPopup(Menu::VERT_LEFT);
+  for(int kind : {REGION_LINED, REGION_SQUARED, REGION_DOTTED}) {
+    kindMenu->addItem(regionKindTitle(kind), regionKindIcon(kind), [this, kind](){
+      editSelRegion([kind](RulingRegionParams& p){
+        Dim pitch = p.yRuling > 0 ? p.yRuling : Page::BLANK_Y_RULING;
+        p.yRuling = pitch;
+        p.xRuling = kind == REGION_LINED ? 0 : pitch;
+        if(kind != REGION_DOTTED)
+          p.dotRadius = 0;
+        else if(p.dotRadius <= 0)
+          p.dotRadius = std::max(Dim(1), pitch/20);
+      });
+    });
+  }
+  setupPopupMenu(regionKindBtn, kindMenu);
+  setupTooltip(regionKindBtn, _("Lines, squares or dots inside the region"));
+  addPanel({regionKindBtn});
+
+  // spacing: squared and dotted keep their cells square
+  // the color picker's slider in miniature: a rounded bar, and a caret with a gap in the panel's color
+  //  cut around it (colors in theme.cpp, .region-panel)
+  static const char* sliderSVG = R"#(
+    <g class="slider" box-anchor="hfill" layout="box">
+      <g box-anchor="hfill" layout="box" margin="0 6">
+        <rect width="100" height="32" fill="none"/>
+        <rect class="slider-bg" box-anchor="hfill" width="100" height="12" rx="6" ry="6"/>
+      </g>
+      <g class="slider-handle-container" box-anchor="left">
+        <rect width="12" height="32" fill="none"/>
+        <g class="slider-handle" transform="translate(6,0)">
+          <rect class="slider-caret-gap" x="-4.5" y="3" width="9" height="26" rx="4.5" ry="4.5"/>
+          <rect class="slider-caret" x="-2.5" y="6" width="5" height="20" rx="2.5" ry="2.5"/>
+        </g>
+      </g>
+    </g>)#";
+  static std::unique_ptr<SvgNode> sliderProto(loadSVGFragment(sliderSVG));
+  regionSpacingSlider = new Slider(sliderProto->clone());
+  regionSpacingText = createTextBox("40");
+  regionSpacingText->setMargins(0, 0, 0, floatPad);
+  regionSpacingSlider->onValueChanged = [this](real pos){
+    ScribbleArea* area = app->activeArea();
+    Element* region = area ? area->selectedRegion() : NULL;
+    if(!region)
+      return;
+    if(!regionSlideStart)
+      regionSlideStart.reset(new RulingRegionParams(region->regionParams()));
+    Dim spacing = regionSliderToSpacing(pos);
+    RulingRegionParams params = region->regionParams();
+    params.yRuling = spacing;
+    if(params.xRuling > 0)
+      params.xRuling = spacing;
+    params.sanitize();
+    area->previewSelRegionParams(params);
+    regionSpacingText->setText(fstring("%.0f", spacing).c_str());
+  };
+  // a drag previews; releasing it records the whole drag as one undo step
+  regionSpacingSlider->selectFirst(".slider-handle")->addHandler([this](SvgGui*, SDL_Event* event){
+    if(event->type == SDL_FINGERUP && regionSlideStart) {
+      ScribbleArea* area = app->activeArea();
+      Element* region = area ? area->selectedRegion() : NULL;
+      std::unique_ptr<RulingRegionParams> start = std::move(regionSlideStart);
+      if(region) {
+        RulingRegionParams dragged = region->regionParams();
+        area->previewSelRegionParams(*start);  // the undo item records what is there when it is made
+        if(dragged.yRuling != start->yRuling || dragged.xRuling != start->xRuling)
+          area->setSelRegionParams(dragged);
+      }
+    }
+    return false;
+  });
+  setupTooltip(regionSpacingSlider, _("Spacing of the lines inside the region"));
+  addPanel({regionSpacingSlider, regionSpacingText});
+
+  // on/off settings get a checkbox in place of the icon: it reads as on/off, which a tinted icon did not
+  auto checkButton = [&](const char* title, SvgNode*& checkNode) {
+    Button* btn = titledButton(SvgGui::useFile(":/icons/ic_file_fill.svg"), title);
+    btn->selectFirst(".icon")->setVisible(false);
+    checkNode = loadSVGFragment(R"#(
+      <g class="checkbox region-check">
+        <rect fill="none" width="16" height="16"/>
+        <rect x="2" y="2" width="12" height="12" rx="2.5" ry="2.5" fill="none" stroke="currentColor" stroke-width="1.25"/>
+        <g class="checkmark">
+          <rect x="1.5" y="1.5" width="13" height="13" rx="3" ry="3" fill="currentColor"/>
+          <path class="region-check-tick" d="M4.6 8.3 L7 10.7 L11.4 5.6" fill="none" stroke-width="1.8"
+              stroke-linecap="round" stroke-linejoin="round"/>
+        </g>
+      </g>)#");
+    SvgNode* titleNode = btn->selectFirst(".title")->node;
+    titleNode->parent()->asContainerNode()->addChild(checkNode, titleNode);
+    return btn;
+  };
+  regionPaperToggle = checkButton(_("Background"), regionPaperCheck);
+  regionPaperToggle->onClicked = [this](){
+    editSelRegion([](RulingRegionParams& p){ p.opaque = !p.opaque; });
+  };
+  setupTooltip(regionPaperToggle, _("Cover what is behind the region with plain paper"));
+  addPanel({regionPaperToggle});
+
+  Button* outlineToggle = checkButton(_("Outline"), regionOutlineCheck);
+  outlineToggle->onClicked = [this](){
+    editSelRegion([](RulingRegionParams& p){ p.outline = !p.outline; });
+  };
+  setupTooltip(outlineToggle, _("Draw the region's edge, so it stands out from the page"));
+  addPanel({outlineToggle});
+
+  // lines back to horizontal, keeping the outline: the usual fix after rotating to match a tilted scan
+  //  and then wanting to write level instead
+  regionStraightenBtn = titledButton(SvgGui::useFile(":/icons/ic_menu_insert_space_ruled.svg"), _("Level"));
+  regionStraightenBtn->onClicked = [this](){ editSelRegion([](RulingRegionParams& p){ p.angle = 0; }); };
+  setupTooltip(regionStraightenBtn, _("Make the lines horizontal again"));
+  addPanel({regionStraightenBtn});
+
+  Button* deleteBtn = titledButton(SvgGui::useFile(":/icons/ic_menu_discard.svg"), _("Delete"));
+  deleteBtn->onClicked = [this](){ app->activeDoc()->doCommand(ID_DELSEL); };
+  setupTooltip(deleteBtn, _("Delete the region; its writing stays"));
+  addPanel({deleteBtn});
+
+  regionPanel->setVisible(false);
+  selectFirst("#main-container")->addWidget(regionPanel);
+}
+
+void MainWindow::syncRegionRow()
+{
+  if(!regionPanel)
+    return;
+  ScribbleArea* area = app->activeArea();
+  Element* region = area ? area->selectedRegion() : NULL;
+  Rect anchor = region ? area->selRegionGlobalRect() : Rect();
+  Rect view = region ? area->globalViewRect() : Rect();
+  // keep clear of the floating toolbar, which lies over the top of the canvas
+  if(region && mainToolbarPanel && mainToolbarPanel->isVisible())
+    view.top = std::max(view.top, mainToolbarPanel->node->bounds().bottom);
+  bool show = region && anchor.intersects(view);
+  if(!region)
+    regionSlideStart.reset();
+  if(show) {
+    const RulingRegionParams& p = region->regionParams();
+    int kind = regionKind(p);
+    regionKindBtn->setIcon(regionKindIcon(kind));
+    regionKindBtn->setTitle(regionKindTitle(kind));
+    if(!regionSlideStart) {
+      regionSpacingSlider->setValue(regionSpacingToSlider(p.yRuling));
+      regionSpacingText->setText(fstring("%.0f", p.yRuling).c_str());
+    }
+    for(auto check : {std::make_pair(regionPaperCheck, p.opaque), std::make_pair(regionOutlineCheck, p.outline)}) {
+      if(check.second)
+        check.first->addClass("checked");
+      else
+        check.first->removeClass("checked");
+    }
+    regionStraightenBtn->setEnabled(p.angle != 0);
+    regionPanel->place(anchor, view);
+  }
+  if(regionPanel->isVisible() != show)
+    regionPanel->setVisible(show);
+}
+
 void MainWindow::setShapeOptions()
 {
   int flags = (shapeHeadStartToggle->isChecked() ? SHAPEFLAG_HEADSTART : 0)
@@ -948,6 +1254,7 @@ void MainWindow::setupUI(ScribbleApp* a)
   });
 
   selectFirst("#main-container")->addWidget(selPopup);
+  buildRegionPanel();
   // set up one-time help popups
   setupHelpTips();
 
@@ -1283,7 +1590,23 @@ void MainWindow::createToolBars()
   shapeRow->addWidget(createStretch());
   for(int ii = 0; ii < SHAPE_COUNT; ++ii)
     shapeRow->addAction(actionShape[ii]);
+  shapeRow->addAction(actionRulingRegion);
   shapeRow->addSeparator();
+  // One swatch, not the draw row's saved list: that would make this row too wide.  Shapes are drawn
+  //  with the current draw pen, so the swatch shows and sets that pen's color.  With a shape selected
+  //  the pen toolbar is in SELECTION_MODE and the pick recolors it - so the pen is set here as well,
+  //  just as the toggles below arm the next shape as well as editing the selected one.
+  PenToolbar* penToolbar = static_cast<PenToolbar*>(penToolbarAutoAdj->contents);
+  shapeRow->addWidget(penToolbar->createSingleSwatch());
+  penToolbar->onSingleSwatchPicked = [this, penToolbar](Color color){
+    if(penToolbar->mode == PenToolbar::PEN_MODE)
+      return;  // updateColor() has already set the pen
+    ScribblePen pen = *app->getPen();
+    int alpha = pen.color.alpha();  // keep the marker translucent
+    pen.color = color;
+    pen.color.setAlpha(alpha);
+    app->setPen(pen);
+  };
   shapeHeadStartToggle = createToolbutton(
       SvgGui::useFile(":/icons/ic_menu_shape_head_start.svg"), _("Start Arrowhead"));
   shapeHeadStartToggle->onClicked = [this](){
@@ -1743,6 +2066,15 @@ void MainWindow::setupActions()
         def->name, def->icon, "", [this, ii](){ selectShape(ii); });
     actionShape[ii]->setCheckable(true);
   }
+  // not a shape: dragging a box with it makes a ruling region, an area with its own lines
+  actionRulingRegion = createAction("actionRulingRegion", "Ruling Region", ":/icons/ic_menu_toggle_ruled.svg", "",
+      [this](){
+        app->scribbleMode->drawRegion = true;
+        app->setMode(MODE_DRAWSHAPE);
+        showOptionsRow(MODE_DRAWSHAPE);
+      });
+  actionRulingRegion->setCheckable(true);
+  actionRulingRegion->tooltip = _("Drag a box with its own lines, to write straight over uneven or tilted ones");
 
   actionErase = createAction("actionErase", "Erase", ":/icons/ic_menu_erase.svg", "",
       [this](){ selectTool(MODE_ERASE); });

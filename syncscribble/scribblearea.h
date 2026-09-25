@@ -13,6 +13,8 @@ struct UIState {
   bool activeSel;
   bool pageSel;
   bool selHasGroup;
+  // a ruling region is selected: the ink-only selection actions (cut, copy, duplicate, link) do not apply
+  bool regionSel = false;
   bool pagemodified;
   bool nextView;
   bool prevView;
@@ -103,7 +105,9 @@ protected:
   Page* page(int n) const;
   int numPages() const;
   const ScribblePen* currPen() const;
-  ScribblePen resolvedPen() const;
+  // `at` picks the ruling whose line height a relative width is measured against (a ruling region's,
+  //  if it lies in one); without it, the page's
+  ScribblePen resolvedPen(Point at = Point(NaN, NaN)) const;
 
   void setPageNum(int pagenum);
   void nextPage(bool appendnew = false);
@@ -151,6 +155,10 @@ protected:
   bool clearSelection();
   bool clearTempSelection();
   void groupStrokes(Element* b = NULL);
+  // Insert space moves whatever lies past the press, and the ink inside a region is part of that; the
+  //  region is not ink, so doSelect() never takes it, and without this the ink would slide out from
+  //  under its lines.  Adds every region whose bbox satisfies `past` to `sel`.
+  void addRegionsToInsertSpace(Selection* sel, const std::function<bool(const Rect&)>& past);
   int selectionHit(Point pos, bool touch);
 
   void viewSelection();
@@ -235,13 +243,65 @@ protected:
   Element* shapeInProgress = NULL;
   int shapeHandleIdx = -1;
   ShapeParams shapeHandleStart;
+  // ruling regions (rulingregion.h): selected only through the "..." button in their bottom-right corner
+public:
+  RegionSelector* regionSelector = NULL;
+  Element* selectedRegion() const;
+  void selectRegion(Element* region);
+  // edit the selected region's ruling (region panel); one undo step
+  void setSelRegionParams(const RulingRegionParams& params);
+  // show `params` on the selected region without recording anything - for a slider drag, which is
+  //  committed with setSelRegionParams once it ends
+  void previewSelRegionParams(const RulingRegionParams& params);
+  // the selected region's outline and this view, in window coordinates, to place the region panel
+  Rect selRegionGlobalRect() const;
+  Rect globalViewRect() const;
+  // create a region over `r` on the current page, with the page's ruling, and select it
+  Element* addRulingRegion(const Rect& r);
+protected:
+  RulingRegionParams regionHandleStart;
+  Point regionHandleStartPos;
+  // the region under construction by the region tool (a drag, like the box shape)
+  Element* regionInProgress = NULL;
+  bool regionButtonsShown() const;
+  Point regionButtonPos(const Element* region) const;
+  Element* regionButtonHit(Point pos, bool touch) const;
+  void drawRegionButtons(Painter* painter);
+  // re-decide which ink a selected region carries - at the start of every gesture on it, since a corner
+  //  drag or new writing changes that
+  void refreshRegionSelection();
   ShapeParams newShapeParams(int shapeid, Point pos) const;
   void editShapeAfterDraw(Element* shape);
   Element* createShapeElement(const ShapeParams& params);
   void cancelShape();
   Point snapShapePoint(Point pos) const;
+  // soft 45 degree snap of point index of a line or polyline (shapeAngleSnap); see snapShapeAngle()
+  Point snapShapeAngleAt(const ShapeParams& params, int index, Point pos) const;
   // swap in a ShapeSelector when the settled selection is exactly one shape (spec 5)
   bool useShapeSelector();
+
+  // hold-to-snap: a pen stroke held still for shapeSnapDelay seconds is recognized (shaperec.h) and
+  //  replaced by a line, box or ellipse that the rest of the gesture scales; a scratch-out erases.
+  //  While a snapped shape is live it is held in currStroke, so it is painted and cleaned up exactly
+  //  like the shape tool's drag gesture.
+  Timer* snapTimer = NULL;
+  std::vector<Point> snapSamples;  // the stroke's raw input in page coordinates
+  Point snapHoldPos;  // where the pen has been (roughly) still since snapHoldStart
+  Timestamp snapHoldStart = 0;
+  bool snapHoldUsed = false;  // this hold already ran the recognizer; wait for the pen to move on
+  bool snapActive = false;  // currStroke is a snapped shape following the pen
+  ShapeParams snapParams;  // the shape as recognized, before the gesture scaled it
+  Point snapAnchor;  // pen position when the shape snapped
+  void startShapeSnap(Point pos);
+  void trackShapeSnap(Point pos);
+  void stopShapeSnap();
+  // returns false once there is nothing left to wait for, which stops the timer
+  bool checkShapeSnap(Timestamp now);
+  bool snapStroke();
+  void discardStrokeBuilder();
+  void scaleSnapShape(Point pos);
+  void commitSnapShape();
+  int scratchOut(const std::vector<Point>& area);
 
   // for groupStrokes
   std::vector<Element*> recentStrokes;

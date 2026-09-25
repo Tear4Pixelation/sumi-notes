@@ -47,6 +47,8 @@ public:
 
   static StrokeBuilder* create(const ScribblePen& pen);
   static Point calcCom(SvgNode* node, Path2D* path);
+  // the same heuristic measured in another frame (a tilted ruling region's), where "up" is not page up
+  static Point calcCom(SvgNode* node, Path2D* path, const Transform2D& toLocal, const Transform2D& toPage);
 
 protected:
   Element* element;

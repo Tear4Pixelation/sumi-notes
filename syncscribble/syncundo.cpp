@@ -137,6 +137,61 @@ void ShapeChangedItem::redo()
   StrokeUndoItem::redo();
 }
 
+// RegionChangedItem - record change of a ruling region's parameters
+void RegionChangedItem::swapParams()
+{
+  RulingRegionParams temp = s->regionParams();
+  s->setRegionParams(params);
+  s->rebuildRegion(page->props.color, page->props.ruleColor);
+  params = temp;
+}
+
+void RegionChangedItem::undo()
+{
+  swapParams();
+  StrokeUndoItem::undo();
+}
+
+void RegionChangedItem::redo()
+{
+  swapParams();
+  StrokeUndoItem::redo();
+}
+
+// StrokeLayerItem - move an element to another layer, restacking it to that layer's run
+void StrokeLayerItem::swapLayer()
+{
+  int prevlayer = s->layer();
+  // moveToLayer() hands back the successor the element had, so undo puts it back exactly where it
+  //  was rather than merely on the right layer
+  Element* prevnext = page->moveToLayer(s, layer, next);
+  layer = prevlayer;
+  next = prevnext;
+}
+
+void StrokeLayerItem::undo()
+{
+  swapLayer();
+  StrokeUndoItem::undo();
+}
+
+void StrokeLayerItem::redo()
+{
+  swapLayer();
+  StrokeUndoItem::redo();
+}
+
+void StrokeLayerItem::serialize(IOStream& strm)
+{
+  strm << fstring("<layerchanged strokeuuid='%llu' layer='%d' nextstrokeuuid='%llu'/>",
+      s->uuid, s->layer(), next ? next->uuid : 0);
+}
+
+UndoHistoryItem* StrokeLayerItem::inverse()
+{
+  return new StrokeLayerItem(*this);
+}
+
 // StrokeTransformItem is passed Stroke prior to commit; used to efficiently save undo info from reflow
 //StrokeTranslateItem::StrokeTranslateItem(Element* s_)
 //    : StrokeUndoItem(s_), xoffset(s_->xOffset()), yoffset(s_->yOffset()) {}
@@ -477,15 +532,40 @@ void ShapeChangedItem::serialize(IOStream& strm)
       serializeShapePoints(curr.points).c_str(), curr.rx, curr.ry, curr.tightness, curr.flags);
 }
 
+void RegionChangedItem::serialize(IOStream& strm)
+{
+  // numbers only, so fstring is safe (no user string goes on the wire here)
+  const RulingRegionParams& curr = s->regionParams();
+  strm << fstring("<regionchanged strokeuuid='%llu' pts='%s' origin='%s' angle='%.17g' xruling='%.9g'"
+      " yruling='%.9g' dotradius='%.9g' opaque='%d' outline='%d'/>", s->uuid,
+      serializeRegionPoints(curr.corners).c_str(), serializeRegionPoints({curr.origin}).c_str(), double(curr.angle),
+      double(curr.xRuling), double(curr.yRuling), double(curr.dotRadius), curr.opaque ? 1 : 0, curr.outline ? 1 : 0);
+}
+
 void PageChangedItem::serialize(IOStream& strm)
 {
   // lots of parameters - just use fstring
   strm << fstring("<pagechanged pagenum='%d' width='%.3f' height='%.3f' color='%u' xruling='%.3f'"
-      " yruling='%.3f' marginLeft='%.3f' rulecolor='%u'>", p->getPageNum(), p->props.width, p->props.height,
-      p->props.color.argb(), p->props.xRuling, p->props.yRuling, p->props.marginLeft, p->props.ruleColor.argb());
+      " yruling='%.3f' marginLeft='%.3f' rulecolor='%u' dotradius='%.3f'>", p->getPageNum(), p->props.width,
+      p->props.height, p->props.color.argb(), p->props.xRuling, p->props.yRuling, p->props.marginLeft,
+      p->props.ruleColor.argb(), p->props.dotRadius);
   //if(props.ruleLayer)
   //  props.ruleLayer->saveSVG(strm);
   strm << "</pagechanged>";
+}
+
+// The title is user text and is the first arbitrary string to go on the sync wire, so it is written
+//  through XmlStreamWriter (i.e. pugixml) rather than fstring - a title containing & or ' would
+//  otherwise produce a malformed item and desync the stream.  pugixml unescapes on the way back in.
+void PageOutlineItem::serialize(IOStream& strm)
+{
+  XmlStreamWriter xmlwriter;
+  xmlwriter.writeStartElement("outlinechanged");
+  xmlwriter.writeAttribute("pagenum", p->getPageNum());
+  xmlwriter.writeAttribute("level", p->outlineLevel);
+  xmlwriter.writeAttribute("title", p->outlineTitle);
+  xmlwriter.writeEndElement();
+  xmlwriter.save(strm);
 }
 
 void PageDeletedItem::serialize(IOStream& strm)
@@ -539,6 +619,11 @@ UndoHistoryItem* PageDeletedItem::inverse()
 UndoHistoryItem* StrokeChangedItem::inverse()
 {
   return new StrokeChangedItem(*this);
+}
+
+UndoHistoryItem* RegionChangedItem::inverse()
+{
+  return new RegionChangedItem(*this);
 }
 
 UndoHistoryItem* ShapeChangedItem::inverse()

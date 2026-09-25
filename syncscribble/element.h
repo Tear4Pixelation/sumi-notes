@@ -5,6 +5,8 @@
 #include "usvg/svgwriter.h"
 #include "usvg/svgpainter.h"
 #include "shape.h"
+#include "rulingregion.h"
+#include "layers.h"
 
 #define MAX_LINE_NUM INT_MAX
 
@@ -150,6 +152,9 @@ public:
   void deleteNode();
 
   const ScribbleTransform& pendingTransform() const { return m_pendingTransform; }
+  // the pending transform lives only in rendering (applyStyle) and bbox(), not in the path or node
+  //  transform - true for a plain translate of ink until commitTransform()
+  bool pendingDeferred() const { return m_applyPending && !m_pendingTransform.isIdentity(); }
   void resetTransform() { applyTransform(m_pendingTransform.inverse()); m_pendingTransform.reset(); }
   void applyTransform(const ScribbleTransform& tf);
   void commitTransform();
@@ -170,6 +175,16 @@ public:
   // degradation contract: any operation that cannot be expressed in the descriptor must drop it and
   //  leave a plain path behind, or the next parameter change would silently undo that operation
   void dropShape();
+  // Ruling regions (rulingregion.h): a <g class="write-ruling-region"> whose parameters are the
+  //  document and whose children - the paper fill and the rule lines - are a cache, like a shape's path.
+  //  A region is not ink: ink selection and every eraser skip it, and it sits below every layer.
+  bool isRulingRegion() const { return m_region.isValid(); }
+  const RulingRegionParams& regionParams() const { return m_region; }
+  void setRegionParams(const RulingRegionParams& params);  // updates parameters and rebuilds the children
+  // rebuild the children; invalid colors keep the ones the children already carry
+  void rebuildRegion(Color paper = Color::INVALID_COLOR, Color rule = Color::INVALID_COLOR);
+  static Element* createRulingRegion(const RulingRegionParams& params, Color paper, Color rule);
+  static const char* RULING_REGION_CLASS;
   bool isBookmark() const { return node->hasClass("bookmark"); }
   bool isHyperRef() const;
   // all children of multi-stroke have Element exts; may extend to include bookmark groups later
@@ -236,4 +251,5 @@ private:
 
   std::vector<PenPoint> penPoints;
   ShapeParams m_shape;
+  RulingRegionParams m_region;
 };

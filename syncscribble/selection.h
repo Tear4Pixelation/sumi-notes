@@ -43,6 +43,9 @@ public:
   void selectAll();
   void invertSelection();
   void selectbyProps(Element* elproto, bool useColor, bool useWidth);
+  // the ruling the ruled operations below work in - the page's own, or a ruling region's; set by
+  //  whoever starts a ruled gesture, from Page::rulingAt() at the press point
+  RulingFrame ruling;
   int sortRuled();
   void insertSpace(Dim dx, int dline);
   void reflowStrokes(Dim dx, int dline, Dim minWordSep);
@@ -207,8 +210,46 @@ private:
   Dim mZoom;
 };
 
+// x0/x1 and ymin/ymax are in the frame's local coordinates, where its lines are horizontal
+// Selector for a ruling region, reached only through the region's "..." button.  The Selection holds
+//  the region *and* the ink inside it (bbox centre in the outline), drawn as ordinary ink: moving,
+//  rotating or scaling the region carries its handwriting with it through the usual Selection
+//  transforms, whose undo items already know how to transform a region (Element::applyTransform).
+//  What the handles do:
+//   - a corner (shapeHandleHit index 0..n-1) reshapes the outline only - the lines and the ink stay put
+//   - the red origin handle (index n) slides the lines, to line them up with a scan's
+//   - the rotate handle above the top edge rotates everything; the grip past the bottom-right corner
+//     scales everything, uniformly (a region's ruling cannot stretch one way only)
+class RegionSelector : public Selector
+{
+public:
+  RegionSelector(Selection* _sel, Element* _region, Dim zoom = 1) : Selector(_sel), region(_region), mZoom(zoom) {}
+
+  bool selectHit(Element* s) override;
+  Rect getBGBBox() override;
+  void drawBG(Painter* painter) override;
+  void setZoom(Dim zoom) override { mZoom = zoom; }
+  void transform(const Transform2D& tf) override { bgDirty = true; }
+  int shapeHandleHit(Point pos, bool touch) override;
+  Point rotHandleHit(Point pos, bool touch) override;
+  Point scaleHandleHit(Point pos, bool touch) override;
+
+  int originHandleIndex() const { return int(region->regionParams().corners.size()); }
+  // the ink a region carries: its bbox centre is inside the outline
+  static bool carries(const RulingRegionParams& params, Element* s);
+
+  Element* region;
+  static Dim HANDLE_SIZE;
+
+private:
+  Point rotHandlePos() const;
+  Point scaleHandlePos() const;
+  Dim mZoom;
+};
+
 struct RuledRange
 {
+  RulingFrame frame;
   Dim x0;
   Dim ymin;
   Dim x1;
@@ -218,8 +259,9 @@ struct RuledRange
   std::vector<Dim> lstops;
   std::vector<Dim> rstops;
 
-  RuledRange(Dim _x0, Dim _ymin, Dim _x1, Dim _ymax, Dim _xruling, Dim _yruling) :
-      x0(_x0), ymin(_ymin), x1(_x1), ymax(_ymax), xruling(_xruling), yruling(_yruling) {}
+  RuledRange(Dim _x0, Dim _ymin, Dim _x1, Dim _ymax, Dim _xruling, Dim _yruling,
+      const RulingFrame& f = RulingFrame()) :
+      frame(f), x0(_x0), ymin(_ymin), x1(_x1), ymax(_ymax), xruling(_xruling), yruling(_yruling) {}
 
   bool isSingleLine() const;
   bool isValid() const;
@@ -227,7 +269,9 @@ struct RuledRange
 
   Dim lstop(int idx) const;
   Dim rstop(int idx) const;
-  int nlines() const { return (ymax - ymin)/yruling; }
+  // clamped: "to the end" is MAX_LINE_NUM (INT_MAX) lines, so a range starting above line 0 - a press just
+  //  outside a region's top edge - spans one more than an int holds, and the overflow selected nothing
+  int nlines() const { Dim n = (ymax - ymin)/yruling; return n >= Dim(INT_MAX) ? INT_MAX : int(n); }
 };
 
 class RuledSelector : public Selector
@@ -237,6 +281,9 @@ public:
   enum ColMode {COL_NONE=0, COL_NORMAL=1, COL_AGGRESSIVE=2} colMode;
   std::vector<Dim> lstops;
   std::vector<Dim> rstops;
+  // a ruled gesture acts only on ink of its own ruling (region or page); display-only callers that just
+  //  want "what is on this line" (the bookmark list) turn it off
+  bool sameRulingOnly = true;
 
   RuledSelector(Selection* _sel, ColMode cm = COL_NORMAL) : Selector(_sel), selMode(SEL_CONTAINED),
       colMode(cm), selRange(MAX_DIM, MAX_DIM, MIN_DIM, MIN_DIM, 0, 0) {}

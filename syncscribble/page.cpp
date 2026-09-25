@@ -110,6 +110,100 @@ Dim Page::yruling(bool usedefault) const
   return props.yRuling > 0 ? props.yRuling : (usedefault ? BLANK_Y_RULING : 0);
 }
 
+RulingFrame Page::pageFrame() const
+{
+  return RulingFrame(Point(0, yRuleOffset), 0, props.xRuling, props.yRuling, props.dotRadius);
+}
+
+std::vector<Element*> Page::regions() const
+{
+  std::vector<Element*> result;
+  if(!contentNode || !contentNode->hasExt())
+    return result;
+  // regions are kept first in the page (REGION_LAYER sorts below every layer), so stop at the first
+  //  element that is not one
+  for(Element* s : children()) {
+    if(!s->isRulingRegion())
+      break;
+    result.push_back(s);
+  }
+  return result;
+}
+
+Element* Page::regionAt(Point pos) const
+{
+  Element* hit = NULL;
+  for(Element* s : regions()) {
+    // later regions draw over earlier ones, so the last one containing pos is the one you see
+    Point local = s->node->hasTransform() ? s->node->getTransform().inverse().map(pos) : pos;
+    if(s->regionParams().contains(local))
+      hit = s;
+  }
+  return hit;
+}
+
+RulingFrame Page::rulingAt(Point pos) const
+{
+  Element* region = regionAt(pos);
+  return region ? regionFrame(region) : pageFrame();
+}
+
+Element* Page::regionNear(Point pos, Dim lines) const
+{
+  Element* hit = NULL;
+  for(Element* s : regions()) {
+    RulingFrame frame = regionFrame(s);
+    Rect extent = frameExtent(frame);
+    if(extent.pad(lines*frame.yrulingOr(BLANK_Y_RULING)).contains(frame.toLocal(pos)))
+      hit = s;
+  }
+  return hit;
+}
+
+RulingFrame Page::regionFrame(Element* region) const
+{
+  RulingFrame frame = region->regionParams().frame(region);
+  // a region carries no node transform in practice (its transforms are applied to its parameters), but
+  //  honour a translate should one arrive from a hand-edited file
+  if(region->node->hasTransform())
+    frame.origin = region->node->getTransform().map(frame.origin);
+  return frame;
+}
+
+Rect Page::frameExtent(const RulingFrame& frame) const
+{
+  const Element* region = static_cast<const Element*>(frame.region);
+  if(!region || !region->isRulingRegion())
+    return frame.localBBox(rect());
+  Rect local;
+  for(const Point& p : region->regionParams().corners)
+    local.rectUnion(frame.toLocal(p));
+  return local;
+}
+
+RulingFrame Page::gestureFrame(Point pos, Dim nearLines) const
+{
+  RulingFrame frame = rulingAt(pos);
+  if(!frame.region && nearLines > 0) {
+    if(Element* region = regionNear(pos, nearLines))
+      frame = regionFrame(region);
+  }
+  // the page's own blank-page phase is set by the caller through yRuleOffset, which pageFrame() reads;
+  //  a blank region gets the same treatment here, on its origin
+  if(frame.region && frame.yRuling <= 0) {
+    Dim ly = frame.toLocal(pos).y;
+    Dim phase = ly - BLANK_Y_RULING/2 - BLANK_Y_RULING*std::floor((ly - BLANK_Y_RULING/2)/BLANK_Y_RULING);
+    frame.origin = frame.toPage(Point(0, phase));
+  }
+  return frame;
+}
+
+void Page::refreshRegions()
+{
+  for(Element* s : regions())
+    s->rebuildRegion(props.color, props.ruleColor);
+}
+
 // The problem with MAX(...) is that bbox gets updated when dragging a selection
 Dim Page::height() const
 {
@@ -152,6 +246,8 @@ void Page::onPageSizeChange()
     ruleNode->setAttr("color", props.ruleColor.color);  // custom rulings can use currColor
   }
   yRuleOffset = 0; //yruling > 0 ? ygroup->yOrigin : 0;
+  // regions take the page's paper and rule colors, so a theme change or invert reaches them too
+  refreshRegions();
 }
 
 // I think perhaps we shouldn't use <pattern> for built-in rulings, since it is not included in SVG-tiny spec!
@@ -497,6 +593,21 @@ bool Page::loadSVG(SvgDocument* doc)
     // create elements for each stroke and find bookmarks - assuming implicit creation is disabled
     for(SvgNode* node : contentNode->children())
       onAddStroke(new Element(node));
+    // regions go below all ink; a file (or an older build) may have put ink ahead of one
+    std::vector<SvgNode*> regionNodes;
+    for(SvgNode* node : contentNode->children()) {
+      if(node->hasExt() && static_cast<Element*>(node->ext())->isRulingRegion())
+        regionNodes.push_back(node);
+    }
+    SvgNode* front = NULL;
+    for(SvgNode* node : contentNode->children()) {
+      if(!node->hasExt() || !static_cast<Element*>(node->ext())->isRulingRegion()) { front = node; break; }
+    }
+    for(SvgNode* node : regionNodes) {
+      if(!front) break;
+      contentNode->removeChild(node);
+      contentNode->addChild(node, front);
+    }
   }
 
   if(svgDoc->width().isPercent() || svgDoc->height().isPercent()) {
@@ -680,6 +791,13 @@ void Page::onAddStroke(Element* s)
     //bookmarks.push_back(s);
     document->bookmarksDirty = true;
   }
+  // a region arriving by undo or sync may have been drawn with colors from before a theme change; and
+  //  it is not writing, so it takes no part in the page's time range
+  if(s->isRulingRegion()) {
+    if(loadStatus == LOAD_OK)
+      s->rebuildRegion(props.color, props.ruleColor);
+    return;
+  }
   // update timestamp range
   if(s->timestamp() < minTimestamp || strokeCount() == 1)
     minTimestamp = s->timestamp();
@@ -714,6 +832,8 @@ void Page::recalcTimeRange(bool force)
   minTimestamp = MAX_TIMESTAMP;
   maxTimestamp = 0;
   for(Element* s : children()) {
+    if(s->isRulingRegion())
+      continue;
     minTimestamp = MIN(minTimestamp, s->timestamp());
     maxTimestamp = MAX(maxTimestamp, s->timestamp());
   }
