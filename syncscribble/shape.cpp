@@ -505,6 +505,62 @@ void applyShapeConstraint(ShapeParams& params)
     def->applyConstraint(params);
 }
 
+// the multiple of 45 degrees the direction anchor -> pos is within tolerance of, as a unit vector; false
+//  if there is none (or pos is on the anchor, where there is no direction)
+static bool snappedDirection(Point anchor, Point pos, Dim tolerance, Point& dir)
+{
+  Point dr = pos - anchor;
+  if(dr.dist() <= 0)
+    return false;
+  Dim angle = std::atan2(dr.y, dr.x);
+  Dim snapped = std::floor(angle/(M_PI/4) + 0.5)*(M_PI/4);
+  if(std::abs(angle - snapped) > tolerance)
+    return false;
+  dir = Point(std::cos(snapped), std::sin(snapped));
+  return true;
+}
+
+Point snapShapeAngle(const ShapeParams& params, int index, Point pos, Dim tolerance)
+{
+  int npts = int(params.points.size());
+  if(tolerance <= 0 || index < 0 || index >= npts || npts < 2)
+    return pos;
+  if(params.id != SHAPE_LINE && !shapeIsPolylineFamily(params.id))
+    return pos;
+  bool closed = params.id != SHAPE_LINE && (params.flags & SHAPEFLAG_CLOSED);
+  int prevIdx = index > 0 ? index - 1 : (closed ? npts - 1 : -1);
+  int nextIdx = index < npts - 1 ? index + 1 : (closed ? 0 : -1);
+  if(nextIdx == prevIdx)
+    nextIdx = -1;  // two points: the one neighbour is both
+
+  Point anchors[2];
+  Point dirs[2];
+  int nsnapped = 0;
+  for(int neighbour : {prevIdx, nextIdx}) {
+    if(neighbour < 0)
+      continue;
+    Point anchor = params.points[neighbour];
+    if(snappedDirection(anchor, pos, tolerance, dirs[nsnapped])) {
+      anchors[nsnapped] = anchor;
+      ++nsnapped;
+    }
+  }
+  // project onto the snapped ray, which keeps the distance along it and drops only the sideways error
+  auto project = [&](int i) { return anchors[i] + dot(pos - anchors[i], dirs[i])*dirs[i]; };
+  if(nsnapped == 0)
+    return pos;
+  if(nsnapped == 2) {
+    Dim denom = dirs[0].x*dirs[1].y - dirs[0].y*dirs[1].x;
+    if(std::abs(denom) > 1E-9) {
+      Point delta = anchors[1] - anchors[0];
+      Dim along = (delta.x*dirs[1].y - delta.y*dirs[1].x)/denom;
+      return anchors[0] + along*dirs[0];
+    }
+    // parallel (the neighbours are collinear with pos): either projection lands on the same line
+  }
+  return project(0);
+}
+
 void dragShapeHandle(ShapeParams& params, const ShapeHandle& handle, Point newpos)
 {
   switch(handle.type) {

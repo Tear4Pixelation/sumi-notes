@@ -96,6 +96,11 @@ void getShapeHandles(const ShapeParams& params, std::vector<ShapeHandle>& handle
 void applyShapeConstraint(ShapeParams& params);
 // move the given handle to newpos, updating params accordingly
 void dragShapeHandle(ShapeParams& params, const ShapeHandle& handle, Point newpos);
+// Soft angle snap for a line or polyline-family point: if the segment from a neighbouring point to pos
+//  lies within `tolerance` radians of a multiple of 45 degrees, pos is moved onto that direction.  With
+//  both neighbours in range (an interior point) pos goes to where the two snapped directions cross, so a
+//  corner can lock to a right angle.  Any other shape, or tolerance <= 0, returns pos unchanged.
+Point snapShapeAngle(const ShapeParams& params, int index, Point pos, Dim tolerance);
 
 std::string serializeShapePoints(const std::vector<Point>& points);
 void parseShapePoints(const char* str, std::vector<Point>& points);

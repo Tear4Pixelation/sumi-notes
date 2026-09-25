@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stroke Recorder</title>
+<style>
+  :root {
+    --bg: #f6f6f4; --fg: #1d1d1b; --muted: #6b6b66; --panel: #ffffff; --line: #d9d9d4;
+    --ink: #1d1d1b; --target: #16a34a; --accent: #2563eb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #181817; --fg: #ececea; --muted: #9a9a94; --panel: #232322; --line: #3a3a37;
+      --ink: #ececea; --target: #4ade80; --accent: #60a5fa; }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; overflow: hidden; overscroll-behavior: none; }
+  body { background: var(--bg); color: var(--fg); font: 14px system-ui, sans-serif;
+    display: flex; flex-direction: column; }
+  header { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; padding: 10px 16px;
+    background: var(--panel); border-bottom: 1px solid var(--line); }
+  .group { display: flex; gap: 4px; align-items: center; }
+  button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--fg); cursor: pointer; }
+  button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+  label { display: flex; gap: 6px; align-items: center; color: var(--muted); }
+  #status { color: var(--muted); margin-left: auto; }
+  #prompt { padding: 8px 16px; color: var(--muted); }
+  canvas { flex: 1; width: 100%; min-height: 0; touch-action: none; cursor: crosshair; display: block; }
+</style>
+</head>
+<body>
+<header>
+  <div class="group" id="labels">
+    <button data-label="line">Line</button>
+    <button data-label="square">Square</button>
+    <button data-label="circle">Circle</button>
+    <button data-label="ellipse">Ellipse</button>
+    <button data-label="scribble">Scratch-out</button>
+    <button data-label="other">Other</button>
+    <button data-label="mix">Mix</button>
+  </div>
+  <label><input type="checkbox" id="showTarget" checked> Trace a target</label>
+  <label><input type="checkbox" id="rotate"> Rotated squares/ellipses</label>
+  <label title="Strokes that are none of the shapes, to check nothing else is ever taken for a scratch-out"><input type="checkbox" id="mixOther"> Other in Mix</label>
+  <div class="group">
+    <button id="undo">Undo last</button>
+    <button id="download">Save strokes</button>
+    <button id="clear">Clear all</button>
+  </div>
+  <span id="status"></span>
+</header>
+<div id="prompt"></div>
+<canvas id="canvas"></canvas>
+<script>
+// Records strokes for evaluate.cpp.  With "Trace a target" on, a faint shape is shown and the stroke is
+//  saved with that shape as its truth, which is the only way to know where a real hand-drawn square's
+//  corners were meant to be.  With it off, strokes are saved with a label but no position truth.
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const promptEl = document.getElementById('prompt');
+const statusEl = document.getElementById('status');
+const showTargetEl = document.getElementById('showTarget');
+const rotateEl = document.getElementById('rotate');
+const mixOtherEl = document.getElementById('mixOther');
+const STORE_KEY = 'shape-recognition-recorder-strokes';
+
+let strokes = [];
+try { strokes = JSON.parse(localStorage.getItem(STORE_KEY) || '[]'); } catch (err) { strokes = []; }
+function persist() {
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(strokes)); } catch (err) { /* private mode */ }
+}
+
+let mode = 'mix';
+let target = null;       // {label, truth, draw(ctx)}
+let current = null;      // points of the stroke in progress
+let lastStroke = null;   // shown faintly until the next one starts
+
+function cssColor(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+function rand(lo, hi) { return lo + Math.random()*(hi - lo); }
+
+// The bitmap must match the canvas's CSS box exactly, or the browser stretches it and ink lands away
+//  from the pen.  The box changes whenever the header wraps to a different height (status text,
+//  rotation, Safari's toolbars), not only on window resize, so it is watched directly.
+function resize() {
+  const ratio = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = Math.round(rect.width*ratio);
+  canvas.height = Math.round(rect.height*ratio);
+  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+  if (!target) newTarget(); else redraw();
+}
+
+function pickLabel() {
+  if (mode !== 'mix') return mode;
+  const labels = ['line', 'square', 'circle', 'ellipse', 'scribble'].concat(mixOtherEl.checked ? ['other'] : []);
+  return labels[Math.floor(Math.random()*labels.length)];
+}
+
+function newTarget() {
+  const rect = canvas.getBoundingClientRect();
+  const label = pickLabel();
+  const maxSize = Math.max(60, Math.min(rect.width, rect.height)*0.7);
+  const size = rand(60, Math.min(400, maxSize));
+  const cx = rand(size/2 + 20, Math.max(size/2 + 21, rect.width - size/2 - 20));
+  const cy = rand(size/2 + 20, Math.max(size/2 + 21, rect.height - size/2 - 20));
+  let truth = [];
+  if (label === 'line') {
+    const angle = rand(0, 2*Math.PI);
+    const dx = Math.cos(angle)*size/2, dy = Math.sin(angle)*size/2;
+    truth = [cx - dx, cy - dy, cx + dx, cy + dy];
+  } else if (label === 'square') {
+    const width = size, height = Math.random() < 0.5 ? size : size*rand(0.6, 1);
+    const angle = rotateEl.checked ? rand(0, Math.PI/2) : 0;
+    const ux = Math.cos(angle), uy = Math.sin(angle);
+    for (const [su, sv] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+      truth.push(cx + ux*su*width/2 - uy*sv*height/2, cy + uy*su*width/2 + ux*sv*height/2);
+    }
+  } else if (label === 'circle') {
+    truth = [cx, cy, size/2];
+  } else if (label === 'ellipse') {
+    // clearly oval, mostly straight; truth is centre, radii and the angle of the x radius in radians
+    const radiusX = size/2, radiusY = radiusX*rand(0.3, 0.6);
+    const angle = rotateEl.checked ? rand(0, Math.PI) : 0;
+    truth = Math.random() < 0.5 ? [cx, cy, radiusX, radiusY, angle] : [cx, cy, radiusY, radiusX, angle];
+  } else if (label === 'scribble') {
+    // a block of "text" to scratch out: a word, or a few lines
+    const width = rand(60, Math.min(360, rect.width - 40)), height = rand(20, Math.min(140, width));
+    truth = [cx - width/2, cy - height/2, cx + width/2, cy - height/2, cx + width/2, cy + height/2, cx - width/2, cy + height/2];
+  }
+  target = { label, truth };
+  const hasTruth = showTargetEl.checked && label !== 'other';
+  promptEl.textContent = label === 'other'
+    ? 'Draw something that is none of these: a word, an arrow, a triangle, a spiral, "mmm"...'
+    : label === 'scribble'
+      ? (hasTruth ? 'Scratch out the grey block, back and forth, in one stroke.' : 'Draw a scratch-out anywhere, in one stroke.')
+      : hasTruth ? `Trace the ${label} in one stroke, at your normal speed - no need to be careful.`
+                 : `Draw a ${label} anywhere, in one stroke.`;
+  redraw();
+}
+
+function drawTarget() {
+  if (!target || !showTargetEl.checked || target.label === 'other') return;
+  const truth = target.truth;
+  if (target.label === 'scribble') {
+    // grey bars standing in for the text being scratched out
+    ctx.save();
+    ctx.fillStyle = cssColor('--muted');
+    ctx.globalAlpha = 0.35;
+    const left = truth[0], top = truth[1], width = truth[2] - truth[0], height = truth[5] - truth[1];
+    const rows = Math.max(1, Math.round(height/28)), rowHeight = height/rows;
+    for (let row = 0; row < rows; ++row) ctx.fillRect(left, top + row*rowHeight + rowHeight*0.2, width, rowHeight*0.6);
+    ctx.restore();
+    return;
+  }
+  ctx.save();
+  ctx.strokeStyle = cssColor('--target');
+  ctx.globalAlpha = 0.45;
+  ctx.lineWidth = 2;
+  ctx.setLineDash([6, 5]);
+  ctx.beginPath();
+  if (target.label === 'line') {
+    ctx.moveTo(truth[0], truth[1]); ctx.lineTo(truth[2], truth[3]);
+  } else if (target.label === 'square') {
+    ctx.moveTo(truth[0], truth[1]);
+    for (let i = 2; i < 8; i += 2) ctx.lineTo(truth[i], truth[i + 1]);
+    ctx.closePath();
+  } else if (target.label === 'ellipse') {
+    ctx.ellipse(truth[0], truth[1], truth[2], truth[3], truth[4], 0, 2*Math.PI);
+  } else {
+    ctx.arc(truth[0], truth[1], truth[2], 0, 2*Math.PI);
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawPoints(points, alpha) {
+  if (!points || points.length < 2) return;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.strokeStyle = cssColor('--ink');
+  ctx.lineWidth = 2;
+  ctx.lineJoin = ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(points[0], points[1]);
+  for (let i = 2; i < points.length; i += 2) ctx.lineTo(points[i], points[i + 1]);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function redraw() {
+  const rect = canvas.getBoundingClientRect();
+  ctx.clearRect(0, 0, rect.width, rect.height);
+  drawTarget();
+  drawPoints(lastStroke, 0.25);
+  drawPoints(current, 1);
+  statusEl.textContent = `${strokes.length} recorded`;
+}
+
+function canvasPoint(event) {
+  const rect = canvas.getBoundingClientRect();
+  return [event.clientX - rect.left, event.clientY - rect.top];
+}
+
+canvas.addEventListener('pointerdown', event => {
+  if (event.button !== 0) return;
+  canvas.setPointerCapture(event.pointerId);
+  current = canvasPoint(event);
+  lastStroke = null;
+  redraw();
+});
+canvas.addEventListener('pointermove', event => {
+  if (!current) return;
+  // coalesced events carry every sample the device reported, not just one per frame
+  const samples = event.getCoalescedEvents ? event.getCoalescedEvents() : [event];
+  for (const sample of (samples.length ? samples : [event])) current.push(...canvasPoint(sample));
+  redraw();
+});
+function finish(event) {
+  if (!current) return;
+  if (current.length >= 6) {
+    const hasTruth = showTargetEl.checked && target.label !== 'other';
+    strokes.push({
+      label: target.label,
+      truth: hasTruth ? target.truth.map(value => +value.toFixed(2)) : [],
+      points: current.map(value => +value.toFixed(2)),
+      pointerType: event.pointerType,
+    });
+    persist();
+    lastStroke = current;
+    current = null;
+    newTarget();
+  } else {
+    current = null;
+    redraw();
+  }
+}
+canvas.addEventListener('pointerup', finish);
+canvas.addEventListener('pointercancel', () => { current = null; redraw(); });
+
+for (const button of document.querySelectorAll('#labels button')) {
+  button.addEventListener('click', () => {
+    mode = button.dataset.label;
+    for (const other of document.querySelectorAll('#labels button'))
+      other.setAttribute('aria-pressed', String(other === button));
+    newTarget();
+  });
+  button.setAttribute('aria-pressed', String(button.dataset.label === mode));
+}
+showTargetEl.addEventListener('change', newTarget);
+rotateEl.addEventListener('change', newTarget);
+mixOtherEl.addEventListener('change', newTarget);
+document.getElementById('undo').addEventListener('click', () => {
+  strokes.pop(); persist(); lastStroke = null; redraw();
+});
+document.getElementById('clear').addEventListener('click', () => {
+  if (strokes.length && !confirm(`Delete all ${strokes.length} recorded strokes?`)) return;
+  strokes = []; persist(); lastStroke = null; redraw();
+});
+document.getElementById('download').addEventListener('click', async () => {
+  if (!strokes.length) { statusEl.textContent = 'nothing recorded yet'; return; }
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  let text = '# shape-recognition strokes v1\n';
+  strokes.forEach((stroke, index) => {
+    text += `stroke rec-${stamp}-${index}-${stroke.pointerType || 'unknown'}\nlabel ${stroke.label}\n`;
+    if (stroke.truth.length) text += `truth ${stroke.truth.join(' ')}\n`;
+    text += `points ${stroke.points.join(' ')}\nend\n`;
+  });
+  // served by serve.py: save straight into fixtures/, then clear the list so the next save cannot
+  //  write the same strokes into a second file
+  if (location.protocol.startsWith('http')) {
+    try {
+      const response = await fetch(`save?name=recorded-${stamp}`, { method: 'POST', body: text });
+      if (response.ok) {
+        const savedAs = await response.text();
+        const count = strokes.length;
+        strokes = []; persist(); lastStroke = null; redraw();
+        statusEl.textContent = `saved ${count} strokes to ${savedAs}`;
+        return;
+      }
+    } catch (err) { /* no serve.py behind this server - fall back to a download */ }
+  }
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
+  link.download = `recorded-${stamp}.strokes`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+});
+if (window.ResizeObserver) new ResizeObserver(resize).observe(canvas);
+window.addEventListener('resize', resize);
+resize();
+</script>
+</body>
+</html>

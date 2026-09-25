@@ -561,6 +561,41 @@ static void testConstraints()
       "the constraint keeps the drag direction");
 }
 
+static void testAngleSnap()
+{
+  const Dim tolerance = 8*M_PI/180;
+  // within tolerance: onto the direction, keeping the distance along it
+  ShapeParams line = makeShape(SHAPE_LINE, Point(0, 0), Point(100, 10));
+  Point snapped = snapShapeAngle(line, 1, line.points[1], tolerance);
+  shapeCheckPointNear(snapped, Point(100, 0), 1e-9, "a line 5.7 degrees off horizontal snaps to it");
+  snapped = snapShapeAngle(line, 0, Point(40, 65), tolerance);
+  shapeCheckNear(snapped.x - line.points[1].x, -(snapped.y - line.points[1].y), 1e-9,
+      "the start point snaps to the diagonal about the end point");
+  // outside tolerance: untouched
+  snapped = snapShapeAngle(line, 1, Point(100, 30), tolerance);
+  shapeCheckPointNear(snapped, Point(100, 30), 0, "a line 16.7 degrees off horizontal is left alone");
+  shapeCheckPointNear(snapShapeAngle(line, 1, Point(100, 10), 0), Point(100, 10), 0,
+      "zero tolerance turns snapping off");
+  // other shapes are not lines
+  ShapeParams box = makeShape(SHAPE_BOX, Point(0, 0), Point(100, 10));
+  shapeCheckPointNear(snapShapeAngle(box, 1, Point(100, 10), tolerance), Point(100, 10), 0,
+      "a box point is not angle snapped");
+
+  // an interior polyline point near both a horizontal and a vertical locks onto the right angle
+  ShapeParams poly = makeShape(SHAPE_POLYLINE, Point(0, 0), Point(97, 6));
+  poly.points.push_back(Point(100, 100));
+  snapped = snapShapeAngle(poly, 1, poly.points[1], tolerance);
+  shapeCheckPointNear(snapped, Point(100, 0), 1e-9, "an interior point near a corner snaps to a right angle");
+  // only one neighbour in range: snaps to that one alone
+  snapped = snapShapeAngle(poly, 1, Point(60, 5), tolerance);
+  shapeCheckPointNear(snapped, Point(60, 0), 1e-9, "an interior point near one direction snaps to it");
+  // a closed polyline wraps: the first point's neighbours are the second and the last
+  poly.flags |= SHAPEFLAG_CLOSED;
+  //  - horizontal from (97, 6) and diagonal from (100, 100) cross at (6, 6)
+  snapped = snapShapeAngle(poly, 0, Point(4, 3), tolerance);
+  shapeCheckPointNear(snapped, Point(6, 6), 1e-9, "a closed polyline's first point snaps against the last too");
+}
+
 static void testEllipse()
 {
   ShapeParams ellipse = makeShape(SHAPE_ELLIPSE, Point(0, 0), Point(100, 50));
@@ -604,6 +639,7 @@ int runShapeTests()
   testCurvePolylines();
   testPolylineFamilyHeads();
   testConstraints();
+  testAngleSnap();
   testEllipse();
   testDegenerateDescriptors();
   return nShapeChecksFailed;

@@ -188,6 +188,12 @@ const char* prefInfoXML = R"#(
   <pref name="shapeCurveTightness" type="float" min="0" max="1" step="0.05" group="Shapes"
       title="Fitted curve tightness"
       description="0 is roundest; higher follows the points more closely" />
+  <pref name="shapeSnapDelay" type="float" min="0" max="1.5" step="0.1" group="Shapes"
+      title="Snap to shape after holding"
+      description="Seconds to hold the pen still at the end of a stroke before it becomes a line, rectangle or ellipse (0.5 to 1.5); a scratch-out erases what is under it. 0 turns this off" />
+  <pref name="shapeAngleSnap" type="float" min="0" max="22" step="1" group="Shapes"
+      title="Snap lines to 45 degrees"
+      description="Lines within this many degrees of horizontal, vertical or diagonal snap onto it, when drawing a shape, editing its handles or scaling a snapped shape. 0 turns this off" />
   <pref name="shapeEditAfterDraw" type="bool" group="Shapes"
       title="Edit shape after drawing"
       description="Leave a new shape selected with its handles shown" />

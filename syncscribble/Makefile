@@ -13,7 +13,10 @@ SOURCES = \
   basics.cpp \
   strokebuilder.cpp \
   shape.cpp \
+  shaperec.cpp \
+  rulingregion.cpp \
   element.cpp \
+  layers.cpp \
   page.cpp \
   syncundo.cpp \
   selection.cpp \

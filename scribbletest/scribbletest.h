@@ -21,6 +21,20 @@ public:
   int themeRoundTripTest();
   // restyling moves the theme's own ink, leaves everything else alone, and undoes in one step
   int restyleTest();
+  int outlineTest();
+  // a locked layer must be immune to selection and to every eraser, and moving an element between
+  // layers must undo both the layer and the restacking it caused
+  int layerTest();
+  int docStateSyncTest();
+  // the curve fit must take the whole-pixel lattice out of the stroke without moving it off the path
+  // the samples came from, at both dense and sparse (mouse-rate) sample spacing
+  int curveFitTest();
+  // hold-to-snap: a held stroke becomes a shape, the rest of the gesture scales it, and the shape as
+  // recognized is its own undo step; a held scratch-out erases what it covers
+  int shapeSnapTest();
+  // ruling regions: the ruled tools follow a (tilted) region's lines, the region stays below all ink and
+  // out of reach of ink selection and erasers, moves with its ink, and survives undo, reload and sync
+  int rulingRegionTest();
   void performanceTest();
   void inputTest();
   void syncSlaveMsg(std::string msg, int level);

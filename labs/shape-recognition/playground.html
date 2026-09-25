@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shape Playground</title>
+<style>
+  :root {
+    --bg: #f6f6f4; --fg: #1d1d1b; --muted: #6b6b66; --panel: #ffffff; --line: #d9d9d4;
+    --ink: #1d1d1b; --shape: #2563eb; --erase: #dc2626; --raw: #d946ef; --accent: #2563eb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #181817; --fg: #ececea; --muted: #9a9a94; --panel: #232322; --line: #3a3a37;
+      --ink: #ececea; --shape: #60a5fa; --erase: #f87171; --raw: #e879f9; --accent: #60a5fa; }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; overflow: hidden; overscroll-behavior: none; }
+  body { background: var(--bg); color: var(--fg); font: 14px system-ui, sans-serif;
+    display: flex; flex-direction: column; }
+  header { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; padding: 10px 16px;
+    background: var(--panel); border-bottom: 1px solid var(--line); }
+  .group { display: flex; gap: 4px; align-items: center; }
+  button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--fg); cursor: pointer; }
+  label { display: flex; gap: 6px; align-items: center; color: var(--muted); }
+  #result { padding: 8px 16px; color: var(--muted); min-height: 2.6em; font-variant-numeric: tabular-nums; }
+  #result b { color: var(--fg); }
+  canvas { flex: 1; width: 100%; min-height: 0; touch-action: none; cursor: crosshair; display: block; }
+</style>
+</head>
+<body>
+<header>
+  <label><input type="checkbox" id="replace" checked> Replace ink with shape</label>
+  <label><input type="checkbox" id="debug"> Show turning points</label>
+  <div class="group">
+    <button id="undo">Undo</button>
+    <button id="clear">Clear</button>
+  </div>
+</header>
+<div id="result">Draw a line, square, circle or scratch-out. Each stroke is recognized as soon as the pen lifts.</div>
+<canvas id="canvas"></canvas>
+<script>
+// Sends each finished stroke to playground.py, which runs the C++ recognizer, and draws what comes back.
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const resultEl = document.getElementById('result');
+const replaceEl = document.getElementById('replace');
+const debugEl = document.getElementById('debug');
+
+let items = [];       // {points, result} - result is null while the request is in flight
+let current = null;
+
+function cssColor(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+
+// the bitmap must match the canvas's CSS box, or the browser stretches it and ink lands off the pen
+function resize() {
+  const ratio = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = Math.round(rect.width*ratio);
+  canvas.height = Math.round(rect.height*ratio);
+  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+  redraw();
+}
+
+function drawPolyline(points, closed) {
+  ctx.beginPath();
+  ctx.moveTo(points[0][0], points[0][1]);
+  for (let i = 1; i < points.length; i++) ctx.lineTo(points[i][0], points[i][1]);
+  if (closed) ctx.closePath();
+}
+
+function drawInk(points, alpha) {
+  if (points.length < 4) return;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.strokeStyle = cssColor('--ink');
+  ctx.lineWidth = 2;
+  ctx.lineJoin = ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(points[0], points[1]);
+  for (let i = 2; i < points.length; i += 2) ctx.lineTo(points[i], points[i + 1]);
+  ctx.stroke();
+  ctx.restore();
+}
+
+// returns false when there is no shape to draw, so the ink stays
+function drawResult(result) {
+  ctx.save();
+  ctx.lineWidth = 2.5;
+  ctx.lineJoin = ctx.lineCap = 'round';
+  ctx.strokeStyle = cssColor('--shape');
+  let drawn = true;
+  if (result.kind === 'line' || result.kind === 'quad') {
+    drawPolyline(result.points, result.kind === 'quad');
+    ctx.stroke();
+  } else if (result.kind === 'ellipse') {
+    ctx.beginPath();
+    ctx.ellipse(result.center[0], result.center[1], result.radiusX, result.radiusY, result.angle, 0, 2*Math.PI);
+    ctx.stroke();
+  } else if (result.kind === 'scribble' && result.points.length >= 3) {
+    // a scratch-out erases everything under it: shown as the area it would clear
+    ctx.strokeStyle = ctx.fillStyle = cssColor('--erase');
+    drawPolyline(result.points, true);
+    ctx.globalAlpha = 0.15; ctx.fill();
+    ctx.globalAlpha = 1; ctx.setLineDash([6, 4]); ctx.stroke();
+  } else {
+    drawn = false;
+  }
+  if (drawn && debugEl.checked) {
+    ctx.fillStyle = cssColor('--raw');
+    for (const [x, y] of result.rawCorners) { ctx.beginPath(); ctx.arc(x, y, 3.5, 0, 2*Math.PI); ctx.fill(); }
+    ctx.fillStyle = cssColor('--shape');
+    if (result.kind !== 'scribble')
+      for (const [x, y] of result.points) { ctx.beginPath(); ctx.arc(x, y, 3.5, 0, 2*Math.PI); ctx.fill(); }
+  }
+  ctx.restore();
+  return drawn;
+}
+
+function redraw() {
+  const rect = canvas.getBoundingClientRect();
+  ctx.clearRect(0, 0, rect.width, rect.height);
+  for (const item of items) {
+    const shapeDrawn = item.result && drawResult(item.result);
+    // with "replace" on, a recognized stroke shows only its shape; otherwise the ink stays, faded
+    if (!shapeDrawn) drawInk(item.points, 1);
+    else if (!replaceEl.checked || item.result.kind === 'scribble') drawInk(item.points, 0.3);
+  }
+  if (current) drawInk(current, 1);
+}
+
+function fmt(value) { return value === null ? '-' : value.toFixed(3); }
+
+function describe(result, millis) {
+  const name = result.kind === 'ellipse' && result.circle ? 'circle'
+             : result.kind === 'quad' ? 'square' : result.kind;
+  return `<b>${name}</b> &middot; ${millis.toFixed(0)} ms &middot; residuals: line ${fmt(result.lineErr)}, `
+       + `quad ${fmt(result.quadErr)}, ellipse ${fmt(result.ellipseErr)}<br>${result.reason.replace(/</g, '&lt;')}`;
+}
+
+async function recognize(item) {
+  const started = performance.now();
+  try {
+    const response = await fetch('recognize', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ points: item.points }),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    item.result = await response.json();
+    resultEl.innerHTML = describe(item.result, performance.now() - started);
+  } catch (err) {
+    resultEl.textContent = `Could not reach the recognizer (${err.message}) - is playground.py running, `
+                         + 'and was this page opened through it rather than as a file?';
+  }
+  redraw();
+}
+
+function canvasPoint(event) {
+  const rect = canvas.getBoundingClientRect();
+  return [event.clientX - rect.left, event.clientY - rect.top];
+}
+
+canvas.addEventListener('pointerdown', event => {
+  if (event.button !== 0) return;
+  canvas.setPointerCapture(event.pointerId);
+  current = canvasPoint(event);
+  redraw();
+});
+canvas.addEventListener('pointermove', event => {
+  if (!current) return;
+  // coalesced events carry every sample the device reported, not just one per frame
+  const samples = event.getCoalescedEvents ? event.getCoalescedEvents() : [];
+  for (const sample of (samples.length ? samples : [event])) current.push(...canvasPoint(sample));
+  redraw();
+});
+canvas.addEventListener('pointerup', () => {
+  if (!current) return;
+  const points = current;
+  current = null;
+  if (points.length < 6) { redraw(); return; }
+  const item = { points, result: null };
+  items.push(item);
+  redraw();
+  recognize(item);
+});
+canvas.addEventListener('pointercancel', () => { current = null; redraw(); });
+
+document.getElementById('undo').addEventListener('click', () => { items.pop(); redraw(); });
+document.getElementById('clear').addEventListener('click', () => { items = []; redraw(); });
+replaceEl.addEventListener('change', redraw);
+debugEl.addEventListener('change', redraw);
+
+if (window.ResizeObserver) new ResizeObserver(resize).observe(canvas);
+window.addEventListener('resize', resize);
+resize();
+</script>
+</body>
+</html>

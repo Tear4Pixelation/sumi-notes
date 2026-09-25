@@ -258,6 +258,11 @@ void ScribbleConfig::init()
   // starting tightness for a new fitted curve: 0 is the roundest (pure B-spline), 1 passes through
   //  every point (i.e. becomes the smooth curve)
   cfgF["shapeCurveTightness"] = 0.35;
+  // seconds the pen must be held still at the end of a stroke before it snaps to a line, box or ellipse
+  //  (or erases, for a scratch-out); 0 turns snapping off, anything else is kept within 0.5 - 1.5
+  cfgF["shapeSnapDelay"] = 0.8;
+  // degrees: a shape's line segment within this of a multiple of 45 degrees snaps onto it; 0 is off
+  cfgF["shapeAngleSnap"] = 8;
   // for continuous view
   cfgF["pageSpacing"] = 20;
   // allow slight overzoom for visual indication of zoom limits

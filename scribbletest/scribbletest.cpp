@@ -42,6 +42,9 @@ ScribbleTest::ScribbleTest(const std::string& path)
   scribbleConfig->set("popupToolbar", false);
   // disable input smoothing
   scribbleConfig->set("inputSmoothing", 0);
+  scribbleConfig->set("inputCurveFit", 0);  // reference output is a polyline through the input points
+  // the hold timer runs off the wall clock; shapeSnapTest() turns it on and fires it by hand
+  scribbleConfig->set("shapeSnapDelay", 0.0f);
   // include thumbnail in test output as a check of rendering
   //  but don't draw page num since fonts are different on different platforms
   scribbleConfig->set("saveThumbnail", 2);
@@ -1295,6 +1298,152 @@ int ScribbleTest::shapeRoundTripTest()
   return nbad;
 }
 
+int ScribbleTest::shapeSnapTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: shape snap: %s\n", what); }
+  };
+  Page* page = NULL;
+  auto lastElement = [&]() {
+    Element* elem = NULL;
+    for(Element* s : page->children())
+      elem = s;
+    return elem;
+  };
+  auto begin = [&](float delay) {
+    scribbleDoc->newDocument();
+    scribbleDoc->cfg->set("shapeSnapDelay", delay);
+    scribbleMode->setMode(MODE_STROKE);
+    scribbleDoc->app->setPen(ScribblePen(Color::BLACK, 2, ScribblePen::TIP_ROUND));
+    page = scribbleArea->currPage;
+  };
+  // the pen resting at the end of a stroke: a few samples jittering within a pixel
+  auto hold = [&](Dim x, Dim y) {
+    for(int i = 0; i < 8; ++i)
+      ie(x + 0.4*(i % 2), y + 0.3*((i/2) % 2), 0, pen);
+  };
+  // stands in for the timer: the hold has lasted as long as it needs to
+  auto fire = [&]() { return scribbleArea->checkShapeSnap(scribbleArea->snapHoldStart + 1600); };
+  const Point center(400, 400);
+  const Dim radius = 110;
+  auto drawCircle = [&]() {
+    for(int i = 0; i <= 72; ++i) {
+      Dim theta = 2*M_PI*i/72;
+      ie(center.x + radius*std::cos(theta), center.y + radius*std::sin(theta), 0, pen, i == 0 ? press : 0);
+    }
+    hold(center.x + radius, center.y);
+  };
+
+  // a held circle snaps, and dragging away from its centre scales it
+  begin(0.8f);
+  drawCircle();
+  scribbleArea->checkShapeSnap(scribbleArea->snapHoldStart + 100);
+  check(!scribbleArea->snapActive, "nothing may snap before the hold has lasted the delay");
+  fire();
+  check(scribbleArea->snapActive && scribbleArea->currStroke && scribbleArea->currStroke->isShape()
+      && scribbleArea->currStroke->shapeParams().id == SHAPE_ELLIPSE, "a held circle should snap to an ellipse");
+  Rect snapped = scribbleArea->snapParams.rect();
+  check(std::abs(snapped.width() - snapped.height()) < 1E-6*snapped.width(), "a circle should come out a true circle");
+  ie(center.x + 1.5*radius, center.y, 0, pen);
+  ie(0, 0, 0, pen, release);
+  Element* shape = lastElement();
+  check(page->strokeCount() == 1 && shape && shape->isShape(), "release should leave the shape and no ink");
+  if(!shape || !shape->isShape())
+    return nbad;
+  check(approxEq(shape->shapeParams().rect().width(), 1.5*snapped.width(), 0.02*snapped.width()),
+      "moving the pen 1.5x as far from the centre should scale the shape 1.5x");
+  undo();
+  check(page->strokeCount() == 1 && approxEq(lastElement()->shapeParams().rect(), snapped, 1E-3),
+      "the first undo should go back to the shape as it snapped");
+  undo();
+  check(page->strokeCount() == 0, "the second undo should remove the shape");
+  redo();
+  redo();
+  check(page->strokeCount() == 1 && approxEq(lastElement()->shapeParams().rect().width(),
+      1.5*snapped.width(), 0.02*snapped.width()), "redo should bring back the scaled shape");
+
+  // a shape the gesture did not change is one undo step, not two
+  begin(0.8f);
+  drawCircle();
+  fire();
+  ie(0, 0, 0, pen, release);
+  check(page->strokeCount() == 1 && lastElement()->isShape(), "an unchanged snap should still commit the shape");
+  undo();
+  check(page->strokeCount() == 0, "an unchanged snap should undo in one step");
+
+  // a held line snaps to a line whose end then follows the pen
+  begin(0.8f);
+  for(int i = 0; i <= 40; ++i)
+    ie(200 + 6*i, 300 + 0.3*std::sin(Dim(i)), 0, pen, i == 0 ? press : 0);
+  hold(440, 300);
+  fire();
+  check(scribbleArea->snapActive && scribbleArea->currStroke->shapeParams().id == SHAPE_LINE,
+      "a held straight stroke should snap to a line");
+  Point lineEnd = scribbleArea->snapParams.points.back();
+  ie(440, 360, 0, pen);
+  ie(0, 0, 0, pen, release);
+  shape = lastElement();
+  check(shape && shape->isShape() && shape->shapeParams().points.back().y > lineEnd.y + 1,
+      "the line's end should follow the pen after the snap");
+
+  // a held rectangle snaps to a box
+  begin(0.8f);
+  {
+    const Point corners[] = {{250, 250}, {500, 250}, {500, 400}, {250, 400}, {250, 250}};
+    bool first = true;
+    for(int side = 0; side < 4; ++side) {
+      for(int i = 0; i < 25; ++i) {
+        Point pt = corners[side] + (corners[side+1] - corners[side])*(i/Dim(25));
+        ie(pt.x, pt.y, 0, pen, first ? press : 0);
+        first = false;
+      }
+    }
+    hold(250, 250);
+  }
+  fire();
+  check(scribbleArea->snapActive && scribbleArea->currStroke->shapeParams().id == SHAPE_BOX,
+      "a held rectangle should snap to a box");
+  ie(0, 0, 0, pen, release);
+
+  // without the hold, or with snapping turned off, a stroke stays ink
+  begin(0.8f);
+  drawCircle();
+  ie(0, 0, 0, pen, release);
+  check(page->strokeCount() == 1 && !lastElement()->isShape(), "a stroke that was never held must stay ink");
+  begin(0.0f);
+  drawCircle();
+  check(!fire() && !scribbleArea->snapActive, "with the delay at 0 nothing may snap");
+  ie(0, 0, 0, pen, release);
+  check(page->strokeCount() == 1 && !lastElement()->isShape(), "with snapping off a held circle stays ink");
+
+  // a held scratch-out erases what it was drawn over, and nothing it was not
+  begin(0.8f);
+  ie(260, 300, 0, pen, press); ie(290, 310, 0, pen); ie(320, 305, 0, pen); ie(0, 0, 0, pen, release);
+  ie(600, 600, 0, pen, press); ie(640, 610, 0, pen); ie(0, 0, 0, pen, release);
+  check(page->strokeCount() == 2, "two strokes to scratch over");
+  for(int pass = 0; pass < 6; ++pass) {
+    for(int i = 0; i <= 20; ++i) {
+      Dim frac = i/Dim(20);
+      Dim x = pass % 2 ? 380 - 180*frac : 200 + 180*frac;
+      ie(x, 285 + 8*pass + 8*frac, 0, pen, pass == 0 && i == 0 ? press : 0);
+    }
+  }
+  hold(200, 333);
+  fire();
+  check(!scribbleArea->snapActive, "a scratch-out must not become a shape");
+  ie(0, 0, 0, pen, release);
+  check(page->strokeCount() == 1, "the scratch-out should erase the stroke under it and leave itself out");
+  undo();
+  check(page->strokeCount() == 2, "undo should bring the erased stroke back");
+
+  scribbleDoc->newDocument();
+  return nbad;
+}
+
+// Ruling regions (rulingregion.h).  runRegionTests() in regiontest.cpp covers the geometry; this is
+//  everything that needs a document.  The region used is tilted on purpose: an unrotated region would let
+//  every check pass against code that only ever looked at page y.
 int ScribbleTest::rulingRegionTest()
 {
   int nbad = 0;
@@ -1682,6 +1831,12 @@ void ScribbleTest::runAll(bool runsynctest)
   nUnitFailed += shapeInterruptTest();
   nUnitFailed += themeRoundTripTest();
   nUnitFailed += restyleTest();
+  nUnitFailed += outlineTest();
+  nUnitFailed += layerTest();
+  nUnitFailed += docStateSyncTest();
+  nUnitFailed += curveFitTest();
+  nUnitFailed += shapeSnapTest();
+  nUnitFailed += rulingRegionTest();
   runAllTime = mSecSinceEpoch() - runAllTime;
   // restore global config
   srandpp(mSecSinceEpoch());

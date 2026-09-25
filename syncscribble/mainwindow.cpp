@@ -1637,12 +1637,14 @@ void MainWindow::createToolBars()
     {"ic_menu_shape_ellipse.svg", "Ellipse", "Drag to draw an ellipse."},
     {"ic_menu_shape_polyline.svg", "Polyline", "Tap to place points; tap the last point to finish, the first to close."},
     {"ic_menu_shape_fitpoly.svg", "Curve", "A smooth curve through your points; drag the red handle to trade smoothness for following them exactly."},
+    {"ic_menu_toggle_ruled.svg", "Ruling Region", "Drag a box that has its own lines. Writing inside it follows them. Select it with the ... button in its corner."},
+    {"ic_menu_add_color.svg", "Color", "The pen's color, which shapes are drawn in. Recolors the selected shape if there is one."},
     {"ic_menu_shape_head_start.svg", "Start Arrowhead", "Puts an arrowhead on the start. Edits the selected shape if there is one."},
     {"ic_menu_shape_head_end.svg", "End Arrowhead", "Puts an arrowhead on the end. A line with an end arrowhead is an arrow."},
     {"ic_menu_shape_rounded.svg", "Rounded Corners", "Rounds the corners of a box or polyline; drag the red handle to set the radius."} })));
   shapeRow->addWidget(createStretch());
   shapeRow->addWidget(smallFloatBtn(createToolSettingsButton("Shape Settings",
-      {"shapeCornerRadius", "shapeCurveTightness", "shapeEditAfterDraw", "doubleTapSticky"})));
+      {"shapeCornerRadius", "shapeCurveTightness", "shapeEditAfterDraw", "shapeSnapDelay", "shapeAngleSnap", "doubleTapSticky"})));
   floatRow(shapeRow);
 
   Toolbar* insSpaceRow = createToolbar();

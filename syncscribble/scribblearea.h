@@ -4,6 +4,7 @@
 #include "document.h"
 #include "selection.h"
 
+struct Timer;
 
 struct UIState {
   enum UIChangeFlags { SetDoc = 0, SaveDoc, InsertDoc, InsertPage, DeletePage, MovePage, SetPageProps,

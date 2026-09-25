@@ -6,6 +6,7 @@
 #include "scribblewidget.h"
 #include "strokebuilder.h"
 #include "bookmarkview.h"
+#include "shaperec.h"
 
 
 const Dim ScribbleArea::ERASESTROKE_RADIUS = 7;
@@ -1073,9 +1074,17 @@ Point ScribbleArea::snapShapePoint(Point pos) const
 {
   if(!currPen()->hasFlag(ScribblePen::SNAP_TO_GRID))
     return pos;
-  Dim yr = currPage->yruling(true);
-  Dim xr = currPage->xruling() > 0 ? currPage->xruling() : yr;
-  return Point(floor(pos.x/xr + 0.5)*xr, floor(pos.y/yr + 0.5)*yr);
+  // the grid of the ruling the shape gesture started in (a region's, rotated or not)
+  return gridFrame.snapToGrid(pos, Page::BLANK_Y_RULING);
+}
+
+Point ScribbleArea::snapShapeAngleAt(const ShapeParams& params, int index, Point pos) const
+{
+  // a grid-snapped pen already lands on grid points; bending those to 45 degrees would pull them off it
+  if(currPen()->hasFlag(ScribblePen::SNAP_TO_GRID))
+    return pos;
+  Dim tolerance = std::min(Dim(22.5), Dim(cfg->Float("shapeAngleSnap")))*M_PI/180;
+  return snapShapeAngle(params, index, pos, tolerance);
 }
 
 // commit an in-progress multi-point shape; a no-op in every other case, so it is safe to call from any
@@ -1129,6 +1138,315 @@ bool ScribbleArea::useShapeSelector()
   shapeSelector = new ShapeSelector(currSelection, mZoom);
   currSelection->xchgBGDirty(true);
   return true;
+}
+
+// hold-to-snap: hold the pen still at the end of a stroke and it becomes the shape it looks like
+
+// How far the pen may wander and still count as held, in screen units.  Loose on purpose: nobody holds a
+//  pen perfectly still, and the recognizer trims the cluster of hold samples itself.
+static constexpr Dim SNAP_HOLD_RADIUS = 6;
+static constexpr int SNAP_POLL_MS = 40;
+// once any point of a snapped shape has moved this far (screen units) under the pen, the shape as it
+//  snapped gets an undo step of its own; less than this is jitter from lifting the pen
+static constexpr Dim SNAP_CHANGE_MIN = 6;
+// a tilted ellipse has no shape of its own; it becomes a closed curve through this many points on it
+static constexpr int SNAP_ELLIPSE_POINTS = 8;
+
+// the hold in ms, or 0 when snapping is off; any other value is kept inside the 0.5 - 1.5 s range
+static int shapeSnapDelayMs(ScribbleConfig* cfg)
+{
+  Dim delay = cfg->Float("shapeSnapDelay");
+  return delay > 0 ? int(1000*std::min(Dim(1.5), std::max(Dim(0.5), delay)) + 0.5) : 0;
+}
+
+// Erases what a scratch-out was drawn over: every element whose bbox centre lies inside the scratch-out's
+//  hull.  An overlap test would also take strokes the scratch-out merely grazed.  Going through
+//  Selection::doSelect() is what keeps locked and hidden layers out of reach.
+class ScratchOutSelector : public Selector
+{
+public:
+  ScratchOutSelector(Selection* sel, const std::vector<Point>& area) : Selector(sel), polygon(area) {}
+
+  bool selectHit(Element* s) override
+  {
+    if(s->node->type() == SvgNode::IMAGE)
+      return false;  // an image under a scratch-out is far more likely background than the target
+    Point center = s->bbox().center();
+    bool inside = false;
+    for(size_t i = 0, prev = polygon.size() - 1; i < polygon.size(); prev = i++) {
+      const Point& pt0 = polygon[prev];
+      const Point& pt1 = polygon[i];
+      if((pt1.y > center.y) != (pt0.y > center.y)
+          && center.x < pt0.x + (center.y - pt0.y)*(pt1.x - pt0.x)/(pt1.y - pt0.y))
+        inside = !inside;
+    }
+    return inside;
+  }
+
+private:
+  std::vector<Point> polygon;
+};
+
+void ScribbleArea::startShapeSnap(Point pos)
+{
+  stopShapeSnap();
+  snapActive = false;
+  const ScribblePen* pen = currPen();
+  // a grid-snapped or line-drawing pen is already making straight lines its own way
+  if(shapeSnapDelayMs(cfg) <= 0 || pen->hasFlag(ScribblePen::EPHEMERAL)
+      || pen->hasFlag(ScribblePen::LINE_DRAWING) || pen->hasFlag(ScribblePen::SNAP_TO_GRID)
+      || pen->hasFlag(ScribblePen::CENTER_ON_LINE))
+    return;
+  snapSamples.push_back(pos);
+  snapHoldPos = pos;
+  snapHoldStart = mSecSinceEpoch();
+  snapHoldUsed = false;
+  // a callback timer of its own rather than the widget's, which autoscroll and fling already share -
+  //  the pen held perfectly still sends no events at all, so something has to notice the time passing
+  if(ScribbleApp::gui) {
+    snapTimer = ScribbleApp::gui->setTimer(SNAP_POLL_MS, NULL, [this]() {
+      if(checkShapeSnap(mSecSinceEpoch()))
+        return SNAP_POLL_MS;
+      snapTimer = NULL;  // returning 0 removes it
+      return 0;
+    });
+  }
+}
+
+void ScribbleArea::trackShapeSnap(Point pos)
+{
+  if(snapSamples.empty())
+    return;
+  snapSamples.push_back(pos);
+  if(pos.dist(snapHoldPos)*mScale > SNAP_HOLD_RADIUS) {
+    snapHoldPos = pos;
+    snapHoldStart = mSecSinceEpoch();
+    snapHoldUsed = false;
+  }
+}
+
+void ScribbleArea::stopShapeSnap()
+{
+  if(snapTimer && ScribbleApp::gui)
+    ScribbleApp::gui->removeTimer(snapTimer);
+  snapTimer = NULL;
+  snapSamples.clear();
+}
+
+bool ScribbleArea::checkShapeSnap(Timestamp now)
+{
+  if(snapSamples.empty() || snapActive || currMode != MODE_STROKE || !scribbleDoc->strokeBuilder)
+    return false;
+  int delay = shapeSnapDelayMs(cfg);
+  if(delay <= 0)
+    return false;
+  if(snapHoldUsed || now - snapHoldStart < delay)
+    return true;
+  // one try per hold: a stroke that is not a shape stays ink, and drawing on is how to try again
+  snapHoldUsed = true;
+  if(!snapStroke())
+    return true;
+  snapSamples.clear();
+  doRefresh();
+  return false;
+}
+
+void ScribbleArea::discardStrokeBuilder()
+{
+  StrokeBuilder* builder = scribbleDoc->strokeBuilder;
+  if(!builder)
+    return;
+  Element* stroke = builder->finish();
+  scribbleDoc->updateCurrStroke(builder->getDirty());
+  delete builder;
+  scribbleDoc->strokeBuilder = NULL;
+  if(stroke) {
+    scribbleDoc->updateCurrStroke(stroke->bbox());
+    stroke->deleteNode();
+  }
+}
+
+// Runs the recognizer over the stroke so far and, if it is a shape, swaps the ink for it.  Returns false
+//  (and changes nothing) if the stroke is not recognized.
+bool ScribbleArea::snapStroke()
+{
+  // the recognizer's absolute thresholds (hold radius, hook length, staircase chords) are in screen
+  //  pixels, so it has to see the stroke at the size it appears on screen
+  std::vector<shaperec::Vec2> stroke;
+  stroke.reserve(snapSamples.size());
+  for(const Point& pt : snapSamples)
+    stroke.emplace_back(pt.x*mScale, pt.y*mScale);
+  shaperec::Result result = shaperec::recognize(stroke);
+  auto toPage = [this](const shaperec::Vec2& pt) { return Point(pt.x/mScale, pt.y/mScale); };
+
+  ShapeParams params;
+  switch(result.kind) {
+  case shaperec::Kind::Scribble:
+  {
+    std::vector<Point> area;
+    for(const shaperec::Vec2& pt : result.points)
+      area.push_back(toPage(pt));
+    discardStrokeBuilder();
+    scratchOut(area);
+    // the rest of the gesture does nothing; release sees MODE_NONE
+    currMode = MODE_NONE;
+    return true;
+  }
+  case shaperec::Kind::Line:
+    if(result.points.size() != 2)
+      return false;
+    params.id = SHAPE_LINE;
+    params.points = {toPage(result.points[0]), toPage(result.points[1])};
+    params.points[1] = snapShapeAngleAt(params, 1, params.points[1]);
+    break;
+  case shaperec::Kind::Quad:
+  {
+    if(result.points.size() != 4)
+      return false;
+    std::vector<Point> corners;
+    for(const shaperec::Vec2& pt : result.points)
+      corners.push_back(toPage(pt));
+    // the recognizer snaps a nearly straight rectangle exactly onto the axes, so an exact test is enough
+    Point side = corners[1] - corners[0];
+    Dim eps = 1E-6*side.dist();
+    if(std::abs(side.x) <= eps || std::abs(side.y) <= eps) {
+      params.id = SHAPE_BOX;
+      params.points = {corners[0], corners[2]};
+    }
+    else {
+      // a box cannot be rotated (rotation demotes it), so a tilted rectangle is a closed polyline
+      params.id = SHAPE_POLYLINE;
+      params.flags = SHAPEFLAG_CLOSED;
+      params.points = corners;
+    }
+    break;
+  }
+  case shaperec::Kind::Ellipse:
+  {
+    Point center = toPage(result.center);
+    Dim radiusX = result.radiusX/mScale, radiusY = result.radiusY/mScale;
+    Dim cosAngle = std::cos(result.angle), sinAngle = std::sin(result.angle);
+    if(result.circle || std::abs(sinAngle) < 1E-6 || std::abs(cosAngle) < 1E-6) {
+      if(!result.circle && std::abs(cosAngle) < 1E-6)
+        std::swap(radiusX, radiusY);
+      params.id = SHAPE_ELLIPSE;
+      params.points = {center - Point(radiusX, radiusY), center + Point(radiusX, radiusY)};
+    }
+    else {
+      // tightness 1 passes exactly through the points, which all lie on the ellipse
+      params.id = SHAPE_CURVE;
+      params.flags = SHAPEFLAG_CLOSED;
+      params.tightness = 1;
+      for(int i = 0; i < SNAP_ELLIPSE_POINTS; ++i) {
+        Dim theta = 2*M_PI*i/SNAP_ELLIPSE_POINTS;
+        Point local(radiusX*std::cos(theta), radiusY*std::sin(theta));
+        params.points.push_back(center + Point(local.x*cosAngle - local.y*sinAngle,
+            local.x*sinAngle + local.y*cosAngle));
+      }
+    }
+    break;
+  }
+  default:
+    return false;
+  }
+
+  discardStrokeBuilder();
+  currStroke = createShapeElement(params);
+  snapParams = currStroke->shapeParams();
+  snapAnchor = snapSamples.back();
+  snapActive = true;
+  scribbleDoc->updateCurrStroke(currStroke->bbox());
+  return true;
+}
+
+// After the snap the pen keeps control of the shape until it lifts: a line's end follows it, anything
+//  closed is scaled about its centre by how far the pen has moved towards or away from that centre.
+void ScribbleArea::scaleSnapShape(Point pos)
+{
+  if(!currStroke || snapParams.points.empty())
+    return;
+  ShapeParams params = snapParams;
+  if(params.id == SHAPE_LINE) {
+    params.points.back() += pos - snapAnchor;
+    params.points.back() = snapShapeAngleAt(params, 1, params.points.back());
+  }
+  else {
+    Point lo = params.points.front(), hi = lo;
+    for(const Point& pt : params.points) {
+      lo = Point(std::min(lo.x, pt.x), std::min(lo.y, pt.y));
+      hi = Point(std::max(hi.x, pt.x), std::max(hi.y, pt.y));
+    }
+    Point center = (lo + hi)/2;
+    Dim startDist = snapAnchor.dist(center);
+    if(startDist*mScale < 1)
+      return;  // the pen is on the centre, so there is no distance to scale by
+    Dim scale = std::max(Dim(0.05), pos.dist(center)/startDist);
+    for(Point& pt : params.points)
+      pt = center + (pt - center)*scale;
+  }
+  scribbleDoc->updateCurrStroke(currStroke->bbox());
+  currStroke->setShapeParams(params);
+  scribbleDoc->updateCurrStroke(currStroke->bbox());
+}
+
+// Called from the release with the undo action already open.  The shape as it snapped is always one
+//  history step; if the gesture then changed it meaningfully, that change is a second step, so undo goes
+//  back to what was recognized before it goes back to nothing.
+void ScribbleArea::commitSnapShape()
+{
+  snapActive = false;
+  Element* shape = currStroke;
+  currStroke = NULL;
+  if(!shape)
+    return;
+  Rect bbox = shape->bbox();
+  scribbleDoc->updateCurrStroke(bbox);
+  if(!bbox.isValid() || !currPage->rect().intersects(bbox) || (bbox.width() < 1 && bbox.height() < 1)) {
+    shape->deleteNode();
+    return;
+  }
+  if(!currPage->rect().contains(bbox))
+    dirtyScreen(bbox);
+  if(cfg->Bool("growWithPen"))
+    growPage(bbox);
+
+  ShapeParams scaled = shape->shapeParams();
+  Dim moved = 0;
+  if(scaled.points.size() == snapParams.points.size()) {
+    for(size_t i = 0; i < scaled.points.size(); ++i)
+      moved = std::max(moved, scaled.points[i].dist(snapParams.points[i]));
+  }
+  bool changed = moved*mScale > SNAP_CHANGE_MIN;
+  if(changed)
+    shape->setShapeParams(snapParams);
+  currPage->addStroke(shape);  // creates the StrokeAddedItem
+  // a shape is not handwriting, but it does end any stroke group in progress
+  groupStrokes();
+  if(changed) {
+    scribbleDoc->endAction();
+    scribbleDoc->startAction(currPageNum);  // closed by doReleaseEvent
+    shape->setShapeParams(scaled);
+    scribbleDoc->history->addItem(new ShapeChangedItem(shape, currPage, snapParams));
+  }
+  scribbleDoc->updateCurrStroke(shape->bbox());
+}
+
+// returns the number of elements erased
+int ScribbleArea::scratchOut(const std::vector<Point>& area)
+{
+  if(area.size() < 3)
+    return 0;
+  // declared in this order so the selector is destroyed first, while the selection it points to lives
+  Selection erased(currPage, Selection::STROKEDRAW_NONE);
+  ScratchOutSelector selector(&erased, area);
+  erased.doSelect();
+  int count = erased.count();
+  if(count > 0) {
+    scribbleDoc->startAction(currPageNum);
+    erased.deleteStrokes();
+    scribbleDoc->endAction();
+  }
+  return count;
 }
 
 // groupStrokes():
@@ -1910,14 +2228,37 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
   //  layer restarts a gesture when the pen button changes mid-stroke, for one.  Dropping it here is the
   //  invariant that keeps an abandoned gesture from leaving a shape on screen that belongs to no page
   //  and so cannot be selected, erased or deleted.
+  stopShapeSnap();
+  snapActive = false;
   if(currStroke) {
     scribbleDoc->updateCurrStroke(currStroke->bbox());
     currStroke->deleteNode();
     currStroke = NULL;
   }
-  prevLine = currPage->getLine(pos.y);
+  gestureFrame = currPage->gestureFrame(pos);
+  gridFrame = currPage->rulingAt(pos);
+  if(!gridFrame.region)
+    gridFrame.origin = Point(0, 0);  // the page's grid is anchored at its origin, never at yRuleOffset
+  prevLine = gestureFrame.line(pos, Page::BLANK_Y_RULING);
   initialLine = prevLine;
   initialPageSize = currPage->rect();
+  // position along the ruled lines, which for the page's own ruling is just pos.x
+  Dim lx = gestureFrame.toLocal(pos).x;
+  // a region has no margin, so nothing in it counts as "in the left margin"
+  Dim marginLeft = gestureFrame.region ? MIN_DIM : currPage->marginLeft();
+
+  // a region's "..." button is the one way to select the region; it sits over the region's ink, so it is
+  //  tested before anything else, and only with no modifier (pen button, eraser end) that asks otherwise
+  if(regionButtonsShown() && !(modemod & (MODEMOD_PENBTN | MODEMOD_ERASE | MODEMOD_EDGEMASK))) {
+    if(Element* region = regionButtonHit(pos, event.source == INPUTSOURCE_TOUCH)) {
+      if(selectedRegion() != region)
+        selectRegion(region);
+      currMode = MODE_NONE;
+      prevPos = initialPos = pos;
+      prevRawPos = rawpos;
+      return;
+    }
+  }
 
   bool selvisible = currSelection &&
       currSelPageNum == currPageNum && isVisible(pageDimToDim(currSelection->getBGBBox()));
@@ -2056,6 +2397,7 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
         }
         scribbleDoc->updateCurrStroke(shapeInProgress->bbox());
         params.points.push_back(pos);
+        params.points.back() = snapShapeAngleAt(params, int(params.points.size()) - 1, pos);
         shapeInProgress->setShapeParams(params);
         scribbleDoc->updateCurrStroke(shapeInProgress->bbox());
       }
@@ -2285,24 +2627,25 @@ void ScribbleArea::doMoveEvent(const InputEvent& event)
     //  currPage->getDirty() will return invalid rect since currStroke is not added
     //  to page until cursor release.
     scribbleDoc->updateCurrStroke(scribbleDoc->strokeBuilder->getDirty());
+    trackShapeSnap(pos);
     break;
   case MODE_ERASESTROKE:
     pathSelector->selectPath(pos, ERASESTROKE_RADIUS/mZoom);
     break;
   case MODE_ERASERULED:
-    if(pos.x < currPage->marginLeft()) {
+    if(lx < marginLeft) {
       // behave like select ruled if cursor in left margin - allows for very fast erasing
-      ruledSelector->selectRuled(eraseXmin, eraseCurrLine, pos.x, line);
+      ruledSelector->selectRuled(eraseXmin, eraseCurrLine, lx, line);
       break;
     }
     else if(eraseCurrLine == line) {
-      eraseXmax = std::max(eraseXmax, pos.x);
-      eraseXmin = std::min(eraseXmin, pos.x);
+      eraseXmax = std::max(eraseXmax, lx);
+      eraseXmin = std::min(eraseXmin, lx);
     }
     else {
       eraseCurrLine = line;
-      eraseXmax = pos.x;
-      eraseXmin = pos.x;
+      eraseXmax = lx;
+      eraseXmin = lx;
     }
     ruledSelector->selectRuled(eraseXmin, line, eraseXmax, line);
     break;
@@ -2424,19 +2767,41 @@ void ScribbleArea::doMoveEvent(const InputEvent& event)
     params.points.back() = snapShapePoint(pos);
     if(event.modemod & MODEMOD_PENBTN)
       applyShapeConstraint(params);
+    else
+      params.points.back() = snapShapeAngleAt(params, int(params.points.size()) - 1, params.points.back());
     shape->setShapeParams(params);
     scribbleDoc->updateCurrStroke(shape->bbox());
     break;
   }
   case MODE_SHAPEHANDLE:
   {
+    if(regionSelector) {
+      // a corner reshapes the outline only; the origin handle slides the lines.  Neither moves ink.
+      Element* region = regionSelector->region;
+      RulingRegionParams params = regionHandleStart;
+      if(shapeHandleIdx >= 0 && shapeHandleIdx < int(params.corners.size()))
+        params.corners[shapeHandleIdx] = pos;
+      else if(shapeHandleIdx == int(params.corners.size()))
+        params.origin = params.origin + (pos - regionHandleStartPos);
+      else
+        break;
+      dirtyScreen(currSelection->getBGBBox());
+      region->setRegionParams(params);
+      currSelection->invalidateBBox();
+      currSelection->xchgBGDirty(true);
+      scribbleDoc->updateCurrStroke(currSelection->getBGBBox());
+      break;
+    }
     Element* shape = shapeSelector ? shapeSelector->shapeElement() : NULL;
     if(!shape || shapeHandleIdx < 0 || shapeHandleIdx >= int(shapeSelector->handles().size()))
       break;
     dirtyScreen(currSelection->getBGBBox());
     ShapeParams params = shape->shapeParams();
-    dragShapeHandle(params, shapeSelector->handles()[shapeHandleIdx],
-        shapeSelector->toLocal(snapShapePoint(pos)));
+    const ShapeHandle& handle = shapeSelector->handles()[shapeHandleIdx];
+    Point local = shapeSelector->toLocal(snapShapePoint(pos));
+    if(handle.type == ShapeHandle::POINT)
+      local = snapShapeAngleAt(params, handle.index, local);
+    dragShapeHandle(params, handle, local);
     shape->setShapeParams(params);
     currSelection->invalidateBBox();
     shapeSelector->updateHandles();
@@ -2677,8 +3042,19 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
     break;
   case MODE_STROKE:
   {
+    stopShapeSnap();
+    if(snapActive) {
+      commitSnapShape();
+      break;
+    }
     strokeCounter++;
     currStroke = scribbleDoc->strokeBuilder->finish();
+    // The centre of mass is what says which line a stroke is on, and its heuristic leans on "up" (first
+    //  point, bbox top).  On a tilted region's lines up is the region's up, so measure it there - in page
+    //  axes a stroke along a tilted line comes out half a line high.
+    if(gestureFrame.isRotated() && currStroke->isPathElement())
+      currStroke->setCom(StrokeBuilder::calcCom(currStroke->node, static_cast<SvgPath*>(currStroke->node)->path(),
+          gestureFrame.localTransform(), gestureFrame.pageTransform()));
     scribbleDoc->updateCurrStroke(scribbleDoc->strokeBuilder->getDirty());
     delete scribbleDoc->strokeBuilder;  // we now own the stroke
     scribbleDoc->strokeBuilder = NULL;
@@ -3044,6 +3420,9 @@ void ScribbleArea::doCancelAction(bool refresh)
     currSelection = NULL;
     // fall through
   case MODE_STROKE:
+    // a snapped shape is in currStroke, so it is discarded below like the ink it replaced
+    stopShapeSnap();
+    snapActive = false;
     if(scribbleDoc->strokeBuilder) {
       currStroke = scribbleDoc->strokeBuilder->finish();
       delete scribbleDoc->strokeBuilder;
