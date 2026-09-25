@@ -145,11 +145,16 @@ const char* prefInfoXML = R"#(
   <pref name="docListSiloed" type="bool" group="Document List" exclude="desktop,ios"
       title="Restrict to document folder" description="Prevent navigation out of document folder" />
 
+  <pref name="libraryPath" type="string" level="1" group="Document List" exclude="ios"
+      title="Library folder" description="Where documents are kept; changing it moves them" />
+
   <pref name="pdfImportDPI" type="int" min="72" max="600" group="Document List"
       title="PDF import resolution" description="DPI at which PDF pages are rendered on import" />
   <pref name="pdfImportLossy" type="bool" level="1" group="Document List"
       title="Compress imported PDF pages" description="Smaller files, but blurrier text" />
 
+  <pref name="pageSize" type="pagesize" level="1" group="General"
+      title="Default page size" description="Size of new pages; they still grow as they are written on" />
   <pref name="growDown" type="bool" level="1" group="General"
       title="Auto grow page down" description="Allow page height to increase" />
   <pref name="growRight" type="bool" group="General"

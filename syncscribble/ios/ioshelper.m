@@ -611,6 +611,8 @@ int iosSafeAreaInsets(float* top, float* bottom)
 // opening "dropped" files
 #import "SDL/src/video/uikit/SDL_uikitappdelegate.h"
 
+void iosOpenExternalDocument(NSURL* url);
+
 @interface SDLUIKitDelegate(Drop)
 
 - (BOOL)application:(UIApplication *)app openURL:(NSURL *)url options:(NSDictionary<UIApplicationOpenURLOptionsKey,id> *)options;
@@ -623,6 +625,12 @@ int iosSafeAreaInsets(float* top, float* bottom)
 {
   if(!url.isFileURL)
     return NO;
+  // Library mode (the tag document browser): open the file where it is; Write copies it into the
+  //  library once loaded (ScribbleApp::dropEvent), so it never needs revealing in a browser here.
+  if(![self.window.rootViewController isKindOfClass:[DocumentBrowser class]]) {
+    iosOpenExternalDocument(url);
+    return YES;
+  }
   // What is the point of this? Can't we just create UIDocument directly?
   DocumentBrowser* docBrowser = (DocumentBrowser*)self.window.rootViewController;
   if(docBrowser.presentedViewController)
@@ -735,19 +743,10 @@ void resolveDocumentConflict(UIViewController* viewController, NSURL* url)
 // delegate refs are weak, so we need a strong ref to InteractionHandler
 static InteractionHandler* interactionHandler = nil;
 
-void initDocumentBrowser(const char* bkmkBase64)
+// Setup shared by both modes. presenter is whatever other view controllers (conflict alerts) are presented
+//  from: the document browser, or the SDL view controller itself in library mode.
+static void setupSdlViewController(UIViewController* presenter)
 {
-  DocumentBrowser* browser = [[DocumentBrowser alloc] initForOpeningFilesWithContentTypes:@[@"public.svg-image"]];
-  UIWindow* sdlUIWindow = UIApplication.sharedApplication.delegate.window;
-  sdlViewController = sdlUIWindow.rootViewController;
-  sdlUIWindow.rootViewController = nil;
-  sdlUIWindow.rootViewController = browser;
-  // fullscreen was the default prior to iOS 13
-  sdlViewController.modalPresentationStyle = UIModalPresentationFullScreen;
-  // "Create Document"
-  if (@available(iOS 13.0, *))
-    browser.localizedCreateDocumentActionTitle = @(_("Create Document"));
-
   // drag and drop; Apple Pencil 2 double tap
   interactionHandler = [[InteractionHandler alloc] init];
   UIDropInteraction* dropInteraction = [[UIDropInteraction alloc] initWithDelegate:interactionHandler];
@@ -783,10 +782,25 @@ void initDocumentBrowser(const char* bkmkBase64)
     UIDocument* doc = note.object;
     // documentState is bitmap - if only conflict bit is set, it means document is open normally
     if(doc.documentState == UIDocumentStateInConflict) {
-      UIViewController* pvc = browser.presentedViewController;
-      resolveDocumentConflict(pvc ? pvc : browser, doc.fileURL);
+      UIViewController* pvc = presenter.presentedViewController;
+      resolveDocumentConflict(pvc ? pvc : presenter, doc.fileURL);
     }
   }];
+}
+
+void initDocumentBrowser(const char* bkmkBase64)
+{
+  DocumentBrowser* browser = [[DocumentBrowser alloc] initForOpeningFilesWithContentTypes:@[@"public.svg-image"]];
+  UIWindow* sdlUIWindow = UIApplication.sharedApplication.delegate.window;
+  sdlViewController = sdlUIWindow.rootViewController;
+  sdlUIWindow.rootViewController = nil;
+  sdlUIWindow.rootViewController = browser;
+  // fullscreen was the default prior to iOS 13
+  sdlViewController.modalPresentationStyle = UIModalPresentationFullScreen;
+  // "Create Document"
+  if (@available(iOS 13.0, *))
+    browser.localizedCreateDocumentActionTitle = @(_("Create Document"));
+  setupSdlViewController(browser);
 
   // reopening previous doc
   if(bkmkBase64 && bkmkBase64[0]) {
@@ -803,6 +817,26 @@ void initDocumentBrowser(const char* bkmkBase64)
         [browser presentDocumentAtURL:url];
     }
   }
+}
+
+// Library mode: the tag document browser (drawn by Write itself) replaces UIDocumentBrowserViewController, so
+//  SDL's view controller simply stays the root and documents are plain files in the app's own storage.
+void initLibraryMode(void)
+{
+  sdlViewController = UIApplication.sharedApplication.delegate.window.rootViewController;
+  setupSdlViewController(sdlViewController);
+}
+
+// A document from outside the app (Files, share sheet, another app's "Open in"). The URL may be outside the
+//  sandbox (LSSupportsOpeningDocumentsInPlace), so access is claimed for as long as the app runs - the
+//  document is only read, once, before being copied into the library.
+void iosOpenExternalDocument(NSURL* url)
+{
+  [url startAccessingSecurityScopedResource];
+  WriteDocument* doc = [[WriteDocument alloc] initWithFileURL:url];
+  doc.docTag = iosOpenDocMode;
+  [doc openWithCompletionHandler:nil];
+  void* retain_doc = (__bridge_retained void*)doc;
 }
 
 void showDocumentBrowser()

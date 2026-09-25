@@ -37,9 +37,9 @@ class ScribbleDoc;
 class ScribbleMode;
 class ScribbleArea;
 class BookmarkView;
-class ClippingView;
 class OverlayWidget;
 class DocumentList;
+class TagDocList;
 class PenToolbar;
 class Selection;
 class Clipboard;
@@ -56,6 +56,7 @@ public:
 
   void newDocument();
   bool openDocument();
+  bool importDocument();
   bool saveDocument();
   bool doSave(ScribbleDoc* doc);
   bool doSaveAs();
@@ -72,10 +73,12 @@ public:
   void reloadConfig();
   void writeConfigFile();
   void resetDocPrefs();
-  bool loadClippingsDoc();
   void setMode(int mode);
   void showPageSetup();
   void showThemePicker();
+  // shows TagDocList; openResult = false leaves acting on the result to the caller
+  //  (openOrCreateDocTagged(), which also handles OPEN_WHITEBOARD)
+  void execTagDocList(bool openResult = true);
   void askThemeForNewDoc();
   void openRecentFile(const std::string& filename);
   void createLink();
@@ -148,7 +151,13 @@ public:
   std::string savedPath;
   //std::string backupPath;
   std::string docRoot;
-  std::string clippingsPath;
+  // The document library (see doclibrary.h): the one directory the tag document browser owns, and where
+  //  every document opened from elsewhere is copied to. libraryTemporary means it is a fallback in app
+  //  storage (Android without all-files access) that is deleted on uninstall; the documents are moved to
+  //  the permanent location, libraryTarget, as soon as it becomes writable.
+  std::string libraryRoot;
+  std::string libraryTarget;
+  bool libraryTemporary = false;
   std::string runType;
   std::string argDoc;
   std::string outDoc;
@@ -205,6 +214,7 @@ private:
   friend class ScribbleTest;
 
   DocumentList* documentList = NULL;
+  TagDocList* tagDocList = NULL;
   std::string cfgFile;
   std::string fileExt;
   std::string httpUserAgent;
@@ -233,12 +243,26 @@ private:
   void onLoadFile(const std::string& filename, bool addrecent = true);
   void sendFile(const std::string& body, const std::string& attachfile);
   bool openOrCreateDoc(bool cancelable = false);
+  // the two document browsers behind openOrCreateDoc(), chosen by the useTagDocList pref
+  bool openOrCreateDocClassic(bool cancelable = false);
+  bool openOrCreateDocTagged(bool cancelable = false);
   std::string execDocumentList(int mode, const char* exts = NULL, bool cancelable = true) ;
   std::string createRecoveryName(std::string filename, const char* toappend = " - recovered");
   std::string docDisplayName(std::string filename, int maxwidth=0);
   std::string docShortName(const std::string& filename, int maxwidth=0);
   Clipboard* importExternalDoc(SvgDocument* doc);
   bool openExternalDoc();
+  // the library is in use whenever the tag document browser is (iOS keeps its own document picker)
+  bool libraryManaged() const;
+  bool isInLibrary(const std::string& filename) const;
+  std::string defaultLibraryBase() const;
+  void initLibrary();
+  void adoptPermanentLibrary();
+  bool relocateLibrary(const std::string& newBase);
+  void offerLibraryMigration();
+  void askDefaultPageSize();
+  bool moveLibraryTo(const std::string& newRoot);
+  bool importActiveDocToLibrary(const std::string& srcFile);
 #if PLATFORM_ANDROID
   Semaphore saveSem;
 #endif

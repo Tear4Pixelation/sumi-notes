@@ -5,6 +5,7 @@
 #include "scribblesync.h"
 #include "strokebuilder.h"
 #include "scribbleapp.h"
+#include "tagstore.h"
 
 
 ScribbleDoc::ScribbleDoc(ScribbleApp* parent, ScribbleConfig* _cfg, ScribbleMode* _mode)
@@ -408,6 +409,44 @@ Image ScribbleDoc::extractThumbnail(const char* filename)
     }
   }
   return Image(0,0);
+}
+
+std::vector<std::string> ScribbleDoc::extractDocTags(const char* filename)
+{
+  StringRef buff;
+  FileStream istrm(filename, "rb");
+  MemStream infstrm;
+
+  FSPath fileinfo(filename);
+  if(fileinfo.extension() == "svgz" || fileinfo.extension() == "gz") {
+    minigz_io_t zistrm(istrm);
+    auto blockInfo = bgz_get_index(zistrm);
+    std::stringstream inf_block;
+    if(blockInfo.empty() || !bgz_read_block(zistrm, &blockInfo.back() - 1, minigz_io_t(infstrm)))
+      return {};
+    buff = StringRef(infstrm.data(), infstrm.size());
+  }
+  else
+    buff.len = istrm.readp((void**)&buff.str, 1 << 18);  // 256KB, same window extractThumbnail uses
+
+  // looking for <string name="tags" value="t1,t2,..."/> as written by ScribbleConfig::saveConfig()
+  int idx = buff.find("name=\"tags\"");
+  if(idx < 0)
+    idx = buff.find("name='tags'");
+  if(idx < 0)
+    return {};
+  idx = buff.find("value=", idx);
+  if(idx < 0)
+    return {};
+  idx += 6;
+  char quote = idx < buff.len ? buff[idx] : '\0';
+  if(quote != '"' && quote != '\'')
+    return {};
+  ++idx;
+  int end = buff.findFirstOf(quote == '"' ? "\"" : "'", idx);
+  if(end < 0)
+    return {};
+  return TagStore::parseTagList(std::string(&buff[idx], end - idx).c_str());
 }
 
 Document::loadresult_t ScribbleDoc::openDocument(const char* filename, bool delayload)

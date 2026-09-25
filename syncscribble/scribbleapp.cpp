@@ -9,9 +9,10 @@
 #include "scribblewidget.h"
 #include "scribblesync.h"
 #include "bookmarkview.h"
-#include "clippingview.h"
 #include "scribbleinput.h"
 #include "documentlist.h"
+#include "tagdoclist.h"
+#include "doclibrary.h"
 #include "pdfimport.h"
 #include "rulingdialog.h"
 #include "themedialog.h"
@@ -295,6 +296,13 @@ void ScribbleApp::init()
   // clear temp folder
   removeDir(tempPath.c_str(), false);
 
+  initLibrary();
+  // not for a command line conversion (--out), which must not stop to ask anything
+  if(outDoc.empty()) {
+    offerLibraryMigration();
+    askDefaultPageSize();
+  }
+
 #if PLATFORM_ANDROID
   // this will cause permission prompt for fresh install
   if(!FSPath(cfgFile).exists())
@@ -322,6 +330,18 @@ void ScribbleApp::init()
   if(activeDoc()->fileName()[0])
     return;
 #elif PLATFORM_IOS
+  if(libraryManaged()) {
+    // SDL's view stays the root and Write's own browser is the way in; everything below is then the same
+    //  as on the other platforms, except that the browser is shown directly (see delayedShowDocList)
+    initLibraryMode();
+    if(cfg->Bool("reopenLastDoc") && recentDocs.size() > 0
+        && FSPath(recentDocs[0]).exists() && doOpenDocument(recentDocs[0]))
+      return;
+    if(runType == "first" && openHelp())
+      return;
+    openOrCreateDoc();
+    return;
+  }
   const char* bkmk = cfg->Bool("reopenLastDoc") ? cfg->String("iosBookmark0") : NULL;
   if(runType == "first" && openHelp())
     bkmk = "!";  // this will cause main Write view to be shown after initializing doc browser
@@ -357,6 +377,15 @@ void ScribbleApp::init()
       Document::loadresult_t res = activeDoc()->openDocument(argInfo.c_str());
       if(res != Document::LOAD_FATAL && res != Document::LOAD_EMPTYDOC) {
         onLoadFile(activeDoc()->fileName());
+        // a document named on the command line was chosen deliberately from where it is, so copying it into
+        //  the library is offered rather than done; declining edits it in place. A --out conversion only reads it.
+        if(outDoc.empty() && libraryManaged() && !isInLibrary(argInfo.c_str())) {
+          auto choice = messageBox(Question, _("Document library"), fstring(_("%s is not in your document library."
+              "\n\nCopy it into the library and edit the copy, or edit the original where it is?"),
+              argInfo.fileName().c_str()), {_("Copy to Library"), _("Edit Original")});
+          if(choice == _("Copy to Library"))
+            importActiveDocToLibrary(argInfo.c_str());
+        }
         if(!outDoc.empty()) {
           FSPath outinfo(outDoc);
           if(outinfo.exists())
@@ -609,6 +638,8 @@ void ScribbleApp::maybeQuit()
 {
   if(win->modalOrSelf() == documentList)
     documentList->finish(DocumentList::REJECTED);
+  else if(tagDocList && win->modalOrSelf() == tagDocList)
+    tagDocList->finish(TagDocList::REJECTED);
   else if(win->modalOrSelf() != win)
     return;  // send ESC key to cancel dialog?  flash dialog for attention?
   if(maybeSave()) {
@@ -792,6 +823,8 @@ bool ScribbleApp::sdlEventHandler(SDL_Event* event)
             tempPath = "/sdcard/styluslabs/.temp/";
             createPath(tempPath.c_str());
           }
+          // documents written to the app storage fallback go to shared storage, where they outlive Write
+          adoptPermanentLibrary();
         }
         if(!openHelp())
           openOrCreateDoc();
@@ -993,7 +1026,32 @@ void ScribbleApp::dropEvent(SDL_Event* event)
 #if PLATFORM_IOS
   UIDocStream* strm = (UIDocStream*)event->user.data1;
   long mode = (long)event->user.data2;
-  if(mode == iosOpenDocMode || mode == iosChooseDocMode) {
+  if((mode == iosOpenDocMode || mode == iosChooseDocMode) && libraryManaged()) {
+    // From Files, another app, or Import Document... The browser may be up (e.g. a cold start from
+    //  "Open in Write"), and the document replaces it.
+    if(tagDocList && tagDocList->isVisible())
+      tagDocList->finish(TagDocList::REJECTED);
+    std::string filename = strm->name();
+    if(isInLibrary(filename)) {
+      // already ours: open it as the plain file it is, not through UIDocument
+      delete strm;
+      if(maybeSave())
+        doOpenDocument(filename);
+      return;
+    }
+    if(!maybeSave()) {
+      delete strm;
+      return;
+    }
+    if(!doOpenDocument(strm))
+      openOrCreateDoc(false);
+    else if(!importActiveDocToLibrary(filename)) {
+      // never keep editing the original through its UIDocument, which would write it back
+      activeDoc()->newDocument();
+      openOrCreateDoc(false);
+    }
+  }
+  else if(mode == iosOpenDocMode || mode == iosChooseDocMode) {
     if(!doOpenDocument(strm))
       openOrCreateDoc(false);  // reopen doc browser on failure
     else if(activeArea() == scribbleAreas[0]) {  // only save bookmark for primary doc
@@ -1042,7 +1100,7 @@ void ScribbleApp::dropEvent(SDL_Event* event)
   std::string ext = fileinfo.extension();
   if(!fileinfo.exists())
     return;
-  if(documentList && documentList->isVisible()) {}  // always try to open as doc if doc list visible
+  if((documentList && documentList->isVisible()) || (tagDocList && tagDocList->isVisible())) {}  // always try to open as doc if doc list visible
   else if(ext == "svgz" || (ext == "svg" && !StringRef(basename).chop(3).endsWith("_page"))) {
     // we load as Document to check if this is a Write document, then reload as Write doc or external SVG
     //  depending on result - not ideal, but this isn't expected to be a common use case
@@ -1087,7 +1145,7 @@ void ScribbleApp::appSuspending()
       // no chance to prompt user, so don't use doSave()
       if(!doc->fileName()[0]) {
         if(doc->isModified()) { // don't bother unless doc is actually modified
-          doc->saveDocument(createRecoveryName(FSPath(cfg->String("currFolder"), "Untitled").c_str()).c_str());
+          doc->saveDocument(createRecoveryName(FSPath(libraryManaged() ? libraryRoot : cfg->String("currFolder"), "Untitled").c_str()).c_str());
           onLoadFile(doc->fileName());  // add to recent doc list before saving config
         }
       }
@@ -1502,7 +1560,346 @@ std::string ScribbleApp::execDocumentList(int mode, const char* exts, bool cance
 #endif
 }
 
+void ScribbleApp::execTagDocList(bool openResult)
+{
+  if(!tagDocList) {
+    // same effective root DocumentList's currDir starts from (scribbleapp.cpp docRoot is the platform
+    // default, e.g. raw $HOME on Linux - fine for DocumentList, which only ever lists one folder the
+    // user chose, but this view recurses the whole root unconditionally, so it needs the narrower,
+    // user-configured document folder when one is set)
+    FSPath root = libraryRoot;
+    if(!libraryManaged()) {
+      root = cfg->String("currFolder");
+      if(!root.isAbsolute())
+        root = canonicalPath(root);
+      if(!root.isDir() || !root.exists())
+        root = docRoot;
+    }
+    tagDocList = new TagDocList(root.c_str());
+  }
+  if(libraryTemporary && PLATFORM_ANDROID)
+    showNotify(_("Documents are in app storage and will be deleted if Kaku is uninstalled. "
+        "Allow access to all files to keep them."), 2);
+  const char* currFile = activeDoc() ? activeDoc()->fileName() : "";
+  tagDocList->setup(win, currFile && currFile[0]);
+  execWindow(tagDocList);
+  if(!openResult)
+    return;
+  if(tagDocList->result == TagDocList::EXISTING_DOC || tagDocList->result == TagDocList::NEW_DOC) {
+    if(!tagDocList->selectedFile.empty())
+      doOpenDocument(tagDocList->selectedFile);
+  }
+}
+
+/// document library
+
+bool ScribbleApp::libraryManaged() const
+{
+  return !libraryRoot.empty() && cfg->Bool("useTagDocList") && !PLATFORM_EMSCRIPTEN;
+}
+
+bool ScribbleApp::isInLibrary(const std::string& filename) const
+{
+  if(libraryRoot.empty())
+    return false;
+#if PLATFORM_IOS
+  // /var is a symlink to /private/var: $HOME comes without the prefix, UIDocument URLs sometimes with it,
+  //  and canonicalPath() does not resolve symlinks - so a library file would look external and be copied
+  if(StringRef(filename).startsWith("/private/var/"))
+    return DocLibrary::contains(libraryRoot, filename.substr(strlen("/private")));
+#endif
+  return DocLibrary::contains(libraryRoot, filename);
+}
+
+// where a fresh install puts its library: somewhere that survives uninstalling Write (on Android that means
+//  shared storage, not Android/data), and on desktop a folder of its own rather than the documents folder
+//  itself, since the browser shows everything under its root
+std::string ScribbleApp::defaultLibraryBase() const
+{
+#if PLATFORM_ANDROID
+  return "/sdcard/Documents/Kaku/";
+#elif PLATFORM_IOS
+  // the app's own Documents folder, which is also what the Files app shows as Kaku's
+  return FSPath(getenv("HOME"), "Documents/Kaku/").c_str();
+#else
+  std::string documentsDir = DocLibrary::userDocumentsDir();
+  return FSPath(documentsDir.empty() ? docRoot : documentsDir, "Kaku/").c_str();
+#endif
+}
+
+// used only while the real library cannot be written: app storage on Android (deleted on uninstall, hence
+//  the warning), next to the config file elsewhere (e.g. the library is on a drive that is not mounted)
+static std::string fallbackLibraryBase(const std::string& cfgFile)
+{
+#if PLATFORM_ANDROID
+  const char* appstorage = SDL_AndroidGetExternalStoragePath();
+  return FSPath(appstorage ? appstorage : "/sdcard/Android/data/com.styluslabs.writeqt/files", "Write/").c_str();
+#else
+  return FSPath(cfgFile).parent().child("library/").c_str();
+#endif
+}
+
+void ScribbleApp::initLibrary()
+{
+  // wasm has only a virtual filesystem, so it keeps its own document handling
+  if(!cfg->Bool("useTagDocList") || PLATFORM_EMSCRIPTEN)
+    return;
+  std::string saved = cfg->String("libraryPath");
+  libraryTarget = saved.empty() ? defaultLibraryBase() : FSPath(saved + "/").c_str();
+  bool canWrite = true;
+#if PLATFORM_ANDROID
+  // without all-files access a directory in shared storage may be creatable, but after a reinstall the
+  //  files in it are unreadable - so don't put documents there until we have the permission
+  canWrite = hasAndroidPermission();
+#endif
+  if(canWrite) {
+    // a saved library is reused as is; only a fresh install goes looking for an empty directory
+    if(saved.empty())
+      libraryRoot = DocLibrary::acquire(libraryTarget);
+    else if(DocLibrary::isLibraryDir(libraryTarget))
+      libraryRoot = libraryTarget;
+    else if(!FSPath(libraryTarget).exists() && FSPath(libraryTarget).parent().exists())
+      libraryRoot = DocLibrary::acquire(libraryTarget, 1);  // the user deleted it: start a new one
+  }
+  if(!libraryRoot.empty()) {
+    libraryTarget = libraryRoot;
+    if(saved.empty())
+      cfg->set("libraryPath", FSPath(libraryRoot).filePath().c_str());
+    // documents written while the library was unavailable
+    std::string fallback = fallbackLibraryBase(cfgFile);
+    if(DocLibrary::isLibraryDir(fallback) && !DocLibrary::findDocuments(fallback, "svgz svg html", 8).empty()) {
+      if(!DocLibrary::moveContents(fallback, libraryRoot))
+        PLATFORM_LOG("Some documents could not be moved from %s to %s\n", fallback.c_str(), libraryRoot.c_str());
+    }
+    return;
+  }
+  // Permanent location unavailable: work in the fallback for now. libraryPath is deliberately left alone,
+  //  so the documents go back where they belong once it is reachable again (adoptPermanentLibrary).
+  libraryRoot = DocLibrary::acquire(fallbackLibraryBase(cfgFile));
+  libraryTemporary = !libraryRoot.empty();
+  PLATFORM_LOG("Document library %s unavailable, using %s\n", libraryTarget.c_str(), libraryRoot.c_str());
+#if !PLATFORM_ANDROID
+  // Android explains itself every time the browser opens (execTagDocList); here it is a one-off surprise
+  if(libraryTemporary && outDoc.empty())
+    messageBox(Warning, _("Document library"), fstring(_("The document library at %s is not available. "
+        "New documents will be kept in %s and moved to the library when it is available again."),
+        libraryTarget.c_str(), libraryRoot.c_str()));
+#endif
+}
+
+// the permanent location just became writable (Android: all-files access was granted)
+void ScribbleApp::adoptPermanentLibrary()
+{
+  if(!libraryTemporary)
+    return;
+  // acquire() rather than creating the directory outright: after a reinstall this is how the library the
+  //  previous install left behind is found again, marker and all
+  std::string permanent = DocLibrary::acquire(libraryTarget);
+  if(permanent.empty() || !moveLibraryTo(permanent))
+    return;
+  libraryTemporary = false;
+  showNotify(fstring(_("Documents moved to %s"), permanent.c_str()), 1);
+}
+
+// Moves every document in the library to newRoot (an acquired library directory) and follows them: open
+//  documents are reopened from their new path, recent documents are rewritten, and the browser is repointed.
+bool ScribbleApp::moveLibraryTo(const std::string& newRoot)
+{
+  std::string oldRoot = libraryRoot;
+  std::vector<std::pair<ScribbleDoc*, std::string>> openDocs;  // doc, path relative to the library
+  for(ScribbleDoc* doc : scribbleDocs) {
+    std::string filename = doc->fileName();
+    if(filename.empty() || !isInLibrary(filename))
+      continue;
+    if(doc->isModified())
+      doc->saveDocument();
+    openDocs.push_back({doc, FSPath(filename).relativeTo(FSPath(oldRoot))});
+  }
+  bool allMoved = DocLibrary::moveContents(oldRoot, newRoot);
+  libraryRoot = newRoot;
+  libraryTarget = newRoot;
+  cfg->set("libraryPath", FSPath(newRoot).filePath().c_str());
+  for(std::string& recent : recentDocs) {
+    if(StringRef(recent).startsWith(oldRoot.c_str()))
+      recent = newRoot + recent.substr(oldRoot.size());
+  }
+  for(auto& openDoc : openDocs) {
+    FSPath moved(newRoot, openDoc.second);
+    if(moved.exists() && openDoc.first->openDocument(moved.c_str()) == Document::LOAD_OK && openDoc.first == activeDoc())
+      onLoadFile(moved.c_str(), false);
+  }
+  if(tagDocList)
+    tagDocList->setRoot(libraryRoot.c_str());
+  writeConfigFile();
+  if(!allMoved)
+    messageBox(Warning, _("Document library"), fstring(_("Some files could not be moved and were left in %s."), oldRoot.c_str()));
+  return true;
+}
+
+// the library location preference was changed
+bool ScribbleApp::relocateLibrary(const std::string& newBase)
+{
+  std::string expanded = newBase;
+  const char* home = getenv("HOME");
+  if(home && StringRef(expanded).startsWith("~"))
+    expanded.replace(0, 1, home);
+  FSPath chosen(expanded + "/");
+  if(!chosen.isAbsolute()) {
+    messageBox(Warning, _("Document library"), _("Please enter the full path of a folder for the library."));
+    return false;
+  }
+  if(DocLibrary::contains(libraryRoot, chosen)) {
+    messageBox(Warning, _("Document library"), _("The library cannot be moved into a folder inside itself."));
+    return false;
+  }
+  // an empty folder (or an existing library) is used as is; a folder with anything else in it gets a Write
+  //  folder of its own inside it, the same rule a fresh install follows
+  std::string newRoot = (DocLibrary::isLibraryDir(chosen) || DocLibrary::isEmptyDir(chosen) || !chosen.exists())
+      ? DocLibrary::acquire(chosen, 1) : DocLibrary::acquire(chosen.child("Kaku/"));
+  if(newRoot.empty()) {
+    messageBox(Warning, _("Document library"), fstring(_("%s cannot be used for the library."), newBase.c_str()));
+    return false;
+  }
+  if(canonicalPath(FSPath(newRoot)) == canonicalPath(FSPath(libraryRoot)))
+    return true;
+  auto choice = messageBox(Question, _("Document library"),
+      fstring(_("Move all documents from %s to %s?"), libraryRoot.c_str(), newRoot.c_str()), {_("Move"), _("Cancel")});
+  if(choice != _("Move"))
+    return false;
+  libraryTemporary = false;
+  return moveLibraryTo(newRoot);
+}
+
+// Once, the first time the library is used: documents from wherever Write used to keep them can be copied in.
+//  Copied, never moved - the classic browser may still be pointing at them, and the user may have their own
+//  arrangement there.
+void ScribbleApp::offerLibraryMigration()
+{
+  if(!libraryManaged() || cfg->Bool("libraryMigrated"))
+    return;
+  cfg->set("libraryMigrated", true);
+  std::vector<std::string> sources;
+  std::string oldFolder = cfg->String("currFolder");
+  if(!oldFolder.empty())
+    sources.push_back(oldFolder);
+#if PLATFORM_ANDROID
+  sources.push_back("/sdcard/styluslabs/write/");
+  const char* appstorage = SDL_AndroidGetExternalStoragePath();
+  if(appstorage)
+    sources.push_back(FSPath(appstorage, "/").c_str());
+#else
+  sources.push_back(docRoot);
+#endif
+  // Multi-file HTML documents are left out: they are several files, and copying just the .html would
+  //  copy a document with no pages. Depth-limited because a source may be a whole home directory.
+  std::string exts = cfg->String("docFileExt") + std::string(" svgz");
+  std::vector<FSPath> docs;
+  std::set<std::string> seen;
+  for(const std::string& source : sources) {
+    if(!isDirectory(source.c_str()))
+      continue;
+    for(const FSPath& doc : DocLibrary::findDocuments(source, exts, 3, libraryRoot)) {
+      if(seen.insert(canonicalPath(doc)).second)
+        docs.push_back(doc);
+    }
+  }
+  if(docs.empty())
+    return;
+  auto choice = messageBox(Question, _("Document library"), fstring(_("Kaku now keeps all documents in one "
+      "library folder:\n%s\n\nCopy your %d existing documents there? The originals are left where they are."),
+      libraryRoot.c_str(), int(docs.size())), {_("Copy"), _("Skip")});
+  if(choice != _("Copy"))
+    return;
+  auto copied = DocLibrary::copyInto(docs, libraryRoot);
+  // tag names live in the tag index of whatever root the tag browser was using, i.e. oldFolder
+  FSPath oldTags(FSPath(oldFolder + "/").childPath(".write-tags")), newTags(FSPath(libraryRoot).childPath(".write-tags"));
+  if(!oldFolder.empty() && oldTags.exists() && !newTags.exists())
+    copyFile(oldTags, newTags);
+  for(std::string& recent : recentDocs) {
+    auto it = copied.find(recent);
+    if(it != copied.end())
+      recent = it->second;
+  }
+  if(copied.size() < docs.size())
+    messageBox(Warning, _("Document library"),
+        fstring(_("%d of %d documents could not be copied."), int(docs.size() - copied.size()), int(docs.size())));
+}
+
+// The active document was just opened from outside the library: save it into the library and carry on
+//  editing the copy, so the library is the only place documents are ever written.
+bool ScribbleApp::importActiveDocToLibrary(const std::string& srcFile)
+{
+  FSPath dest = DocLibrary::uniquePath(FSPath(libraryRoot), FSPath(srcFile).baseName(), cfg->String("docFileExt"));
+  activeDoc()->checkAndClearErrors(true);  // clear errors so document can be saved
+  if(!activeDoc()->saveDocument(dest.c_str(), Document::SAVE_FORCE)) {
+    messageBox(Error, _("Import document"), fstring(_("%s could not be copied into the document library at %s."),
+        FSPath(srcFile).fileName().c_str(), libraryRoot.c_str()));
+    return false;
+  }
+  // the original was registered as recent when it was opened; offering it there would import it again
+  recentDocs.erase(std::remove(recentDocs.begin(), recentDocs.end(), srcFile), recentDocs.end());
+  onLoadFile(dest.c_str());
+  showNotify(fstring(_("Copied %s into the document library"), FSPath(srcFile).fileName().c_str()), 1);
+  return true;
+}
+
+// "Import Document..." - the classic folder browser's one remaining job: picking a file from anywhere,
+//  which doOpenDocument() then copies into the library
+bool ScribbleApp::importDocument()
+{
+  if(!maybeSave())
+    return false;
+#if PLATFORM_IOS
+  iosPickDocument(iosOpenDocMode);  // asynchronous: the picked document arrives in dropEvent()
+  return true;
+#endif
+  std::string filename = execDocumentList(DocumentList::CHOOSE_DOC, PdfImport::isAvailable() ? "svgz svg html htm pdf" : NULL);
+  return !filename.empty() && doOpenDocument(filename);
+}
+
 bool ScribbleApp::openOrCreateDoc(bool cancelable)
+{
+  // TagDocList has no CHOOSE_DOC/SAVE_DOC modes, so DocumentList (or the iOS pickers) stays for insert
+  //  document and save as
+  if(libraryManaged())
+    return openOrCreateDocTagged(cancelable);
+  return openOrCreateDocClassic(cancelable);
+}
+
+// TagDocList counterpart of openOrCreateDocClassic(); it creates new documents itself (as DocumentList
+//  does), but offers no ruling choice, so NEW_DOC skips that step
+bool ScribbleApp::openOrCreateDocTagged(bool cancelable)
+{
+  backToDocList = true;
+  if(!cancelable && PLATFORM_MOBILE)
+    cfg->set("reopenLastDoc", false);
+  execTagDocList(false);
+  int res = tagDocList ? tagDocList->result : TagDocList::REJECTED;
+  std::string filename = tagDocList ? tagDocList->selectedFile : "";
+  if(res == TagDocList::OPEN_WHITEBOARD) {
+    if(!openSharedDoc())
+      return openOrCreateDocTagged(cancelable);  // try again
+  }
+  else if(res == TagDocList::EXISTING_DOC && !filename.empty()) {
+    return doOpenDocument(filename) || openOrCreateDocTagged(cancelable);
+  }
+  else if(res == TagDocList::NEW_DOC && !filename.empty()) {
+    if(!doOpenDocument(filename))
+      return openOrCreateDocTagged(cancelable);
+    if(FSPath(filename).extension() == "html")
+      activeDoc()->saveDocument((IOStream*)NULL, Document::SAVE_MULTIFILE);
+    askThemeForNewDoc();
+  }
+  else {  // canceled
+#if PLATFORM_ANDROID
+    cfg->set("reopenLastDoc", true);
+#endif
+    checkExtModified();  // handle case of current doc being deleted or renamed from the browser
+  }
+  return true;
+}
+
+bool ScribbleApp::openOrCreateDocClassic(bool cancelable)
 {
   backToDocList = true;
   // on Android, reopenLastDoc is not a user pref, but determined by whether user was viewing doc vs. doc list
@@ -1514,7 +1911,7 @@ bool ScribbleApp::openOrCreateDoc(bool cancelable)
   if(res == DocumentList::OPEN_HELP) {
     if(!openHelp()) {
       openURL("http://www.styluslabs.com/write/Help.html");
-      return openOrCreateDoc(cancelable);  // try again
+      return openOrCreateDocClassic(cancelable);  // try again
     }
   }
   else if(filename.empty()) {  // document list canceled
@@ -1526,15 +1923,15 @@ bool ScribbleApp::openOrCreateDoc(bool cancelable)
   else if(res == DocumentList::OPEN_WHITEBOARD) {
     //cfg->set("currFolder", filename.c_str());
     if(!openSharedDoc())
-      return openOrCreateDoc(cancelable);  // try again
+      return openOrCreateDocClassic(cancelable);  // try again
   }
   else if(res == DocumentList::EXISTING_DOC) {
     //if(scribbleDoc->fileName != documentList->selectedFile || getFileMTime(currFileName.c_str()) != currFileLastMod)
-    return doOpenDocument(filename) || openOrCreateDoc(cancelable);
+    return doOpenDocument(filename) || openOrCreateDocClassic(cancelable);
   }
   else if(res == DocumentList::OPEN_COPY) {
     if(!doOpenDocument(documentList->selectedSrcFile))
-      return openOrCreateDoc(cancelable);  //false;
+      return openOrCreateDocClassic(cancelable);  //false;
     if(!activeDoc()->saveDocument(filename.c_str(), Document::SAVE_FORCE)) {
       // this should never happen since doc list creates the file first
       doNewDocument();
@@ -1545,12 +1942,13 @@ bool ScribbleApp::openOrCreateDoc(bool cancelable)
   }
   else if(res == DocumentList::NEW_DOC) {
     if(!doOpenDocument(filename))
-      return openOrCreateDoc(cancelable);  //false;
+      return openOrCreateDocClassic(cancelable);  //false;
     int ruleidx = documentList->selectedRuling;
     if(ruleidx > 0 && ruleidx < 8) {
       PageProperties props(0, 0, RulingDialog::predefRulings[ruleidx][0],
           RulingDialog::predefRulings[ruleidx][1], RulingDialog::predefRulings[ruleidx][2],
-          Color::fromRgb(cfg->Int("pageColor")), RulingDialog::predefRulings[ruleidx][3]);
+          Color::fromRgb(cfg->Int("pageColor")), Color::fromArgb(cfg->Int("ruleColor")),
+          RulingDialog::predefDotRadii[ruleidx]);
       activeDoc()->setPageProperties(&props, true, true, false, false);
     }
     // force multi-file for .html extension, since new file will default to single file because _page001.svg
@@ -1698,6 +2096,8 @@ bool ScribbleApp::openDocument(std::string filename)
 {
   if(documentList && documentList->isVisible())
     documentList->finish(DocumentList::REJECTED);
+  if(tagDocList && tagDocList->isVisible())
+    tagDocList->finish(TagDocList::REJECTED);
   backToDocList = false;
   // don't save clean doc - on Android, I think doc will always be clean when we're called
   return maybeSave() && doOpenDocument(filename);  //!activeDoc()->isModified() ||
@@ -1709,7 +2109,8 @@ bool ScribbleApp::openDocument()
 #if PLATFORM_ANDROID
   cfg->set("reopenLastDoc", false);
 #endif
-  return maybeSave() && openOrCreateDoc(!PLATFORM_IOS);  // cancelable except on iOS
+  // cancelable, except for the iOS system browser, which has no way back to the document
+  return maybeSave() && openOrCreateDoc(!PLATFORM_IOS || libraryManaged());
 }
 
 bool ScribbleApp::doOpenDocument(std::string filename)
@@ -1728,12 +2129,24 @@ bool ScribbleApp::doOpenDocument(std::string filename)
     size_t chopat = filename.rfind("_page");
     if(chopat != std::string::npos) {
       std::string htmlfile = filename.substr(0, chopat) + ".html";  // + fileExt;
-      auto choice = messageBox(Question, _("Write"),
+      auto choice = messageBox(Question, _("Kaku"),
           _("You are attempting to open a single page SVG file. Would you like to try opening the entire document instead?"),
           {_("Yes"), _("No")});
       if(choice == _("Yes"))
         filename = htmlfile;
     }
+  }
+  // Opened from outside the library (drag and drop, an Android intent, Import Document...): read the
+  //  original, never write it, and continue in a copy saved into the library.  This also makes a
+  //  read-only original a non-issue, so the Save As prompt below is never reached for one.
+  if(libraryManaged() && !isInLibrary(filename)) {
+    FileStream* srcStrm = new FileStream(filename.c_str(), "rb");
+    if(!doOpenDocument(srcStrm))
+      return false;
+    if(importActiveDocToLibrary(filename))
+      return true;
+    srcStrm->filename.clear();  // import failed: still never save back over the original
+    return false;
   }
   FileStream* strm = new FileStream(filename.c_str(), "rb+");
   if(strm->is_open())
@@ -2133,14 +2546,21 @@ bool ScribbleApp::doImportPdf(const std::string& pdfPath)
 std::string ScribbleApp::importPdfToDocFile(const std::string& pdfPath, std::string* errorOut)
 {
   if(!PdfImport::isAvailable()) {
-    if(errorOut) *errorOut = _("This build of Write does not include PDF support.");
+    if(errorOut) *errorOut = _("This build of Kaku does not include PDF support.");
     return std::string();
   }
   FSPath pdfinfo(pdfPath);
+  // into the library; a command line conversion (--out) only needs a scratch copy, and without a library
+  //  the document goes next to the PDF as it always did
+  FSPath outDir = pdfinfo.parent();
+  if(!outDoc.empty()) {
+    outDir = FSPath(tempPath);
+    createPath(outDir);
+  }
+  else if(libraryManaged())
+    outDir = FSPath(libraryRoot);
   // don't overwrite an existing document
-  FSPath outinfo = pdfinfo.parent().child(pdfinfo.baseName() + ".svgz");
-  for(int ii = 2; outinfo.exists(); ++ii)
-    outinfo = pdfinfo.parent().child(fstring("%s (%d).svgz", pdfinfo.baseName().c_str(), ii));
+  FSPath outinfo = DocLibrary::uniquePath(outDir, pdfinfo.baseName(), "svgz");
 
   // rendering is synchronous and can take a while for a long PDF; level 0 = notification stays up
   showNotify(fstring(_("Importing %s..."), pdfinfo.fileName().c_str()), 0);
@@ -2380,13 +2800,23 @@ void ScribbleApp::showThemePicker()
 void ScribbleApp::openPreferences()
 {
   if(disableConfigSave)
-    messageBox(Warning, _("Write"), _("Preferences will not be saved because some were set from command line."));
+    messageBox(Warning, _("Kaku"), _("Preferences will not be saved because some were set from command line."));
   //showSelToolbar(Point(NaN, NaN)); -- no longer possible to open prefs w/o sel toolbar being closed
   //ConfigDialog dialog(cfg);
   //int res = execDialog(&dialog);  // blocking
-  asyncDialog(new ConfigDialog(cfg), [this](int res) {
-    if(res == Dialog::ACCEPTED)
+  std::string prevLibraryPath = cfg->String("libraryPath");
+  asyncDialog(new ConfigDialog(cfg), [this, prevLibraryPath](int res) {
+    if(res == Dialog::ACCEPTED) {
       reloadConfig();  // note we still save config file if res == 0 (rejected)
+      activeDoc()->updateGhostPage();  // the default page size may have changed
+      // a new library location moves the documents there; on refusal or failure the old one stands
+      std::string newLibraryPath = StringRef(cfg->String("libraryPath")).trimmed().toString();
+      if(libraryManaged() && newLibraryPath != prevLibraryPath) {
+        cfg->set("libraryPath", prevLibraryPath.c_str());
+        if(!newLibraryPath.empty())
+          relocateLibrary(newLibraryPath);
+      }
+    }
     else if(res == -1)
       return;
     writeConfigFile();

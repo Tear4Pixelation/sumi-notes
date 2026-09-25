@@ -134,6 +134,8 @@ void ScribbleConfig::init()
   cfg["autoSaveInterval"] = 0; //120;
   // Use custom document list dialog to open and create documents
   cfg["useDocList"] = 1;
+  // open and create documents from the tag browser (TagDocList) rather than the folder list (DocumentList)
+  cfg["useTagDocList"] = 1;
   // doc list icon (thumbnail) size
   cfg["thumbnailSize"] = 140;
   // doc list sort order; 0 = name; 1 = last modified time
@@ -144,6 +146,8 @@ void ScribbleConfig::init()
   cfg["showThumbnail"] = 1;
   // resolution (DPI) at which PDF pages are rasterized on import; higher = sharper but much bigger
   cfg["pdfImportDPI"] = 300;
+  cfg["libraryMigrated"] = 0;  // the one-time offer to copy old documents into the library was made
+  cfg["pageSizeAsked"] = 0;  // the one-time question whether new pages are A4 or Letter was asked
   // encode imported PDF pages as JPEG instead of PNG - much smaller for scans, blurrier for text
   cfg["pdfImportLossy"] = 0;
 
@@ -282,8 +286,8 @@ void ScribbleConfig::init()
   cfgS["windowState"] = "";
   cfgS["recentDocs"] = "";
   cfgS["currFolder"] = "";
+  cfgS["libraryPath"] = "";  // "" until the first run acquires one (ScribbleApp::initLibrary)
   cfgS["toolModes"] = "";
-  cfgS["clippingDoc"] = "";
   // rulings most recently used to add a page, shown as previews in the add page menu
   cfgS["recentPageRulings"] = "";
   // for pen toobar
@@ -331,10 +335,15 @@ void ScribbleConfig::init()
   // document specific config
   cfg["docFormatVersion"] = Document::docFormatVersion;
   cfg["pageNum"] = 0;
+  cfg["currentLayer"] = LayerList::DEFAULT_LAYER;
   cfgF["xOffset"] = -10.0f;
   cfgF["yOffset"] = -10.0f;
   cfgS["docTitle"] = "";
   cfgS["docTags"] = "";
+  // Comma-separated tag ids (TagStore ids, not display names) this document carries in the
+  // sidebar's tag system - unrelated to the legacy single-string "docTags" above, which only
+  // ever held one folder-derived name for the old folder->tag migration tool.
+  cfgS["tags"] = "";
   //cfgS["backupFilename"] = "";
 
   // sync

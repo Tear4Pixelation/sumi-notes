@@ -17,6 +17,7 @@ extern int iosSafeAreaInsets(float* top, float* bottom);
 
 //extern void freeSecuredURL(void* data);
 extern void initDocumentBrowser(const char* bkmkBase64);
+extern void initLibraryMode(void);
 extern void showDocumentBrowser(void);
 extern void iosCloseDocument(void* _doc);
 extern void iosSaveDocument(void* _doc, void* data, int len);

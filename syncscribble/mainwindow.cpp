@@ -1876,6 +1876,7 @@ void MainWindow::setupActions()
   overflowPopup->addSubmenu(_("Selection"), selectionmenu);
   overflowPopup->addAction(actionPage_Setup);
   overflowPopup->addAction(actionTheme);
+  overflowPopup->addAction(actionTagDocList);
   overflowPopup->addAction(actionInsert_Image);  // move to Document menu?
   overflowPopup->addAction(actionScan_Element);
   overflowPopup->addAction(actionPreferences);
@@ -1903,11 +1904,12 @@ void MainWindow::setupActions()
 
   // undoRedoBtn and docTitle ... how to set priority for these?
   // - maybe create a subclass of Action that is tied to a single button?
-  titleButton = createToolbutton(appIcon, "Write", true);
+  titleButton = createToolbutton(appIcon, "Kaku", true);
   titleButton->onClicked = SLOT(openDocument());
   menuRecent_Files = createMenu("menuRecent", "Recent Documents", tbMenuAlign, false);  //Menu::VERT_RIGHT
-  // iOS doc browser has recents already (and we'd need to save secured bookmarks to open recents ourselves)
-#if !PLATFORM_IOS
+  // The iOS system browser has recents already (and we'd need to save secured bookmarks to open recents
+  //  ourselves); library documents are plain files, so with the tag browser recents work there too
+  if(!PLATFORM_IOS || ScribbleApp::cfg->Bool("useTagDocList")) {
   titleButton->addWidget(menuRecent_Files);
   titleButton->addHandler([this](SvgGui* gui, SDL_Event* event){
     if(isLongPressOrRightClick(event)) {
@@ -1920,9 +1922,9 @@ void MainWindow::setupActions()
     return false;
   });
   setupTooltip(titleButton, altTooltip(_("Documents"), _("Recent Documents")));
-#else
-  setupTooltip(titleButton, "Open Document");
-#endif
+  }
+  else
+    setupTooltip(titleButton, "Open Document");
 
   // "History", not "Undo": tapping it still undoes, but the panel behind it is a history scrubber and a
   //  selector, and the undo arrow promised only the first of those.  Plain undo is still reachable by the

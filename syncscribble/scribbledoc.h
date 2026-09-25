@@ -123,6 +123,10 @@ public:
 
   static bool deleteDocument(const char* filename);
   static Image extractThumbnail(const char* filename);
+  // Cheap partial read for the sidebar's tag view, same technique as extractThumbnail: scan the head
+  // of the file (or first gzip block) for the "tags" string config entry rather than fully parsing
+  // the document, so listing a folder of documents doesn't mean loading each one.
+  static std::vector<std::string> extractDocTags(const char* filename);
   Document::loadresult_t insertDocument(IOStream* strm);
   const char* fileName() const { return document->fileName(); }
 
