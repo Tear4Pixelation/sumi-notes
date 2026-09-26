@@ -653,9 +653,14 @@ void Sidebar::buildLayerRows()
       lockBtn->node->addClass("sb-lock-off");
     int layerId = info.id;
     bool locked = info.locked;
+    // Deferred like the drop in rowdrag.cpp: locking can let go of the selection, and the refreshUI
+    //  that follows rebuilds this list - deleting the button whose handler is still running.
     lockBtn->onClicked = [this, layerId, locked](){
-      scribbleDoc->setLayerLocked(layerId, !locked);
-      rebuildList();
+      gui()->setTimer(1, this, [this, layerId, locked](){
+        scribbleDoc->setLayerLocked(layerId, !locked);
+        rebuildList();
+        return 0;
+      });
     };
     content->addWidget(lockBtn);
 
@@ -663,9 +668,13 @@ void Sidebar::buildLayerRows()
       row->node->addClass("checked");
     // a locked layer is still picked here: the lock guards it from edits made on other layers, and
     //  making it current is how it is edited (LayerList::isEditable)
+    // deferred for the same reason: leaving a locked layer clears the selection
     static_cast<Button*>(row)->onClicked = [this, layerId](){
-      scribbleDoc->setCurrentLayer(layerId);
-      rebuildList();
+      gui()->setTimer(1, this, [this, layerId](){
+        scribbleDoc->setCurrentLayer(layerId);
+        rebuildList();
+        return 0;
+      });
     };
     SvgGui::setupRightClick(row, [this, layerId, row](SvgGui*, Widget*, Point){
       menuLayer = layerId;
