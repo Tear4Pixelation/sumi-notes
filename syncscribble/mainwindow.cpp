@@ -595,6 +595,46 @@ static real regionSpacingToSlider(Dim spacing)
   return std::log(spacing/regionMinSpacing)/std::log(regionMaxSpacing/regionMinSpacing);
 }
 
+// The selection popup's layer list, rebuilt each time the popup opens (never while it is open, since its
+//  items close it).  Top layer first, as the sidebar lists them; the layer already holding the whole
+//  selection is ticked and disabled, and a locked layer shows its lock - moving there is allowed (it is
+//  how a locked layer is filled), but the ink is then out of reach and the selection is let go.
+void MainWindow::refreshSelPopup()
+{
+  ScribbleArea* area = app->activeArea();
+  ScribbleDoc* doc = app->activeDoc();
+  const Selection* sel = area ? area->selection() : NULL;
+  if(!doc || !moveLayerPopup)
+    return;
+  window()->gui()->deleteContents(moveLayerPopup->selectFirst(".child-container"));
+  const LayerList& layerList = doc->layers();
+  moveLayerBtn->setEnabled(layerList.size() > 1 && sel && !sel->strokes.empty());
+  int selLayer = -1;  // the one layer every selected element is on, if there is one
+  if(sel) {
+    for(Element* element : sel->strokes) {
+      if(selLayer == -1)
+        selLayer = element->layer();
+      else if(selLayer != element->layer()) {
+        selLayer = -1;
+        break;
+      }
+    }
+  }
+  for(int idx = layerList.size() - 1; idx >= 0; --idx) {
+    const LayerInfo& info = layerList.layers[idx];
+    int layerId = info.id;
+    Button* item = moveLayerPopup->addItem(info.name.empty() ? _("Layer") : info.name.c_str(),
+        info.locked ? SvgGui::useFile(":/icons/ic_menu_lock.svg") : NULL, [this, layerId](){
+      if(ScribbleDoc* target = app->activeDoc())
+        target->moveSelToLayer(layerId);
+    });
+    if(layerId == selLayer) {
+      item->setChecked(true);
+      item->setEnabled(false);
+    }
+  }
+}
+
 void MainWindow::buildRegionPanel()
 {
   regionPanel = new RegionPanel(loadSVGFragment(
@@ -1229,9 +1269,25 @@ void MainWindow::setupUI(ScribbleApp* a)
   selToolbar->addAction(actionDupSel);
   selToolbar->addAction(actionDelete_Selection);
   selToolbar->addAction(actionCreate_Link);
+  // Move to Layer: a labeled dropdown listing the layers, filled in by refreshSelPopup() on each open.
+  //  Added with addWidget rather than Menubar::addButton, whose release handler closes the menu tree -
+  //  which would take the layer list down with it the moment it opened.
+  moveLayerBtn = createToolbutton(SvgGui::useFile(":/icons/ic_menu_pagesel.svg"), _("Move to Layer"), true);
+  moveLayerBtn->node->addClass("float-wide-btn");  // sized by its label
+  moveLayerPopup = createArrowPopup(Menu::VERT_LEFT);
+  setupPopupMenu(moveLayerBtn, moveLayerPopup);
+  setupTooltip(moveLayerBtn, _("Move the selection to another layer"));
+  selToolbar->addWidget(moveLayerBtn);
+  // rounded like the floating toolbar panels, with their button sizes
+  SvgRect* selBg = static_cast<SvgRect*>(selToolbar->selectFirst(".toolbar-bg")->node);
+  selBg->setRect(selBg->getRect(), floatCorner, floatCorner);
+  selToolbar->selectFirst(".child-container")->setMargins(0, floatPad, 0, floatPad);
+  scaleFloatPanel(selToolbar, floatIconSize);
   //selPopup = ::createMenu(Menu::VERT_RIGHT, false); -- requires event->user.data2 = 0 hack for OUTSIDE_MODAL
+  // keeps the menu class, which closeMenus() walks up by; .sel-popup swaps the menu's all-round shadow
+  //  for a rounded one cast downwards (theme.cpp)
   selPopup = new AbsPosWidget(loadSVGFragment(
-       "<g class='menu' position='absolute' box-anchor='fill' layout='box'></g>"));
+       "<g class='menu sel-popup' position='absolute' box-anchor='fill' layout='box'></g>"));
   selPopup->addWidget(selToolbar);
   selPopup->setVisible(false);
 

@@ -87,6 +87,7 @@ public:
   int strokeCounter = 0;
   void updateUIState(UIState* state);
   bool hasSelection() const { return currSelection != NULL; }
+  const Selection* selection() const { return currSelection; }
   void setStrokeProperties(const StrokeProperties& props, bool undoable = true);
   ScribblePen getPenForSelection() const;
   // accept external selection

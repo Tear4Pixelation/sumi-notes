@@ -242,11 +242,13 @@ bool ScribbleDoc::moveLayer(int fromIdx, int toIdx)
   return editLayer(layer->id, [&](LayerList& layers) { return layers.moveLayer(fromIdx, toIdx); });
 }
 
+// The target may be locked (or hidden): a lock guards a layer against edits made from other layers,
+//  and filing ink onto it is exactly how a locked layer is meant to be filled.  What was moved is then
+//  out of reach, so the selection is let go, as it is when the layer holding it is locked.
 int ScribbleDoc::moveSelToLayer(int id)
 {
   Selection* sel = activeArea ? activeArea->currSelection : NULL;
-  if(!sel || sel->strokes.empty() || !document->layers.find(id)
-      || !document->layers.isEditable(id))
+  if(!sel || sel->strokes.empty() || !document->layers.find(id))
     return 0;
   // copy the list: each move restacks the element, and StrokeLayerItem works off the page's node
   //  order, which the selection's own list does not track
@@ -262,6 +264,8 @@ int ScribbleDoc::moveSelToLayer(int id)
     ++nmoved;
   }
   endAction();
+  if(!document->layers.isEditable(id))
+    clearSelection();
   if(nmoved)
     doRefresh();
   return nmoved;

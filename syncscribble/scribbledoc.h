@@ -105,7 +105,8 @@ public:
   bool setLayerLocked(int id, bool locked);
   bool setLayerHidden(int id, bool hidden);
   bool moveLayer(int fromIdx, int toIdx);
-  // move the current selection to a layer, as one undo action; returns the number of elements moved
+  // move the current selection to a layer, as one undo action; returns the number of elements moved.
+  //  The layer may be locked or hidden; the selection is cleared if the ink is out of reach after.
   int moveSelToLayer(int id);
   // number of elements on a layer across all *loaded* pages
   int layerElementCount(int id) const;

@@ -161,6 +161,10 @@ public:
   Button* iapButton = NULL;  // iOS IAP
   Widget* toolBarStretch;
   Widget* selPopup;
+  // "Move to Layer" on the selection popup, and its list of layers, rebuilt each time the popup opens
+  Button* moveLayerBtn = NULL;
+  ArrowPopup* moveLayerPopup = NULL;
+  void refreshSelPopup();
   AutoAdjContainer* penToolbarAutoAdj;
   Widget* eraseOptsRow;
   Widget* selectOptsRow;

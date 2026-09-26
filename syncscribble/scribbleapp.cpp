@@ -1522,6 +1522,7 @@ void ScribbleApp::showSelToolbar(Point pos)
 {
   // sel toolbar only opened on pen up, so don't make pressed (because outside_pressed event will invoke 2nd
   //  call to ScribbleArea::doReleaseEvent)
+  win->refreshSelPopup();
   gui->showContextMenu(win->selPopup, pos, NULL, false);   //if(!pos.isNaN())
 }
 

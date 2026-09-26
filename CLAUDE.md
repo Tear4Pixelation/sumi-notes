@@ -149,6 +149,38 @@ and sync entirely out of the import path. `.pdf` paths are routed to the importe
 Note the import temporarily forces `SvgWriter::DEFAULT_SAVE_IMAGE_SCALED = 0`, otherwise
 `savePicScaled` resamples the pages back down to 150 DPI and discards the chosen `pdfImportDPI`.
 
+## Noteful import (backend only, no UI yet)
+
+Noteful's `.noteful` export is an undocumented binary format, reverse engineered from sample exports;
+`tools/noteful-dump.py` is the reference decoder and its header is the format description (container +
+index, tagged big-endian records with per-field sync timestamps, collections with alive flags, the
+stroke blob). `syncscribble/notefulfile.*` is the C++ reader - no app dependencies, C++14, no
+exceptions, bounds-checked; tested standalone by `scribbletest/notefultest.cpp` against a notebook it
+synthesizes itself (no personal file is checked in), mutation-checked. `notefulimport.*` builds a
+`Document` like `PdfImport` does; `ScribbleTest::notefulImportTest()` covers it, and
+`NOTEFUL_CONVERT=in.noteful NOTEFUL_OUT=out.svgz ./Debug/Kaku --test` converts a real notebook.
+
+- **Units:** Noteful pages are pixels at 132 dpi (A4 = 1091.34 wide); Kaku's 150/inch gives a 150/132
+  scale. Paper templates give line spacing in *points* (`lh:20` is 20 pt = 36.7 Noteful units) - read
+  as units, the grid came out almost half size. Rule color `#9a9888`, from the templates' own PDFs.
+- **Strokes with at most 4 points are raw f32 pairs**; longer ones are a box plus u16 pairs normalized to
+  it. At exactly 4 both layouts are 32 bytes, so nothing breaks visibly: reading them as a box turned
+  i-dots into long vertical lines. The u32 at offset 36 of a stroke header is its layer id.
+- Paper templates become Kaku ruling (editable paper); imported PDF pages, photos and covers become a
+  rule-layer image, as in PDF import - rendered from memory by `PdfImport::renderPage(data, ...)`,
+  JPEG by default (PNG made the 13 MB sample 81 MB). Ink below a page's edge (Noteful keeps it) makes
+  the page taller.
+- Tags are returned, not applied - they belong to the library's `TagStore`. Noteful keeps them per page
+  and as `#tags` in text boxes. Text boxes are not imported (counted in `Result::textBoxesSkipped`); a
+  second outline entry on one page is dropped with a warning.
+- The layer table is written into the document config node, so a directly saved `Document` keeps it.
+- `pdfimport.cpp`'s catch blocks now call `fz_ignore_error()`: this MuPDF prints "UNHANDLED EXCEPTION!"
+  at `fz_drop_context` for any caught error not cleared that way.
+
+Unknown: layer hidden/locked flags (only seen as 0), the per-segment f32 arrays on flag-2 strokes
+(pressure?), text-box font sizes, shape rotation, non-A4 pages, and whether any template besides Grid,
+Ruled and covers exists.
+
 ## Document library
 
 The tag document browser owns **one directory, the library**, and every document opened from anywhere
@@ -1179,8 +1211,16 @@ layer and drop the rest on save. The attribute has no such failure mode.
   elements on the layer being removed and they must be reassigned undoably rather than orphaned.
 
 Known gaps: hiding a layer in a large delay-loaded document only
-affects loaded pages until the rest are loaded; and `setLayerHidden`, `moveLayer` and
-`moveSelToLayer` have no UI yet (see the sidebar's own gaps below).
+affects loaded pages until the rest are loaded; and `setLayerHidden` and `moveLayer` have no UI yet
+(see the sidebar's own gaps below).
+
+**Move to Layer** is a labeled dropdown on the selection popup (`MainWindow::refreshSelPopup()`, rebuilt
+on every open, never while open). The target may be locked or hidden - filing ink onto a locked layer is
+how it is filled - and `moveSelToLayer()` then lets go of the selection. The button is added with
+`addWidget`, not `Menubar::addButton`, whose release handler closes the menu tree and would take the
+layer list down with it. The popup is rounded like the floating panels, and `.menu.sel-popup` swaps the
+menu's all-round shadow for one cast downwards: ugui's `box-shadow` takes offset, blur and (negative)
+spread, and `border-radius` rounds it.
 
 ## The general-purpose sidebar
 
@@ -1270,6 +1310,9 @@ the summary. `syncscribble/sidebar.cpp`.
   contents after opening another, ignored undo and peers' edits, and came up empty when open at
   startup: `MainWindow`'s constructor opens it before there is an `SvgGui` to build rows through.
 
+- **A layer row's click and its lock toggle run on a 1 ms timer.** Either can let go of the selection,
+  whose `refreshUI` rebuilds this list synchronously - deleting the button still dispatching (ASan:
+  use-after-free in the lock lambda when locking with a selection).
 - **Right click / long press on a row** opens an ArrowPopup reparented onto that row (the tag browser's
   pattern, and its trap: `rebuildList()` detaches both popups before deleting rows, because their own
   items rebuild the list mid-click). Outline: Rename, Move to Top Level, Delete (removes the entry,
