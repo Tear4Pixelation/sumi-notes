@@ -606,6 +606,13 @@ void MainWindow::refreshSelPopup()
   const Selection* sel = area ? area->selection() : NULL;
   if(!doc || !moveLayerPopup)
     return;
+  // a selection gesture that caught nothing leaves only its area, and the only thing to do with that is
+  //  capture it
+  bool hasInk = sel && !sel->strokes.empty();
+  for(Button* btn : selInkButtons)
+    btn->setVisible(hasInk);
+  moveLayerBtn->setVisible(hasInk);
+  actionScreenshot->setEnabled(area && (area->hasShotRegion() || hasInk));
   window()->gui()->deleteContents(moveLayerPopup->selectFirst(".child-container"));
   const LayerList& layerList = doc->layers();
   moveLayerBtn->setEnabled(layerList.size() > 1 && sel && !sel->strokes.empty());
@@ -1264,11 +1271,12 @@ void MainWindow::setupUI(ScribbleApp* a)
 
   // popup selection toolbar
   Menubar* selToolbar = createMenubar();  // Menubar used instead of Toolbar so that popup closes after use
-  selToolbar->addAction(actionCut); // TouchBar::HideText is default
-  selToolbar->addAction(actionCopy);
-  selToolbar->addAction(actionDupSel);
-  selToolbar->addAction(actionDelete_Selection);
-  selToolbar->addAction(actionCreate_Link);
+  selInkButtons.push_back(selToolbar->addAction(actionCut)); // TouchBar::HideText is default
+  selInkButtons.push_back(selToolbar->addAction(actionCopy));
+  selInkButtons.push_back(selToolbar->addAction(actionDupSel));
+  selInkButtons.push_back(selToolbar->addAction(actionDelete_Selection));
+  selInkButtons.push_back(selToolbar->addAction(actionCreate_Link));
+  selToolbar->addAction(actionScreenshot);
   // Move to Layer: a labeled dropdown listing the layers, filled in by refreshSelPopup() on each open.
   //  Added with addWidget rather than Menubar::addButton, whose release handler closes the menu tree -
   //  which would take the layer list down with it the moment it opened.
@@ -1291,9 +1299,16 @@ void MainWindow::setupUI(ScribbleApp* a)
   selPopup->addWidget(selToolbar);
   selPopup->setVisible(false);
 
-  selPopup->addHandler([](SvgGui* gui, SDL_Event* event){
+  // an area marked with nothing selected lives only as long as its popup
+  auto dropLoneRegion = [this](){
+    ScribbleArea* area = app->activeArea();
+    if(area && !area->selection())
+      area->clearShotRegion();
+  };
+  selPopup->addHandler([this, dropLoneRegion](SvgGui* gui, SDL_Event* event){
     if(event->type == SvgGui::OUTSIDE_PRESSED) {
       gui->closeMenus();
+      dropLoneRegion();
       return true;
     }
     if(event->type == SvgGui::OUTSIDE_MODAL) {
@@ -1303,6 +1318,7 @@ void MainWindow::setupUI(ScribbleApp* a)
     // don't let repeat key events close popup (happens with Ctrl key held down for sel mode on Windows)
     if(event->type == SDL_KEYDOWN && !event->key.repeat) {
       gui->closeMenus();
+      dropLoneRegion();
       if(event->key.keysym.sym == SDLK_ESCAPE)  // only swallow Esc key
         return true;
     }
@@ -1983,6 +1999,8 @@ void MainWindow::setupActions()
   actionDelete_Selection = createAction("actionDelete_Selection",
        "Delete", ":/icons/ic_menu_discard.svg", "Delete", SLOT(doCommand(ID_DELSEL)));
   actionCreate_Link = createAction("actionCreate_Link", "Create Link...", ":/icons/ic_menu_link.svg", "Ctrl+L", SLOT(createLink()));
+  actionScreenshot = createAction("actionScreenshot", "Screenshot", ":/icons/ic_menu_screenshot.svg", "",
+      [this](){ if(app->activeArea()) app->activeArea()->screenshotSelection(); });
   // icon: something like https://www.brandeps.com/icon/U/Ungroup-01 but with a solid instead of dashed line
   actionUngroup = createAction("actionUngroup", "Ungroup", "", "", SLOT(doCommand(ID_UNGROUP)));
 

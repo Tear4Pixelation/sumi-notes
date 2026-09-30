@@ -161,6 +161,7 @@ public:
   RectSelector(Selection* _sel, Dim zoom = 1, bool handles = true)
       : Selector(_sel), mZoom(zoom) { drawHandles = handles;  }
   void selectRect(Dim x0, Dim y0, Dim x1, Dim y1);
+  Rect rect() const { return selRect; }
   bool selectHit(Element* s) override;
   void shrink() override;
   Rect getBGBBox() override;
@@ -321,6 +322,7 @@ public:
   Rect getBGBBox() override;
   void drawBG(Painter* painter) override;
 
+  const Path2D& path() const { return lasso; }
 private:
   Path2D lasso;
   Rect lassoBBox;

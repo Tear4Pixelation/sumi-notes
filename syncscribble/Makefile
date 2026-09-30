@@ -24,6 +24,7 @@ SOURCES = \
   scribblemode.cpp \
   scribbleinput.cpp \
   scribbleview.cpp \
+  screenshot.cpp \
   bookmarkview.cpp \
   scribblearea.cpp \
   scribbledoc.cpp \

@@ -61,6 +61,13 @@ public:
       Element* bkmktarget = NULL, const char* idstr = NULL, bool forcenormal = false);
   void insertImage(Image image); //, bool lossy = false);
 
+  // Screenshot (docs/agent/screenshot.md): the area the last selection gesture covered stays marked,
+  //  dashed, until the selection is cleared - even when the gesture caught no ink
+  bool hasShotRegion() const { return !shotRegion.empty(); }
+  void clearShotRegion();
+  void screenshotSelection();
+  void captureScreenshot();
+  void dirtyShotRegion();
   // some of these need to be made private
   DocPosition getPos() const;
   void doGotoPos(int pagenum, Point pos, bool exact = true);
@@ -239,6 +246,10 @@ protected:
   // selection for stroke fragments produced by free eraser
   Selection* freeErasePieces = NULL;
   int currSelPageNum = 0;
+  // lasso or rectangle of the last selection gesture, in page coordinates of shotRegionPage
+  Path2D shotRegion;
+  int shotRegionPage = -1;
+  float shotRegionDashes[3];
   Rect selBGRect;
 
   PathSelector* pathSelector = NULL;

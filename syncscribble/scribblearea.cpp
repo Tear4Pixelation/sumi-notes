@@ -3,6 +3,7 @@
 #include "usvg/svgpainter.h"
 #include "scribbledoc.h"
 #include "scribbleapp.h"
+#include "screenshot.h"
 #include "scribblewidget.h"
 #include "strokebuilder.h"
 #include "bookmarkview.h"
@@ -479,8 +480,30 @@ void ScribbleArea::invalidatePage(Page* p)
     recentStrokes.clear();
 }
 
+void ScribbleArea::clearShotRegion()
+{
+  if(shotRegion.empty())
+    return;
+  dirtyShotRegion();
+  shotRegion.clear();
+  shotRegionPage = -1;
+  doRefresh();
+}
+
+// the outline is an overlay (drawScreen), so it is the screen that needs repainting, not the page
+void ScribbleArea::dirtyShotRegion()
+{
+  if(shotRegion.empty() || shotRegionPage < 0 || shotRegionPage >= numPages())
+    return;
+  if(shotRegionPage == currPageNum)
+    dirtyScreen(shotRegion.getBBox().pad(4/mZoom));
+  else
+    scribbleDoc->dirtyPage(shotRegionPage);
+}
+
 bool ScribbleArea::clearSelection()
 {
+  clearShotRegion();
   if(!currSelection) {
     scribbleDoc->clearSelection();
     return false;
@@ -1946,6 +1969,64 @@ void ScribbleArea::insertImage(Image image)
   doRefresh();
 }
 
+// page units around ink captured without a drawn outline: ~4 mm, enough that the capture does not look
+//  cut off at the strokes
+static constexpr Dim SCREENSHOT_INK_PADDING = 25;
+
+// Captures the bounding box of the selection gesture (or, for a ruled selection, of the selected ink) in
+//  the document's own colors, offers a crop, then copies it or adds it to the current page as an image.
+void ScribbleArea::screenshotSelection()
+{
+  captureScreenshot();
+  // an area marked with nothing selected existed only to be captured; its popup is gone now too
+  if(!currSelection)
+    clearShotRegion();
+}
+
+void ScribbleArea::captureScreenshot()
+{
+  int pagenum = !shotRegion.empty() ? shotRegionPage : currSelection ? currSelPageNum : -1;
+  // A ruled or path selection has no outline of its own, only the ink it caught, whose bbox runs right up
+  //  to the strokes; the padding gives the capture a margin.  A drawn outline is taken as the user drew it.
+  Rect region = !shotRegion.empty() ? shotRegion.getBBox()
+      : currSelection ? currSelection->getBBox().pad(SCREENSHOT_INK_PADDING) : Rect();
+  Page* srcPage = pagenum >= 0 && pagenum < numPages() ? page(pagenum) : NULL;
+  if(!srcPage || !region.isValid())
+    return;
+  region = region.rectIntersect(srcPage->rect());
+  if(!region.isValid() || region.width() < 1 || region.height() < 1)
+    return;
+  Dim scale = screenshotScale(region);
+  ScreenshotDialog dialog([srcPage, region, scale](int layers){
+    return renderPageRegion(srcPage, region, scale, layers);
+  });
+  if(Application::execDialog(&dialog) != Dialog::ACCEPTED)
+    return;
+  Rect crop = dialog.cropRect();
+  Image shot = dialog.takeCropped();
+  if(shot.width <= 0 || shot.height <= 0)
+    return;
+  // at its real size: the crop in page units, where it was on the source page
+  Rect bbox = Rect::ltwh(region.left + crop.left/scale, region.top + crop.top/scale,
+      crop.width()/scale, crop.height()/scale);
+  if(dialog.choice == ScreenshotDialog::CHOICE_COPY) {
+    Clipboard* clip = new Clipboard;
+    clip->addStroke(new Element(new SvgImage(std::move(shot), bbox)));
+    app->setClipboard(clip, srcPage, 0);
+    app->refreshUI(scribbleDoc, UIState::ClipboardChange);  // enables Paste, which may have had nothing to paste
+    return;
+  }
+  // Add to page: dropped at the middle of the view, selected, so it can be dragged where it belongs
+  clearSelection();
+  doCancelAction();
+  Clipboard clip;
+  Point center = screenToDim(screenRect.center());
+  clip.addStroke(new Element(new SvgImage(std::move(shot), Rect::centerwh(center, bbox.width(), bbox.height()))));
+  doPasteAt(&clip, center, PasteFlags(PasteOrigPos | PasteMoveClipboard | PasteUndoable));
+  uiChanged(UIState::Paste);
+  doRefresh();
+}
+
 void ScribbleArea::freeErase(Point prevpos, Point pos)
 {
   // for now, let's fix the eraser size in screen space so that user can zoom to adjust how much is erased
@@ -2189,6 +2270,9 @@ int ScribbleArea::selectionHit(Point pos, bool touch)
 // For handling touch events, see the touch/fingerpaint example
 void ScribbleArea::doPressEvent(const InputEvent& event)
 {
+  // an area marked with nothing selected is only there for its popup; any press on the canvas moves on
+  if(!currSelection)
+    clearShotRegion();
   int modemod = event.modemod;
   Point rawpos = Point(event.points[0].x, event.points[0].y);
   Point gpos = screenToDim(rawpos);
@@ -2971,6 +3055,8 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
   if(undoable)
     scribbleDoc->startAction(currPageNum);
 
+  // what the selection gesture covered, kept for Screenshot once the selectors are gone
+  Path2D gestureRegion;
   switch(currMode) {
   case MODE_PAN:
     panZoomFinish(event);
@@ -3160,6 +3246,7 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
     tempSelection->deleteStrokes();
     break;
   case MODE_SELECTRECT:
+    gestureRegion.addRect(rectSelector->rect());
     rectSelector->drawHandles = true;
     useShapeSelector();
     break;
@@ -3174,6 +3261,7 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
     }
     break;
   case MODE_SELECTLASSO:
+    gestureRegion = lassoSelector->path();
     if(currSelection->count() > 0) {
       // replace lasso selector with rect selector
       delete lassoSelector;
@@ -3352,9 +3440,28 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
   default:
     break;
   }
+  // a gesture that caught nothing still marks an area, which Screenshot can capture
+  bool regionOnly = currSelection && currSelection->count() == 0 && currModeType == MODE_SELECT
+      && gestureRegion.getBBox().isValid() && gestureRegion.getBBox().width() > 0
+      && gestureRegion.getBBox().height() > 0;
+  int gesturePage = currSelPageNum;
+  auto keepRegion = [&](){
+    shotRegion = gestureRegion;
+    shotRegionPage = gesturePage;
+    dirtyShotRegion();
+  };
+  // set before the popup opens, which offers Screenshot only when there is a region
+  if(currSelection && currSelection->count() > 0 && currModeType == MODE_SELECT && !gestureRegion.empty())
+    keepRegion();
   if(currSelection) {
-    if(currSelection->count() == 0)
+    if(currSelection->count() == 0) {
       clearSelection();  // for select or erase within selection
+      if(regionOnly) {
+        keepRegion();
+        if(cfg->Bool("popupToolbar"))
+          app->showSelToolbar(screenToGlobal(prevRawPos));
+      }
+    }
     else {
       currSelection->shrink();
       Rect b = dimToScreen(pageDimToDim(currSelection->getBGBBox()));
@@ -3402,6 +3509,8 @@ void ScribbleArea::doCancelAction(bool refresh)
   // Should we also call BookmarkView's doCancelAction() in case it's scrolling?
   ScribbleView::doCancelAction();
   cancelShape();
+  if(!currSelection)
+    clearShotRegion();  // Esc on an area marked with nothing selected
   switch(currMode) {
   case MODE_DRAWSHAPE:
     if(currStroke) {
@@ -3875,6 +3984,27 @@ void ScribbleArea::drawScreen(Painter* painter, const Rect& dirty)
   if(regionInProgress)
     SvgPainter(painter).drawNode(regionInProgress->node);
   drawRegionButtons(painter);
+
+  // the last selection gesture's area, dashed; it stays where it was drawn when the selection is moved
+  if(!shotRegion.empty() && shotRegionPage < numPages()
+      && (shotRegionPage == currPageNum || viewMode != VIEWMODE_SINGLE)) {
+    painter->save();
+    if(shotRegionPage != currPageNum) {
+      Point origin = getPageOrigin(shotRegionPage);
+      painter->translate(origin.x - currPageXOrigin, origin.y - currPageYOrigin);
+    }
+    // the dash array is read when the path is stroked, so it has to outlive this block's locals
+    shotRegionDashes[0] = 6/mZoom;
+    shotRegionDashes[1] = 4/mZoom;
+    shotRegionDashes[2] = -1;
+    bool lightPaper = page(shotRegionPage)->props.color.luma() > 127;
+    painter->setFillBrush(Color::NONE);
+    painter->setStroke(lightPaper ? Color::BLUE : Color::YELLOW, 1.5/mZoom, Painter::FlatCap, Painter::MiterJoin);
+    painter->setDashArray(shotRegionDashes);
+    painter->drawPath(shotRegion);
+    painter->setDashArray(NULL);
+    painter->restore();
+  }
 
   // a region's selection draws its ink normally but still has handles
   if(currSelection && (currSelection->drawType() == Selection::STROKEDRAW_SEL || regionSelector)

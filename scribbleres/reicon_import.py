@@ -45,6 +45,7 @@ MAPPING = {
   'ic_menu_history': 'history',
   'ic_menu_cloud': 'cloud',
   'ic_menu_copy': 'copy',
+  'ic_menu_screenshot': 'camera',
   'ic_menu_cut': 'scissors',
   'ic_menu_discard': 'trash2',
   'ic_menu_document': 'document-text',

@@ -122,6 +122,7 @@ public:
   Action* actionImport_PDF;
   Action* actionPreferences;
   Action* actionCreate_Link;
+  Action* actionScreenshot;
   Action* actionUngroup;
   Action* actionUpdateCheck;
   Action* actionFree_Eraser;
@@ -163,6 +164,8 @@ public:
   Widget* selPopup;
   // "Move to Layer" on the selection popup, and its list of layers, rebuilt each time the popup opens
   Button* moveLayerBtn = NULL;
+  // selection popup buttons that act on ink, hidden when the gesture caught none (Screenshot remains)
+  std::vector<Button*> selInkButtons;
   ArrowPopup* moveLayerPopup = NULL;
   void refreshSelPopup();
   AutoAdjContainer* penToolbarAutoAdj;
