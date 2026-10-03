@@ -20,7 +20,7 @@
 	ignore = untracked
 [submodule "ulib"]
 	path = ulib
-	url = https://github.com/styluslabs/ulib.git
+	url = https://github.com/Tear4Pixelation/ulib.git
 	ignore = untracked
 [submodule "usvg"]
 	path = usvg
@@ -28,7 +28,7 @@
 	ignore = untracked
 [submodule "ugui"]
 	path = ugui
-	url = https://github.com/styluslabs/ugui.git
+	url = https://github.com/Tear4Pixelation/ugui.git
 	ignore = untracked
 [submodule "mupdf"]
 	path = mupdf
