@@ -7,9 +7,9 @@ stroke blob). `syncscribble/notefulfile.*` is the C++ reader - no app dependenci
 exceptions, bounds-checked; tested standalone by `scribbletest/notefultest.cpp` against a notebook it
 synthesizes itself (no personal file is checked in), mutation-checked. `notefulimport.*` builds a
 `Document` like `PdfImport` does; `ScribbleTest::notefulImportTest()` covers it, and
-`NOTEFUL_CONVERT=in.noteful NOTEFUL_OUT=out.svgz ./Debug/Kaku --test` converts a real notebook.
+`NOTEFUL_CONVERT=in.noteful NOTEFUL_OUT=out.svgz ./Debug/Sumi --test` converts a real notebook.
 
-- **Units:** Noteful pages are pixels at 132 dpi (A4 = 1091.34 wide); Kaku's 150/inch gives a 150/132
+- **Units:** Noteful pages are pixels at 132 dpi (A4 = 1091.34 wide); Sumi's 150/inch gives a 150/132
   scale. Paper templates give line spacing in *points* (`lh:20` is 20 pt = 36.7 Noteful units) - read
   as units, the grid came out almost half size. Rule color `#9a9888`, from the templates' own PDFs.
 - **Strokes with at most 4 points are raw f32 pairs**; longer ones are a box plus u16 pairs normalized to
@@ -17,7 +17,7 @@ synthesizes itself (no personal file is checked in), mutation-checked. `notefuli
   i-dots into long vertical lines. The u32 at offset 36 of a stroke header is its layer id.
 - **Stroke flag 1 is a pressure pen**: after the box two f32 (the pressure range) and u16 x/y/pressure
   *triples* - the only layout under which all 87 samples span their box and draw smoothly. Imported
-  through Kaku's own `StrokeBuilder` with a linear round pen (prParam 1, wRatio 1): width = Noteful width
+  through Sumi's own `StrokeBuilder` with a linear round pen (prParam 1, wRatio 1): width = Noteful width
   x pressure, each stroke scaled by its peak pressure because the builder clamps pressure at 1. So they
   are ordinary filled pen strokes (`write-round-pen`), erasable and restyleable.
 - **Short pressure strokes (<= 4 points) are unconfirmed** - no sample has one. Raw floats are used while
@@ -32,7 +32,7 @@ synthesizes itself (no personal file is checked in), mutation-checked. `notefuli
   on the sample's graphs: only the centre reading puts a tangent through its intercept on the hand-drawn axes.
 - **Highlighter** = element field 9 (u16) = 1; only seen on straight lines (kind 20, width 24). Noteful
   stores the colour opaque, so importing it as is painted solid bars over the words. Imported at half
-  alpha (Kaku's marker, `highlightPen`) and inserted first in its layer (`layerFirstElement`, as a
+  alpha (Sumi's marker, `highlightPen`) and inserted first in its layer (`layerFirstElement`, as a
   `DRAW_UNDER` stroke). Noteful's own highlighter opacity is not stored anywhere found.
 - **Rotated images** get a node transform about their frame centre (`SvgImage::setTransform`), the same
   convention as shapes - unconfirmed for images, which no sample had rotated.
@@ -48,7 +48,7 @@ synthesizes itself (no personal file is checked in), mutation-checked. `notefuli
   because folders often mirror tags already. A TagDocList open on the library must reload its store
   afterwards. Reads go through ulib (`readFile`, a `FILE*` for miniz) because ulib's `fopen` is the
   UTF-8-safe one on Windows; `miniz_zip.c` is now in the build for the reader.
-- Paper templates become Kaku ruling (editable paper); imported PDF pages, photos and covers become a
+- Paper templates become Sumi ruling (editable paper); imported PDF pages, photos and covers become a
   rule-layer image, as in PDF import - rendered from memory by `PdfImport::renderPage(data, ...)`,
   JPEG by default (PNG made the 13 MB sample 81 MB). Ink below a page's edge (Noteful keeps it) makes
   the page taller.
