@@ -45,15 +45,16 @@ DEFS = GLES_SILENCE_DEPRECATION
 
 # run `xcrun --sdk iphoneos --find clang` to get path to clang
 # run `xcrun --sdk iphoneos --show-sdk-path` to get arg for -isysroot
-XCODE = /Applications/Xcode.app/Contents/Developer
+XCODE ?= $(shell xcode-select -p)
+IOS_MIN_VERSION ?= 15.0
 SIM ?= 0
 ifneq ($(SIM), 0)
   SDKROOT = $(XCODE)/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator.sdk
-  TARGET_ARCH = x86_64-apple-ios11.0-simulator
+  TARGET_ARCH = x86_64-apple-ios$(IOS_MIN_VERSION)-simulator
   ARCH_ONLY = x86_64
 else
   SDKROOT = $(XCODE)/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk
-  TARGET_ARCH = arm64-apple-ios11.0
+  TARGET_ARCH = arm64-apple-ios$(IOS_MIN_VERSION)
   ARCH_ONLY = arm64
 endif
 CLANG = $(XCODE)/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -target $(TARGET_ARCH) -isysroot $(SDKROOT)
@@ -66,7 +67,7 @@ CCFLAGS = --std=c99
 MC = $(CLANG) -x objective-c
 MFLAGS = -fobjc-arc
 # ar
-AR = /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/libtool -static -arch_only $(ARCH_ONLY) -syslibroot $(SDKROOT)
+AR = $(XCODE)/Toolchains/XcodeDefault.xctoolchain/usr/bin/libtool -static -arch_only $(ARCH_ONLY) -syslibroot $(SDKROOT)
 ARFLAGS =
 
 DEBUG ?= 1

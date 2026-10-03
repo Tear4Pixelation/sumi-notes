@@ -11,3 +11,11 @@ scribbletest/test*_ref.png
 scribbleres/icons/backup/
 scribbleres/icons/select_icons/
 test-docs/
+
+# local build variants and the wasm SDL worktree (see CLAUDE.md)
+syncscribble/EmRelease/
+syncscribble/ReleaseB/
+syncscribble/ReleaseSDL/
+SDL-wasm/
+__pycache__/
+.nimbalyst/

@@ -5,25 +5,26 @@
 
 # run `xcrun --sdk iphoneos --find clang` to get path to clang
 # run `xcrun --sdk iphoneos --show-sdk-path` to get arg for -isysroot
-XCODE = /Applications/Xcode.app/Contents/Developer
+# the selected Xcode (`sudo xcode-select -s`), not a fixed path - CI images install several side by side
+XCODE ?= $(shell xcode-select -p)
+IOS_MIN_VERSION ?= 15.0
 SIM ?= 0
 ifneq ($(SIM), 0)
   SDKROOT = $(XCODE)/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator.sdk
-  TARGET_ARCH = x86_64-apple-ios11.0-simulator
+  TARGET_ARCH = x86_64-apple-ios$(IOS_MIN_VERSION)-simulator
   ARCH_ONLY = x86_64
 # no signing id need for sim; mobileprovision file also not needed
   CODESIGN = /usr/bin/codesign --force --sign - --timestamp=none
   XCENT = ios/Sim.app.xcent
 else
   SDKROOT = $(XCODE)/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk
-  TARGET_ARCH = arm64-apple-ios11.0
+  TARGET_ARCH = arm64-apple-ios$(IOS_MIN_VERSION)
   ARCH_ONLY = arm64
 endif
 CLANG = $(XCODE)/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang++ -target $(TARGET_ARCH) -isysroot $(SDKROOT)
-#-arch arm64 / x86_64  -miphoneos-version-min=11.0
 # note that we omit --output-partial-info-plist and assume it will not be needed
-IBTOOL = XCODE_DEVELOPER_USR_PATH=$(XCODE)/usr $(XCODE)/usr/bin/ibtool --errors --warnings --notices --auto-activate-custom-fonts --target-device iphone --target-device ipad --minimum-deployment-target 11.0 --output-format human-readable-text
-ACTOOL = $(XCODE)/usr/bin/actool --output-format human-readable-text --notices --warnings --app-icon AppIcon --compress-pngs --enable-on-demand-resources YES --development-region en --target-device iphone --target-device ipad --minimum-deployment-target 11.0 --platform iphoneos --product-type com.apple.product-type.application
+IBTOOL = XCODE_DEVELOPER_USR_PATH=$(XCODE)/usr $(XCODE)/usr/bin/ibtool --errors --warnings --notices --auto-activate-custom-fonts --target-device iphone --target-device ipad --minimum-deployment-target $(IOS_MIN_VERSION) --output-format human-readable-text
+ACTOOL = $(XCODE)/usr/bin/actool --output-format human-readable-text --notices --warnings --app-icon AppIcon --compress-pngs --enable-on-demand-resources YES --development-region en --target-device iphone --target-device ipad --minimum-deployment-target $(IOS_MIN_VERSION) --platform iphoneos --product-type com.apple.product-type.application
 # ar
 AR = $(XCODE)/Toolchains/XcodeDefault.xctoolchain/usr/bin/libtool -static -arch_only $(ARCH_ONLY) -syslibroot $(SDKROOT)
 ARFLAGS =
@@ -130,8 +131,10 @@ $(TGT): $(OBJ) $(IOSRES) $(NIB)
 	$(PLISTENV) perl -pe 's{\$$\((\w+)\)}{$$ENV{$$1} // $$&}ge' < $(INFOPLIST) > $(TGTDIR)/Info.plist
 	test -z "$(XCASSETS)" || $(ACTOOL) --export-dependency-info $(OBJDIR)/assetcatalog_dependencies --output-partial-info-plist $(OBJDIR)/assetcatalog_info.plist --compile $(TGTDIR) $(XCASSETS)
 	test -z "$(NIB)" || cp -R $(NIB) $(TGTDIR)
-	cp $(PROVISIONING_PROFILE) $(TGTDIR)/embedded.mobileprovision
-	$(CODESIGN) --generate-entitlement-der --entitlements $(XCENT) $(TGTDIR)
+	test -z "$(PROVISIONING_PROFILE)" || cp $(PROVISIONING_PROFILE) $(TGTDIR)/embedded.mobileprovision
+# CODESIGN is empty for an unsigned build; the entitlements get the same $$(VAR) substitution as Info.plist
+	test -z '$(CODESIGN)' || { $(PLISTENV) perl -pe 's{\$$\((\w+)\)}{$$ENV{$$1} // $$&}ge' < $(XCENT) > $(OBJDIR)/entitlements.xcent \
+	  && $(CODESIGN) --generate-entitlement-der --entitlements $(OBJDIR)/entitlements.xcent $(TGTDIR); }
 
 $(IPA): $(TGT)
 	(cd $(BUILDDIR) && zip -rXm $(TARGET).ipa Payload)

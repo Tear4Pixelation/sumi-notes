@@ -3,16 +3,14 @@
 <plist version="1.0">
 <dict>
 	<key>application-identifier</key>
-	<string>8U8646Y4MM.com.styluslabs.write3</string>
+	<string>$(TEAM_ID).$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>com.apple.developer.team-identifier</key>
-	<string>8U8646Y4MM</string>
+	<string>$(TEAM_ID)</string>
 	<key>get-task-allow</key>
-	<false/>
-	<key>beta-reports-active</key>
-	<true/>
+	<$(GET_TASK_ALLOW)/>
 	<key>keychain-access-groups</key>
 	<array>
-		<string>8U8646Y4MM.com.styluslabs.write3</string>
+		<string>$(TEAM_ID).$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	</array>
 </dict>
 </plist>

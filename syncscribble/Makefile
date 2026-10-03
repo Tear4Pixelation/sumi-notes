@@ -196,8 +196,8 @@ DMGRES = ../scribbleres/macos/Readme.txt
 
 include Makefile.mac
 
-else ifneq ($(XPC_FLAGS),)
-# iOS (XPC_FLAGS seems to be defined on macOS)
+else ifneq ($(IOS)$(XPC_FLAGS),)
+# iOS (XPC_FLAGS seems to be defined on macOS, but not reliably in a CI shell - pass IOS=1 there)
 
 SOURCES += ios/ioshelper.m
 DEFS += GLES_SILENCE_DEPRECATION
@@ -209,34 +209,47 @@ IOSRES = \
   ../scribbleres/fonts/DroidSansFallback.ttf \
   ../scribbleres/Intro.svg
 INFOPLIST = ios/Info.plist
-PLISTENV = CURRENT_PROJECT_VERSION=1.5 MARKETING_VERSION=1.5
+IOS_MIN_VERSION ?= 15.0
+PLISTENV = CURRENT_PROJECT_VERSION=$(GITCOUNT) MARKETING_VERSION=$(APPVERSION) IOS_MIN_VERSION=$(IOS_MIN_VERSION)
 
-# Xcode generated provisioning profile for free account is per-app and expires every 7 days; w/ paid account, 1-year profile w/ all apps (com.styluslabs.*) can be generated
-# For signing, we expect a valid .xcent file - the value for com.apple.developer.team-identifier can be found under the "Organizational Unit" field in "Get Info" for the iPhone Developer certificate in the Keychain Access app
-# run `security find-identity -v -p codesigning` to get argument for codesign --sign
+# Signing - nothing machine-specific lives here; pass these on the command line (CI does), e.g.
+#   make IOS=1 DIST=adhoc DEBUG=0 IOS_TEAM_ID=ABCDE12345 IOS_SIGN_ID="Apple Distribution" \
+#     IOS_PROFILE=kaku.mobileprovision ipa
+# IOS_TEAM_ID is the 10 character Team ID from the Membership page of the developer account.
+# IOS_SIGN_ID is anything `security find-identity -v -p codesigning` prints for the certificate.
+# IOS_PROFILE must be issued for IOS_BUNDLE_ID: a development profile for DIST=0, an ad hoc (or
+# App Store) one otherwise.  With IOS_SIGN_ID empty the app is built unsigned - to check that the
+# build works, or to be signed later by a sideloading tool.
+IOS_BUNDLE_ID ?= app.kakuink.kaku
+IOS_TEAM_ID ?=
+IOS_SIGN_ID ?=
+IOS_PROFILE ?=
+# entitlements are generated from ios/Kaku.app.xcent with the team and bundle id filled in
+XCENT = ios/Kaku.app.xcent
+PLISTENV += PRODUCT_BUNDLE_IDENTIFIER=$(IOS_BUNDLE_ID) TEAM_ID=$(IOS_TEAM_ID)
 
 DIST ?= 0
 ifeq ($(DIST), 0)
   APPDIR = Kaku.app
-  PROVISIONING_PROFILE = /Users/mwhite/Documents/mwhite_iOS_Dev_2024.mobileprovision
-  XCENT = ios/Dev.app.xcent
-  CODESIGN = /usr/bin/codesign --force --sign 9E6635D070FC516CD66467812DDFA3CFDD010E3D --timestamp=none
+  # lets a debugger attach; only a development profile allows it
+  PLISTENV += GET_TASK_ALLOW=true
 else
   ifneq ($(DEBUG), 0)
     $(error DIST build requires DEBUG=0)
   endif
   APPDIR = Payload/Kaku.app
-  ifeq ("$(DIST)", "appstore")
-    PROVISIONING_PROFILE = /Users/mwhite/Documents/Stylus_Labs_App_Store_2024.mobileprovision
-    XCENT = ios/AppStore.app.xcent
-  else
-    PROVISIONING_PROFILE = /Users/mwhite/Documents/Stylus_Labs_AdHoc_2020.mobileprovision
-    XCENT = ios/AdHoc.app.xcent
-  endif
-  CODESIGN = /usr/bin/codesign --force --sign 55648202533A2234B7ED12254A2C271BC52ACED187E0 --timestamp=none
+  PLISTENV += GET_TASK_ALLOW=false
 endif
 
-INCSYS += /Users/mwhite/styluslabs/SDL/include
+ifneq ($(IOS_SIGN_ID),)
+  ifeq ($(IOS_TEAM_ID),)
+    $(error signing (IOS_SIGN_ID) needs IOS_TEAM_ID)
+  endif
+  PROVISIONING_PROFILE = $(IOS_PROFILE)
+  CODESIGN = /usr/bin/codesign --force --sign "$(IOS_SIGN_ID)" --timestamp=none
+endif
+
+INCSYS += ../SDL/include
 FRAMEWORKS = AVFoundation GameController CoreMotion Foundation UIKit CoreGraphics OpenGLES QuartzCore CoreAudio AudioToolbox Metal StoreKit
 
 SIM ?= 0
@@ -249,10 +262,6 @@ endif
 IAP ?= 0
 ifneq ($(IAP), 0)
   DEFS += SCRIBBLE_IAP
-  PLISTENV += PRODUCT_BUNDLE_IDENTIFIER=com.styluslabs.write3a
-	XCENT = ios/IAPDev.app.xcent
-else
-  PLISTENV += PRODUCT_BUNDLE_IDENTIFIER=com.styluslabs.write3
 endif
 
 include Makefile.ios
@@ -390,7 +399,7 @@ else ifneq ($(BUILD_SHARED_LIBRARY),)
   # ndk-build already compiles with -ffunction-sections and links release with --gc-sections
 else
   CFLAGS += -ffunction-sections -fdata-sections
-  ifneq ($(MACOS)$(XPC_FLAGS),)
+  ifneq ($(MACOS)$(IOS)$(XPC_FLAGS),)
     LDFLAGS += -Wl,-dead_strip
   else
     LDFLAGS += -Wl,--gc-sections
