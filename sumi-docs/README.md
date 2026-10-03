@@ -1,6 +1,6 @@
-# kaku-docs
+# sumi-docs
 
-User documentation for [Kaku Ink](https://kakuink.app), built with [Fumadocs](https://fumadocs.dev) on
+User documentation for [Sumi Notes](https://sumi-notes.com), built with [Fumadocs](https://fumadocs.dev) on
 Next.js and exported as a static site.
 
 ## Working on it

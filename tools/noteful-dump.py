@@ -368,7 +368,7 @@ def element_svg(notebook, element):
     if 'color' in element:
         red, green, blue, alpha = element['color']
         if element['highlighter']:
-            alpha *= 0.5  # Kaku's marker alpha; Noteful's own is not stored
+            alpha *= 0.5  # Sumi's marker alpha; Noteful's own is not stored
         stroke = ('fill="none" stroke="rgb(%d,%d,%d)" stroke-opacity="%.3g" stroke-width="%.3g" stroke-linecap="round"'
                   % (red * 255, green * 255, blue * 255, alpha, element['width']))
     if 'path' in element:
@@ -408,7 +408,7 @@ def page_svg(notebook, page):
     width, height = page['size']
     strokes = notebook.strokes(page['ink'])
     elements = notebook.elements(page['ink'])
-    # ink may run past the page's nominal height; show all of it (Kaku pages grow anyway)
+    # ink may run past the page's nominal height; show all of it (Sumi pages grow anyway)
     page_height = height
     height = max(height, content_bottom(strokes, elements) + 20)
     parts = ['<svg xmlns="http://www.w3.org/2000/svg" width="%g" height="%g" viewBox="0 0 %g %g">'

@@ -37,7 +37,7 @@ bool markLibrary(const FSPath& dir)
   FILE* file = fopen(marker.c_str(), "wb");
   if(!file)
     return false;
-  static const char note[] = "This folder is Kaku's document library. Documents opened from elsewhere are copied here.\n";
+  static const char note[] = "This folder is Sumi's document library. Documents opened from elsewhere are copied here.\n";
   bool written = fwrite(note, 1, sizeof(note) - 1, file) == sizeof(note) - 1;
   return fclose(file) == 0 && written;
 }

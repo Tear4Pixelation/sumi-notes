@@ -1,12 +1,12 @@
 Make sure your graphics driver is up-to-date, then run ./setup.sh
-This script will install the SDL2 library required by Kaku and
+This script will install the SDL2 library required by Sumi and
 create a desktop entry.
 
-If Kaku's interface appears too small (or too large), enable
+If Sumi's interface appears too small (or too large), enable
 advanced preferences and enter the actual DPI (= horizontal
 pixels/horizontal size in inches) for "Screen DPI" in the
-Advanced section, then restart Kaku.  You may also wish to
+Advanced section, then restart Sumi.  You may also wish to
 adjust the default page size in Page Setup.
 
-To remove the desktop entry created by Kaku, run:
-    rm ~/.local/share/applications/Kaku.desktop
+To remove the desktop entry created by Sumi, run:
+    rm ~/.local/share/applications/Sumi.desktop

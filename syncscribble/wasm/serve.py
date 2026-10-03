@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Serve the web build (EmRelease/ by default) to other devices on the LAN, e.g. an iPad:
-#   python3 wasm/serve.py [dir] [port]   then open http://<this machine's IP>:<port>/Kaku.html
-# Plain http.server would do, except that Safari caches Kaku.wasm heuristically and keeps running
+#   python3 wasm/serve.py [dir] [port]   then open http://<this machine's IP>:<port>/Sumi.html
+# Plain http.server would do, except that Safari caches Sumi.wasm heuristically and keeps running
 #  a stale build after a rebuild; no-cache makes it revalidate every load (a 304 when unchanged).
 import http.server
 import os
@@ -25,5 +25,5 @@ except OSError:
   lanAddr = "localhost"
 finally:
   probe.close()
-print(f"Serving {os.getcwd()} at http://{lanAddr}:{port}/Kaku.html", flush=True)
+print(f"Serving {os.getcwd()} at http://{lanAddr}:{port}/Sumi.html", flush=True)
 http.server.ThreadingHTTPServer(("", port), NoCacheHandler).serve_forever()

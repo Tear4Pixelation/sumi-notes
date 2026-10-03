@@ -109,7 +109,7 @@ const char* prefInfoXML = R"#(
 
   <!-- should be limited to the "chrome", i.e, excluding any behaviors of ScribbleArea -->
   <!-- pref type="label" group="User Interface"
-      title="Changes may not take effect until Kaku is restarted." / -->
+      title="Changes may not take effect until Sumi is restarted." / -->
   <pref name="uiTheme" type="int" group="User Interface"
       enum="Dark;Light" enumvals="1;2"
       title="Theme" description="User interface style" />
@@ -220,7 +220,7 @@ const char* prefInfoXML = R"#(
   <pref name="showAdvPrefs" type="bool" level="1" group="Advanced" title="Show advanced preferences" description="" />
   <pref name="Config Edit" type="button" group="Advanced" />
   <pref name="Reset Prefs" type="button" group="Advanced" />
-  <pref name="About Kaku" type="button" level="1" group="Advanced" />
+  <pref name="About Sumi" type="button" level="1" group="Advanced" />
 
 </map>
 )#";

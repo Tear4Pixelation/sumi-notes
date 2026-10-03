@@ -1,4 +1,4 @@
-name: Kaku CI
+name: Sumi CI
 
 on:
   push:
@@ -40,7 +40,7 @@ jobs:
     # test doesn't work because SDL init fails due to no video device
     #- run: make DEBUG=1 SANITIZE=0 USE_SYSTEM_SDL=0
     #  working-directory: syncscribble
-    #- run: ./Debug/Kaku --glRender=0 --test
+    #- run: ./Debug/Sumi --glRender=0 --test
     #  working-directory: syncscribble
     - run: make DEBUG=0 USE_SYSTEM_SDL=0 real_tgz
       working-directory: Write/syncscribble
@@ -75,7 +75,7 @@ jobs:
       run: |
         git switch write-win
         ..\..\make.exe -f ..\scribbleres\SDL-Makefile.msvc SHELL=cmd.exe
-    - name: Build Kaku
+    - name: Build Sumi
       shell: cmd
       working-directory: Write/syncscribble
       run: ..\..\make.exe SHELL=cmd.exe DEBUG=0 zip
@@ -120,7 +120,7 @@ jobs:
 
   # iOS app for installing on your own registered devices (ad hoc).  Unlike the jobs above this builds
   # *this* repository, not upstream.  Without the signing secrets it still builds, producing an
-  # unsigned IPA; with them, a signed one that `ideviceinstaller install Kaku.ipa` puts on the device.
+  # unsigned IPA; with them, a signed one that `ideviceinstaller install Sumi.ipa` puts on the device.
   # Secrets (Settings > Secrets and variables > Actions):
   #   IOS_CERTIFICATE_P12_BASE64  base64 of the Apple Distribution certificate + key as .p12
   #   IOS_CERTIFICATE_P12_PASSWORD
@@ -154,7 +154,7 @@ jobs:
       # after https://docs.github.com/en/actions/how-tos/deploy/deploy-to-third-party-platforms/sign-xcode-applications
       run: |
         CERTIFICATE_PATH=$RUNNER_TEMP/signing.p12
-        PROFILE_PATH=$RUNNER_TEMP/kaku.mobileprovision
+        PROFILE_PATH=$RUNNER_TEMP/sumi.mobileprovision
         KEYCHAIN_PATH=$RUNNER_TEMP/signing.keychain-db
         KEYCHAIN_PASSWORD=$(uuidgen)
         echo -n "$IOS_CERTIFICATE_P12_BASE64" | base64 --decode -o $CERTIFICATE_PATH
@@ -177,14 +177,14 @@ jobs:
           echo "IOS_SIGN_ARGS=IOS_SIGN_ID=$SIGN_ID IOS_TEAM_ID=$TEAM_ID IOS_BUNDLE_ID=${APP_ID#$TEAM_ID.} IOS_PROFILE=$PROFILE_PATH"
           echo "KEYCHAIN_PATH=$KEYCHAIN_PATH"
         } >> $GITHUB_ENV
-    - name: Build Kaku
+    - name: Build Sumi
       working-directory: syncscribble
       run: make IOS=1 DIST=adhoc DEBUG=0 $IOS_SIGN_ARGS -j$(sysctl -n hw.ncpu) ipa
     - name: Upload IPA
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ env.IOS_SIGN_ARGS != '' && 'kaku-ios-adhoc-ipa' || 'kaku-ios-unsigned-ipa' }}
-        path: syncscribble/Release/Kaku.ipa
+        name: ${{ env.IOS_SIGN_ARGS != '' && 'sumi-ios-adhoc-ipa' || 'sumi-ios-unsigned-ipa' }}
+        path: syncscribble/Release/Sumi.ipa
     - name: Remove keychain
       if: always() && env.KEYCHAIN_PATH != ''
       run: security delete-keychain $KEYCHAIN_PATH

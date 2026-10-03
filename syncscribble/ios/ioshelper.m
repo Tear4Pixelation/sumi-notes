@@ -197,7 +197,7 @@ void iosRequestIAP(void)
     showErrorAlert(@(_("In-app purchases have been disabled on this device.")));
     return;
   }
-  NSString* alerttitle = @(_("Upgrade Kaku"));
+  NSString* alerttitle = @(_("Upgrade Sumi"));
   NSString* alertmsg = @(_("Make a one-time purchase to permanently remove page watermark."));
   UIAlertController* alertController = [UIAlertController alertControllerWithTitle:alerttitle message:alertmsg preferredStyle:UIAlertControllerStyleAlert];
   if([SKPaymentQueue canMakePayments]) {

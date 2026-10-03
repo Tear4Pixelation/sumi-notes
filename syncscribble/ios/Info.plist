@@ -5,9 +5,9 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>Kaku</string>
+	<string>Sumi</string>
 	<key>CFBundleExecutable</key>
-	<string>Kaku</string>
+	<string>Sumi</string>
 	<key>CFBundleIcons</key>
 	<dict>
 		<key>CFBundlePrimaryIcon</key>
@@ -38,7 +38,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>Kaku</string>
+	<string>Sumi</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleSignature</key>
@@ -103,7 +103,7 @@
 		</dict>
 	</array>
 	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>Kaku can save an image of the document to your photo library for easy sharing.</string>
+	<string>Sumi can save an image of the document to your photo library for easy sharing.</string>
 	<key>DTSDKName</key>
 	<string>iphoneos13.2</string>
 	<key>DTXcode</key>

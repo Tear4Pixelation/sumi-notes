@@ -3,7 +3,7 @@
 // Reader for Noteful's notebook export (.noteful).  The format is undocumented; everything here was
 //  worked out from sample exports, and tools/noteful-dump.py is the reference implementation it was
 //  checked against (its header describes the layout in full).  This file only decodes - it has no
-//  dependency on the rest of Kaku, so it is testable on its own (scribbletest/notefultest.cpp);
+//  dependency on the rest of Sumi, so it is testable on its own (scribbletest/notefultest.cpp);
 //  notefulimport.cpp turns the result into a Document.
 //
 // Coordinates are Noteful's: pixels at 132 dpi, origin top left (an A4 page is 1091.34 x 1543.46).

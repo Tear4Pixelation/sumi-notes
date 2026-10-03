@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# agent-display.sh - run Kaku in an isolated compositor so an agent can drive it
+# agent-display.sh - run Sumi in an isolated compositor so an agent can drive it
 # without touching the user's real session.
 #
 # Two separate isolated displays are involved, and which one a command uses is
@@ -12,14 +12,14 @@
 # session. Do NOT replace either with ydotool/dotool: those inject through kernel
 # uinput, which is seat-global, and would land in the user's windows instead.
 #
-# Keyboard goes through Xwayland because Kaku is an X11 client here - SDL's
+# Keyboard goes through Xwayland because Sumi is an X11 client here - SDL's
 # Wayland video driver segfaults it (verified: exit 139), so SDL falls back to
 # x11, and wtype's virtual-keyboard keymap does not survive the Xwayland
 # translation. xdotool talks to cage's own X server and does work.
 #
 # Usage:
 #   agent-display.sh run [--windowed] [--debug] [-- <app args>]
-#   agent-display.sh test                 # ./Debug/Kaku --test
+#   agent-display.sh test                 # ./Debug/Sumi --test
 #   agent-display.sh shot [out.png]
 #   agent-display.sh click <x> <y> [left|right|middle]
 #   agent-display.sh move <x> <y>
@@ -117,7 +117,7 @@ cmd_run() {
 
   is_running && die "an agent display is already running (pid $(cat "$PID_FILE")); stop it first"
 
-  local app="$APP_DIR/$build/Kaku"
+  local app="$APP_DIR/$build/Sumi"
   [[ -x "$app" ]] || die "no binary at $app - build it first"
   need cage "install with: sudo pacman -S cage"
 
@@ -144,7 +144,7 @@ pid=$(cat "$PID_FILE") mode=$([[ $windowed == 1 ]] && echo windowed || echo head
 }
 
 cmd_test() {
-  local app="$APP_DIR/Debug/Kaku"
+  local app="$APP_DIR/Debug/Sumi"
   [[ -x "$app" ]] || die "no binary at $app - build with: cd syncscribble && make DEBUG=1"
   need cage "install with: sudo pacman -S cage"
 
@@ -152,7 +152,7 @@ cmd_test() {
   # ScribbleTest exits with the number of failed thumbnails, which is the signal
   # worth having. ASan's leak check overrides that with its own exitcode (1), and
   # every leak it reports here is inside NVIDIA's GL driver and libdbus, not
-  # Kaku - so leak detection is off by default. Set AGENT_DISPLAY_ASAN_LEAKS=1
+  # Sumi - so leak detection is off by default. Set AGENT_DISPLAY_ASAN_LEAKS=1
   # to get it back when the leaks are the point.
   local asan="${ASAN_OPTIONS:-}"
   [[ "${AGENT_DISPLAY_ASAN_LEAKS:-0}" == "1" ]] || asan="detect_leaks=0${asan:+,$asan}"
@@ -215,7 +215,7 @@ cmd_type() {
   in_session_x xdotool type --clearmodifiers -- "$*"
 }
 
-# Keystrokes for a *native Wayland* client (Kaku built on sdl2-compat with linuxWayland=1 is one);
+# Keystrokes for a *native Wayland* client (Sumi built on sdl2-compat with linuxWayland=1 is one);
 #  xdotool only reaches X clients.  Same syntax as `key`: modifiers and key joined by '+'.
 cmd_wkey() {
   [[ $# -ge 1 ]] || die "usage: $0 wkey <keyname>   e.g. ctrl+s, Escape"
@@ -283,8 +283,8 @@ cmd_status() {
     echo "not running"
   fi
   local stray
-  stray="$(pgrep -cx 'Kaku|Write' 2>/dev/null || true)"
-  [[ "${stray:-0}" != "0" ]] && echo "Kaku processes alive: $stray"
+  stray="$(pgrep -cx 'Sumi|Write' 2>/dev/null || true)"
+  [[ "${stray:-0}" != "0" ]] && echo "Sumi processes alive: $stray"
   return 0
 }
 
@@ -295,13 +295,13 @@ cmd_stop() {
     sleep 0.5
     kill -9 "$(cat "$PID_FILE")" 2>/dev/null || true
   fi
-  # Killing cage does not necessarily take the app with it: a Kaku that
+  # Killing cage does not necessarily take the app with it: a Sumi that
   # outlives its compositor keeps running headless forever, holding the document
   # and its lock. Reap it explicitly - by the pid the session recorded, never by
-  # name: the user may have their own Kaku open, and a name match killed it.
+  # name: the user may have their own Sumi open, and a name match killed it.
   local app_pid
   app_pid="$(cat "$APP_PID_FILE" 2>/dev/null || true)"
-  if [[ -n "$app_pid" ]] && [[ "$(ps -o comm= -p "$app_pid" 2>/dev/null)" =~ ^(Kaku|Write)$ ]]; then
+  if [[ -n "$app_pid" ]] && [[ "$(ps -o comm= -p "$app_pid" 2>/dev/null)" =~ ^(Sumi|Write)$ ]]; then
     kill "$app_pid" 2>/dev/null || true
     sleep 0.3
     kill -9 "$app_pid" 2>/dev/null || true

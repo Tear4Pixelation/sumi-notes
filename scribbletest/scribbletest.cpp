@@ -433,12 +433,12 @@ int ScribbleTest::notefulImportTest()
     if(!ok) { ++nbad; printf("FAIL: noteful import: %s\n", what); }
   };
   const char* tmpdir = getenv("TMPDIR") ? getenv("TMPDIR") : "/tmp";
-  std::string notebookPath = std::string(tmpdir) + "/kaku-noteful-test.noteful";
-  std::string savedPath = std::string(tmpdir) + "/kaku-noteful-test.svgz";
+  std::string notebookPath = std::string(tmpdir) + "/sumi-noteful-test.noteful";
+  std::string savedPath = std::string(tmpdir) + "/sumi-noteful-test.svgz";
 
   // Converting a real notebook for inspection, with no UI for it yet:
-  //  NOTEFUL_CONVERT=in.noteful NOTEFUL_OUT=out.svgz ./Debug/Kaku --test
-  //  NOTEFUL_CONVERT=export.zip NOTEFUL_OUT=librarydir ./Debug/Kaku --test   (a zip or a directory)
+  //  NOTEFUL_CONVERT=in.noteful NOTEFUL_OUT=out.svgz ./Debug/Sumi --test
+  //  NOTEFUL_CONVERT=export.zip NOTEFUL_OUT=librarydir ./Debug/Sumi --test   (a zip or a directory)
   if(getenv("NOTEFUL_CONVERT") && getenv("NOTEFUL_OUT") && NotefulImport::isNotefulArchive(getenv("NOTEFUL_CONVERT"))) {
     NotefulImport::ArchiveResult result;
     std::string error;
@@ -504,13 +504,13 @@ int ScribbleTest::notefulImportTest()
   int pressureStrokes = 0;
   for(Element* s : grid->children())
     pressureStrokes += s->node->hasClass(Element::ROUND_PEN_CLASS);
-  // a filled round-pen outline, as Kaku draws a pressure pen - not a constant-width stroked path
+  // a filled round-pen outline, as Sumi draws a pressure pen - not a constant-width stroked path
   check(pressureStrokes == 4, "pressure strokes become variable-width strokes");
 
   const Dim scale = 150.0/132;
   check(fabs(grid->props.yRuling - 20*150.0/72) < 1e-6 && fabs(grid->props.xRuling - grid->props.yRuling) < 1e-6,
-      "grid paper becomes Kaku ruling at Noteful's spacing (points, not page units)");
-  check(fabs(grid->width() - 1091.3385826771655*scale) < 1e-3, "page width scaled to Kaku units");
+      "grid paper becomes Sumi ruling at Noteful's spacing (points, not page units)");
+  check(fabs(grid->width() - 1091.3385826771655*scale) < 1e-3, "page width scaled to Sumi units");
   // a stroke reaches y = 1800 on a 1543 unit page; Noteful keeps it, so the page grows
   check(grid->height() > 1800*scale, "page extended to hold ink below its edge");
   check(!grid->isCustomRuling, "paper page keeps a standard ruling");
@@ -521,7 +521,7 @@ int ScribbleTest::notefulImportTest()
 
   check(grid->outlineTitle == "Grundlagen" && grid->outlineLevel == 0, "outline entry on its page");
   check(imported->outlineTitle == "Anhang", "second outline entry on the second page");
-  // Kaku has one entry per page; the child sharing Grundlagen's page is dropped and said so
+  // Sumi has one entry per page; the child sharing Grundlagen's page is dropped and said so
   bool droppedReported = false;
   for(const std::string& warning : result.warnings)
     droppedReported = droppedReported || warning.find("Kettenregel") != std::string::npos;
@@ -555,7 +555,7 @@ int ScribbleTest::notefulArchiveTest()
     if(!ok) { ++nbad; printf("FAIL: noteful archive: %s\n", what); }
   };
   const char* tmpdir = getenv("TMPDIR") ? getenv("TMPDIR") : "/tmp";
-  FSPath base(fstring("%s/kaku-noteful-archive-%lld", tmpdir, (long long)mSecSinceEpoch()));
+  FSPath base(fstring("%s/sumi-noteful-archive-%lld", tmpdir, (long long)mSecSinceEpoch()));
   FSPath source = base.child("src"), library = base.child("lib"), zipLibrary = base.child("ziplib");
   std::string sample = sampleNotebook();
   auto writeBytes = [](const FSPath& path, const std::string& bytes) {

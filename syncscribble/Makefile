@@ -1,11 +1,11 @@
-# cross-platform C/C++ makefile for Kaku
+# cross-platform C/C++ makefile for Sumi
 # - platform-specific, project-independent stuff moved to Makefile.msvc, .ios, .unix
 # - generates files in ./Release (default) or ./Debug (with DEBUG=1 passed to make)
 # - while it is tempting to try to move generic code to a shared file, the complete make file
 #   is part of a project and should be included with it
 # useful ref: https://www.gnu.org/software/make/manual/html_node/Quick-Reference.html
 
-TARGET = Kaku
+TARGET = Sumi
 # build application.cpp first since that contains impl. for single header libraries
 SOURCES = \
   application.cpp \
@@ -161,9 +161,9 @@ LIBS += $(SDL_LIB)
 FORCECPP = ../layout/layout.obj
 
 # distribution package
-MSIFILE = kaku-$(GITREV).msi
-ZIPFILE = kaku-$(GITREV).zip
-ZIPDIR = Kaku
+MSIFILE = sumi-$(GITREV).msi
+ZIPFILE = sumi-$(GITREV).zip
+ZIPDIR = Sumi
 DISTRES = \
   ..\scribbleres\fonts\Roboto-Regular.ttf \
   ..\scribbleres\fonts\DroidSansFallback.ttf \
@@ -176,7 +176,7 @@ include Makefile.msvc
 else ifneq ($(MACOS),)
 # pass MACOS=1 to make to force macOS build (instead of default of iOS on mac)
 
-APPDIR = Kaku.app
+APPDIR = Sumi.app
 SOURCES += macos/macoshelper.m ../nanovgXC/glad/glad.c
 INCSYS += ../SDL/include
 DEFS += SCRIBBLE_TEST_PATH='"$(CURDIR)/../scribbletest"'
@@ -214,30 +214,30 @@ PLISTENV = CURRENT_PROJECT_VERSION=$(GITCOUNT) MARKETING_VERSION=$(APPVERSION) I
 
 # Signing - nothing machine-specific lives here; pass these on the command line (CI does), e.g.
 #   make IOS=1 DIST=adhoc DEBUG=0 IOS_TEAM_ID=ABCDE12345 IOS_SIGN_ID="Apple Distribution" \
-#     IOS_PROFILE=kaku.mobileprovision ipa
+#     IOS_PROFILE=sumi.mobileprovision ipa
 # IOS_TEAM_ID is the 10 character Team ID from the Membership page of the developer account.
 # IOS_SIGN_ID is anything `security find-identity -v -p codesigning` prints for the certificate.
 # IOS_PROFILE must be issued for IOS_BUNDLE_ID: a development profile for DIST=0, an ad hoc (or
 # App Store) one otherwise.  With IOS_SIGN_ID empty the app is built unsigned - to check that the
 # build works, or to be signed later by a sideloading tool.
-IOS_BUNDLE_ID ?= app.kakuink.kaku
+IOS_BUNDLE_ID ?= de.gipflig.sumi
 IOS_TEAM_ID ?=
 IOS_SIGN_ID ?=
 IOS_PROFILE ?=
-# entitlements are generated from ios/Kaku.app.xcent with the team and bundle id filled in
-XCENT = ios/Kaku.app.xcent
+# entitlements are generated from ios/Sumi.app.xcent with the team and bundle id filled in
+XCENT = ios/Sumi.app.xcent
 PLISTENV += PRODUCT_BUNDLE_IDENTIFIER=$(IOS_BUNDLE_ID) TEAM_ID=$(IOS_TEAM_ID)
 
 DIST ?= 0
 ifeq ($(DIST), 0)
-  APPDIR = Kaku.app
+  APPDIR = Sumi.app
   # lets a debugger attach; only a development profile allows it
   PLISTENV += GET_TASK_ALLOW=true
 else
   ifneq ($(DEBUG), 0)
     $(error DIST build requires DEBUG=0)
   endif
-  APPDIR = Payload/Kaku.app
+  APPDIR = Payload/Sumi.app
   PLISTENV += GET_TASK_ALLOW=false
 endif
 
@@ -363,8 +363,8 @@ DISTRES = \
   ../scribbleres/fonts/Roboto-Regular.ttf \
   ../scribbleres/fonts/DroidSansFallback.ttf \
   ../scribbleres/Intro.svg \
-  ../scribbleres/linux/Kaku.desktop \
-  ../scribbleres/linux/Kaku144x144.png \
+  ../scribbleres/linux/Sumi.desktop \
+  ../scribbleres/linux/Sumi144x144.png \
   ../scribbleres/linux/setup.sh \
   ../scribbleres/linux/INSTALL
 

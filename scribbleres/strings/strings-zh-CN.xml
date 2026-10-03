@@ -246,7 +246,7 @@
 
 
   <!-- old translations -->
-  <string name="app_name">Kaku</string> <!-- 書く, "to write" -->
+  <string name="app_name">Sumi</string> <!-- 墨, "ink" -->
   <string name="no_notes">无文档</string>
   <string name="menu_viewasgrid">网格视图</string>
   <string name="menu_viewaslist">列表视图</string>
@@ -383,7 +383,7 @@
 
     <!-- About dialog -->
   <string name="about_title">关于</string>
-  <string name="about_summary">关于 Kaku</string>
+  <string name="about_summary">关于 Sumi</string>
   <string name="about_text">创建人：Stylus Labs\n 网址：http://www.styluslabs.com\n 电子邮件：support@styluslabs.com\n\nWrite 是手写文字处理器。\n 也适用于 Windows 平板计算机。</string>
 
 </resources>

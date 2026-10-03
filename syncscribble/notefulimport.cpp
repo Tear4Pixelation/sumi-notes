@@ -17,7 +17,7 @@
 #include "ulib/fileutil.h"
 #include "miniz/miniz_zip.h"
 
-// Kaku units per Noteful unit: Kaku works at 150 units per inch, Noteful at 132
+// Sumi units per Noteful unit: Sumi works at 150 units per inch, Noteful at 132
 static constexpr Dim NOTEFUL_SCALE = 150.0/Noteful::UNITS_PER_INCH;
 // Noteful's paper templates draw their lines in this color (read from the templates' own PDFs)
 static const Color NOTEFUL_RULE_COLOR(0x9a, 0x98, 0x88);
@@ -35,14 +35,14 @@ bool NotefulImport::isNotefulFile(const char* filename)
   return ext == "noteful";
 }
 
-static Point toKaku(const Noteful::Point& point) { return Point(point.x*NOTEFUL_SCALE, point.y*NOTEFUL_SCALE); }
+static Point toSumi(const Noteful::Point& point) { return Point(point.x*NOTEFUL_SCALE, point.y*NOTEFUL_SCALE); }
 
 static Color toColor(const double rgba[4])
 {
   return Color::fromFloat(float(rgba[0]), float(rgba[1]), float(rgba[2]), float(rgba[3]));
 }
 
-// A pressure pen's stroke, built by Kaku's own stroke builder so it is an ordinary variable-width
+// A pressure pen's stroke, built by Sumi's own stroke builder so it is an ordinary variable-width
 //  stroke - erasable and restyleable like one drawn here.  Linear pressure (prParam 1, wRatio 1) makes
 //  width = pen width * pressure; the pen gets Noteful's width at the stroke's peak pressure and each
 //  point its share of that peak, so widths follow Noteful's pressure values proportionally.
@@ -56,11 +56,11 @@ static Element* pressureStrokeElement(const Noteful::Stroke& stroke)
       ScribblePen::WIDTH_PR | ScribblePen::TIP_ROUND, 1, 1);
   std::unique_ptr<StrokeBuilder> builder(StrokeBuilder::create(pen));
   for(size_t ii = 0; ii < stroke.points.size(); ++ii) {
-    Point pos = toKaku(stroke.points[ii]);
+    Point pos = toSumi(stroke.points[ii]);
     builder->addInputPoint(StrokePoint(pos.x, pos.y, std::max(MIN_PRESSURE, Dim(stroke.pressure[ii]/peak))));
   }
   if(stroke.points.size() == 1) {
-    Point pos = toKaku(stroke.points.front());
+    Point pos = toSumi(stroke.points.front());
     builder->addInputPoint(StrokePoint(pos.x, pos.y, std::max(MIN_PRESSURE, Dim(stroke.pressure[0]/peak))));
   }
   return builder->finish();
@@ -72,11 +72,11 @@ static Element* strokeElement(const Noteful::Stroke& stroke)
     return pressureStrokeElement(stroke);
   SvgPath* svgPath = new SvgPath();
   Path2D* path = svgPath->path();
-  path->moveTo(toKaku(stroke.points.front()));
+  path->moveTo(toSumi(stroke.points.front()));
   for(size_t ii = 1; ii < stroke.points.size(); ++ii)
-    path->lineTo(toKaku(stroke.points[ii]));
+    path->lineTo(toSumi(stroke.points[ii]));
   if(stroke.points.size() == 1)
-    path->lineTo(toKaku(stroke.points.front()));  // a dot; round caps draw it
+    path->lineTo(toSumi(stroke.points.front()));  // a dot; round caps draw it
   // the same attributes StrokedStrokeBuilder gives a round-tipped pen stroke
   svgPath->setAttr<color_t>("fill", Color::NONE);
   setSvgStrokeColor(svgPath, toColor(stroke.rgba));
@@ -92,7 +92,7 @@ static Element* shapeElement(const Noteful::Shape& shape)
   SvgPath* svgPath = new SvgPath();
   Path2D* path = svgPath->path();
   size_t next = 0;
-  auto pt = [&]() { return toKaku(shape.points[next++]); };
+  auto pt = [&]() { return toSumi(shape.points[next++]); };
   // notefulfile.cpp only passes shapes whose ops and points agree
   for(int op : shape.ops) {
     switch(op) {
@@ -105,13 +105,13 @@ static Element* shapeElement(const Noteful::Shape& shape)
   }
   svgPath->setAttr<color_t>("fill", Color::NONE);
   // Noteful stores a highlighter's colour opaque and makes it translucent when drawing; imported at
-  //  the alpha of Kaku's own marker (ScribbleMode's highlightPen), or it paints over the words it marks
+  //  the alpha of Sumi's own marker (ScribbleMode's highlightPen), or it paints over the words it marks
   double rgba[4] = {shape.rgba[0], shape.rgba[1], shape.rgba[2], shape.rgba[3]*(shape.highlighter ? 0.5 : 1)};
   setSvgStrokeColor(svgPath, toColor(rgba));
   svgPath->setAttr<float>("stroke-width", float(shape.width*NOTEFUL_SCALE));
   svgPath->setAttr<int>("stroke-linecap", Painter::RoundCap);
   svgPath->setAttr<int>("stroke-linejoin", Painter::RoundJoin);
-  // no pen class, as for Kaku's own shapes: a pen class would have toPenPoints() reinterpret the path
+  // no pen class, as for Sumi's own shapes: a pen class would have toPenPoints() reinterpret the path
   //  as variable-width pen geometry
   return new Element(svgPath);
 }
@@ -143,7 +143,7 @@ static Element* imageElement(const Noteful::ImageItem& item, const Image& full)
   Rect bounds = Rect::ltwh(item.x*NOTEFUL_SCALE, item.y*NOTEFUL_SCALE,
       item.width*NOTEFUL_SCALE, item.height*NOTEFUL_SCALE);
   SvgImage* image = new SvgImage(std::move(cropped), bounds);
-  // rotated about the frame centre, as shapes are; a node transform is how Kaku rotates an image too
+  // rotated about the frame centre, as shapes are; a node transform is how Sumi rotates an image too
   if(item.rotation != 0)
     image->setTransform(Transform2D::rotating(item.rotation, bounds.center()));
   return new Element(image);
@@ -159,7 +159,7 @@ static Page* createPage(const Noteful::Notebook& notebook, const Noteful::Page& 
   Color paper = src.hasPaperColor ? Color::fromRgb(src.paperColor) : Color(Color::WHITE);
 
   if(src.isPaper) {
-    // Kaku's own ruling, so it stays paper rather than a picture of paper.  Noteful's spacing is in points.
+    // Sumi's own ruling, so it stays paper rather than a picture of paper.  Noteful's spacing is in points.
     Dim pitch = src.lineHeight*Noteful::UNITS_PER_POINT*NOTEFUL_SCALE;
     PageProperties props(width, height, src.lineType == 2 ? pitch : 0, pitch, 0, paper, NOTEFUL_RULE_COLOR);
     return new Page(props);
@@ -234,7 +234,7 @@ static int importParsed(Document* doc, const Noteful::Notebook& notebook, const 
       layerIds[layer.id] = doc->layers.addLayer(layer.name);
   }
   // an id missing from the table goes to the bottom layer rather than failing open to a phantom one
-  auto kakuLayer = [&layerIds](uint32_t id) {
+  auto sumiLayer = [&layerIds](uint32_t id) {
     auto it = layerIds.find(id);
     return it != layerIds.end() ? it->second : LayerList::DEFAULT_LAYER;
   };
@@ -252,7 +252,7 @@ static int importParsed(Document* doc, const Noteful::Notebook& notebook, const 
     ++imported;
 
     for(const Noteful::Shape& shape : src.shapes) {
-      int layer = kakuLayer(shape.layer);
+      int layer = sumiLayer(shape.layer);
       // a highlighter goes under everything on its layer, as a DRAW_UNDER marker stroke does
       page->addStroke(shapeElement(shape), shape.highlighter ? page->layerFirstElement(layer) : NULL, layer);
     }
@@ -266,17 +266,17 @@ static int importParsed(Document* doc, const Noteful::Notebook& notebook, const 
           res.warnings.push_back("image " + item.assetId + ": " + (imageError.empty() ? "missing" : imageError));
       }
       if(Element* element = it->second.isNull() ? NULL : imageElement(item, it->second))
-        page->addStroke(element, NULL, kakuLayer(item.layer));
+        page->addStroke(element, NULL, sumiLayer(item.layer));
     }
     // ink last, so it draws over shapes and images on the same layer
     for(const Noteful::Stroke& stroke : src.strokes) {
       if(!stroke.points.empty())
-        page->addStroke(strokeElement(stroke), NULL, kakuLayer(stroke.layer));
+        page->addStroke(strokeElement(stroke), NULL, sumiLayer(stroke.layer));
     }
     res.textBoxesSkipped += int(src.texts.size());
   }
 
-  // one outline entry per page in Kaku; the first (in outline order) wins
+  // one outline entry per page in Sumi; the first (in outline order) wins
   for(const Noteful::OutlineEntry& entry : notebook.outline) {
     auto it = pagesById.find(entry.pageId);
     if(it == pagesById.end())

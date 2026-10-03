@@ -1149,7 +1149,7 @@ void TagDocList::createUI()
   sidebarContent->setMargins(32, SIDEBAR_PAD_RIGHT, 12, SIDEBAR_PAD_LEFT);
   sidebar->addWidget(sidebarContent);
 
-  SvgText* titleNode = createTextNode("Kaku");
+  SvgText* titleNode = createTextNode("Sumi");
   titleNode->addClass("doclist-title");
   Widget* titleWidget = new Widget(titleNode);
   titleWidget->node->setAttribute("box-anchor", "left");

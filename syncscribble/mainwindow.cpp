@@ -1430,7 +1430,7 @@ void MainWindow::createToolBars()
         </g>)";
 
         iapButton = new Button(loadSVGFragment(iapButtonSVG));
-        iapButton->setText(_("Upgrade Kaku"));  // for i18n
+        iapButton->setText(_("Upgrade Sumi"));  // for i18n
         iapButton->onClicked = [](){ iosRequestIAP(); };  //app->openURL("https://apps.apple.com/us/app/stylus-labs-write/id1498369428"); };
         dest->addWidget(iapButton);
         addTBWidget(iapButton, Action::NormalPriority - 10);
@@ -2434,7 +2434,7 @@ void MainWindow::setupActions()
 
   // undoRedoBtn and docTitle ... how to set priority for these?
   // - maybe create a subclass of Action that is tied to a single button?
-  titleButton = createToolbutton(appIcon, "Kaku", true);
+  titleButton = createToolbutton(appIcon, "Sumi", true);
   titleButton->onClicked = SLOT(openDocument());
   menuRecent_Files = createMenu("menuRecent", "Recent Documents", tbMenuAlign, false);  //Menu::VERT_RIGHT
   // The iOS system browser has recents already (and we'd need to save secured bookmarks to open recents

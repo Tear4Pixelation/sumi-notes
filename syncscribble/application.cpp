@@ -343,7 +343,7 @@ int SDL_main(int argc, char* argv[])
 #if !PLATFORM_OSX && !PLATFORM_EMSCRIPTEN
   if(ScribbleApp::cfg->Int("glRender")) {
     // create window so we can create GL context
-    sdlWindow = SDL_CreateWindow("Kaku", winGeom[0], winGeom[1], winGeom[2], winGeom[3],
+    sdlWindow = SDL_CreateWindow("Sumi", winGeom[0], winGeom[1], winGeom[2], winGeom[3],
         winMaxFlag|SDL_WINDOW_RESIZABLE|SDL_WINDOW_OPENGL|SDL_WINDOW_ALLOW_HIGHDPI);
     if(!sdlWindow)
       PLATFORM_LOG("SDL_CreateWindow (OpenGL) failed: %s\n", SDL_GetError());
@@ -402,7 +402,7 @@ int SDL_main(int argc, char* argv[])
 #if PLATFORM_MOBILE
     SDL_GL_SetAttribute(SDL_GL_FRAMEBUFFER_SRGB_CAPABLE, 0);  // otherwise Android will convert SW renderer output!
 #endif
-    sdlWindow = SDL_CreateWindow("Kaku", winGeom[0], winGeom[1], winGeom[2], winGeom[3],
+    sdlWindow = SDL_CreateWindow("Sumi", winGeom[0], winGeom[1], winGeom[2], winGeom[3],
         winMaxFlag|SDL_WINDOW_RESIZABLE|SDL_WINDOW_ALLOW_HIGHDPI|(USE_GL_BLITTER ? SDL_WINDOW_OPENGL : 0));
 #if USE_GL_BLITTER
     // note that OpenGL loader is not needed for Mac

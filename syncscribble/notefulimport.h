@@ -1,17 +1,17 @@
 #pragma once
 
-// Noteful import: turn a Noteful notebook export (.noteful) into Kaku pages.  notefulfile.cpp does the
+// Noteful import: turn a Noteful notebook export (.noteful) into Sumi pages.  notefulfile.cpp does the
 //  decoding; this maps the result onto a Document the same way PDF import does - a finished set of
 //  ordinary pages, so undo, views and sync never see the import.
 //
-//  - Paper templates (Grid, Ruled) become Kaku's own ruling at Noteful's spacing, so the paper stays
+//  - Paper templates (Grid, Ruled) become Sumi's own ruling at Noteful's spacing, so the paper stays
 //    editable; everything else (imported PDF pages, photos, covers) becomes a background image in the
 //    rule layer, exactly as PdfImport's pages are.
 //  - Strokes, lines and curves become paths, pasted images SvgImages, each on its layer.
 //  - Ink below the page's bottom edge (Noteful keeps it) makes the page taller rather than being lost.
-//  - Outline entries go onto their pages; Kaku keeps one entry per page, so a second is dropped.
+//  - Outline entries go onto their pages; Sumi keeps one entry per page, so a second is dropped.
 //  - Tags are returned, not applied: they live in the library's TagStore, which the caller owns.
-//  - Text boxes are not imported yet (Kaku has no editable text element); they are counted.
+//  - Text boxes are not imported yet (Sumi has no editable text element); they are counted.
 
 #include <string>
 #include <vector>

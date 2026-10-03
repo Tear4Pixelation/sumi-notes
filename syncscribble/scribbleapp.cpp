@@ -45,7 +45,7 @@ Uint32 ScribbleApp::scribbleSDLEvent = 0;
 ScribbleApp::ScribbleApp(int argc, char* argv[])
 {
   // print the current version to aid investigating errors reported by users
-  PLATFORM_LOG("Kaku r" PPVALUE_TO_STRING(SCRIBBLE_REV_NUMBER) "\n");
+  PLATFORM_LOG("Sumi r" PPVALUE_TO_STRING(SCRIBBLE_REV_NUMBER) "\n");
   // seed RNG (only applies to this thread)
   srandpp(mSecSinceEpoch());
   srand(randpp());
@@ -252,7 +252,7 @@ void ScribbleApp::init()
   fileExt = cfg->String("docFileExt");
   //nameFilter = "Write Document (*" + fileExt + ")";
   // user agent string for http requests
-  httpUserAgent = std::string("Mozilla/5.0 (") + PLATFORM_NAME + ") Kaku r" + PPVALUE_TO_STRING(SCRIBBLE_REV_NUMBER);
+  httpUserAgent = std::string("Mozilla/5.0 (") + PLATFORM_NAME + ") Sumi r" + PPVALUE_TO_STRING(SCRIBBLE_REV_NUMBER);
 
   /// UI creation
 
@@ -716,7 +716,7 @@ bool ScribbleApp::sdlEventHandler(SDL_Event* event)
       if(cfg->Int("strokeCounter") > 10000 && cfg->Int("lastReviewPrompt") == 0) {
         cfg->set("lastReviewPrompt", int(mSecSinceEpoch()/1000));
         auto choice = messageBox(Question, _("Leave a review?"),
-            _("You can support the development of Kaku by leaving a review."), {_("OK"), _("Cancel")});
+            _("You can support the development of Sumi by leaving a review."), {_("OK"), _("Cancel")});
         if(choice == _("OK"))
           openURL("http://play.google.com/store/apps/details?id=com.styluslabs.writeqt");
       }
@@ -988,7 +988,7 @@ bool ScribbleApp::requestAndroidPermission()
   if(hasAndroidPermission())
     return false;  // already has permission
   auto choice = messageBox(Question, _("Storage Access"),
-      _("To open documents in shared folders, enable storage access for Kaku."), {_("OK"), _("Cancel")});
+      _("To open documents in shared folders, enable storage access for Sumi."), {_("OK"), _("Cancel")});
   if(choice != _("OK"))
     return false;
   AndroidHelper::doAction(A_REQ_PERM);
@@ -1099,7 +1099,7 @@ void ScribbleApp::dropEvent(SDL_Event* event)
           docstrm->uiDocument = NULL;
           if(doc->openDocument(strm) == Document::LOAD_OK)
             messageBox(Info, _("Document reloaded"),
-                fstring(_("%s has been reloaded due to modification outside of Kaku."),
+                fstring(_("%s has been reloaded due to modification outside of Sumi."),
                 docShortName(strm->name()).c_str()));
         }
         break;
@@ -1604,7 +1604,7 @@ void ScribbleApp::execTagDocList(bool openResult)
   if(!tagDocList)
     tagDocList = new TagDocList(tagBrowserRoot().c_str());
   if(libraryTemporary && PLATFORM_ANDROID)
-    showNotify(_("Documents are in app storage and will be deleted if Kaku is uninstalled. "
+    showNotify(_("Documents are in app storage and will be deleted if Sumi is uninstalled. "
         "Allow access to all files to keep them."), 2);
   const char* currFile = activeDoc() ? activeDoc()->fileName() : "";
   tagDocList->setup(win, currFile && currFile[0]);
@@ -1677,13 +1677,13 @@ bool ScribbleApp::isInLibrary(const std::string& filename) const
 std::string ScribbleApp::defaultLibraryBase() const
 {
 #if PLATFORM_ANDROID
-  return "/sdcard/Documents/Kaku/";
+  return "/sdcard/Documents/Sumi/";
 #elif PLATFORM_IOS
-  // the app's own Documents folder, which is also what the Files app shows as Kaku's
-  return FSPath(getenv("HOME"), "Documents/Kaku/").c_str();
+  // the app's own Documents folder, which is also what the Files app shows as Sumi's
+  return FSPath(getenv("HOME"), "Documents/Sumi/").c_str();
 #else
   std::string documentsDir = DocLibrary::userDocumentsDir();
-  return FSPath(documentsDir.empty() ? docRoot : documentsDir, "Kaku/").c_str();
+  return FSPath(documentsDir.empty() ? docRoot : documentsDir, "Sumi/").c_str();
 #endif
 }
 
@@ -1832,7 +1832,7 @@ bool ScribbleApp::relocateLibrary(const std::string& newBase)
   // an empty folder (or an existing library) is used as is; a folder with anything else in it gets a Write
   //  folder of its own inside it, the same rule a fresh install follows
   std::string newRoot = (DocLibrary::isLibraryDir(chosen) || DocLibrary::isEmptyDir(chosen) || !chosen.exists())
-      ? DocLibrary::acquire(chosen, 1) : DocLibrary::acquire(chosen.child("Kaku/"));
+      ? DocLibrary::acquire(chosen, 1) : DocLibrary::acquire(chosen.child("Sumi/"));
   if(newRoot.empty()) {
     messageBox(Warning, _("Document library"), fstring(_("%s cannot be used for the library."), newBase.c_str()));
     return false;
@@ -1882,7 +1882,7 @@ void ScribbleApp::offerLibraryMigration()
   }
   if(docs.empty())
     return;
-  auto choice = messageBox(Question, _("Document library"), fstring(_("Kaku now keeps all documents in one "
+  auto choice = messageBox(Question, _("Document library"), fstring(_("Sumi now keeps all documents in one "
       "library folder:\n%s\n\nCopy your %d existing documents there? The originals are left where they are."),
       libraryRoot.c_str(), int(docs.size())), {_("Copy"), _("Skip")});
   if(choice != _("Copy"))
@@ -2107,7 +2107,7 @@ std::string ScribbleApp::docShortName(const std::string& filename, int maxwidth)
 void ScribbleApp::setWinTitle(const std::string& filename)
 {
   const char* winTitle =
-      SCRIBBLE_DEBUG ? (" - Kaku (r" PPVALUE_TO_STRING(SCRIBBLE_REV_NUMBER) ")") : " - Kaku";
+      SCRIBBLE_DEBUG ? (" - Sumi (r" PPVALUE_TO_STRING(SCRIBBLE_REV_NUMBER) ")") : " - Sumi";
   win->setTitle((docDisplayName(filename) + winTitle).c_str());
   win->titleStr = docShortName(filename);  // storage for full title string, since button text may be elided
   win->titleButton->setText(win->titleStr.c_str());
@@ -2226,7 +2226,7 @@ bool ScribbleApp::doOpenDocument(std::string filename)
     size_t chopat = filename.rfind("_page");
     if(chopat != std::string::npos) {
       std::string htmlfile = filename.substr(0, chopat) + ".html";  // + fileExt;
-      auto choice = messageBox(Question, _("Kaku"),
+      auto choice = messageBox(Question, _("Sumi"),
           _("You are attempting to open a single page SVG file. Would you like to try opening the entire document instead?"),
           {_("Yes"), _("No")});
       if(choice == _("Yes"))
@@ -2314,7 +2314,7 @@ bool ScribbleApp::doOpenDocument(IOStream* filestrm)
     onLoadFile(activeDoc()->fileName());
     if(res == Document::LOAD_NEWERVERSION) {
       messageBox(Warning, _("Newer document"), _("This document was created with a more recent"
-          " version of Kaku. Saving with this version may result in data loss."));
+          " version of Sumi. Saving with this version may result in data loss."));
     }
     else if(res == Document::LOAD_NONWRITE) {
       return openExternalDoc();
@@ -2340,8 +2340,8 @@ bool ScribbleApp::doOpenDocument(IOStream* filestrm)
 // handle opening external SVG (vs. importExternalDoc, which handles loading external doc to Clipboard)
 bool ScribbleApp::openExternalDoc()
 {
-  auto choice = messageBox(Warning, _("Foreign document"), _("This file does not appear to be a Kaku document."
-      "  Saving with Kaku could result in data loss - you will be prompted to save a copy."),
+  auto choice = messageBox(Warning, _("Foreign document"), _("This file does not appear to be a Sumi document."
+      "  Saving with Sumi could result in data loss - you will be prompted to save a copy."),
       {_("Use as background"), _("Ungroup all"), _("No change")});
   if(choice == _("Ungroup all")) {
     for(Page* page : activeDoc()->document->pages) {
@@ -2439,7 +2439,7 @@ bool ScribbleApp::checkExtModified(ScribbleDoc* doc)
       // don't bother displaying message if doc list is on top
       if(documentList == NULL || !documentList->isVisible()) {
         messageBox(Info, _("Document reloaded"),
-            fstring(_("%s has been reloaded due to modification outside of Kaku."), docShortName(filename).c_str()));
+            fstring(_("%s has been reloaded due to modification outside of Sumi."), docShortName(filename).c_str()));
       }
       return true;
     }
@@ -2448,14 +2448,14 @@ bool ScribbleApp::checkExtModified(ScribbleDoc* doc)
   // if we can't display a message box, just save to new file
   if(QGuiApplication::applicationState() == Qt::ApplicationSuspended) {
     doSaveAs();
-    QMessageBox::information(this, "Kaku",
-        "Document was saved to new file because original was modified outside Kaku.");
+    QMessageBox::information(this, "Sumi",
+        "Document was saved to new file because original was modified outside Sumi.");
     return true;
   }
 #endif
   // the bad case: conflict between local and disk versions
   auto choice = messageBox(Warning, _("Save conflict"),
-      fstring(_("%s has been modified outside Kaku.\nWhat would you like to do?"), docDisplayName(filename).c_str()),
+      fstring(_("%s has been modified outside Sumi.\nWhat would you like to do?"), docDisplayName(filename).c_str()),
       {_("Keep Both"), _("Discard Other"), _("Discard Current")});
   if(choice == _("Discard Other") && doc->saveDocument(filename.c_str())) {}
   else if(choice == _("Discard Current") && doc->openDocument(filename.c_str()) == Document::LOAD_OK) {}
@@ -2612,7 +2612,7 @@ void ScribbleApp::openRecentFile(const std::string& filename)
 void ScribbleApp::importPDF()
 {
   if(!PdfImport::isAvailable()) {
-    messageBox(Warning, _("Import PDF"), _("This build of Kaku does not include PDF support."));
+    messageBox(Warning, _("Import PDF"), _("This build of Sumi does not include PDF support."));
     return;
   }
   if(!maybeSave())
@@ -2643,7 +2643,7 @@ bool ScribbleApp::doImportPdf(const std::string& pdfPath)
 std::string ScribbleApp::importPdfToDocFile(const std::string& pdfPath, std::string* errorOut)
 {
   if(!PdfImport::isAvailable()) {
-    if(errorOut) *errorOut = _("This build of Kaku does not include PDF support.");
+    if(errorOut) *errorOut = _("This build of Sumi does not include PDF support.");
     return std::string();
   }
   FSPath pdfinfo(pdfPath);
@@ -2696,7 +2696,7 @@ std::string ScribbleApp::importFromBrowser(bool noteful)
 {
   if(!noteful) {
     if(!PdfImport::isAvailable()) {
-      messageBox(Warning, _("Import PDF"), _("This build of Kaku does not include PDF support."));
+      messageBox(Warning, _("Import PDF"), _("This build of Sumi does not include PDF support."));
       return "";
     }
     std::string filename = execDocumentList(DocumentList::CHOOSE_DOC, "pdf");
@@ -2956,7 +2956,7 @@ void ScribbleApp::showThemePicker()
 void ScribbleApp::openPreferences()
 {
   if(disableConfigSave)
-    messageBox(Warning, _("Kaku"), _("Preferences will not be saved because some were set from command line."));
+    messageBox(Warning, _("Sumi"), _("Preferences will not be saved because some were set from command line."));
   //showSelToolbar(Point(NaN, NaN)); -- no longer possible to open prefs w/o sel toolbar being closed
   //ConfigDialog dialog(cfg);
   //int res = execDialog(&dialog);  // blocking
@@ -3021,16 +3021,16 @@ void ScribbleApp::about()
   static const int maint = ver % 100;
   static const int minor = (ver/100) % 100;
   static const int major = (ver/10000) % 100;
-  // Kaku is a modified version of Write; the AGPL (section 5) requires saying so and keeping the credit
-  messageBox(Info, _("About Kaku"),
-      //fstring("Kaku v%d.%d.%d\nBuild ID: ", major, minor, maint) + PPVALUE_TO_STRING(SCRIBBLE_REV_NUMBER)
-      fstring("Kaku %d\nBuild ID: ", major) + PPVALUE_TO_STRING(SCRIBBLE_REV_NUMBER)
+  // Sumi is a modified version of Write; the AGPL (section 5) requires saying so and keeping the credit
+  messageBox(Info, _("About Sumi"),
+      //fstring("Sumi v%d.%d.%d\nBuild ID: ", major, minor, maint) + PPVALUE_TO_STRING(SCRIBBLE_REV_NUMBER)
+      fstring("Sumi %d\nBuild ID: ", major) + PPVALUE_TO_STRING(SCRIBBLE_REV_NUMBER)
       + "; " + __DATE__ + (IS_DEBUG ? " DEBUG" : "") +
       "\nBased on Write by Stylus Labs\nhttp://www.styluslabs.com"
       "\nFree software under the GNU Affero General Public License v3"
-      "\n\nKaku is a word processor for handwriting."
+      "\n\nSumi is a word processor for handwriting."
 #if PLATFORM_IOS
-      "\nPrivacy: Kaku does not collect any personal data."
+      "\nPrivacy: Sumi does not collect any personal data."
 #else
       "\nAvailable for iOS, Android, Windows, Mac, and Linux."
 #endif
@@ -3169,11 +3169,11 @@ void ScribbleApp::updateInfoReceived(char* updateData)
     cfg->set("lastUpdateCheck", int(mSecSinceEpoch()/1000));
     // see if a new version is available
     if(node.child("sl:version").text().as_int(0) <= SCRIBBLE_VERSION_SERIAL)
-      updateNotify(_("You have the latest version of Kaku."), 0);
+      updateNotify(_("You have the latest version of Sumi."), 0);
     else {
       // no automatic update for now - just prompt to go to download page
-      auto choice = messageBox(Question, _("Kaku Update"),
-          _("A new version of Kaku is available.  Would you like to open the download page?"), {_("Yes"), _("No")});
+      auto choice = messageBox(Question, _("Sumi Update"),
+          _("A new version of Sumi is available.  Would you like to open the download page?"), {_("Yes"), _("No")});
       if(choice == _("Yes"))
         openURL("http://www.styluslabs.com/download/");
     }
@@ -3538,7 +3538,7 @@ void MainWindow::updateDownloaded()
     QFile file(updaterpath);
     if(!file.open(QIODevice::WriteOnly)) {
       updateNotify("Error saving update installer to " + updaterpath
-            + ". You may need to run Kaku as an administrator to perform update.");
+            + ". You may need to run Sumi as an administrator to perform update.");
       goto cleanup;
     }
     file.write(reply->readAll());
@@ -3548,7 +3548,7 @@ void MainWindow::updateDownloaded()
     // ask user if they want to install update
     pugi::xml_node node = updateInfo.child("rss").child("channel").child("item");
     QMessageBox msgbox(QMessageBox::Question, tr("Update Available"),
-        tr("A new version of Kaku is available, would you like to update now?\n\n")
+        tr("A new version of Sumi is available, would you like to update now?\n\n")
         + node.child_value("description"));
     QPushButton* updatebtn = msgbox.addButton(tr("Update Now"), QMessageBox::AcceptRole);
     msgbox.addButton(tr("Skip Update"), QMessageBox::RejectRole);
