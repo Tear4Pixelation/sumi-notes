@@ -49,6 +49,13 @@ public:
   int sortRuled();
   void insertSpace(Dim dx, int dline);
   void reflowStrokes(Dim dx, int dline, Dim minWordSep);
+  // measured from the ink as it was before the gesture, on the first reflowStrokes() call: where the
+  //  paragraph's text starts (MAX_DIM if unknown) and the writer's gap between words (0 if unknown); with
+  //  skippedLineFrame() these are per text line, so "the line above" is the previous text line
+  bool reflowMeasured = false;
+  Dim reflowIndent = MAX_DIM;
+  Dim reflowWordGap = 0;
+  void measureReflowInk(Dim minWordGap);
   int count() const { return int(strokes.size()); }
   void recalcTimeRange();
   void invalidateBBox() { bbox = Rect(); }
@@ -87,6 +94,9 @@ public:
 
   StrokeDrawType m_drawType;
 };
+
+// for text written on every second line: a frame whose lines are the line at pos and every second one from it
+RulingFrame skippedLineFrame(const RulingFrame& frame, Point pos);
 
 // clipboard owns its strokes, unlike Selection
 class Clipboard
@@ -155,6 +165,7 @@ private:
 class RectSelector : public Selector
 {
 public:
+  // RECTSEL_BBOX takes what lies entirely inside the rect, RECTSEL_ANY what it touches
   enum {RECTSEL_BBOX, RECTSEL_COM, RECTSEL_ANY} rectSelMode = RECTSEL_BBOX;
   bool enableCrop = false;
 
@@ -233,18 +244,24 @@ public:
   void transform(const Transform2D& tf) override { bgDirty = true; }
   int shapeHandleHit(Point pos, bool touch) override;
   Point rotHandleHit(Point pos, bool touch) override;
-  Point scaleHandleHit(Point pos, bool touch) override;
+  // the size handle is a shape handle (resizeHandleIndex()), not a scale handle: see resized()
+  Point scaleHandleHit(Point pos, bool touch) override { return Point(NaN, NaN); }
 
   int originHandleIndex() const { return int(region->regionParams().corners.size()); }
+  int resizeHandleIndex() const { return originHandleIndex() + 1; }
+  // the outline of `start` stretched about its top-left corner (in its own frame) by a size handle drag
+  //  from startPos to pos; the ruling and the ink stay where they are
+  RulingRegionParams resized(const RulingRegionParams& start, Point startPos, Point pos) const;
   // the ink a region carries: its bbox centre is inside the outline
   static bool carries(const RulingRegionParams& params, Element* s);
+
+  Point scaleHandlePos() const;
 
   Element* region;
   static Dim HANDLE_SIZE;
 
 private:
   Point rotHandlePos() const;
-  Point scaleHandlePos() const;
   Dim mZoom;
 };
 
@@ -314,6 +331,9 @@ private:
 class LassoSelector : public Selector
 {
 public:
+  // take everything the lasso touches rather than only what it encloses
+  bool touching = false;
+
   LassoSelector(Selection* sel, Dim simplify = 0);
   //void selectRect(Dim x0, Dim y0, Dim x1, Dim y1);
   void addPoint(Dim x, Dim y);

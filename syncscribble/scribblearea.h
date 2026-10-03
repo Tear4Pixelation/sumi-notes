@@ -3,6 +3,7 @@
 #include "scribbleview.h"
 #include "document.h"
 #include "selection.h"
+#include "nightmode.h"
 
 struct Timer;
 
@@ -60,7 +61,6 @@ public:
   void setSelProperties(const StrokeProperties* props, const char* target = NULL,
       Element* bkmktarget = NULL, const char* idstr = NULL, bool forcenormal = false);
   void insertImage(Image image); //, bool lossy = false);
-
   // Screenshot (docs/agent/screenshot.md): the area the last selection gesture covered stays marked,
   //  dashed, until the selection is cleared - even when the gesture caught no ink
   bool hasShotRegion() const { return !shotRegion.empty(); }
@@ -68,6 +68,7 @@ public:
   void screenshotSelection();
   void captureScreenshot();
   void dirtyShotRegion();
+
   // some of these need to be made private
   DocPosition getPos() const;
   void doGotoPos(int pagenum, Point pos, bool exact = true);
@@ -96,7 +97,8 @@ public:
   bool hasSelection() const { return currSelection != NULL; }
   const Selection* selection() const { return currSelection; }
   void setStrokeProperties(const StrokeProperties& props, bool undoable = true);
-  ScribblePen getPenForSelection() const;
+  // dashStyle, if given, receives the selection's ScribblePen::DASH_* (DASH_MIXED if it has several)
+  ScribblePen getPenForSelection(int* dashStyle = NULL) const;
   // accept external selection
   virtual bool selectionDropped(Selection* clip, Point globalPos, Point offset, bool replaceids = false);
   // for file dropped from OS
@@ -190,6 +192,8 @@ protected:
   void drawWatermark(Painter* painter, Page* page, const Rect& dirty);  // for iOS IAP
   void drawImage(Painter* imgpaint, const Rect& dirty) override;
   void drawScreen(Painter* painter, const Rect& dirty) override;
+  const ColorMap* viewColorMap() override;
+  NightColorMap nightMap;
 
   int currMode;
   Point prevPos;
@@ -279,7 +283,30 @@ public:
   Rect globalViewRect() const;
   // create a region over `r` on the current page, with the page's ruling, and select it
   Element* addRulingRegion(const Rect& r);
+
+  // Page tags (docs/agent/page-tags.md).  Tags picked in the toolbar's tag popup ride on the pointer until
+  //  a press puts them on the page under it (one undo step); Esc drops them.  `tags` is {id, name}.
+  void startTagPlacement(const std::vector<std::pair<std::string, std::string>>& tags);
+  void cancelTagPlacement();
+  bool placingTags() const { return !pendingTags.empty(); }
+  size_t numPendingTags() const { return pendingTags.size(); }
+  bool capturesPointer() const override { return placingTags(); }
+  // scroll to the tags with these ids on the current page and pulse them, to show where they are (a page
+  //  card was opened)
+  void flashPageTags(const std::vector<std::string>& tagIds);
 protected:
+  // the tags being placed: not in any page, painted by drawScreen with their anchor at pendingTagsPos
+  std::vector<Element*> pendingTags;
+  Point pendingTagsAnchor;  // the point of the stack that sits under the pointer, in the stack's own coords
+  Point pendingTagsPos;  // the pointer, in the current page's coordinates
+  bool placingPressed = false;
+  Rect pendingTagsRect() const;  // current page coordinates
+  void movePendingTags(Point pos);
+  void placePendingTags(bool select);
+  std::vector<Rect> flashRects;  // page coordinates on flashPageNum
+  int flashPageNum = -1;
+  int flashTicks = 0;  // frames left of the pulse animation, counting down
+  Timer* flashTimer = NULL;
   RulingRegionParams regionHandleStart;
   Point regionHandleStartPos;
   // the region under construction by the region tool (a drag, like the box shape)
@@ -359,4 +386,6 @@ public:
   static const Color BACKGROUND_COLOR_DARK;
   static const Color BACKGROUND_COLOR_LIGHT;
   static Color BACKGROUND_COLOR;
+  // the canvas's night mode map, or NULL - for UI that shows document colors (pen swatches)
+  const ColorMap* nightColorMap() { return viewColorMap(); }
 };

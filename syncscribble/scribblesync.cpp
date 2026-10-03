@@ -583,9 +583,11 @@ void ScribbleSync::processItem(pugi::xml_node& node)
     }
   }
   else if(nodename == "strokechanged") {
-    if(mpage)
-      item = new StrokeChangedItem(mstroke, mpage, StrokeProperties(
-          Color::fromArgb(node.attribute("color").as_uint()), node.attribute("width").as_float()));
+    if(mpage) {
+      StrokeProperties props(Color::fromArgb(node.attribute("color").as_uint()), node.attribute("width").as_float());
+      props.dashArray = node.attribute("dash").as_string();  // absent from an older peer: left alone
+      item = new StrokeChangedItem(mstroke, mpage, props);
+    }
   }
   else if(nodename == "shapechanged") {
     // ShapeChangedItem (spec 7.5)

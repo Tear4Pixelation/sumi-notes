@@ -3,6 +3,8 @@
 #include "ulib/stringutil.h"
 
 #include <cstdio>
+#include <cstring>
+#include <cctype>
 #include <algorithm>
 
 TagStore::TagStore(std::string _indexPath) : indexPath(std::move(_indexPath)) {}
@@ -30,6 +32,76 @@ std::vector<std::string> TagStore::parseTagList(const char* s)
 std::string TagStore::formatTagList(const std::vector<std::string>& tagIds)
 {
   return joinStr(tagIds, ",");
+}
+
+// split keeping empty fields - an untitled page's record ends in an empty title
+static std::vector<std::string> splitFields(const std::string& s, char sep)
+{
+  std::vector<std::string> fields;
+  size_t start = 0;
+  for(size_t end; (end = s.find(sep, start)) != std::string::npos; start = end + 1)
+    fields.push_back(s.substr(start, end - start));
+  fields.push_back(s.substr(start));
+  return fields;
+}
+
+static std::string percentEncode(const std::string& s)
+{
+  std::string out;
+  for(unsigned char c : s) {
+    if(c < 0x20 || strchr("%|;,&<>\"'\t", c))
+      out += fstring("%%%02X", c);
+    else
+      out += char(c);
+  }
+  return out;
+}
+
+static std::string percentDecode(const std::string& s)
+{
+  std::string out;
+  for(size_t ii = 0; ii < s.size(); ++ii) {
+    if(s[ii] == '%' && ii + 2 < s.size() && isxdigit((unsigned char)s[ii+1]) && isxdigit((unsigned char)s[ii+2])) {
+      out += char(strtol(s.substr(ii + 1, 2).c_str(), NULL, 16));
+      ii += 2;
+    }
+    else
+      out += s[ii];
+  }
+  return out;
+}
+
+std::vector<TagStore::PageTags> TagStore::parsePageTags(const char* s)
+{
+  std::vector<PageTags> pages;
+  if(!s || !s[0])
+    return pages;
+  for(const std::string& record : splitFields(s, ';')) {
+    std::vector<std::string> fields = splitFields(record, '|');
+    if(fields.size() < 2 || fields[0].empty() || !isdigit((unsigned char)fields[0][0]))
+      continue;
+    PageTags entry;
+    entry.page = atoi(fields[0].c_str());
+    entry.tagIds = parseTagList(fields[1].c_str());
+    if(fields.size() > 2)
+      entry.title = percentDecode(fields[2]);
+    if(!entry.tagIds.empty())
+      pages.push_back(entry);
+  }
+  return pages;
+}
+
+std::string TagStore::formatPageTags(const std::vector<PageTags>& pages)
+{
+  std::string out;
+  for(const PageTags& entry : pages) {
+    if(entry.tagIds.empty())
+      continue;
+    if(!out.empty())
+      out += ';';
+    out += fstring("%d|%s|%s", entry.page, formatTagList(entry.tagIds).c_str(), percentEncode(entry.title).c_str());
+  }
+  return out;
 }
 
 std::string TagStore::addTag(const std::string& name, const std::string& parentId)
@@ -122,18 +194,22 @@ void TagStore::reparentTag(const std::string& id, const std::string& newParentId
   siblings->insert(after == siblings->end() ? siblings->end() : after + 1, id);
 }
 
-void TagStore::setDocTags(const std::string& relPath, time_t mtime, const std::vector<std::string>& tagIds)
+void TagStore::setDocTags(const std::string& relPath, time_t mtime, const std::vector<std::string>& tagIds,
+    const std::string& pageTags)
 {
-  docCache[relPath] = DocEntry{mtime, tagIds};
+  docCache[relPath] = DocEntry{mtime, tagIds, pageTags, true};
 }
 
-bool TagStore::cachedDocTags(const std::string& relPath, time_t mtime, std::vector<std::string>* outTagIds) const
+bool TagStore::cachedDocTags(const std::string& relPath, time_t mtime, std::vector<std::string>* outTagIds,
+    std::string* outPageTags) const
 {
   auto it = docCache.find(relPath);
-  if(it == docCache.end() || it->second.mtime != mtime)
+  if(it == docCache.end() || it->second.mtime != mtime || !it->second.pageTagsKnown)
     return false;
   if(outTagIds)
     *outTagIds = it->second.tagIds;
+  if(outPageTags)
+    *outPageTags = it->second.pageTags;
   return true;
 }
 
@@ -144,7 +220,8 @@ void TagStore::removeDoc(const std::string& relPath)
 
 // Simple tab-separated line format, one record per line:
 //   TAG\t<id>\t<parentId>\t<name>
-//   DOC\t<relPath>\t<mtime>\t<comma-separated tag ids>
+//   DOC\t<relPath>\t<mtime>\t<comma-separated tag ids>\t<page tags, as formatPageTags()>
+// A DOC line without the fifth field was written before page tags existed; its document is reread.
 // Tags are written before docs, and in an order where a parent always precedes children that
 // reference it, so a single top-to-bottom pass can link everything without a second pass.
 bool TagStore::load()
@@ -161,7 +238,9 @@ bool TagStore::load()
   for(const std::string& rawLine : splitStr<std::vector>(contents.c_str(), '\n')) {
     if(rawLine.empty())
       continue;
-    std::vector<std::string> fields = splitStr<std::vector>(rawLine.c_str(), '\t');
+    // keeps trailing empty fields: getline-based splitStr drops them, which made every untagged
+    //  document's DOC line look short and so be reread from its file on every refresh
+    std::vector<std::string> fields = splitFields(rawLine, '\t');
     if(fields.empty())
       continue;
     if(fields[0] == "TAG" && fields.size() >= 4) {
@@ -183,6 +262,9 @@ bool TagStore::load()
       DocEntry entry;
       entry.mtime = strtoll(fields[2].c_str(), nullptr, 10);
       entry.tagIds = parseTagList(fields[3].c_str());
+      entry.pageTagsKnown = fields.size() >= 5;
+      if(entry.pageTagsKnown)
+        entry.pageTags = fields[4];
       docCache[fields[1]] = entry;
     }
   }
@@ -209,8 +291,8 @@ bool TagStore::save() const
       stack.push_back(*childIt);
   }
   for(const auto& pair : docCache) {
-    fprintf(f, "DOC\t%s\t%lld\t%s\n", pair.first.c_str(),
-        (long long)pair.second.mtime, formatTagList(pair.second.tagIds).c_str());
+    fprintf(f, "DOC\t%s\t%lld\t%s\t%s\n", pair.first.c_str(),
+        (long long)pair.second.mtime, formatTagList(pair.second.tagIds).c_str(), pair.second.pageTags.c_str());
   }
   fclose(f);
   return true;

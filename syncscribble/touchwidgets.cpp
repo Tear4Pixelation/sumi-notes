@@ -23,6 +23,7 @@ static void drawCheckerboard(Painter* p, Dim w, Dim h, int nrows, Color fill)
 }
 
 Color PenPreview::bgColor(Color::WHITE);
+std::function<const ColorMap*()> PenPreview::colorMap;
 
 PenPreview::PenPreview() : Widget(new SvgCustomNode), mBounds(Rect::wh(200, 70)) //, penNum(n)  //int n
 {
@@ -47,6 +48,8 @@ void PenPreview::draw(SvgPainter* svgp) const
 {
   const ScribblePen* pen = &mPen;
   Painter* p = svgp->p;
+  const ColorMap* prevMap = p->colorMap();
+  p->setColorMap(colorMap ? colorMap() : NULL);
   int w = mBounds.width() - 4;
   int h = mBounds.height() - 4;
   p->translate(2, 2);
@@ -69,6 +72,7 @@ void PenPreview::draw(SvgPainter* svgp) const
     t += 100 - 60*a;
   }
   SvgPainter(p).drawNode(sb->getElement()->node);
+  p->setColorMap(prevMap);
 }
 
 // undo timeline

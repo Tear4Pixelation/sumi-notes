@@ -5,8 +5,11 @@
 #include "scribbledoc.h"
 #include "document.h"
 #include "scribbleconfig.h"
+#include "pdfimport.h"
 #include "ulib/stringutil.h"
 #include <algorithm>
+#include <codecvt>
+#include <locale>
 
 TagNameDialog::TagNameDialog(const char* title, const char* initialName) : PopupDialog(createPopupDialogNode())
 {
@@ -30,9 +33,20 @@ static const char* tagDocListWindowSVG = R"#(
 </svg>
 )#";
 
-// Pixel values throughout createUI() (sidebar width 367, padding 32/24/12/24, row height 50, icon
+// Pixel values throughout createUI() (sidebar width 367 - see SIDEBAR_WIDTH below - padding 32/24/12/24, row height 50, icon
 // size 24, FAB diameters 67/90, ...) are taken directly off the Penpot "Screen" board, which is the
 // design's primary reference (COLORS/CLAUDE.md convention: match the design file, don't eyeball it).
+// Sidebar geometry, shared by createUI() and elideTagRowTitle(), which derives a tag name's room from it.
+//  The design's 367 never took effect (see the sizer rect in createUI()); the sidebar was ~222, sized
+//  by its contents. 260 widens that a little. The tag list reaches TAG_LIST_BLEED_* further out on both
+//  sides than the rest of the sidebar's content (a negative margin), so the tree gets almost the whole
+//  width while the header, search box and bottom toolbar keep the design's padding. Rows indent 16 per
+//  level (was 20), for the same reason: nested tags keep room for their name and chevron.
+static constexpr int SIDEBAR_WIDTH = 260;
+static constexpr int SIDEBAR_PAD_LEFT = 24, SIDEBAR_PAD_RIGHT = 24;
+static constexpr int TAG_LIST_BLEED_LEFT = 12, TAG_LIST_BLEED_RIGHT = 18;
+static constexpr int TAG_ROW_LEFT = 0, TAG_ROW_RIGHT = 4, TAG_ROW_INDENT = 16;
+
 TagDocList::TagDocList(const char* root) : Window(createWindowNode(tagDocListWindowSVG)), tagStore("")
 {
   docRoot = root;
@@ -120,8 +134,8 @@ static void shrinkChevronButton(Button* chevron)
 
 Widget* TagDocList::createTagRow(const std::string& tagId, int depth)
 {
-  const TagNode* node = tagStore.tag(tagId);
-  if(!node)
+  const TagNode* tagNode = tagStore.tag(tagId);
+  if(!tagNode)
     return NULL;
 
   static const char* rowProtoSVG = R"(
@@ -139,15 +153,15 @@ Widget* TagDocList::createTagRow(const std::string& tagId, int depth)
 
   Button* row = new Button(proto->clone());
   row->node->addClass("tag-row");
-  row->node->setAttribute("margin", fstring("6 12 6 %d", 12 + depth*20).c_str());
-  row->selectFirst(".title")->setText(node->name.c_str());
+  row->node->setAttribute("margin", fstring("6 %d 6 %d", TAG_ROW_RIGHT, TAG_ROW_LEFT + depth*TAG_ROW_INDENT).c_str());
+  row->selectFirst(".title")->setText(tagNode->name.c_str());
   row->setChecked(activeTags.count(tagId) > 0);
 
   SvgUse* tagIcon = new SvgUse(Rect::wh(24, 24), "", SvgGui::useFile("icons/ic_tag.svg"));
   tagIcon->addClass("icon");
   row->selectFirst(".icon-container")->containerNode()->addChild(tagIcon);
 
-  if(!node->childIds.empty() && tagSearchQuery.empty()) {
+  if(!tagNode->childIds.empty() && tagSearchQuery.empty()) {
     bool expanded = expandedTags.count(tagId) > 0;
     Button* chevron = createToolbutton(
         SvgGui::useFile(expanded ? "icons/chevron_up.svg" : "icons/ic_menu_expanddown.svg"), "");
@@ -187,8 +201,8 @@ Widget* TagDocList::createTagRow(const std::string& tagId, int depth)
 
 bool TagDocList::isTagDescendant(const std::string& tagId, const std::string& ancestorId) const
 {
-  for(const TagNode* node = tagStore.tag(tagId); node && !node->parentId.empty(); node = tagStore.tag(node->parentId)) {
-    if(node->parentId == ancestorId)
+  for(const TagNode* tagNode = tagStore.tag(tagId); tagNode && !tagNode->parentId.empty(); tagNode = tagStore.tag(tagNode->parentId)) {
+    if(tagNode->parentId == ancestorId)
       return true;
   }
   return false;
@@ -198,8 +212,8 @@ bool TagDocList::isTagDescendant(const std::string& tagId, const std::string& an
 //  moving a tag in the tree changes nothing about which documents have it.
 void TagDocList::moveTagUnder(const std::string& tagId, const std::string& parentId, const std::string& afterId)
 {
-  const TagNode* node = tagStore.tag(tagId);
-  if(!node || node->parentId == parentId || tagId == parentId || isTagDescendant(parentId, tagId))
+  const TagNode* tagNode = tagStore.tag(tagId);
+  if(!tagNode || tagNode->parentId == parentId || tagId == parentId || isTagDescendant(parentId, tagId))
     return;
   tagStore.reparentTag(tagId, parentId, afterId);
   // show the tag where it went rather than folding it away under a collapsed parent
@@ -207,6 +221,65 @@ void TagDocList::moveTagUnder(const std::string& tagId, const std::string& paren
     expandedTags.insert(parentId);
   tagStore.save();
   rebuildTagTree();
+}
+
+// A long tag name would otherwise push the chevron off the sidebar's edge, leaving a parent tag that
+//  cannot be expanded. The row's width is fixed by the sidebar, so the title's share is known up front:
+//  everything else in the row is subtracted and the name is ellipsized to fit what is left. Called
+//  once the row is in the tree, since elideText() measures with the font the theme's CSS gives it.
+//  The chevron's slot is reserved on every row so names line up whether or not a tag has children.
+// Shortens text to fit maxWidth by cutting out its middle ("Semester 3...Analysis"), since tag names
+//  that share a start - "Semester 3 Linear Algebra", "Semester 3 Analysis" - differ at the end. Assumes
+//  one glyph per codepoint, as SvgPainter::elideText() does.
+static void elideTextMiddle(SvgText* textnode, real maxWidth)
+{
+  SvgDocument* root = textnode->rootDocument();
+  SvgPainter* bounder = root && root->boundsCalculator ? root->boundsCalculator : SvgDocument::sharedBoundsCalc;
+  std::string text = textnode->text();
+  textnode->addText("...");
+  std::vector<GlyphPosition> glyphs = bounder->glyphPositions(textnode);
+  textnode->clearText();
+  std::u32string codepoints = std::wstring_convert<std::codecvt_utf8<char32_t>, char32_t>().from_bytes(text);
+  size_t count = codepoints.size();
+  if(glyphs.size() != count + 3 || count == 0 || glyphs[count-1].right - glyphs[0].left <= maxWidth) {
+    textnode->addText(text.c_str());
+    return;
+  }
+  real ellipsisWidth = glyphs[count+2].right - glyphs[count].left;
+  real budget = maxWidth - ellipsisWidth;
+  // the head gets half the room, the tail whatever the head leaves
+  size_t headLen = 0;
+  while(headLen < count && glyphs[headLen].right - glyphs[0].left <= budget/2)
+    ++headLen;
+  real headWidth = headLen > 0 ? glyphs[headLen-1].right - glyphs[0].left : 0;
+  size_t tailLen = 0;
+  while(tailLen < count - headLen && glyphs[count-1].right - glyphs[count-1-tailLen].left <= budget - headWidth)
+    ++tailLen;
+  std::u32string head = codepoints.substr(0, headLen), tail = codepoints.substr(count - tailLen);
+  // a space beside the ellipsis only widens the gap it already marks
+  while(!head.empty() && head.back() == U' ') head.pop_back();
+  while(!tail.empty() && tail.front() == U' ') tail.erase(0, 1);
+  std::wstring_convert<std::codecvt_utf8<char32_t>, char32_t> converter;
+  textnode->addText((converter.to_bytes(head) + "..." + converter.to_bytes(tail)).c_str());
+}
+
+// A long tag name would otherwise push the chevron off the sidebar's edge, leaving a parent tag that
+//  cannot be expanded. The row's width is fixed by the sidebar, so the title's share is known up front:
+//  everything else in the row is subtracted and the name is shortened to fit what is left. Called
+//  once the row is in the tree, since the measurement needs the font the theme's CSS gives it.
+//  The chevron's slot is reserved on every row so names line up whether or not a tag has children.
+void TagDocList::elideTagRowTitle(Widget* row, int depth)
+{
+  SvgText* title = static_cast<SvgText*>(row->containerNode()->selectFirst(".title"));
+  if(!title)
+    return;
+  // CSS is otherwise applied lazily, at the next layout; unstyled, the title has no font to measure with
+  row->node->restyle();
+  real rowWidth = SIDEBAR_WIDTH - SIDEBAR_PAD_LEFT - SIDEBAR_PAD_RIGHT + TAG_LIST_BLEED_LEFT + TAG_LIST_BLEED_RIGHT
+      - (TAG_ROW_LEFT + depth*TAG_ROW_INDENT) - TAG_ROW_RIGHT;
+  // icon 24 + its 12 margin; chevron's 36 wide toolbutton + its 12 margin
+  real maxWidth = rowWidth - (24 + 12) - (36 + 12);
+  elideTextMiddle(title, std::max(maxWidth, real(40)));
 }
 
 void TagDocList::rebuildTagTree()
@@ -228,9 +301,10 @@ void TagDocList::rebuildTagTree()
     if(!row)
       return;
     tagTreeView->addWidget(row);
-    const TagNode* node = tagStore.tag(id);
-    if(node && expandedTags.count(id))
-      for(const std::string& childId : node->childIds)
+    elideTagRowTitle(row, depth);
+    const TagNode* tagNode = tagStore.tag(id);
+    if(tagNode && expandedTags.count(id))
+      for(const std::string& childId : tagNode->childIds)
         appendRecursive(childId, depth + 1);
   };
 
@@ -243,8 +317,10 @@ void TagDocList::rebuildTagTree()
     for(const auto& pair : tagStore.allTags()) {
       if(toLower(pair.second.name).find(query) != std::string::npos) {
         Widget* row = createTagRow(pair.first, 0);
-        if(row)
+        if(row) {
           tagTreeView->addWidget(row);
+          elideTagRowTitle(row, 0);
+        }
       }
     }
   }
@@ -252,7 +328,7 @@ void TagDocList::rebuildTagTree()
 
 std::vector<TagDocList::DocEntry> TagDocList::collectDocuments()
 {
-  std::vector<DocEntry> result;
+  std::vector<DocEntry> docs;
   std::vector<FSPath> stack = {docRoot};
   while(!stack.empty()) {
     FSPath dir = stack.back();
@@ -272,14 +348,31 @@ std::vector<TagDocList::DocEntry> TagDocList::collectDocuments()
 
       time_t mtime = (time_t)getFileMTime(info);
       std::vector<std::string> tagIds;
-      if(!tagStore.cachedDocTags(info.c_str(), mtime, &tagIds)) {
+      std::string pageTags;
+      if(!tagStore.cachedDocTags(info.c_str(), mtime, &tagIds, &pageTags)) {
         tagIds = ScribbleDoc::extractDocTags(info.c_str());
-        tagStore.setDocTags(info.c_str(), mtime, tagIds);
+        pageTags = ScribbleDoc::extractDocConfigValue(info.c_str(), "pagetags");
+        tagStore.setDocTags(info.c_str(), mtime, tagIds, pageTags);
       }
-      result.push_back({info, tagIds});
+      docs.push_back({info, tagIds, TagStore::parsePageTags(pageTags.c_str())});
     }
   }
-  return result;
+  return docs;
+}
+
+std::vector<FSPath> TagDocList::docsWithPageTag(const std::vector<std::string>& tagIds)
+{
+  std::vector<FSPath> tagged;
+  for(const DocEntry& doc : collectDocuments()) {
+    bool found = std::any_of(doc.pageTags.begin(), doc.pageTags.end(), [&](const TagStore::PageTags& page){
+      return std::any_of(page.tagIds.begin(), page.tagIds.end(), [&](const std::string& id){
+        return std::find(tagIds.begin(), tagIds.end(), id) != tagIds.end();
+      });
+    });
+    if(found)
+      tagged.push_back(doc.path);
+  }
+  return tagged;
 }
 
 static Widget* createDocRowGroup()
@@ -311,22 +404,52 @@ void TagDocList::rebuildDocGrid()
 
   std::string query = toLower(docSearchQuery);
   std::vector<DocEntry> allDocs, someDocs;
+  // a tagged page, shown as its own card beside (not instead of) its notebook
+  // matched: the page's own tags that the filter picked it for - shown blinking when it opens
+  struct PageCard { FSPath path; TagStore::PageTags page; std::vector<std::string> matched; };
+  std::vector<PageCard> allPages, somePages;
+  // A tag also matches documents carrying any of its subtags. Only here, not in the tree: selecting
+  //  a supertag does not check its subtags. So with a supertag and one of its subtags both active,
+  //  documents with that subtag satisfy both and sort above those with only a sibling subtag.
+  auto carries = [this](const std::vector<std::string>& ids, const std::string& t){
+    return std::any_of(ids.begin(), ids.end(), [&](const std::string& id){
+      return id == t || isTagDescendant(id, t);
+    });
+  };
   for(const DocEntry& doc : collectDocuments()) {
     if(!query.empty() && toLower(doc.path.baseName()).find(query) == std::string::npos)
       continue;
     if(activeTags.empty()) {
-      allDocs.push_back(doc);
+      allDocs.push_back(doc);  // pages are only listed when filtering by a tag
       continue;
     }
     size_t matched = std::count_if(activeTags.begin(), activeTags.end(), [&](const std::string& t){
-      return std::find(doc.tagIds.begin(), doc.tagIds.end(), t) != doc.tagIds.end();
+      return carries(doc.tagIds, t);
     });
-    if(matched == 0)
-      continue;
     if(matched == activeTags.size())
       allDocs.push_back(doc);
-    else
+    else if(matched > 0)
       someDocs.push_back(doc);
+
+    // A page inherits its notebook's tags, so #math + #homework finds the homework page in a math
+    //  notebook.  It is listed only for a tag of its own, though - otherwise filtering by #math would
+    //  list every tagged page of every math notebook.
+    for(const TagStore::PageTags& page : doc.pageTags) {
+      if(!std::any_of(activeTags.begin(), activeTags.end(), [&](const std::string& t){ return carries(page.tagIds, t); }))
+        continue;
+      size_t pageMatched = std::count_if(activeTags.begin(), activeTags.end(), [&](const std::string& t){
+        return carries(page.tagIds, t) || carries(doc.tagIds, t);
+      });
+      std::vector<std::string> matched;
+      for(const std::string& id : page.tagIds) {
+        if(std::any_of(activeTags.begin(), activeTags.end(), [&](const std::string& t){ return carries({id}, t); }))
+          matched.push_back(id);
+      }
+      if(pageMatched == activeTags.size())
+        allPages.push_back({doc.path, page, matched});
+      else
+        somePages.push_back({doc.path, page, matched});
+    }
   }
 
   auto addCell = [this, &iconSize, &symbolSize](Widget* group, const DocEntry& doc){
@@ -334,6 +457,7 @@ void TagDocList::rebuildDocGrid()
     item->node->addClass("doc-cell");
     item->onClicked = [this, doc](){
       selectedFile = doc.path.c_str();
+      selectedPage = -1;
       finish(EXISTING_DOC);
     };
     SvgGui::setupRightClick(item, [this, doc, item](SvgGui* gui, Widget* w, Point p){
@@ -378,20 +502,74 @@ void TagDocList::rebuildDocGrid()
     SvgPainter::elideText(textnode, itemWidth);
   };
 
+  // the page's preview, its name (the outline title, if it has one), and which notebook it is in
+  auto addPageCell = [this, &iconSize](Widget* group, const PageCard& card){
+    Button* item = new Button(gridItemProto->clone());
+    item->node->addClass("doc-cell");
+    item->node->addClass("page-cell");
+    int pagenum = card.page.page;
+    item->onClicked = [this, card, pagenum](){
+      selectedFile = card.path.c_str();
+      selectedPage = pagenum;
+      selectedPageTags = card.matched;
+      finish(EXISTING_DOC);
+    };
+
+    SvgContainerNode* container = item->selectFirst(".image-container")->containerNode();
+    real itemWidth = iconSize.width();
+    Image thumbnail = ScribbleDoc::extractPageThumbnail(card.path.c_str(), pagenum);
+    if(!thumbnail.isNull()) {
+      // the page's own proportions, fitted inside the cell a notebook's thumbnail takes
+      real scale = std::min(iconSize.width()/thumbnail.width, iconSize.height()/thumbnail.height);
+      Rect imageRect = Rect::wh(thumbnail.width*scale, thumbnail.height*scale);
+      SvgRect* spacer = new SvgRect(iconSize);
+      spacer->setAttribute("fill", "none");
+      container->addChild(spacer);
+      SvgImage* image = new SvgImage(std::move(thumbnail), imageRect);
+      image->setAttribute("box-anchor", "bottom");
+      container->addChild(image);
+    }
+    else {
+      SvgRect* spacer = new SvgRect(iconSize);
+      spacer->setAttribute("fill", "none");
+      container->addChild(spacer);
+      container->addChild(fileUseNode->clone());
+    }
+
+    group->addWidget(item);
+    std::string pageLabel = fstring(_("Page %d"), pagenum + 1);
+    std::string notebook = card.path.extension() == docFileExt ? card.path.baseName() : card.path.fileName();
+    SvgText* textnode = static_cast<SvgText*>(item->containerNode()->selectFirst(".title-text"));
+    textnode->addText(card.page.title.empty() ? pageLabel.c_str() : card.page.title.c_str());
+    SvgPainter::elideText(textnode, itemWidth);
+    SvgText* subnode = createTextNode((card.page.title.empty() ? fstring(_("in %s"), notebook.c_str())
+        : fstring(_("%s of %s"), pageLabel.c_str(), notebook.c_str())).c_str());
+    subnode->addClass("page-cell-notebook");
+    subnode->setAttribute("font-size", "12");
+    subnode->setAttribute("margin", "0 0 4 0");
+    subnode->setAttribute("opacity", "0.7");
+    textnode->parent()->asContainerNode()->addChild(subnode);
+    SvgPainter::elideText(subnode, itemWidth);
+  };
+
   Widget* allGroup = createDocRowGroup();
   docGrid->addWidget(allGroup);
   for(const DocEntry& doc : allDocs)
     addCell(allGroup, doc);
+  for(const PageCard& card : allPages)
+    addPageCell(allGroup, card);
 
   // Multi-select with 2+ tags active: documents matching every active tag are shown above this
   // separator, documents matching only some of them below it - see the header comment on
   // multiSelectMode for why this beats a strict all-or-nothing AND filter.
-  if(!someDocs.empty()) {
+  if(!someDocs.empty() || !somePages.empty()) {
     docGrid->addWidget(createHRule());
     Widget* someGroup = createDocRowGroup();
     docGrid->addWidget(someGroup);
     for(const DocEntry& doc : someDocs)
       addCell(someGroup, doc);
+    for(const PageCard& card : somePages)
+      addPageCell(someGroup, card);
   }
 }
 
@@ -497,34 +675,76 @@ void TagDocList::addTag(const std::string& parentId)
 
 void TagDocList::renameTag(const std::string& tagId)
 {
-  const TagNode* node = tagStore.tag(tagId);
-  if(!node)
+  const TagNode* tagNode = tagStore.tag(tagId);
+  if(!tagNode)
     return;
   closeAllContextPopups();
-  TagNameDialog dialog(_("Rename Tag"), node->name.c_str());
+  TagNameDialog dialog(_("Rename Tag"), tagNode->name.c_str());
   int res = Application::execDialog(&dialog);
   std::string name = dialog.getName();
   if(res != Dialog::ACCEPTED || name.empty())
     return;
   tagStore.renameTag(tagId, name);
   tagStore.save();
-  rebuildTagTree();
+  // a page's tag shows its name, so pages carrying it are relabelled; a document's own tag is shown
+  //  only from the store, so it needs nothing
+  std::vector<FSPath> tagged = docsWithPageTag({tagId});
+  for(const FSPath& path : tagged) {
+    rewriteDocument(path, [&](Document& doc, ScribbleConfig&){
+      ScribbleDoc::renamePageTagElements(&doc, tagId, name);
+    });
+  }
+  if(tagged.empty())
+    rebuildTagTree();
+  else
+    refresh();
 }
 
 // Deletion only ever touches the TagStore's tree (and its cache) -- never the tag lists a document
-// stores in its own config. That's deliberate, not an oversight: it's what makes undo trivial (the
+// stores in its own config, except to add the supertag when the user asked for that (retagDocs). That's deliberate, not an oversight: it's what makes undo trivial (the
 // document side never changes, so there's nothing to put back there) and it costs nothing, since a
 // document referencing a since-deleted tag id simply stops matching anything in the tree - the id
 // becomes inert rather than dangling. If the tag is undone, it's exactly as if it was never deleted.
-void TagDocList::deleteTagWithUndo(const std::string& tagId, bool deleteChildren)
+// Documents carrying tagId (or, with subtree, any tag below it too) and not already carrying its parent,
+//  i.e. those that would drop out of the parent's listing if the tag were deleted.
+std::vector<FSPath> TagDocList::docsWithTag(const std::string& tagId, bool subtree)
+{
+  const TagNode* tagNode = tagStore.tag(tagId);
+  std::vector<FSPath> taggedDocs;
+  if(!tagNode)
+    return taggedDocs;
+  std::string parentId = tagNode->parentId;
+  for(const DocEntry& doc : collectDocuments()) {
+    const auto& ids = doc.tagIds;
+    if(std::find(ids.begin(), ids.end(), parentId) != ids.end())
+      continue;
+    if(std::any_of(ids.begin(), ids.end(), [&](const std::string& id){
+        return id == tagId || (subtree && isTagDescendant(id, tagId)); }))
+      taggedDocs.push_back(doc.path);
+  }
+  return taggedDocs;
+}
+
+void TagDocList::deleteTagWithUndo(const std::string& tagId, bool deleteChildren,
+    const std::vector<FSPath>& retagDocs)
 {
   const TagNode* nodePtr = tagStore.tag(tagId);
   if(!nodePtr)
     return;
-  TagNode node = *nodePtr;  // copy before mutating the store
+  TagNode tagNode = *nodePtr;  // copy before mutating the store
+
+  // the one case where deletion does write documents: they take the parent tag, which undo takes back
+  //  off; the deleted id itself stays in them, inert, as below
+  for(const FSPath& path : retagDocs) {
+    std::vector<std::string> tags = ScribbleDoc::extractDocTags(path.c_str());
+    tags.push_back(tagNode.parentId);
+    setDocumentTags(path, tags);
+  }
 
   DeleteSnapshot snapshot;
-  snapshot.label = node.name;
+  snapshot.label = tagNode.name;
+  snapshot.parentId = tagNode.parentId;
+  snapshot.parentAddedTo = retagDocs;
   if(deleteChildren) {
     std::vector<std::string> queue = {tagId};
     while(!queue.empty()) {
@@ -539,8 +759,27 @@ void TagDocList::deleteTagWithUndo(const std::string& tagId, bool deleteChildren
     }
   }
   else {
-    snapshot.removedInOrder.push_back(node);
-    snapshot.reparentedBack = node.childIds;
+    snapshot.removedInOrder.push_back(tagNode);
+    snapshot.reparentedBack = tagNode.childIds;
+  }
+
+  // Unlike a document's own tags, a page's tags are taken off the page: they are visible content, and
+  //  one left behind would show a name no tag has any more.  Nor do they fall back to the supertag - a
+  //  page tag is a mark on one page, and a broader one is not what was put there.  Undo restores the
+  //  files as they were, so each is kept before it is rewritten.
+  std::vector<std::string> removedIds;
+  for(const TagNode& removed : snapshot.removedInOrder)
+    removedIds.push_back(removed.id);
+  for(const FSPath& path : docsWithPageTag(removedIds)) {
+    DeleteSnapshot::FileBackup backup;
+    backup.path = path;
+    if(!readFile(&backup.contents, path.c_str()))
+      continue;
+    if(rewriteDocument(path, [&](Document& doc, ScribbleConfig&){
+        ScribbleDoc::removePageTagElements(&doc, removedIds); })) {
+      backup.mtime = (time_t)getFileMTime(path);
+      snapshot.pageTagFiles.push_back(std::move(backup));
+    }
   }
 
   tagStore.deleteTag(tagId, deleteChildren);
@@ -558,6 +797,21 @@ void TagDocList::undoTagDelete()
 {
   if(!lastDelete.valid)
     return;
+  for(const FSPath& path : lastDelete.parentAddedTo) {
+    std::vector<std::string> tags = ScribbleDoc::extractDocTags(path.c_str());
+    tags.erase(std::remove(tags.begin(), tags.end(), lastDelete.parentId), tags.end());
+    setDocumentTags(path, tags);
+  }
+  // a file edited since the delete keeps its edits, and so stays without the page tags
+  for(const DeleteSnapshot::FileBackup& backup : lastDelete.pageTagFiles) {
+    if((time_t)getFileMTime(backup.path) != backup.mtime)
+      continue;
+    FileStream file(backup.path.c_str(), "wb");
+    if(file.is_open())
+      file.write(backup.contents.data(), backup.contents.size());
+    file.close();
+    tagStore.removeDoc(backup.path.c_str());  // reread on the refresh below
+  }
   for(const TagNode& tagNode : lastDelete.removedInOrder)
     tagStore.restoreTag(tagNode);
   if(!lastDelete.removedInOrder.empty()) {
@@ -574,21 +828,6 @@ void TagDocList::hideUndo()
 {
   lastDelete = DeleteSnapshot();
   undoButton->setEnabled(false);
-}
-
-void TagDocList::toggleDocSearch()
-{
-  bool visible = !docSearchRow->isVisible();
-  docSearchRow->setVisible(visible);
-  if(visible) {
-    focusedWidget = docSearchEdit;
-    gui()->setFocused(docSearchEdit, SvgGui::REASON_TAB);
-  }
-  else {
-    docSearchQuery.clear();
-    docSearchEdit->setText("");
-    rebuildDocGrid();
-  }
 }
 
 void TagDocList::newDoc()
@@ -650,8 +889,8 @@ void TagDocList::showDocTagsPopup(const FSPath& path, Widget* cell)
 Widget* TagDocList::createDocTagRow(const std::string& tagId, int depth,
     const std::vector<std::string>& currentTags)
 {
-  const TagNode* node = tagStore.tag(tagId);
-  if(!node)
+  const TagNode* tagNode = tagStore.tag(tagId);
+  if(!tagNode)
     return NULL;
 
   // Same rowProtoSVG shape as createTagRow(); see that function's comment on the chevron for why its
@@ -674,7 +913,7 @@ Widget* TagDocList::createDocTagRow(const std::string& tagId, int depth,
   row->node->setAttribute("margin", fstring("6 12 6 %d", 12 + depth*20).c_str());
 
   bool checked = std::find(currentTags.begin(), currentTags.end(), tagId) != currentTags.end();
-  CheckBox* checkbox = createCheckBox(node->name.c_str(), checked);
+  CheckBox* checkbox = createCheckBox(tagNode->name.c_str(), checked);
   checkbox->node->setAttribute("box-anchor", "left");
   std::string id = tagId;
   checkbox->onToggled = [this, id](bool on){
@@ -693,7 +932,7 @@ Widget* TagDocList::createDocTagRow(const std::string& tagId, int depth,
   };
   row->selectFirst(".checkbox-container")->addWidget(checkbox);
 
-  if(!node->childIds.empty() && docTagsSearchQuery.empty()) {
+  if(!tagNode->childIds.empty() && docTagsSearchQuery.empty()) {
     bool expanded = docTagsExpandedTags.count(tagId) > 0;
     Button* chevron = createToolbutton(
         SvgGui::useFile(expanded ? "icons/chevron_up.svg" : "icons/ic_menu_expanddown.svg"), "");
@@ -749,9 +988,9 @@ void TagDocList::rebuildDocTagsList()
         return;
       docTagsList->addWidget(row);
       ++shown;
-      const TagNode* node = tagStore.tag(id);
-      if(node && docTagsExpandedTags.count(id))
-        for(const std::string& childId : node->childIds)
+      const TagNode* tagNode = tagStore.tag(id);
+      if(tagNode && docTagsExpandedTags.count(id))
+        for(const std::string& childId : tagNode->childIds)
           appendRecursive(childId, depth + 1);
     };
     for(const std::string& id : tagStore.rootTagIds())
@@ -797,11 +1036,18 @@ void TagDocList::rebuildDocTagsList()
 // toggled on it - exactly what shipped here initially and was caught by testing.
 void TagDocList::setDocumentTags(const FSPath& path, const std::vector<std::string>& tagIds)
 {
+  rewriteDocument(path, [&](Document&, ScribbleConfig& cfg){
+    cfg.set("tags", TagStore::formatTagList(tagIds).c_str());
+  });
+}
+
+bool TagDocList::rewriteDocument(const FSPath& path, const std::function<void(Document&, ScribbleConfig&)>& edit)
+{
   Image thumbnail = ScribbleDoc::extractThumbnail(path.c_str());
 
   Document doc;
   if(doc.load(new FileStream(path.c_str()), false) != Document::LOAD_OK)
-    return;
+    return false;
   // .svgz's block-gzip format loads pages lazily regardless of the `delayload` argument above -
   // Document::loadBgzDoc() always just records each page's blockIdx and defers the actual per-page
   // read to Document::ensureLoaded()/loadBgzPage(), which reads through `doc`'s own blockStream (the
@@ -816,7 +1062,9 @@ void TagDocList::setDocumentTags(const FSPath& path, const std::vector<std::stri
   doc.ensurePagesLoaded();
   ScribbleConfig cfg(ScribbleApp::cfg);
   cfg.loadConfig(doc.getConfigNode());
-  cfg.set("tags", TagStore::formatTagList(tagIds).c_str());
+  edit(doc, cfg);
+  // every page is loaded, so this also renders any tagged page whose thumbnail the file did not carry
+  ScribbleDoc::updatePageTagSummary(&doc, &cfg);
   cfg.saveConfig(doc.resetConfigNode());
 
   std::string thumbBuff;
@@ -826,9 +1074,11 @@ void TagDocList::setDocumentTags(const FSPath& path, const std::vector<std::stri
     thumbArg = thumbBuff.c_str();
   }
   if(!doc.save(new FileStream(path.c_str(), "wb"), thumbArg, Document::SAVE_FORCE))
-    return;
-  tagStore.setDocTags(path.c_str(), (time_t)getFileMTime(path), tagIds);
+    return false;
+  tagStore.setDocTags(path.c_str(), (time_t)getFileMTime(path),
+      TagStore::parseTagList(cfg.String("tags", "")), cfg.String("pagetags", ""));
   tagStore.save();
+  return true;
 }
 
 void TagDocList::renameDoc(const FSPath& path)
@@ -882,16 +1132,21 @@ void TagDocList::createUI()
   sidebar->node->addClass("sidebar");  // .tagdoclist .sidebar { fill: var(--dark); } - see theme.cpp
   sidebar->node->setAttribute("box-anchor", "vfill");
   sidebar->node->setAttribute("layout", "box");
-  sidebar->node->setAttribute("width", "367");
   // a <g> paints nothing on its own; this fill rect (inheriting .sidebar's fill) is what actually
   // paints the background - without it the sidebar was reported as "not always rendering instantly"
   sidebar->addWidget(createFillRect());
+  // The box layout ignores a width attribute on a <g>, and the fill rect above declares no size, so
+  //  the sidebar used to be exactly as wide as its widest child. This vfill rect is what sets it.
+  SvgRect* sidebarSizer = new SvgRect(Rect::wh(SIDEBAR_WIDTH, 0));
+  sidebarSizer->setAttribute("box-anchor", "vfill");
+  sidebarSizer->setAttribute("fill", "none");
+  sidebar->containerNode()->addChild(sidebarSizer);
 
   Widget* sidebarContent = new Widget(new SvgG());
   sidebarContent->node->setAttribute("box-anchor", "fill");
   sidebarContent->node->setAttribute("layout", "flex");
   sidebarContent->node->setAttribute("flex-direction", "column");
-  sidebarContent->setMargins(32, 24, 12, 24);
+  sidebarContent->setMargins(32, SIDEBAR_PAD_RIGHT, 12, SIDEBAR_PAD_LEFT);
   sidebar->addWidget(sidebarContent);
 
   SvgText* titleNode = createTextNode("Kaku");
@@ -913,11 +1168,11 @@ void TagDocList::createUI()
   tagDrag->setRootTarget(allDocumentsBtn);
   tagDrag->canDrop = [this](int src, int dst){
     const std::string& srcId = dragTagIds[src];
-    const TagNode* node = tagStore.tag(srcId);
-    if(!node)
+    const TagNode* tagNode = tagStore.tag(srcId);
+    if(!tagNode)
       return false;
     if(dst == RowDrag::ROOT)
-      return !node->parentId.empty();
+      return !tagNode->parentId.empty();
     const std::string& dstId = dragTagIds[dst];
     // its own supertag is allowed: that is how a subtag is dragged back out (see onDrop)
     return dstId != srcId && !isTagDescendant(dstId, srcId);
@@ -925,13 +1180,13 @@ void TagDocList::createUI()
   tagDrag->onDrop = [this](int src, int dst){
     if(src < 0 || src >= int(dragTagIds.size()) || dst >= int(dragTagIds.size()))
       return;
-    const TagNode* node = tagStore.tag(dragTagIds[src]);
-    if(!node)
+    const TagNode* tagNode = tagStore.tag(dragTagIds[src]);
+    if(!tagNode)
       return;
     std::string parentId = dst == RowDrag::ROOT ? std::string() : dragTagIds[dst];
     std::string afterId;
     // dropped on its own supertag: out of it, one level up, listed right below the supertag it left
-    if(!parentId.empty() && parentId == node->parentId) {
+    if(!parentId.empty() && parentId == tagNode->parentId) {
       const TagNode* parent = tagStore.tag(parentId);
       afterId = parentId;
       parentId = parent ? parent->parentId : std::string();
@@ -970,6 +1225,7 @@ void TagDocList::createUI()
   tagScrollContainer->node->setAttribute("box-anchor", "fill");
   tagScrollContainer->node->setAttribute("layout", "box");
   tagScrollContainer->addWidget(tagScroll);
+  tagScrollContainer->setMargins(0, -TAG_LIST_BLEED_RIGHT, 0, -TAG_LIST_BLEED_LEFT);
   sidebarContent->addWidget(tagScrollContainer);
 
   // undo, search(tags), separator, filter-tick(multi-select) - the sidebar's own bottom toolbar
@@ -983,16 +1239,10 @@ void TagDocList::createUI()
   undoButton->setEnabled(false);
   newTagBtn = createToolbutton(SvgGui::useFile("icons/ic_menu_plus.svg"), _("New Tag"));
   newTagBtn->onClicked = [this](){ addTag(""); };
-  Button* focusTagSearchBtn = createToolbutton(SvgGui::useFile("icons/ic_menu_search2.svg"), _("Search Tags"));
-  focusTagSearchBtn->onClicked = [this](){
-    focusedWidget = tagSearchEdit;
-    gui()->setFocused(tagSearchEdit, SvgGui::REASON_TAB);
-  };
   multiSelectBtn = createToolbutton(SvgGui::useFile("icons/ic_menu_filter_tick.svg"), _("Multi-select Tags"));
   multiSelectBtn->onClicked = [this](){ toggleMultiSelect(); };
   sidebarBottom->addWidget(newTagBtn);
   sidebarBottom->addWidget(undoButton);
-  sidebarBottom->addWidget(focusTagSearchBtn);
   sidebarBottom->addSeparator();
   sidebarBottom->addWidget(multiSelectBtn);
   sidebarContent->addWidget(sidebarBottom);
@@ -1014,8 +1264,7 @@ void TagDocList::createUI()
   docSearchRow->node->setAttribute("layout", "flex");
   docSearchRow->node->setAttribute("flex-direction", "row");
   docSearchRow->node->setAttribute("align-items", "center");
-  docSearchRow->setMargins(24, 24, 0, 24);
-  docSearchRow->setVisible(false);
+  docSearchRow->setMargins(8, 24, 0, 24);
 
   // Same as the tag search box: the rounded fill *is* the TextEdit's own background, sized to the
   // text rather than a separate larger rect behind it.
@@ -1049,7 +1298,8 @@ void TagDocList::createUI()
   docGrid->node->setAttribute("layout", "flex");
   docGrid->node->setAttribute("flex-direction", "column");
   docGrid->node->setAttribute("justify-content", "flex-start");
-  docGrid->setMargins(16, 16, 16, 16);
+  // no top margin: the cells' own margin already spaces the first row from the search box
+  docGrid->setMargins(0, 16, 16, 16);
 
   docScrollWidget = new ScrollWidget(new SvgDocument(), docGrid);
   docScrollWidget->node->setAttribute("box-anchor", "fill");
@@ -1062,8 +1312,8 @@ void TagDocList::createUI()
   content->addWidget(contentInner);
 
   // Floating FABs, bottom-right of the content area, on top of the grid (added after it so they sit
-  // in front - see the "Move z-order" convention noted throughout the codebase). Search is the
-  // smaller/secondary FAB, Add Document the larger/accent-colored primary one, matching Penpot's
+  // in front - see the "Move z-order" convention noted throughout the codebase). Search was the
+  // smaller/secondary FAB (the search fields are now always shown), Add Document the larger/accent-colored primary one, matching Penpot's
   // "Screen" reference. Open Whiteboard (not in the mockup) sits between them at the secondary size.
   // The back-to-note FAB is also new and sits to their left, shown only when there's a document open
   // behind this browser.
@@ -1077,16 +1327,32 @@ void TagDocList::createUI()
   backNoteFab->setVisible(false);
   backNoteFab->onClicked = [this](){ finish(REJECTED); };
   fabRow->addWidget(backNoteFab);
-  searchFab = static_cast<Button*>(createFab("icons/ic_menu_search2.svg", 44, false));
-  searchFab->setMargins(0, 17, 0, 0);
-  searchFab->onClicked = [this](){ toggleDocSearch(); };
-  fabRow->addWidget(searchFab);
   // DocumentList's "Open Whiteboard" toolbar button, as a secondary FAB; the connect dialog itself is
   //  ScribbleApp::openSharedDoc(), reached through the OPEN_WHITEBOARD result
   whiteboardFab = static_cast<Button*>(createFab("icons/ic_menu_people.svg", 44, false));
   whiteboardFab->setMargins(0, 17, 0, 0);
   whiteboardFab->onClicked = [this](){ selectedFile.clear(); finish(OPEN_WHITEBOARD); };
   fabRow->addWidget(whiteboardFab);
+  // Import: a popup of formats, opening upwards from the bottom edge.  Picking one ends the browser with
+  //  IMPORT_*, like Open Whiteboard, so the file picker and the import run in ScribbleApp.
+  importFab = static_cast<Button*>(createFab("icons/ic_menu_import.svg", 44, false));
+  importFab->setMargins(0, 17, 0, 0);
+  ArrowPopup* importPopup = createArrowPopup(Menu::VERT_LEFT | Menu::ABOVE);
+  Button* importPdfItem = importPopup->addItem(_("PDF"), NULL,
+      [this](){ selectedFile.clear(); finish(IMPORT_PDF); });
+  importPdfItem->setEnabled(PdfImport::isAvailable());
+  importPopup->addItem(_("Noteful"), NULL, [this](){ selectedFile.clear(); finish(IMPORT_NOTEFUL); });
+  importPopup->addSeparator();
+  // chosen here rather than in Preferences, since whether folders mirror tags depends on the export at
+  //  hand; added with addWidget(), not addItem(), so a toggle does not close the popup
+  CheckBox* folderTagsBox = createCheckBox(_("Folders as tags"), ScribbleApp::cfg->Bool("notefulFolderTags", true));
+  folderTagsBox->setMargins(6, 0);
+  folderTagsBox->onToggled = [](bool on){ ScribbleApp::cfg->set("notefulFolderTags", on); };
+  importPopup->addWidget(folderTagsBox);
+  setupPopupMenu(importFab, importPopup);
+  // iOS picks files asynchronously through UIDocumentPicker (svg only), which this flow cannot wait for
+  importFab->setVisible(!PLATFORM_IOS);
+  fabRow->addWidget(importFab);
   addDocFab = static_cast<Button*>(createFab("icons/ic_menu_plus.svg", 56, true));
   addDocFab->onClicked = [this](){ newDoc(); };
   fabRow->addWidget(addDocFab);
@@ -1121,18 +1387,34 @@ void TagDocList::createUI()
     if(!n)
       return;
     closeAllContextPopups();
+    bool deleteChildren = false;
     if(!n->childIds.empty()) {
       auto res = ScribbleApp::messageBox(ScribbleApp::Question, _("Delete Tag"),
           fstring(_("\"%s\" has subtags. Delete just this tag and keep its subtags, "
               "or delete it along with all its subtags?"), n->name.c_str()),
           {_("Keep Subtags"), _("Delete All"), _("Cancel")});
-      if(res == _("Keep Subtags"))
-        deleteTagWithUndo(contextMenuTagId, false);
-      else if(res == _("Delete All"))
-        deleteTagWithUndo(contextMenuTagId, true);
+      if(res == _("Delete All"))
+        deleteChildren = true;
+      else if(res != _("Keep Subtags"))
+        return;
     }
-    else
-      deleteTagWithUndo(contextMenuTagId, false);
+    // a subtag's documents can fall back to its supertag rather than losing the tag altogether
+    std::vector<FSPath> retagDocs;
+    const TagNode* parent = tagStore.tag(n->parentId);
+    if(parent) {
+      std::vector<FSPath> tagged = docsWithTag(contextMenuTagId, deleteChildren);
+      if(!tagged.empty()) {
+        auto res = ScribbleApp::messageBox(ScribbleApp::Question, _("Delete Tag"),
+            fstring(_("%d document(s) are tagged \"%s\". Tag them with \"%s\" instead, "
+                "or remove the tag from them?"), int(tagged.size()), n->name.c_str(), parent->name.c_str()),
+            {fstring(_("Tag \"%s\""), parent->name.c_str()), _("Remove Tag"), _("Cancel")});
+        if(res == _("Cancel") || res.empty())
+          return;
+        if(res != _("Remove Tag"))
+          retagDocs = tagged;
+      }
+    }
+    deleteTagWithUndo(contextMenuTagId, deleteChildren, retagDocs);
   });
   setupAutoClosePopup(tagContextPopup);
 
@@ -1250,6 +1532,10 @@ void TagDocList::setup(Window* parent, bool hasCurrentNote)
   // TagDocList is cached and reused across separate opens (ScribbleApp::tagDocList), so a delete from
   // a previous visit must not leave undo looking available on this one.
   hideUndo();
+  selectedPage = -1;
+  // the editor's Tag Page dialog adds tags to the same index file; every edit here is saved as it is
+  //  made, so reading the file back loses nothing
+  tagStore.load();
   refresh();
 }
 

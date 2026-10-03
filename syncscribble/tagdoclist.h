@@ -11,6 +11,9 @@
 #include <memory>
 #include <set>
 
+class Document;
+class ScribbleConfig;
+
 // Small prompt for naming a new tag or renaming an existing one -- deliberately not NewDocDialog,
 // which is filesystem-oriented (existence checks, invalid-path characters, a ruling combo box).
 class TagNameDialog : public PopupDialog
@@ -34,7 +37,11 @@ public:
   TagDocList(const char* root);
 
   std::string selectedFile;
-  enum Result_t {REJECTED = 0, EXISTING_DOC, NEW_DOC, OPEN_WHITEBOARD} result;
+  // with EXISTING_DOC, the page to open selectedFile at: a page card was picked (-1 = where it was left)
+  int selectedPage = -1;
+  std::vector<std::string> selectedPageTags;  // and the tags on it to point out (ScribbleArea::flashPageTags())
+  // IMPORT_*: the import FAB's menu picked a format; ScribbleApp runs the picker and the import
+  enum Result_t {REJECTED = 0, EXISTING_DOC, NEW_DOC, OPEN_WHITEBOARD, IMPORT_PDF, IMPORT_NOTEFUL} result;
 
   // hasCurrentNote: whether a "back to note" FAB should be offered (there is a real document open
   // behind this browser, as opposed to it being the very first thing shown at startup).
@@ -42,6 +49,7 @@ public:
   void finish(Result_t res);
   // points the browser at a different document root (the library was moved); safe while it is shown
   void setRoot(const char* root);
+  const FSPath& root() const { return docRoot; }
 
   std::function<void(int)> onFinished;
 
@@ -51,16 +59,18 @@ public:
 protected:
   void refresh();
   void rebuildTagTree();
+  void elideTagRowTitle(Widget* row, int depth);
   void rebuildDocGrid();
   void toggleTagFilter(const std::string& tagId);
   void toggleMultiSelect();
   void showTagMenu(const std::string& tagId, Widget* row);
   void addTag(const std::string& parentId);
   void renameTag(const std::string& tagId);
-  void deleteTagWithUndo(const std::string& tagId, bool deleteChildren);
+  void deleteTagWithUndo(const std::string& tagId, bool deleteChildren,
+      const std::vector<FSPath>& retagDocs = {});
+  std::vector<FSPath> docsWithTag(const std::string& tagId, bool subtree);
   void undoTagDelete();
   void hideUndo();
-  void toggleDocSearch();
   void newDoc();
   void showDocMenu(const FSPath& path, Widget* cell);
   void showDocTagsPopup(const FSPath& path, Widget* cell);
@@ -69,13 +79,20 @@ protected:
   void renameDoc(const FSPath& path);
   void deleteDoc(const FSPath& path);
   void setDocumentTags(const FSPath& path, const std::vector<std::string>& tagIds);
+  // Load a document whole, let `edit` change it and its config, and save it back, keeping its
+  //  thumbnail and bringing the page tag summary and the tag cache up to date.  See setDocumentTags()
+  //  for why every page has to be loaded first.  False if it could not be loaded or saved.
+  bool rewriteDocument(const FSPath& path, const std::function<void(Document&, ScribbleConfig&)>& edit);
   void closeAllContextPopups();
 
 private:
   struct DocEntry {
     FSPath path;
     std::vector<std::string> tagIds;
+    std::vector<TagStore::PageTags> pageTags;  // docs/agent/page-tags.md
   };
+  // documents with a page carrying one of tagIds
+  std::vector<FSPath> docsWithPageTag(const std::vector<std::string>& tagIds);
 
   // Recursively lists every document under root (ignoring directory structure entirely -- a
   // directory is just a container to descend into, never a browsable unit), resolving each one's
@@ -114,14 +131,20 @@ private:
   bool isTagDescendant(const std::string& tagId, const std::string& ancestorId) const;
 
   // Undo for the last tag deletion (see tagstore.h's restoreTag()/reparentTag() for how the tree
-  // itself is put back); nothing about documents' own tag lists needs undoing since deleteTag()
-  // never touches them -- see deleteTagWithUndo()'s comment.
+  // itself is put back); documents' own tag lists need undoing only where the deleted tag was replaced
+  // by its parent (parentAddedTo) -- see deleteTagWithUndo()'s comment.
   struct DeleteSnapshot {
     bool valid = false;
     std::vector<TagNode> removedInOrder;      // parent-before-child; empty unless subtree was cascaded
     std::vector<std::string> reparentedBack;  // children that were reparented to removedInOrder[0]'s
                                                // old parent and need to move back under it on undo
     std::string label;
+    std::string parentId;
+    std::vector<FSPath> parentAddedTo;  // documents given parentId in place of the deleted tag
+    // Page tags are removed from the pages when their tag is deleted (unlike a document's own tags,
+    //  which go inert), so undo puts the files back as they were - unless one has changed since.
+    struct FileBackup { FSPath path; std::string contents; time_t mtime; };
+    std::vector<FileBackup> pageTagFiles;
   } lastDelete;
 
   Widget* tagTreeView;
@@ -133,8 +156,8 @@ private:
   Button* allDocumentsBtn;
   Button* newTagBtn;
   Button* multiSelectBtn;
-  Button* searchFab;
   Button* whiteboardFab;
+  Button* importFab;
   Button* addDocFab;
   Button* backNoteFab;
   Button* undoButton;

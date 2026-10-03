@@ -258,11 +258,12 @@ void ScribbleInput::doInputEvent(InputEvent& event)
 
   if(scribbling == NOT_SCRIBBLING) {
     if(npoints > prevpoints) {
-      if(event.source == INPUTSOURCE_TOUCH && ((npoints == 1 && singleTouchMode == INPUTMODE_NONE)
+      bool captured = npoints == 1 && parent->capturesPointer();
+      if(!captured && event.source == INPUTSOURCE_TOUCH && ((npoints == 1 && singleTouchMode == INPUTMODE_NONE)
           || (npoints > 1 && multiTouchMode == INPUTMODE_NONE)))
         return;
-      else if((event.source == INPUTSOURCE_TOUCH && (npoints > 1 || singleTouchMode != INPUTMODE_DRAW))
-          || (event.source == INPUTSOURCE_MOUSE && (mouseMode == INPUTMODE_PAN || midBtnPan))) {
+      else if(!captured && ((event.source == INPUTSOURCE_TOUCH && (npoints > 1 || singleTouchMode != INPUTMODE_DRAW))
+          || (event.source == INPUTSOURCE_MOUSE && (mouseMode == INPUTMODE_PAN || midBtnPan)))) {
         scribbling = SCRIBBLING_PAN;
         parent->panZoomStart(event);
       }

@@ -8,7 +8,7 @@
   <string name="ios_conflict_prompt">Please choose a new location for version of %@ modified %@ by %@</string>
   <string name="docs_createdoc">Create Document</string>
 
-  <string name="menu_invert_colors">Invert Colors</string>
+  <string name="menu_dark_mode">Dark Mode</string>
   <string name="menu_screenshot">Screenshot</string>
   <string name="screenshot_add_to_page">Add to page</string>
   <string name="screenshot_background">PDF / image background</string>

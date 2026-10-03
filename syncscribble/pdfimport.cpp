@@ -4,6 +4,8 @@
 #include "page.h"
 #include "resources.h"  // _() for translated strings
 #include "ulib/fileutil.h"
+#include "ulib/painter.h"
+#include "ulib/stringutil.h"
 
 #ifdef SCRIBBLE_PDF
 // fitz.h provides its own extern "C" guard
@@ -15,6 +17,24 @@
 // the rule layer is the page background, so the image cannot be selected, dragged or erased by
 // accident, while everything in the content layer (i.e. the user's ink) draws on top of it.
 static const char* PDF_BACKGROUND_CLASS = "write-pdf-background";
+
+std::string PdfImport::thumbnail(Document* doc)
+{
+  if(doc->numPages() < 1)
+    return std::string();
+  Page* page = doc->pages.front();
+  // ScribbleDoc saves 240x400; the height follows the page instead, or a short page gets a blank strip
+  const int width = 240;
+  Dim scale = width/page->width();
+  Image image(width, std::max(1, std::min(400, int(page->height()*scale + 0.5))), Image::PNG);
+  Painter painter(Painter::PAINT_SW, &image);
+  painter.beginFrame();
+  painter.fillRect(Rect::wh(image.width, image.height), Color::WHITE);
+  painter.scale(scale, scale);
+  page->draw(&painter, Rect::wh(page->width(), std::min(page->height(), image.height/scale)));
+  painter.endFrame();
+  return base64_encode(image.encode(Image::PNG));
+}
 
 bool PdfImport::isPdfFile(const char* filename)
 {
@@ -39,6 +59,13 @@ int PdfImport::importPdf(Document*, const char*, const Options&, std::string* er
   if(errorOut)
     *errorOut = _("This build of Kaku does not include PDF support.");
   return -1;
+}
+
+Image PdfImport::renderPage(const std::string&, int, Dim, std::string* errorOut)
+{
+  if(errorOut)
+    *errorOut = _("This build of Kaku does not include PDF support.");
+  return Image(0, 0);
 }
 
 #else
@@ -69,12 +96,8 @@ struct FzDoc {
 
   bool open(const char* filename, const char* password)
   {
-    // NULL locks: the context is only ever used from the thread that created it
-    ctx = fz_new_context(NULL, NULL, FZ_STORE_DEFAULT);
-    if(!ctx) {
-      snprintf(err, sizeof(err), "Out of memory initializing PDF support.");
+    if(!newContext())
       return false;
-    }
     bool ok = false;
     fz_try(ctx) {
       fz_register_document_handlers(ctx);
@@ -83,17 +106,56 @@ struct FzDoc {
     }
     fz_catch(ctx) {
       snprintf(err, sizeof(err), "%s", fz_caught_message(ctx));
+      fz_ignore_error(ctx);
       return false;
     }
-    if(!ok)
-      return false;
+    return ok && authenticate(password);
+  }
 
+  // `data` is not copied and must outlive this object
+  bool openMemory(const std::string& data, const char* password)
+  {
+    if(!newContext())
+      return false;
+    bool ok = false;
+    fz_stream* stream = NULL;
+    fz_var(stream);
+    fz_try(ctx) {
+      fz_register_document_handlers(ctx);
+      stream = fz_open_memory(ctx, (const unsigned char*)data.data(), data.size());
+      doc = fz_open_document_with_stream(ctx, "application/pdf", stream);
+      ok = true;
+    }
+    fz_always(ctx) {
+      fz_drop_stream(ctx, stream);  // the document keeps its own reference
+    }
+    fz_catch(ctx) {
+      snprintf(err, sizeof(err), "%s", fz_caught_message(ctx));
+      fz_ignore_error(ctx);
+      return false;
+    }
+    return ok && authenticate(password);
+  }
+
+  bool newContext()
+  {
+    // NULL locks: the context is only ever used from the thread that created it
+    ctx = fz_new_context(NULL, NULL, FZ_STORE_DEFAULT);
+    if(!ctx)
+      snprintf(err, sizeof(err), "Out of memory initializing PDF support.");
+    return ctx != NULL;
+  }
+
+  bool authenticate(const char* password)
+  {
+    bool ok = false;
     fz_try(ctx) {
       ok = !fz_needs_password(ctx, doc)
           || fz_authenticate_password(ctx, doc, password ? password : "");
     }
     fz_catch(ctx) {
       snprintf(err, sizeof(err), "%s", fz_caught_message(ctx));
+      fz_ignore_error(ctx);
       return false;
     }
     if(!ok)
@@ -105,7 +167,7 @@ struct FzDoc {
   {
     int n = -1;
     fz_try(ctx) { n = fz_count_pages(ctx, doc); }
-    fz_catch(ctx) { snprintf(err, sizeof(err), "%s", fz_caught_message(ctx)); n = -1; }
+    fz_catch(ctx) { snprintf(err, sizeof(err), "%s", fz_caught_message(ctx)); fz_ignore_error(ctx); n = -1; }
     return n;
   }
 };
@@ -138,6 +200,7 @@ Image renderPage(FzDoc& fzdoc, int pageNum, Dim dpi, Dim* widthPtOut, Dim* heigh
   }
   fz_catch(ctx) {
     snprintf(fzdoc.err, sizeof(fzdoc.err), "%s", fz_caught_message(ctx));
+    fz_ignore_error(ctx);
     ok = false;
   }
 
@@ -170,6 +233,16 @@ Image renderPage(FzDoc& fzdoc, int pageNum, Dim dpi, Dim* widthPtOut, Dim* heigh
 }
 
 }  // namespace
+
+Image PdfImport::renderPage(const std::string& pdfData, int pageNum, Dim dpi, std::string* errorOut)
+{
+  FzDoc fzdoc;
+  Dim widthPt = 0, heightPt = 0;
+  Image img = fzdoc.openMemory(pdfData, NULL) ? ::renderPage(fzdoc, pageNum, dpi, &widthPt, &heightPt) : Image(0, 0);
+  if(img.isNull() && errorOut)
+    *errorOut = fzdoc.err;
+  return img;
+}
 
 int PdfImport::pageCount(const char* filename, const char* password)
 {

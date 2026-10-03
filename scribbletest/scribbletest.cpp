@@ -1,11 +1,15 @@
 #include "scribbletest.h"
 #include <fstream>
+#include <set>
 
 #include "usvg/svgparser.h"
 #include "application.h"
 #include "strokebuilder.h"
 #include "scribblesync.h"
 #include "scribbleapp.h"  // only for sync tests
+#include "notefulimport.h"
+#include "tagstore.h"
+#include "miniz/miniz_zip.h"
 
 // document scanning math; unlike everything else here it needs neither GL nor a document
 #include "scantest.cpp"
@@ -14,6 +18,8 @@
 #include "layertest.cpp"
 #include "regiontest.cpp"
 #include "librarytest.cpp"
+#include "notefultest.cpp"
+#include "pagetagtest.cpp"
 
 // Ideally, these tests should be run under valgrind to help check for memory leaks
 // renaming out files to refs (Linux):  for i in {0..13}; do mv "test${i}_out.html" "test${i}_ref.html"; done;
@@ -420,6 +426,232 @@ int ScribbleTest::themeRoundTripTest()
 //  of storing the entry inside the page's own SVG rather than in a {page number, title} list on
 //  Document is that inserting or deleting a page above it cannot invalidate it - so that is what this
 //  checks, along with the round trip, the level normalization and the undo step.
+int ScribbleTest::notefulImportTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: noteful import: %s\n", what); }
+  };
+  const char* tmpdir = getenv("TMPDIR") ? getenv("TMPDIR") : "/tmp";
+  std::string notebookPath = std::string(tmpdir) + "/kaku-noteful-test.noteful";
+  std::string savedPath = std::string(tmpdir) + "/kaku-noteful-test.svgz";
+
+  // Converting a real notebook for inspection, with no UI for it yet:
+  //  NOTEFUL_CONVERT=in.noteful NOTEFUL_OUT=out.svgz ./Debug/Kaku --test
+  //  NOTEFUL_CONVERT=export.zip NOTEFUL_OUT=librarydir ./Debug/Kaku --test   (a zip or a directory)
+  if(getenv("NOTEFUL_CONVERT") && getenv("NOTEFUL_OUT") && NotefulImport::isNotefulArchive(getenv("NOTEFUL_CONVERT"))) {
+    NotefulImport::ArchiveResult result;
+    std::string error;
+    int docs = NotefulImport::importArchive(getenv("NOTEFUL_CONVERT"), getenv("NOTEFUL_OUT"),
+        NotefulImport::ArchiveOptions(), &result, &error);
+    printf("Noteful archive: %d documents, %d failed %s\n", docs, result.failed, error.c_str());
+    for(const NotefulImport::ArchiveEntry& entry : result.entries) {
+      printf("  %s -> %s %s\n", entry.archivePath.c_str(), entry.docPath.c_str(), entry.error.c_str());
+      for(const std::string& tag : entry.tagPaths)
+        printf("    tag %s\n", tag.c_str());
+      for(const std::string& warning : entry.result.warnings)
+        printf("    warning: %s\n", warning.c_str());
+    }
+  }
+  else if(getenv("NOTEFUL_CONVERT") && getenv("NOTEFUL_OUT")) {
+    Document converted;
+    NotefulImport::Result result;
+    std::string error;
+    int pages = NotefulImport::importNoteful(&converted, getenv("NOTEFUL_CONVERT"), NotefulImport::Options(),
+        &result, &error);
+    float savedImageScale = SvgWriter::DEFAULT_SAVE_IMAGE_SCALED;
+    SvgWriter::DEFAULT_SAVE_IMAGE_SCALED = 0;  // as for PDF import: keep the backgrounds' resolution
+    bool saved = pages > 0 && converted.save(new FileStream(getenv("NOTEFUL_OUT"), "wb"), NULL, Document::SAVE_FORCE);
+    SvgWriter::DEFAULT_SAVE_IMAGE_SCALED = savedImageScale;
+    printf("Noteful convert: %d pages, %d text boxes skipped, saved: %d %s\n", pages, result.textBoxesSkipped,
+        saved, error.c_str());
+    for(const std::string& warning : result.warnings)
+      printf("  warning: %s\n", warning.c_str());
+  }
+
+  // the synthetic notebook from notefultest.cpp: a grid page with ink on two layers, some of it below
+  //  the page's bottom edge, and an imported page whose (fake) PDF cannot be rendered
+  {
+    std::string sample = sampleNotebook();
+    FileStream out(notebookPath.c_str(), "wb");
+    out.write(sample.data(), sample.size());
+  }
+  Document doc;
+  NotefulImport::Result result;
+  std::string error;
+  int pages = NotefulImport::importNoteful(&doc, notebookPath.c_str(), NotefulImport::Options(), &result, &error);
+  check(pages == 2 && doc.numPages() == 2, "both live pages imported");
+  if(doc.numPages() != 2)
+    return nbad;
+
+  check(doc.layers.size() == 2 && doc.layers.byIndex(0)->name == "Layer 1" && doc.layers.byIndex(1)->name == "Layer 2",
+      "layer table, bottom first");
+  int topLayer = doc.layers.size() == 2 ? doc.layers.byIndex(1)->id : -1;
+  Page* grid = doc.pages[0];
+  int onBottom = 0, onTop = 0;
+  for(Element* s : grid->children()) {
+    if(s->layer() == LayerList::DEFAULT_LAYER) ++onBottom;
+    else if(s->layer() == topLayer) ++onTop;
+  }
+  // bottom: the 3 point, flag-2 and four pressure strokes, the ellipse, the triangle and the highlighter;
+  //  top: the 4 point stroke, the last box stroke and the line
+  check(onBottom == 9 && onTop == 3, "each element on its layer");
+  // Noteful stores a highlighter opaque: imported at the marker's alpha, under the ink of its layer
+  //  (the bottom one, so first on the page) although it comes last among the elements
+  Element* first = grid->children().begin() != grid->children().end() ? *grid->children().begin() : NULL;
+  check(first && first->layer() == LayerList::DEFAULT_LAYER && fabs(first->node->getFloatAttr("stroke-opacity", 1) - 0.5) < 0.01,
+      "highlighter translucent and under the ink");
+  int pressureStrokes = 0;
+  for(Element* s : grid->children())
+    pressureStrokes += s->node->hasClass(Element::ROUND_PEN_CLASS);
+  // a filled round-pen outline, as Kaku draws a pressure pen - not a constant-width stroked path
+  check(pressureStrokes == 4, "pressure strokes become variable-width strokes");
+
+  const Dim scale = 150.0/132;
+  check(fabs(grid->props.yRuling - 20*150.0/72) < 1e-6 && fabs(grid->props.xRuling - grid->props.yRuling) < 1e-6,
+      "grid paper becomes Kaku ruling at Noteful's spacing (points, not page units)");
+  check(fabs(grid->width() - 1091.3385826771655*scale) < 1e-3, "page width scaled to Kaku units");
+  // a stroke reaches y = 1800 on a 1543 unit page; Noteful keeps it, so the page grows
+  check(grid->height() > 1800*scale, "page extended to hold ink below its edge");
+  check(!grid->isCustomRuling, "paper page keeps a standard ruling");
+  Page* imported = doc.pages[1];
+  check(!result.warnings.empty(), "an unrenderable background is reported");
+  check(fabs(imported->width() - 869*scale) < 1e-3 && fabs(imported->height() - 1315.8*scale) < 1e-3,
+      "a cropped page keeps its own size");
+
+  check(grid->outlineTitle == "Grundlagen" && grid->outlineLevel == 0, "outline entry on its page");
+  check(imported->outlineTitle == "Anhang", "second outline entry on the second page");
+  // Kaku has one entry per page; the child sharing Grundlagen's page is dropped and said so
+  bool droppedReported = false;
+  for(const std::string& warning : result.warnings)
+    droppedReported = droppedReported || warning.find("Kettenregel") != std::string::npos;
+  check(droppedReported, "a second entry on one page is dropped with a warning");
+
+  check(result.title == "Mathe" && result.tags.size() == 2 && result.textBoxesSkipped == 1,
+      "title, tags and skipped text boxes reported");
+
+  // the layer table rides the document config; a Document saved directly must keep it
+  check(doc.save(new FileStream(savedPath.c_str(), "wb"), NULL, Document::SAVE_FORCE), "saved");
+  Document reloaded;
+  check(reloaded.load(new FileStream(savedPath.c_str(), "rb")) == Document::LOAD_OK, "reloaded");
+  // a default config, as a document load uses: loadConfig() only takes keys the config already knows
+  ScribbleConfig reloadedCfg;
+  reloadedCfg.loadConfig(reloaded.getConfigNode());
+  LayerList reloadedLayers = LayerList::parse(reloadedCfg.String("layers", ""));
+  check(reloadedLayers.size() == 2 && reloadedLayers.byIndex(1)->name == "Layer 2", "layer table survives save");
+  check(reloaded.numPages() == 2 && reloaded.pages[0]->ensureLoaded(false)
+      && std::distance(reloaded.pages[0]->children().begin(), reloaded.pages[0]->children().end()) == 12,
+      "ink survives save");
+
+  removeFile(notebookPath);
+  removeFile(savedPath);
+  return nbad;
+}
+
+int ScribbleTest::notefulArchiveTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: noteful archive: %s\n", what); }
+  };
+  const char* tmpdir = getenv("TMPDIR") ? getenv("TMPDIR") : "/tmp";
+  FSPath base(fstring("%s/kaku-noteful-archive-%lld", tmpdir, (long long)mSecSinceEpoch()));
+  FSPath source = base.child("src"), library = base.child("lib"), zipLibrary = base.child("ziplib");
+  std::string sample = sampleNotebook();
+  auto writeBytes = [](const FSPath& path, const std::string& bytes) {
+    createPath(path.parentPath());
+    FileStream out(path.c_str(), "wb");
+    out.write(bytes.data(), bytes.size());
+  };
+  // two notebooks, both titled "Mathe": one in KA, one in KA/Test
+  writeBytes(source.child("KA").child("One.noteful"), sample);
+  writeBytes(source.child("KA").child("Test").child("Two.noteful"), sample);
+  writeBytes(source.child("KA").child("notes.txt"), "not a notebook");
+
+  // tag path of a tag id, "/" separated, from the library's index
+  auto tagPath = [](const TagStore& store, const std::string& id) {
+    std::string path;
+    for(const TagNode* node = store.tag(id); node; node = node->parentId.empty() ? NULL : store.tag(node->parentId))
+      path = path.empty() ? node->name : node->name + "/" + path;
+    return path;
+  };
+  auto docTagPaths = [&](const FSPath& lib, const std::string& doc) {
+    TagStore store(lib.child(".write-tags").c_str());
+    store.load();
+    std::vector<std::string> paths;
+    for(const std::string& id : ScribbleDoc::extractDocTags(doc.c_str()))
+      paths.push_back(tagPath(store, id));
+    std::sort(paths.begin(), paths.end());
+    return paths;
+  };
+
+  NotefulImport::ArchiveResult result;
+  std::string error;
+  int imported = NotefulImport::importArchive(source.c_str(), library.c_str(), NotefulImport::ArchiveOptions(),
+      &result, &error);
+  check(imported == 2 && result.failed == 0, "directory: both notebooks imported, the text file ignored");
+  check(library.child("Mathe.svgz").exists() && library.child("Mathe (2).svgz").exists(),
+      "named after the notebook, a clash numbered");
+  const NotefulImport::ArchiveEntry* inTest = NULL;
+  for(const NotefulImport::ArchiveEntry& entry : result.entries)
+    if(entry.folder == "KA/Test") inTest = &entry;
+  check(inTest && !inTest->docPath.empty(), "the subfolder's notebook found");
+  if(inTest) {
+    std::vector<std::string> expected = {"Jahre/11", "KA/Test", "Schule/Mathe"};
+    check(docTagPaths(library, inTest->docPath) == expected,
+        "document carries its own tags and its folder, as subtags of their parents");
+  }
+
+  // importing again reuses the tags rather than creating a second "KA"
+  NotefulImport::importArchive(source.c_str(), library.c_str());
+  TagStore store(library.child(".write-tags").c_str());
+  store.load();
+  int kaTags = 0;
+  for(const auto& pair : store.allTags())
+    kaTags += pair.second.name == "KA";
+  check(kaTags == 1, "tags are reused, not duplicated, by a second import");
+  check(library.child("Mathe (4).svgz").exists(), "a second import adds documents rather than overwriting");
+
+  // the same as a zip, as Noteful exports it (plus the junk macOS adds), with folder tags off
+  {
+    mz_zip_archive zip;
+    memset(&zip, 0, sizeof(zip));
+    mz_zip_writer_init_heap(&zip, 0, 0);
+    mz_zip_writer_add_mem(&zip, "archive.json", "{}", 2, MZ_DEFAULT_COMPRESSION);
+    mz_zip_writer_add_mem(&zip, "KA/", NULL, 0, 0);
+    mz_zip_writer_add_mem(&zip, "KA/One.noteful", sample.data(), sample.size(), MZ_DEFAULT_COMPRESSION);
+    mz_zip_writer_add_mem(&zip, "KA/Test/Two.noteful", sample.data(), sample.size(), 0);  // stored
+    mz_zip_writer_add_mem(&zip, "__MACOSX/KA/._One.noteful", "junk", 4, 0);
+    void* bytes = NULL;
+    size_t size = 0;
+    mz_zip_writer_finalize_heap_archive(&zip, &bytes, &size);
+    writeBytes(base.child("export.zip"), std::string((const char*)bytes, size));
+    mz_zip_writer_end(&zip);
+  }
+  NotefulImport::ArchiveOptions noFolders;
+  noFolders.folderTags = false;
+  NotefulImport::ArchiveResult zipResult;
+  imported = NotefulImport::importArchive(base.child("export.zip").c_str(), zipLibrary.c_str(), noFolders,
+      &zipResult, &error);
+  check(imported == 2 && zipResult.failed == 0, "zip: both notebooks imported, macOS junk skipped");
+  bool noFolderTag = zipResult.entries.size() == 2;
+  for(const NotefulImport::ArchiveEntry& entry : zipResult.entries) {
+    std::vector<std::string> expected = {"Jahre/11", "Schule/Mathe"};
+    noFolderTag = noFolderTag && docTagPaths(zipLibrary, entry.docPath) == expected;
+  }
+  check(noFolderTag, "folder tags off: only the notebooks' own tags");
+
+  // a broken notebook is reported and does not stop the others
+  writeBytes(source.child("KA").child("Broken.noteful"), sample.substr(0, sample.size()/2));
+  NotefulImport::ArchiveResult brokenResult;
+  imported = NotefulImport::importArchive(source.c_str(), base.child("lib3").c_str(), NotefulImport::ArchiveOptions(),
+      &brokenResult, &error);
+  check(imported == 2 && brokenResult.failed == 1, "a broken notebook fails alone");
+
+  removeDir(base);
+  return nbad;
+}
+
 int ScribbleTest::outlineTest()
 {
   int nbad = 0;
@@ -641,6 +873,128 @@ int ScribbleTest::outlineNestTest()
 // Layers (LAYERS_INVESTIGATION.md).  runLayerTests() in layertest.cpp covers the table's own logic;
 //  everything here needs a document: the lock actually blocking the editing paths, the undo item, the
 //  round trip through the document config, and the wire format.
+int ScribbleTest::selectTouchingTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: select touching: %s\n", what); }
+  };
+  auto nSelected = [&]() { return scribbleArea->currSelection ? scribbleArea->currSelection->count() : 0; };
+  auto rectSelect = [&](Dim x0, Dim y0, Dim x1, Dim y1) {
+    scribbleDoc->clearSelection();
+    scribbleMode->setMode(MODE_SELECTRECT);
+    ie(x0, y0, 0, pen, press);  ie(x1, y1, 0, pen);  ie(0, 0, 0, pen, release);
+    return nSelected();
+  };
+  auto lassoSelect = [&](Dim x0, Dim y0, Dim x1, Dim y1) {
+    scribbleDoc->clearSelection();
+    scribbleMode->setMode(MODE_SELECTLASSO);
+    ie(x0, y0, 0, pen, press);  ie(x1, y0, 0, pen);  ie(x1, y1, 0, pen);  ie(x0, y1, 0, pen);
+    ie(x0, y0 + 1, 0, pen);  ie(0, 0, 0, pen, release);
+    return nSelected();
+  };
+
+  const bool wasTouching = scribbleMode->selectTouching;
+  scribbleDoc->newDocument();
+  scribbleDoc->app->setPen(ScribblePen(Color::BLACK, 2, ScribblePen::TIP_ROUND));
+  // two straight strokes, so their outlines have no points in the middle
+  scribbleMode->setMode(MODE_STROKE);
+  ie(120, 160, 0, pen, press);  ie(300, 160, 0, pen);  ie(0, 0, 0, pen, release);
+  ie(120, 260, 0, pen, press);  ie(300, 260, 0, pen);  ie(0, 0, 0, pen, release);
+  check(scribbleArea->currPage->strokeCount() == 2, "two strokes drawn");
+
+  scribbleMode->selectTouching = false;
+  check(rectSelect(100, 140, 200, 180) == 0, "off: a rect over half a stroke selects nothing");
+  check(rectSelect(100, 140, 320, 180) == 1, "off: a rect around a stroke selects it");
+  check(lassoSelect(100, 140, 200, 180) == 0, "off: a lasso over half a stroke selects nothing");
+
+  scribbleMode->selectTouching = true;
+  check(rectSelect(100, 140, 200, 180) == 1, "on: a rect over half a stroke selects it");
+  check(rectSelect(180, 140, 220, 280) == 2, "on: a rect crossing both strokes between their points selects both");
+  check(rectSelect(100, 190, 320, 230) == 0, "on: a rect between the strokes selects nothing");
+  check(lassoSelect(100, 140, 200, 180) == 1, "on: a lasso over half a stroke selects it");
+  check(lassoSelect(180, 140, 220, 280) == 2, "on: a lasso crossing both strokes between their points selects both");
+  check(lassoSelect(100, 190, 320, 230) == 0, "on: a lasso between the strokes selects nothing");
+
+  scribbleDoc->clearSelection();
+  scribbleMode->selectTouching = wasTouching;
+  return nbad;
+}
+
+int ScribbleTest::pageTagTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: page tags: %s\n", what); }
+  };
+  ScribbleArea* area = scribbleArea;
+  auto screenAt = [&](int pagenum, Point p) { return area->dimToScreen(area->getPageOrigin(pagenum) + p); };
+  auto tagsOn = [&](int pagenum) { return area->page(pagenum)->pageTagIds.size(); };
+  // every tag element must lie inside the page it is on, or no thumbnail shows it and the pulse misses it
+  auto allTagsInside = [&]() {
+    for(int pagenum = 0; pagenum < area->numPages(); ++pagenum) {
+      Page* page = area->page(pagenum);
+      for(Element* s : page->children()) {
+        if(s->isPageTag() && !page->rect().contains(s->bbox()))
+          return false;
+      }
+    }
+    return true;
+  };
+  // pick up one tag and press/release with the pen at a point given in a page's coordinates
+  auto placeAt = [&](int pagenum, Point p) {
+    area->startTagPlacement({{"t1", "homework"}});
+    Point pos = screenAt(pagenum, p);
+    ie(pos.x, pos.y, 0, pen, press);  ie(0, 0, 0, pen, release);
+  };
+
+  scribbleDoc->newDocument();
+  scribbleDoc->newPage();
+  area->gotoPage(0);
+  Page* first = area->page(0);
+  Page* last = area->page(1);
+
+  placeAt(0, Point(first->width()/2, first->height() + area->pageSpacing/2));
+  check(tagsOn(0) + tagsOn(1) == 1, "a press in the gap between pages places the tag");
+  check(allTagsInside(), "a press in the gap between pages keeps the tag on a page");
+  check(!area->placingTags(), "the tag is no longer on the pointer once placed");
+  placeAt(0, Point(first->width() + 150, first->height()/2));
+  check(allTagsInside(), "a press beside the page keeps the tag on it");
+  placeAt(1, Point(last->width()/2, last->height() + 400));
+  check(tagsOn(1) >= 1 && allTagsInside(), "a press below the last page puts the tag on the last page");
+
+  // a pen had no preview, so the tag comes up selected, ready to be dragged into place
+  scribbleDoc->newDocument();
+  scribbleDoc->newPage();
+  const Dim prevZoom = area->getZoom();
+  area->setZoom(0.35);  // both pages on screen, so the drag below can reach the second
+  area->gotoPage(0);
+  placeAt(0, Point(200, 200));
+  check(area->currSelection && area->currSelection->count() == 1, "a pen placement leaves the tag selected");
+
+  // dragging the selected tag onto the next page moves it there, and undo brings it back
+  Point from = screenAt(0, Point(200, 200));
+  Point to = screenAt(1, Point(200, 200));
+  ie(from.x, from.y, 0, pen, press);  ie((from.x + to.x)/2, (from.y + to.y)/2, 0, pen);  ie(to.x, to.y, 0, pen);
+  ie(0, 0, 0, pen, release);
+  check(tagsOn(0) == 0 && tagsOn(1) == 1, "a tag dragged to the next page is counted there and not on the first");
+  check(allTagsInside(), "a tag dragged to the next page lands inside it");
+  scribbleDoc->clearSelection();
+  scribbleDoc->doCommand(ID_UNDO);
+  check(tagsOn(0) == 1 && tagsOn(1) == 0, "undoing the move puts the tag back on the first page");
+  scribbleDoc->doCommand(ID_REDO);
+  check(tagsOn(0) == 0 && tagsOn(1) == 1, "redoing the move puts it on the next page again");
+
+  // tags still on the pointer belong to the notebook they were picked for
+  area->startTagPlacement({{"t1", "homework"}});
+  scribbleDoc->newDocument();
+  check(!area->placingTags(), "opening another document drops tags still on the pointer");
+
+  scribbleDoc->clearSelection();
+  area->setZoom(prevZoom);
+  return nbad;
+}
+
 int ScribbleTest::layerTest()
 {
   int nbad = 0;
@@ -1103,7 +1457,7 @@ int ScribbleTest::restyleTest()
   check(colorAt(0) == inkA, "the first stroke should be the theme's ink");
   check(colorAt(1) == offPalette, "the second stroke should be the off-palette color");
 
-  int undoBefore = scribbleDoc->history->undoSteps();
+  size_t undoBefore = scribbleDoc->history->undoSteps();
 
   PaletteRecipe themeB = themeA;
   themeB.seedHue = 40;
@@ -1167,6 +1521,99 @@ int ScribbleTest::restyleTest()
     check(colorAt(1) == offBefore, "...and still never touches the off-palette stroke");
     check(scribbleDoc->palette().paper == paperBefore, "...and restores the paper exactly");
   }
+
+  scribbleDoc->newDocument();
+  return nbad;
+}
+
+// Dashed and dotted lines, as set from the selection's width popup.  A style is sized by each element's
+//  own width; a filled pen stroke - the default pen, which stroke-dasharray alone cannot reach - is
+//  redrawn as a stroked centreline to take one; the pattern scales with the width; and undo puts back
+//  exactly what was there, geometry included.
+int ScribbleTest::dashStyleTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: dash style: %s\n", what); }
+  };
+  // the first two numbers of an element's stroke-dasharray, 0 for none
+  auto dashesOf = [](Element* s, Dim* dash, Dim* gap) {
+    std::string str = s->getProperties().dashArray;
+    char* end = NULL;
+    *dash = str == "none" ? 0 : std::strtod(str.c_str(), &end);
+    *gap = str == "none" ? 0 : std::strtod(end, NULL);
+  };
+  auto near = [](Dim a, Dim b) { return std::abs(a - b) < 1E-3*std::max(Dim(1), std::abs(b)); };
+
+  scribbleDoc->newDocument();
+  scribbleMode->setMode(MODE_STROKE);
+  scribbleDoc->app->setPen(ScribblePen(Color::BLACK, 4, ScribblePen::TIP_FLAT | ScribblePen::WIDTH_PR));
+  ie(120, 160, 1, pen, press);  ie(160, 180, 1, pen);  ie(200, 160, 1, pen);  ie(0, 0, 0, pen, release);
+  scribbleDoc->app->setPen(ScribblePen(Color::BLACK, 3));
+  ie(120, 260, 0, pen, press);  ie(200, 300, 0, pen);  ie(0, 0, 0, pen, release);
+
+  Page* page = scribbleArea->currPage;
+  check(page->strokeCount() == 2, "two strokes should have been drawn");
+  if(page->strokeCount() != 2)
+    return nbad;
+  auto elementAt = [&](int idx) {
+    int ii = 0;
+    for(Element* s : page->children()) { if(ii++ == idx) return s; }
+    return (Element*)NULL;
+  };
+  check(elementAt(0)->isFilledPenStroke(), "a pressure pen draws a filled outline");
+  check(!elementAt(1)->isFilledPenStroke(), "a plain pen draws a stroked path");
+  std::string filledPath = elementAt(0)->getProperties().dashArray;  // "none"
+  Rect filledBox = elementAt(0)->bbox();
+  size_t undoBefore = scribbleDoc->history->undoSteps();
+
+  scribbleArea->selectAll();
+  StrokeProperties dotted(Color::INVALID_COLOR, -1);
+  dotted.dashStyle = ScribblePen::DASH_DOTTED;
+  scribbleArea->setStrokeProperties(dotted);
+  check(scribbleDoc->history->undoSteps() == undoBefore + 1, "a line style is a single undo step");
+
+  Element* conv = elementAt(0);
+  Element* plain = elementAt(1);
+  check(conv && !conv->isFilledPenStroke(), "a dotted style redraws a filled stroke as a stroked one");
+  check(conv && conv->node->getColorAttr("stroke", Color::NONE) != Color::NONE, "...which has a stroke");
+  check(conv && conv->getProperties().dashStyle == ScribblePen::DASH_DOTTED, "...and is dotted");
+  check(conv && conv->bbox().intersects(filledBox), "...along the path it had");
+  Dim dash, gap, width = plain->node->getFloatAttr("stroke-width", 0);
+  dashesOf(plain, &dash, &gap);
+  check(plain->getProperties().dashStyle == ScribblePen::DASH_DOTTED, "a stroked path takes the style directly");
+  // each element's pattern follows its own width (ScribblePen::dashFor)
+  check(near(dash, 0.1*width) && near(gap, 2*width), "a dotted pattern is sized by the element's width");
+  check(plain->node->getIntAttr("stroke-linecap", -1) == Painter::RoundCap, "dots need a round cap");
+  int selDash = -2;
+  scribbleArea->getPenForSelection(&selDash);
+  check(selDash == ScribblePen::DASH_DOTTED, "the selection reports its line style");
+
+  // the pattern is part of how thick the line looks, so doubling the width doubles it
+  StrokeProperties wider(Color::INVALID_COLOR, 2*width);
+  scribbleArea->setStrokeProperties(wider);
+  Dim dash2, gap2;
+  dashesOf(plain, &dash2, &gap2);
+  check(near(dash2, 2*dash) && near(gap2, 2*gap), "the pattern scales with the width");
+  check(plain->getProperties().dashStyle == ScribblePen::DASH_DOTTED, "...so the style is unchanged");
+
+  scribbleDoc->doUndoRedo(false);
+  dashesOf(plain, &dash2, &gap2);
+  check(near(dash2, dash) && near(gap2, gap), "undoing the width restores the pattern exactly");
+  scribbleDoc->doUndoRedo(false);
+  check(elementAt(0)->isFilledPenStroke(), "undoing the style restores the filled stroke");
+  check(elementAt(0)->getProperties().dashArray == filledPath, "...unchanged");
+  check(elementAt(1)->getProperties().dashArray == "none", "...and the stroked path's solid line");
+  check(elementAt(1)->getProperties().dashStyle == ScribblePen::DASH_SOLID, "...which reads as solid");
+
+  // one dashed, one solid: the selection has no one style, so the popup must show none checked
+  scribbleDoc->doUndoRedo(true);
+  scribbleDoc->app->setPen(ScribblePen(Color::BLACK, 3));
+  scribbleMode->setMode(MODE_STROKE);
+  ie(120, 360, 0, pen, press);  ie(200, 400, 0, pen);  ie(0, 0, 0, pen, release);
+  scribbleArea->selectAll();
+  scribbleArea->getPenForSelection(&selDash);
+  check(selDash == ScribblePen::DASH_MIXED, "a selection of several styles reports none");
 
   scribbleDoc->newDocument();
   return nbad;
@@ -1535,6 +1982,208 @@ int ScribbleTest::shapeSnapTest()
 // Ruling regions (rulingregion.h).  runRegionTests() in regiontest.cpp covers the geometry; this is
 //  everything that needs a document.  The region used is tilted on purpose: an unrotated region would let
 //  every check pass against code that only ever looked at page y.
+// Reflow on a page with no margin (a dot grid): words wrapped onto an empty line start where the text does,
+//  not at the page edge, and words wrapped onto a line with text are kept a word gap apart - the writer's gap,
+//  not one sized from the pitch.  Against the old code the first came out at x = 9 against text at 19, and
+//  the second at 11.25 (1.25 x 0.3 x pitch) against a written gap of 17.
+int ScribbleTest::reflowIndentTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: reflow: %s\n", what); }
+  };
+  auto at = [&](Point pagept, int ev) {
+    Point scr = scribbleArea->dimToScreen(scribbleArea->pageDimToDim(pagept));
+    ie(scr.x, scr.y, 0, pen, ev);
+  };
+  const Dim pitch = 30, row = 4*pitch, textLeft = 20;
+  // a word of n letters, each a zigzag in the lower part of the row starting at rowTop; returns its right end
+  auto word = [&](Dim x, Dim rowTop, int n) {
+    scribbleMode->setMode(MODE_STROKE);
+    for(int ii = 0; ii < n; ++ii) {
+      Dim lx = x + ii*14;
+      at(Point(lx, rowTop + 0.35*pitch), press);
+      at(Point(lx + 4, rowTop + 0.85*pitch), INPUTEVENT_MOVE);
+      at(Point(lx + 8, rowTop + 0.35*pitch), INPUTEVENT_MOVE);
+      at(Point(lx + 11, rowTop + 0.85*pitch), INPUTEVENT_MOVE);
+      at(Point(lx + 11, rowTop + 0.85*pitch), release);
+    }
+    return x + n*14;
+  };
+  auto onRow = [&](const Element* s, Dim rowTop) { return s->com().y >= rowTop && s->com().y < rowTop + pitch; };
+
+  for(int nextLineText = 0; nextLineText < 2; ++nextLineText) {
+    scribbleDoc->newDocument();
+    doCommand(ID_RESETZOOM);
+    scribbleDoc->app->setPen(ScribblePen(Color::BLACK, 2, ScribblePen::TIP_ROUND));
+    PageProperties props(768, 1024, pitch, pitch, 0, Color::WHITE, Color::BLUE, 1.5);
+    scribbleDoc->setPageProperties(&props, true, false, false, false);
+    // a full line of 4-letter words 16 apart, and optionally a short word starting the next line
+    Dim x = textLeft;
+    while(x + 60 < 740) x = word(x, row, 4) + 16;
+    std::set<Element*> existing;
+    if(nextLineText) {
+      word(textLeft, row + pitch, 3);
+      for(Element* s : scribbleArea->currPage->children())
+        if(onRow(s, row + pitch)) existing.insert(s);
+    }
+    Dim inkLeft = MAX_DIM, writtenGap = 0;
+    for(Element* s : scribbleArea->currPage->children())
+      inkLeft = std::min(inkLeft, s->bbox().left);
+    {
+      // the gap between the first two words' ink: first letter of word 2 minus last letter of word 1
+      std::vector<Element*> line;
+      for(Element* s : scribbleArea->currPage->children()) if(onRow(s, row)) line.push_back(s);
+      writtenGap = line[4]->bbox().left - line[3]->bbox().right;
+    }
+    // ruled insert space from the gap after the first word, 160 to the right: the line overflows
+    Dim px = textLeft + 4*14 + 8;
+    scribbleMode->setMode(MODE_INSSPACERULED);
+    at(Point(px, row + 0.5*pitch), press);
+    for(int ii = 1; ii <= 16; ++ii) at(Point(px + 10*ii, row + 0.5*pitch), INPUTEVENT_MOVE);
+    at(Point(px + 160, row + 0.5*pitch), release);
+
+    Dim wrappedLeft = MAX_DIM, wrappedRight = MIN_DIM, existingLeft = MAX_DIM;
+    for(Element* s : scribbleArea->currPage->children()) {
+      if(!onRow(s, row + pitch)) continue;
+      if(existing.count(s))
+        existingLeft = std::min(existingLeft, s->bbox().left);
+      else {
+        wrappedLeft = std::min(wrappedLeft, s->bbox().left);
+        wrappedRight = std::max(wrappedRight, s->bbox().right);
+      }
+    }
+    check(wrappedLeft < MAX_DIM, "the overflowing words wrap onto the next line");
+    if(!nextLineText)
+      check(std::abs(wrappedLeft - inkLeft) < 0.5, "words wrapped onto an empty line start where the text does");
+    else {
+      check(std::abs(wrappedLeft - inkLeft) < 0.5, "words wrapped onto a line with text start where it did");
+      check(std::abs((existingLeft - wrappedRight) - writtenGap) < 0.5,
+          "wrapped words are the writer's word gap from the text already on the line");
+    }
+  }
+  scribbleDoc->clearSelection();
+  return nbad;
+}
+
+// The Skip Lines toggle (skippedLineFrame): with it on, reflow wraps to the next *text* line, an underline in
+//  a blank line does not pull anything onto it, and vertical steps are two lines; with it off, nothing changes.
+//  Default test page: lined, 40 pitch, margin 100.
+int ScribbleTest::skippedLinesTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: skipped lines: %s\n", what); }
+  };
+  auto at = [&](Point pagept, int ev) {
+    Point scr = scribbleArea->dimToScreen(scribbleArea->pageDimToDim(pagept));
+    ie(scr.x, scr.y, 0, pen, ev);
+  };
+  const Dim pitch = 40, textLeft = 110;
+  auto lineOf = [&](const Element* s) { return int(std::floor(s->com().y/pitch)); };
+  // a word of 4 letters on `line`, starting at x; returns its strokes
+  auto word = [&](Dim x, int line) {
+    std::vector<Element*> letters;
+    scribbleMode->setMode(MODE_STROKE);
+    for(int ii = 0; ii < 4; ++ii) {
+      Dim lx = x + ii*14, top = line*pitch;
+      at(Point(lx, top + 0.35*pitch), press);
+      at(Point(lx + 4, top + 0.85*pitch), INPUTEVENT_MOVE);
+      at(Point(lx + 8, top + 0.35*pitch), INPUTEVENT_MOVE);
+      at(Point(lx + 11, top + 0.85*pitch), INPUTEVENT_MOVE);
+      at(Point(lx + 11, top + 0.85*pitch), release);
+      Element* last = NULL;
+      for(Element* s : scribbleArea->currPage->children()) last = s;
+      letters.push_back(last);
+    }
+    return letters;
+  };
+  // a descender: from the bottom of `line` well down into the line below
+  auto descender = [&](Dim x, int line) {
+    scribbleMode->setMode(MODE_STROKE);
+    at(Point(x, line*pitch + 0.8*pitch), press);
+    at(Point(x - 2, line*pitch + 1.3*pitch), INPUTEVENT_MOVE);
+    at(Point(x - 6, line*pitch + 1.6*pitch), INPUTEVENT_MOVE);
+    at(Point(x - 6, line*pitch + 1.6*pitch), release);
+  };
+  // an underline beneath the first word of `line`, in the upper part of the line below
+  auto underline = [&](Dim x, int line) {
+    scribbleMode->setMode(MODE_STROKE);
+    at(Point(x, (line + 1.15)*pitch), press);
+    at(Point(x + 30, (line + 1.2)*pitch), INPUTEVENT_MOVE);
+    at(Point(x + 56, (line + 1.15)*pitch), INPUTEVENT_MOVE);
+    at(Point(x + 56, (line + 1.15)*pitch), release);
+  };
+  // line 3 full of words (returns the last one, which must wrap), then two words on each of `others`
+  auto setup = [&](const std::vector<int>& others) {
+    scribbleDoc->newDocument();
+    doCommand(ID_RESETZOOM);
+    scribbleDoc->app->setPen(ScribblePen(Color::BLACK, 2, ScribblePen::TIP_ROUND));
+    std::vector<Element*> lastWord;
+    for(Dim x = textLeft; x + 60 < 740; x += 4*14 + 16)
+      lastWord = word(x, 3);
+    for(int line : others) {
+      word(textLeft, line);
+      word(textLeft + 4*14 + 16, line);
+    }
+    return lastWord;
+  };
+  // ruled insert space on line 3 from the gap after the first word, far enough right to overflow
+  auto pushRight = [&]() {
+    Dim px = textLeft + 4*14 + 8;
+    scribbleMode->setMode(MODE_INSSPACERULED);
+    at(Point(px, 3*pitch + 0.5*pitch), press);
+    for(int ii = 1; ii <= 16; ++ii) at(Point(px + 10*ii, 3*pitch + 0.5*pitch), INPUTEVENT_MOVE);
+    at(Point(px + 160, 3*pitch + 0.5*pitch), release);
+  };
+  auto allOn = [&](const std::vector<Element*>& strokes, int line) {
+    for(Element* s : strokes) if(lineOf(s) != line) return false;
+    return true;
+  };
+
+  const bool wasSkipping = scribbleMode->insSpaceSkipLines;
+  scribbleMode->insSpaceSkipLines = true;
+  std::vector<Element*> wrapped = setup({5, 7, 9});
+  pushRight();
+  check(allOn(wrapped, 5), "double spaced: words wrap to the next text line, not the blank one");
+  {
+    bool blankStaysBlank = true;
+    for(Element* s : scribbleArea->currPage->children()) if(lineOf(s) == 4) blankStaysBlank = false;
+    check(blankStaysBlank, "double spaced: the blank line stays blank");
+  }
+
+  // descenders stay on their line (calcCom leans on a stroke's first point and top), but an underline lies in
+  //  the blank line below its word - that is the stray ink the detection has to see past
+  wrapped = setup({5, 7, 9});
+  descender(300, 3);
+  descender(160, 5);
+  for(int line : {3, 5, 7}) underline(textLeft, line);
+  pushRight();
+  check(allOn(wrapped, 5), "double spaced with underlines in the blank lines: still wraps to the next text line");
+
+
+  // insert space from the margin on double spaced text moves it a text line, i.e. two lines
+  setup({5, 7, 9});
+  std::vector<Element*> line5;
+  for(Element* s : scribbleArea->currPage->children()) if(lineOf(s) == 5) line5.push_back(s);
+  scribbleMode->setMode(MODE_INSSPACERULED);
+  at(Point(50, 5*pitch + 0.5*pitch), press);
+  at(Point(50, 5*pitch + 1.0*pitch), INPUTEVENT_MOVE);
+  at(Point(50, 5*pitch + 1.6*pitch), INPUTEVENT_MOVE);
+  at(Point(50, 5*pitch + 1.6*pitch), release);
+  check(!line5.empty() && allOn(line5, 7), "double spaced: vertical insert space steps two lines");
+
+  // off: the same double spaced text wraps onto the blank line, as ruled insert space always has
+  scribbleMode->insSpaceSkipLines = false;
+  wrapped = setup({5, 7, 9});
+  pushRight();
+  check(allOn(wrapped, 4), "toggle off: words wrap to the very next line");
+
+  scribbleMode->insSpaceSkipLines = wasSkipping;
+  scribbleDoc->clearSelection();
+  return nbad;
+}
+
 int ScribbleTest::rulingRegionTest()
 {
   int nbad = 0;
@@ -1670,6 +2319,37 @@ int ScribbleTest::rulingRegionTest()
   check(approxEq(region->regionParams().corners[0], cornerStart, 1E-3)
       && approxEq(offsetOf(centred, centredStart), Point(0, 0), 1E-3), "undo puts the region and its ink back");
 
+  // the size handle makes more paper, not bigger lines: the outline grows - by different amounts each
+  //  way - while the ruling and the ink inside stay exactly where they were
+  {
+    scribbleArea->selectRegion(region);
+    RulingRegionParams start = region->regionParams();
+    auto localSize = [](const RulingRegionParams& rp) {
+      RulingFrame f = rp.frame();
+      Rect r;
+      for(Point p : rp.corners) r.rectUnion(f.toLocal(p));
+      return Point(r.width(), r.height());
+    };
+    Point size0 = localSize(start);
+    Point handle = scribbleArea->regionSelector ? scribbleArea->regionSelector->scaleHandlePos() : Point(NaN, NaN);
+    Point drag = frame.toPageDir(Point(60, 20));
+    steps = scribbleDoc->history->undoSteps();
+    scribbleMode->setMode(MODE_STROKE);
+    at(handle, press);
+    at(handle + drag*0.5, INPUTEVENT_MOVE);
+    at(handle + drag, INPUTEVENT_MOVE);
+    at(handle + drag, release);
+    const RulingRegionParams& now = region->regionParams();
+    check(approxEq(localSize(now) - size0, Point(60, 20), 1E-2), "the size handle stretches the outline, freely");
+    check(std::abs(now.yRuling - start.yRuling) < 1E-6 && approxEq(now.origin, start.origin, 1E-6)
+        && std::abs(now.angle - start.angle) < 1E-9, "...without scaling or moving the lines");
+    check(approxEq(offsetOf(centred, centredStart), Point(0, 0), 1E-3), "...or the ink on them");
+    check(scribbleDoc->history->undoSteps() == steps + 1, "resizing a region is one undo step");
+    scribbleDoc->clearSelection();
+    scribbleDoc->doUndoRedo(false);
+    check(approxEq(localSize(region->regionParams()), size0, 1E-3), "undo puts the old size back");
+  }
+
   // deleting a region keeps its ink
   ncount = page->strokeCount();
   scribbleArea->selectRegion(region);
@@ -1770,7 +2450,7 @@ void ScribbleTest::runAll(bool runsynctest)
   nFailed = 0;
   int nThumbsFailed = 0;
   int nUnitFailed = runScanTests() + runShapeTests() + runColorTests() + runLayerTests() + runLibraryTests()
-      + runRegionTests();
+      + runRegionTests() + runNotefulTests() + runPageTagTests();
   std::vector<std::string> slFailed;
   void (ScribbleTest::*tests[])() = {
     &ScribbleTest::test0,
@@ -1922,13 +2602,20 @@ void ScribbleTest::runAll(bool runsynctest)
   nUnitFailed += shapeInterruptTest();
   nUnitFailed += themeRoundTripTest();
   nUnitFailed += restyleTest();
+  nUnitFailed += dashStyleTest();
   nUnitFailed += outlineTest();
   nUnitFailed += outlineNestTest();
+  nUnitFailed += notefulImportTest();
+  nUnitFailed += notefulArchiveTest();
   nUnitFailed += layerTest();
+  nUnitFailed += selectTouchingTest();
+  nUnitFailed += pageTagTest();
   nUnitFailed += docStateSyncTest();
   nUnitFailed += curveFitTest();
   nUnitFailed += shapeSnapTest();
   nUnitFailed += rulingRegionTest();
+  nUnitFailed += reflowIndentTest();
+  nUnitFailed += skippedLinesTest();
   runAllTime = mSecSinceEpoch() - runAllTime;
   // restore global config
   srandpp(mSecSinceEpoch());

@@ -11,6 +11,7 @@
 #include <string>
 #include <functional>
 #include "basics.h"
+#include "ulib/image.h"
 
 class Document;
 
@@ -45,5 +46,14 @@ int importPdf(Document* doc, const char* filename, const Options& opts = Options
 
 // Number of pages in `filename`, or -1 if it cannot be opened.  Cheap - does not render anything.
 int pageCount(const char* filename, const char* password = NULL);
+
+// The thumbnail an imported document is saved with (Document::save's `thumb`): its first page, width
+//  filling the image, as base64 PNG - what ScribbleArea::drawThumbnail gives a document saved in the
+//  app, which an import never passes through.  Empty for a document without pages.
+std::string thumbnail(Document* doc);
+
+// Render page `pageNum` of a PDF held in memory - for PDFs embedded in another format (a Noteful
+//  notebook's page backgrounds).  Returns a null Image on failure, with `errorOut` set if given.
+Image renderPage(const std::string& pdfData, int pageNum, Dim dpi, std::string* errorOut = NULL);
 
 }  // namespace PdfImport

@@ -24,6 +24,7 @@ SOURCES = \
   scribblemode.cpp \
   scribbleinput.cpp \
   scribbleview.cpp \
+  nightmode.cpp \
   screenshot.cpp \
   bookmarkview.cpp \
   scribblearea.cpp \
@@ -35,12 +36,15 @@ SOURCES = \
   tagstore.cpp \
   tagdoclist.cpp \
   doclibrary.cpp \
+  notefulfile.cpp \
+  notefulimport.cpp \
   sidebar.cpp \
   rowdrag.cpp \
   rulingdialog.cpp \
   themedialog.cpp \
   cover.cpp \
   newdocdialog.cpp \
+  tagmenu.cpp \
   addpagemenu.cpp \
   scandialog.cpp \
   configdialog.cpp \
@@ -82,7 +86,8 @@ SOURCES += \
 SOURCES += \
   ../miniz/miniz.c \
   ../miniz/miniz_tdef.c \
-  ../miniz/miniz_tinfl.c
+  ../miniz/miniz_tinfl.c \
+  ../miniz/miniz_zip.c
 
 
 # if source contains ../ paths, this should be the <current> directory; if ../../, <parent>/<current>; etc.

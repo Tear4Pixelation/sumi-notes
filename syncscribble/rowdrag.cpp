@@ -26,9 +26,9 @@ void RowDrag::addRow(Button* row, int key)
         row->node->addClass("dragging");
       }
       if(dragging) {
-        int key;
-        Widget* target = targetAt(gui, row, pos, &key);
-        bool allowed = target && target != row && (!canDrop || canDrop(rows[row], key));
+        int targetKey;
+        Widget* target = targetAt(gui, row, pos, &targetKey);
+        bool allowed = target && target != row && (!canDrop || canDrop(rows[row], targetKey));
         setHover(allowed ? target : NULL);
       }
       // Accepted even below the threshold: when a ScrollWidget passes a pen or touch drag through to

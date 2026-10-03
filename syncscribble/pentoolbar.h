@@ -3,6 +3,8 @@
 #include "ugui/widgets.h"
 #include "basics.h"
 #include "scribbleconfig.h"
+#include "scribblepen.h"
+#include <memory>
 
 
 class ScribbleApp;
@@ -44,13 +46,19 @@ public:
   // Repopulates the swatches from the active document's theme (COLORS_SPEC.md §6). Called when the
   //  theme changes and when the document changes; harmless when theming is off.
   void refreshPalette();
+  void refreshDisplayColors();
   void updateColor();
   void updateWidth();
   void updatePen();
-  void setPen(const ScribblePen& newpen, Mode m);
+  // selDashStyle is the selection's line style in SELECTION_MODE (a pen carries its own, as dash/gap)
+  void setPen(const ScribblePen& newpen, Mode m, int selDashStyle = ScribblePen::DASH_SOLID);
+  // ScribblePen::DASH_*: solid, dashed or dotted.  In SELECTION_MODE it is the selection's (DASH_MIXED
+  //  when that has several) and a change is reported as DASH_CHANGED; otherwise it is the pen's.
+  int dashStyle = ScribblePen::DASH_SOLID;
+  void setDashStyle(int style);
   //void dragWidth(int delta);
 
-  enum ChangedFlag { COLOR_CHANGED=1, WIDTH_CHANGED=2, PEN_CHANGED=4, YIELD_FOCUS=8,
+  enum ChangedFlag { COLOR_CHANGED=1, WIDTH_CHANGED=2, PEN_CHANGED=4, YIELD_FOCUS=8, DASH_CHANGED=0x20,
       UNDO_PREV=0x10000 };
   std::function<void(int)> onChanged;
 
@@ -64,20 +72,47 @@ public:
   const Dim penWidthPreviewMax = 22;  // was 30 for circle instead of line; static constexpr only works for int
   const bool compact;
 
-  // A lone color swatch for an options row with no room for the saved list - the shape tool's.  It
-  //  shows the pen's color and opens the same theme grid as the "+"; a pick sets the pen's color (or
-  //  the selection's, in SELECTION_MODE) instead of adding a swatch.  Returns the swatch plus its
-  //  popups, which have to sit beside it in the tree.  Only one may be created.
-  Widget* createSingleSwatch();
-  // called after a pick through the single swatch, with the color as snapped to the theme
-  std::function<void(Color)> onSingleSwatchPicked;
+  // A lone color swatch for a row with no room for the saved list - the shape tool's options row and
+  //  the selection popup.  It shows the pen's color and opens the same theme grid as the "+"; a pick
+  //  sets the pen's color (or the selection's, in SELECTION_MODE) instead of adding a swatch.  Returns
+  //  the swatch plus its popups, which have to sit beside it in the tree.  onPicked is called after a
+  //  pick with the color as snapped to the theme.
+  Widget* createSingleSwatch(std::function<void(Color)> onPicked = nullptr);
+  // Its thickness counterpart: one width swatch showing the pen's (or the selection's) width and line
+  //  style, opening a popup with the width presets, the width itself and solid/dashed/dotted.
+  //  onWidthChanged is called after the width or the style is changed through it.
+  Widget* createSingleWidth(std::function<void()> onWidthChanged = nullptr);
 
 private:
   void fillColorGrid(Widget* grid, const std::function<void(Color)>& onPick,
       const std::function<void()>& onCustom);
-  void openSingleSwatch();
-  void pickSingleSwatch(Color color);
-  void updateSingleSwatch();
+  struct SingleSwatch {
+    Button* btn;
+    ArrowPopup* palettePopup;
+    Widget* paletteGrid;
+    ArrowPopup* customPopup;
+    ColorEditBox* customPicker;
+    std::function<void(Color)> onPicked;
+  };
+  struct SingleWidth {
+    Button* btn;
+    ArrowPopup* popup;
+    Widget* presetRow;
+    std::vector<Button*> presets;
+    SpinBox* spin;
+    Widget* spinRow;
+    Button* dashBtns[3];
+    std::function<void()> onChanged;
+  };
+  std::vector<std::unique_ptr<SingleSwatch>> singleSwatches;
+  std::vector<std::unique_ptr<SingleWidth>> singleWidths;
+  void openSingleSwatch(SingleSwatch* sw);
+  void pickSingleSwatch(SingleSwatch* sw, Color color);
+  void openSingleWidth(SingleWidth* sw);
+  void setSingleWidth(SingleWidth* sw, Dim width);
+  void updateSingles();
+  // counts edits since a text field took focus, so typing a width is one undo step, not one per key
+  void trackEditFocus(Widget* field);
   void rebuildGrids();
   void selectWidth(int idx);
   void selectColor(int idx);
@@ -148,11 +183,6 @@ private:
   int colorPopupIdx = -1;
   Widget* colorGroup;
   Widget* widthGroup;
-  Button* singleSwatchBtn = NULL;
-  ArrowPopup* singlePalettePopup = NULL;
-  Widget* singlePaletteGrid = NULL;
-  ArrowPopup* singleCustomPopup = NULL;
-  ColorEditBox* singleCustomPicker = NULL;
 
   Button* overflowBtn;
   Button* selOverflowBtn;

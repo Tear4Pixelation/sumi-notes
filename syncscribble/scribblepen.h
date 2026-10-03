@@ -37,6 +37,27 @@ public:
   bool hasVarWidth() const { return flags & WIDTH_MASK; }
   bool usesPressure() const { return hasFlag(WIDTH_PR); }
 
+  // Line style.  What is stored - on a pen as dash/gap, on a path as stroke-dasharray - is the absolute
+  //  pattern; the style is derived from it by measuring against the width, never stored, so a pattern
+  //  written by anything else still reads as one of the three.  Dashes are sized in widths so that a
+  //  thicker line gets a proportionally longer pattern.  A dot is a dash a tenth of a width long drawn
+  //  with a round cap: a zero-length dash has no direction, and nanovg merges its two points and draws
+  //  nothing.
+  enum DashStyle { DASH_MIXED = -1, DASH_SOLID = 0, DASH_DASHED = 1, DASH_DOTTED = 2 };
+  static int dashStyleOf(Dim dash, Dim gap, Dim width)
+  {
+    if(dash <= 0 && gap <= 0)
+      return DASH_SOLID;
+    return width > 0 && dash < 0.5*width ? DASH_DOTTED : DASH_DASHED;
+  }
+  static void dashFor(int style, Dim width, Dim* dash, Dim* gap)
+  {
+    *dash = style == DASH_DASHED ? 3*width : (style == DASH_DOTTED ? 0.1*width : 0);
+    *gap = style == DASH_DASHED ? 3*width : (style == DASH_DOTTED ? 2*width : 0);
+  }
+  int dashStyle() const { return dashStyleOf(dash, gap, width); }
+  void setDashStyle(int style) { dashFor(style, width, &dash, &gap); }
+
   Rect getBBox() const
   {
     Dim hw = 0.75*0.5*width;  //pressureparam > 0 ? 0.5*width * (1 - pow(1 - 0.66, pressureparam)) : 0.5*width;

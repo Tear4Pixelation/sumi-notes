@@ -36,6 +36,9 @@ public:
   virtual void doDblClickAction(Point pos) {}
   virtual void doLongPressAction(Point pos) {}
   virtual void doMotionEvent(const InputEvent& event, inputevent_t eventtype) {}
+  // true while a single pointer must reach doPressEvent whatever the input mode - e.g. a finger that
+  //  would otherwise pan places page tags instead (ScribbleArea::startTagPlacement())
+  virtual bool capturesPointer() const { return false; }
   virtual void doCancelAction(bool refresh = true);
   virtual bool doTimerEvent(Timestamp t);
   virtual void doRefresh() { reqRepaint(); }
@@ -60,6 +63,8 @@ protected:
 
   virtual void drawImage(Painter* imgpaint, const Rect& dirty) {}
   virtual void drawScreen(Painter* painter, const Rect& dirty) {}
+  // render-time color transform for night mode; NULL draws the document's own colors
+  virtual const ColorMap* viewColorMap() { return NULL; }
   virtual void doPan(Dim dx, Dim dy);
   virtual void pageSizeChanged();
 

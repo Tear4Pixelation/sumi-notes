@@ -93,7 +93,9 @@ StrokedStrokeBuilder::StrokedStrokeBuilder(const ScribblePen& pen) : width(pen.w
   svgPath->setAttr<float>("stroke-width", pen.width);
   // only round cap and join give decent results with freehand input
   // should we consider setting stroke-linecap/-linejoin on content <g> instead of individual strokes?
-  auto cap = pen.hasFlag(ScribblePen::TIP_FLAT) ? Painter::FlatCap : Painter::RoundCap;
+  // a dot is a dash shorter than the line is wide, which only a round cap turns into a dot
+  auto cap = pen.hasFlag(ScribblePen::TIP_FLAT) && pen.dashStyle() != ScribblePen::DASH_DOTTED
+      ? Painter::FlatCap : Painter::RoundCap;
   auto join = pen.hasFlag(ScribblePen::TIP_FLAT) ? Painter::MiterJoin : Painter::RoundJoin;
   svgPath->setAttr<int>("stroke-linecap", cap);
   svgPath->setAttr<int>("stroke-linejoin", join);

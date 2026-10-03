@@ -20,8 +20,6 @@ void ScribbleConfig::init()
   cfg["greedyRuledErase"] = 1;
   // apply erasers to images?
   cfg["eraseOnImage"] = 1;
-  // 1: return to previous mode on cursor up (except from draw mode) 0: do not return to previous mode
-  cfg["doubleTapSticky"] = 1;
   // leave a freshly drawn shape selected with its parameter handles up
   cfg["shapeEditAfterDraw"] = 1;
   // hint shown in the history panel until the user has actually scrubbed once; cleared by using the
@@ -150,6 +148,8 @@ void ScribbleConfig::init()
   cfg["pageSizeAsked"] = 0;  // the one-time question whether new pages are A4 or Letter was asked
   // encode imported PDF pages as JPEG instead of PNG - much smaller for scans, blurrier for text
   cfg["pdfImportLossy"] = 0;
+  // importing a Noteful folder export: tag each notebook with its folder path (NotefulImport::ArchiveOptions)
+  cfg["notefulFolderTags"] = 1;
 
   // save thumbnail to HTML file - currently only disabled when running tests
   cfg["saveThumbnail"] = 1;
@@ -185,7 +185,6 @@ void ScribbleConfig::init()
 
   // color inversion
   cfg["invertColors"] = 0;
-  cfg["colorXorMask"] = 0x00FFFFFF;
 
   // document theme (COLORS_SPEC.md).  These are the defaults new documents get; a document that has
   //  been themed overrides them in its own config node, and one that has not inherits these.
@@ -360,6 +359,9 @@ void ScribbleConfig::init()
   // sidebar's tag system - unrelated to the legacy single-string "docTags" above, which only
   // ever held one folder-derived name for the old folder->tag migration tool.
   cfgS["tags"] = "";
+  // the tagged pages, summarized on save from the pages' own tag elements so the document browser can
+  //  list them without opening the file (TagStore::formatPageTags, docs/agent/page-tags.md)
+  cfgS["pagetags"] = "";
   // the notebook's cover color (ARGB) - its seed only, the band is derived (cover.h); 0 = no cover, so
   //  the document list shows the first page instead
   cfg["coverColor"] = 0;

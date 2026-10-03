@@ -7,6 +7,7 @@
 #include "shape.h"
 #include "rulingregion.h"
 #include "layers.h"
+#include "scribblepen.h"
 
 #define MAX_LINE_NUM INT_MAX
 
@@ -97,6 +98,12 @@ public:
   Dim width;
   Color fillColor = Color::INVALID_COLOR;
   Color strokeColor = Color::INVALID_COLOR;
+  // ScribblePen::DASH_*: the pattern to give each stroked path, sized by that path's own width, so one
+  //  choice suits a selection of mixed widths.  DASH_MIXED leaves it alone.
+  int dashStyle = -1;
+  // the exact stroke-dasharray, "none" for solid - what getProperties() reads, so that undo and sync put
+  //  back precisely what was there.  Empty leaves it alone; takes precedence over dashStyle.
+  std::string dashArray;
 
   StrokeProperties(Color c, Dim w) : color(c), width(w) {}
 
@@ -113,7 +120,11 @@ public:
         props.color = Color::INVALID_COLOR;
       if(p2.width > 0 && p2.width != props.width)
         props.width = -1;
-      if(!props.color.isValid() && props.width == -1)
+      if(p2.dashStyle != props.dashStyle)
+        props.dashStyle = -1;
+      if(p2.dashArray != props.dashArray)
+        props.dashArray.clear();
+      if(!props.color.isValid() && props.width == -1 && props.dashStyle == -1)
         return props;
     }
     return props;
@@ -161,6 +172,12 @@ public:
   void scaleWidth(Dim sx_int, Dim sy_int);
   StrokeProperties getProperties() const;
   bool setProperties(const StrokeProperties& props);
+  // a filled outline from a flat, round or chisel pen - which a dash pattern cannot apply to, since
+  //  stroke-dasharray acts only on a stroke
+  bool isFilledPenStroke() const;
+  // redraws a filled pen stroke as a stroked centreline of its mean width, losing the width variation;
+  //  the way a dash style is given to one.  False, and nothing changed, for anything else.
+  bool convertToStroked();
 
   void setSelected(const Selection* l);
   bool isSelected(const Selection* l) const { return m_selection == l; }
@@ -185,6 +202,14 @@ public:
   void rebuildRegion(Color paper = Color::INVALID_COLOR, Color rule = Color::INVALID_COLOR);
   static Element* createRulingRegion(const RulingRegionParams& params, Color paper, Color rule);
   static const char* RULING_REGION_CLASS;
+  // Page tags (docs/agent/page-tags.md): a <g class="write-pagetag" __pagetag="t5"> holding a pill and
+  //  the tag's name.  It is ordinary content - selecting and deleting it is how a tag comes off a page,
+  //  and undo and sync handle it like any other element.  The id is what counts; the text is a label.
+  bool isPageTag() const { return node->type() == SvgNode::G && node->hasClass(PAGE_TAG_CLASS); }
+  const char* pageTagId() const { return node->getStringAttr("__pagetag", ""); }
+  // a tag with its top right corner at `topRight`, in page coordinates
+  static Element* createPageTag(const char* tagId, const char* name, Point topRight);
+  static const char* PAGE_TAG_CLASS;
   bool isBookmark() const { return node->hasClass("bookmark"); }
   bool isHyperRef() const;
   // all children of multi-stroke have Element exts; may extend to include bookmark groups later

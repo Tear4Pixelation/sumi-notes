@@ -19,6 +19,8 @@ public:
 
   Rect mBounds;
   static Color bgColor;
+  // dark mode map, as on the canvas; asked for at each draw, since the view that owns it can go away
+  static std::function<const ColorMap*()> colorMap;
 private:
   //int penNum;
   ScribblePen mPen = {Color::INVALID_COLOR, -1};

@@ -88,6 +88,9 @@ public:
   void importPDF();
   bool doImportPdf(const std::string& pdfPath);
   std::string importPdfToDocFile(const std::string& pdfPath, std::string* errorOut = NULL);
+  // the document browser's import FAB: pick a file of the format and import it into the library;
+  //  returns a document to open (one PDF or notebook), empty for an archive, a cancel or a failure
+  std::string importFromBrowser(bool noteful);
   void insertImage();
   void pickImage();
   void insertImage(const std::string& filename);
@@ -160,6 +163,8 @@ public:
   std::string libraryRoot;
   std::string libraryTarget;
   bool libraryTemporary = false;
+  // --library DIR: use DIR as the library for this run only (docs screenshots, demos); see initLibrary()
+  std::string libraryOverride;
   std::string runType;
   std::string argDoc;
   std::string outDoc;
@@ -194,6 +199,9 @@ public:
   void loadConfig();
 
   static ScribbleApp* app;
+  // a document color as the canvas currently draws it (dark mode maps it); for swatches and previews,
+  //  never for comparing against or storing a pen color
+  static Color displayColor(Color c);
   static MainWindow* win;
   static ScribbleConfig* cfg;
   static Dialog* currDialog;
@@ -211,6 +219,9 @@ public:
   static bool hasAndroidPermission();
   static bool requestAndroidPermission();
 #endif
+
+  // the folder the tag document browser lists, whose .write-tags holds the tags page tags come from
+  std::string tagBrowserRoot() const;
 
 private:
   friend class ScribbleTest;
@@ -248,6 +259,7 @@ private:
   // the two document browsers behind openOrCreateDoc(), chosen by the useTagDocList pref
   bool openOrCreateDocClassic(bool cancelable = false);
   bool openOrCreateDocTagged(bool cancelable = false);
+  void gotoSelectedPage();
   std::string execDocumentList(int mode, const char* exts = NULL, bool cancelable = true) ;
   std::string createRecoveryName(std::string filename, const char* toappend = " - recovered");
   std::string docDisplayName(std::string filename, int maxwidth=0);

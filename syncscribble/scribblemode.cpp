@@ -112,7 +112,8 @@ std::string ScribbleMode::saveModes()
   //  index would have silently reassigned everyone's active tool when that happened.
   const ShapeDef* shapedef = shapeDef(shapeId);
   ss << ' ' << (shapedef ? shapedef->id : "box") << ' ' << shapeFlags
-     << ' ' << int(selectSwitchBack) << ' ' << int(eraseSwitchBack) << ' ' << int(insSpaceSwitchBack);
+     << ' ' << int(selectSwitchBack) << ' ' << int(eraseSwitchBack) << ' ' << int(insSpaceSwitchBack)
+     << ' ' << int(selectTouching) << ' ' << int(insSpaceSkipLines);
   return ss.str();
 }
 
@@ -128,10 +129,12 @@ void ScribbleMode::loadModes(const char* modestr)
   drawTool = DRAWTOOL_PEN;
   shapeId = SHAPE_BOX;
   shapeFlags = 0;
-  // all default to on, which is what the global doubleTapSticky pref (also on by default) used to do
+  // all default to on, which is what the removed global doubleTapSticky pref (also on by default) did
   eraseSwitchBack = true;
   selectSwitchBack = true;
   insSpaceSwitchBack = true;
+  selectTouching = false;
+  insSpaceSkipLines = false;
   drawPen = ScribblePen(Color::BLACK, 1.6, ScribblePen::TIP_FLAT | ScribblePen::WIDTH_PR, 0.9, 2.0);
   // the marker's width is a fraction of the line height by default: what a marker has to do is cover a
   //  line of text, so the useful number is "three quarters of a line", not "30 units" (which covers a
@@ -190,6 +193,10 @@ void ScribbleMode::loadModes(const char* modestr)
     eraseSwitchBack = mode != 0;
   if(ss >> mode)
     insSpaceSwitchBack = mode != 0;
+  if(ss >> mode)
+    selectTouching = mode != 0;
+  if(ss >> mode)
+    insSpaceSkipLines = mode != 0;
 }
 
 void ScribbleMode::setMode(int mode, bool once)
@@ -232,13 +239,11 @@ void ScribbleMode::setMode(int mode, bool once)
     break;
   }
 
-  // The "doubleTapSticky" pref is the master switch - off means no tool ever switches back.  With it on,
-  //  the tools with a switch back toggle follow it; every other tool switches back.
-  bool switchback = cfg->Bool("doubleTapSticky")
-      && (hasSwitchBack(newmode) ? switchBack(newmode) : true);
-  // previously we had newmode == currMode, but I want to prevent changing mode of single-use tool from locking
+  // the tools with a switch back toggle follow it; every other tool switches back.  Picking the active
+  //  tool again no longer locks it (double tap to lock) - that is also how its options row is closed
+  bool switchback = hasSwitchBack(newmode) ? switchBack(newmode) : true;
   if(!once && (newmode == MODE_STROKE || newmode == MODE_DRAWSHAPE || newmode == MODE_PAGESEL
-      || mode == currMode || !switchback)) {
+      || newmode == MODE_PAN || !switchback)) {
     if(newmode != stickyMode)
       prevStickyMode = stickyMode;
     stickyMode = newmode;
@@ -267,7 +272,7 @@ void ScribbleMode::setSwitchBack(int modetype, bool on)
 {
   (modetype == MODE_ERASE ? eraseSwitchBack :
       modetype == MODE_SELECT ? selectSwitchBack : insSpaceSwitchBack) = on;
-  if(currMode != modetype || !cfg->Bool("doubleTapSticky"))
+  if(currMode != modetype)
     return;
   if(!on)
     stickyMode = currMode;

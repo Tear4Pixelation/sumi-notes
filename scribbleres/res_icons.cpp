@@ -550,6 +550,18 @@ static const char* icons__ic_menu_history_svg = R"~~~~(<?xml version="1.0" encod
 </svg>
 )~~~~";
 
+static const char* icons__ic_menu_import_svg = R"~~~~(<?xml version="1.0" encoding="utf-8"?>
+<svg version="1.2" baseProfile="tiny" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+  x="0px" y="0px" viewBox="0 0 24 24" xml:space="preserve">
+<!-- reicon "import2" (outline), https://reicon.dev - MIT -->
+<g class="icon">
+  <path fill="none" d="M22 2L13.8 10.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path fill="none" d="M13 6.17004V11H17.83" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path fill="none" d="M11 2H9C4 2 2 4 2 9V15C2 20 4 22 9 22H15C20 22 22 20 22 15V13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+</svg>
+)~~~~";
+
 static const char* icons__ic_menu_insert_space_ruled_svg = R"~~~~(<?xml version="1.0" encoding="utf-8"?>
 <svg version="1.2" baseProfile="tiny" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
   x="0px" y="0px" viewBox="733 285.38 35 35" xml:space="preserve">
@@ -1130,6 +1142,32 @@ static const char* icons__ic_menu_toggle_ruled_svg = R"~~~~(<?xml version="1.0" 
 </svg>
 )~~~~";
 
+static const char* icons__ic_menu_toggle_select_touch_svg = R"~~~~(<?xml version="1.0" encoding="utf-8"?>
+<svg version="1.2" baseProfile="tiny" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+  x="0px" y="0px" viewBox="0 0 24 24" xml:space="preserve">
+<g class="icon">
+  <rect x="2.75" y="2.75" width="12.5" height="12.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2.5 2"/>
+  <path d="M9,11.5C11.5,9,14,17,16.5,14.5S19.5,19.5,21.5,20.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+</g>
+</svg>
+)~~~~";
+
+static const char* icons__ic_menu_toggle_skip_lines_svg = R"~~~~(<?xml version="1.0" encoding="utf-8"?>
+<svg version="1.2" baseProfile="tiny" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+  x="0px" y="0px" viewBox="619 158.03 34 34" xml:space="preserve">
+<g class="icon">
+  <path d="M620.5,169L651.5,169" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+  <path d="M620.5,180L651.5,180" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+  <path d="M620.5,191L651.5,191" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+  <!-- handwriting on the first and third lines, none on the second -->
+  <path d="M621.5,165.3 q2,-7.2 4,0 q2.3,-10.4 4.6,0 q1.7,-6 3.4,0" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M639,165.3 q2.1,-8.8 4.2,0 q1.6,-5.2 3.2,0 q2.2,-7.6 4.4,0" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M621.5,187.3 q1.8,-6 3.6,0 q2.4,-8 4.8,0 q1.9,-6.8 3.8,0 q1.6,-4.8 3.2,0" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M641,187.3 q2.3,-7.6 4.6,0 q2.2,-6 4.4,0" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+</svg>
+)~~~~";
+
 static const char* icons__ic_menu_undo_svg = R"~~~~(<?xml version="1.0" encoding="utf-8"?>
 <svg version="1.2" baseProfile="tiny" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
   x="0px" y="0px" viewBox="0 0 24 24" xml:space="preserve">
@@ -1284,6 +1322,7 @@ static void LOAD_RES_FN() { addStringResources({
   {"icons/ic_menu_hidden.svg", icons__ic_menu_hidden_svg},
   {"icons/ic_menu_highlight.svg", icons__ic_menu_highlight_svg},
   {"icons/ic_menu_history.svg", icons__ic_menu_history_svg},
+  {"icons/ic_menu_import.svg", icons__ic_menu_import_svg},
   {"icons/ic_menu_insert_space_ruled.svg", icons__ic_menu_insert_space_ruled_svg},
   {"icons/ic_menu_insert_space.svg", icons__ic_menu_insert_space_svg},
   {"icons/ic_menu_link.svg", icons__ic_menu_link_svg},
@@ -1337,6 +1376,8 @@ static void LOAD_RES_FN() { addStringResources({
   {"icons/ic_menu_switch_back.svg", icons__ic_menu_switch_back_svg},
   {"icons/ic_menu_toggle_erase_stroke.svg", icons__ic_menu_toggle_erase_stroke_svg},
   {"icons/ic_menu_toggle_ruled.svg", icons__ic_menu_toggle_ruled_svg},
+  {"icons/ic_menu_toggle_select_touch.svg", icons__ic_menu_toggle_select_touch_svg},
+  {"icons/ic_menu_toggle_skip_lines.svg", icons__ic_menu_toggle_skip_lines_svg},
   {"icons/ic_menu_undo.svg", icons__ic_menu_undo_svg},
   {"icons/ic_menu_unlock.svg", icons__ic_menu_unlock_svg},
   {"icons/ic_menu_visible.svg", icons__ic_menu_visible_svg},

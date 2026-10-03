@@ -377,14 +377,19 @@ void Selection::setStrokeProperties(const StrokeProperties& props)
   for(Element* s : strokescopy) {
     // if node doesn't have fill attribute, easier to replace it than handle it as a special case
     bool nofill = props.color.alpha() > 0 && !s->node->getAttr("fill");
+    // a dash pattern applies only to a stroke, so a filled pen stroke is redrawn as a stroked centreline;
+    //  that changes its geometry, which StrokeChangedItem cannot record, so it is replaced like a group
+    bool restroke = props.dashStyle > ScribblePen::DASH_SOLID && s->isFilledPenStroke();
     // since setProperties descends recursively into groups (container or <text> w/ <tspan>s) we need to
     //  replace group so we can undo properly
-    if(s->containerNode() || s->node->type() == SvgNode::TEXT || nofill) {
+    if(s->containerNode() || s->node->type() == SvgNode::TEXT || nofill || restroke) {
       Element* t = s->cloneNode();
       page->addStroke(t, s);
       addStroke(t);
       removeStroke(s);
       page->removeStroke(s);
+      if(restroke)
+        t->convertToStroked();
       t->setProperties(props);
     }
     else {
@@ -524,6 +529,70 @@ static int workingLine(Element* s, const RulingFrame& f)
   return int(std::floor(local.y/rulingYr(f)));
 }
 
+// Writing on every second line (the Skip Lines toggle): the line pressed on is a text line, and so is every
+//  second line from it.  The returned frame makes each text line plus half the blank line either side one
+//  "line" - pitch doubled, origin half a line above the pressed line - so reflow wraps to the next text line
+//  rather than the blank one, insert space steps two lines, and an underline in a blank line still belongs to
+//  the text above it.  Nothing downstream needs to know.  It is a toggle rather than detected from the ink:
+//  a guess that can misfire moves text onto the wrong line with no visible reason.
+RulingFrame skippedLineFrame(const RulingFrame& frame, Point pos)
+{
+  const Dim yr = frame.yrulingOr(Page::BLANK_Y_RULING);
+  RulingFrame skipped = frame;
+  skipped.origin = frame.toPage(Point(0, frame.line(pos, yr)*yr - yr/2));
+  skipped.yRuling = 2*yr;
+  return skipped;
+}
+
+// Where wrapped words start and how far apart they sit come from the writing, not the page: a dot grid has
+//  no margin, so margin + gap put wrapped words against the page edge, left of the text, and a gap sized
+//  from the pitch is tighter than most people's word spacing on a fine grid.  Measured once per gesture,
+//  from the ink as it was before the gesture moved any of it.
+void Selection::measureReflowInk(Dim minWordGap)
+{
+  reflowMeasured = true;
+  if(strokes.empty())
+    return;
+  const RulingFrame& f = ruling;
+  const std::vector<Dim>& lstops = static_cast<RuledSelector*>(selector)->lstops;
+  Dim marginLeft = f.region ? page->frameExtent(f).left : page->props.marginLeft;
+  // the text's left edge: leftmost ink on the line the reflow starts on and on the line above, so that an
+  //  indented first line does not indent the rest of its paragraph.  Ink in the margin (bookmarks) or left
+  //  of a column stop belongs to something else.
+  int line0 = rulingLine(f, strokes.front());
+  for(Element* s : page->children()) {
+    if(s->isRulingRegion() || page->regionAt(s->com()) != f.region)
+      continue;
+    int line = rulingLine(f, s);
+    if(line != line0 && line != line0 - 1)
+      continue;
+    Dim left = localElementBBox(f, s).left - pendingLocalOffset(s, f).x;
+    Dim lstop = line >= 0 && line < int(lstops.size()) ? MAX(marginLeft, lstops[line]) : marginLeft;
+    if(left >= lstop)
+      reflowIndent = MIN(reflowIndent, left);
+  }
+  // the writer's word gap: median of the gaps between words in the selection (sorted by line, then left)
+  std::vector<Dim> gaps;
+  int currline = INT_MIN;
+  Dim currRight = 0;
+  for(Element* s : strokes) {
+    Rect bbox = localElementBBox(f, s).translate(-pendingLocalOffset(s, f));
+    int line = rulingLine(f, s);
+    if(line != currline) {
+      currline = line;
+      currRight = bbox.right;
+      continue;
+    }
+    if(bbox.left - currRight >= minWordGap)
+      gaps.push_back(bbox.left - currRight);
+    currRight = MAX(currRight, bbox.right);
+  }
+  if(!gaps.empty()) {
+    std::nth_element(gaps.begin(), gaps.begin() + gaps.size()/2, gaps.end());
+    reflowWordGap = gaps[gaps.size()/2];
+  }
+}
+
 // Although reflow might not work well for long paragraphs on unruled pages, don't really see any harm
 //  enabling it since alternative is a bunch of strokes past edge of page; if it doesn't work, don't use it!
 // TODO: consider rounding dx, nextdx to integers!
@@ -544,6 +613,12 @@ void Selection::reflowStrokes(Dim dx, int dline, Dim minWordSep)
   }
 
   const Dim minWordGap = minWordSep * yruling;
+  if(!reflowMeasured)
+    measureReflowInk(minWordGap);
+  // the gap put between wrapped words and text already on the line: the writer's own, but at least the old
+  //  fixed 1.25 x minWordGap and at most a line height, so one wide gap cannot open a column
+  const Dim wordGap = reflowWordGap > 0 ?
+      std::min(std::max(reflowWordGap, 1.25*minWordGap), yruling) : 1.25*minWordGap;
   auto curr = strokes.begin();
   auto wordbreak = strokes.begin();
   // TODO: should we init currRight to left instead of 0?
@@ -577,8 +652,9 @@ void Selection::reflowStrokes(Dim dx, int dline, Dim minWordSep)
     if(wordbreak == strokes.end())
       goto alldone;
     // Step 1.5: find first stroke of next line so we can start strokes moved down at same position
-    //  if the next line is empty, we'll start strokes moved down at (left + minWordGap)
-    dx = left + minWordGap;
+    //  if the next line is empty, strokes moved down start where the paragraph's text does (never left of
+    //  the margin or column stop), or at (left + minWordGap) if that is unknown
+    dx = reflowIndent < MAX_DIM ? MAX(left, reflowIndent) : left + minWordGap;
     while(++curr != strokes.end()) {
       if(workingLine(*curr, ruling) == currline)
         continue;
@@ -601,11 +677,11 @@ void Selection::reflowStrokes(Dim dx, int dline, Dim minWordSep)
     // Step 3: shift all strokes on next line right to accommodate strokes moved down
     currline++;
     while(curr != strokes.end() && workingLine(*curr, ruling) == currline) {
-      // we use insblankline here to test for first pass through loop.  We insert a 1.25*minWordGap space
+      // we use insblankline here to test for first pass through loop.  We insert a wordGap space
       //  between strokes moved down (which end at nextdx) and strokes already on the line. Recall that
       //  strokes are sorted by bbox.left
       if(insblankline)
-        nextdx += (1.25*minWordGap) - workingBBox(*curr, ruling).left;
+        nextdx += wordGap - workingBBox(*curr, ruling).left;
       (*curr)->scratch.x += nextdx;  //translateStroke(*curr, nextdx, 0);
       curr++;
       insblankline = false;  // line is not blank
@@ -740,11 +816,73 @@ Rect PathSelector::getBGBBox()
 Dim RectSelector::HANDLE_SIZE = 4;
 Dim RectSelector::HANDLE_PAD = 4;  // can be changed from ScribbleArea::loadConfig()
 
+// "touching" selection: an element is hit if any part of its outline lies in the selection area.  Paths
+//  are flattened (the control points of a shape's curve lie outside it); anything else is its bounds.
+
+static Path2D flatOutline(SvgNode* node)
+{
+  if(node->type() != SvgNode::PATH)
+    return Path2D().addRect(node->bounds());
+  const Path2D* path = static_cast<SvgPath*>(node)->path();
+  Path2D flat = path->isSimple() ? *path : path->toFlat();
+  flat.transform(node->totalTransform());
+  return flat;
+}
+
+// Liang-Barsky: clip the segment to the rect and see if anything is left
+static bool segmentHitsRect(Point a, Point b, const Rect& r)
+{
+  Dim t0 = 0, t1 = 1;
+  const Dim dx = b.x - a.x, dy = b.y - a.y;
+  const Dim dir[4] = {-dx, dx, -dy, dy};
+  const Dim dist[4] = {a.x - r.left, r.right - a.x, a.y - r.top, r.bottom - a.y};
+  for(int i = 0; i < 4; ++i) {
+    if(dir[i] == 0) {
+      if(dist[i] < 0)
+        return false;  // parallel to this edge and outside it
+    }
+    else {
+      Dim t = dist[i]/dir[i];
+      if(dir[i] < 0)
+        t0 = std::max(t0, t);
+      else
+        t1 = std::min(t1, t);
+      if(t0 > t1)
+        return false;
+    }
+  }
+  return true;
+}
+
+static bool touchesRect(const Rect& r, SvgNode* node)
+{
+  if(node->asContainerNode()) {
+    for(SvgNode* child : node->asContainerNode()->children())
+      if(touchesRect(r, child))
+        return true;
+    return false;
+  }
+  if(node->type() != SvgNode::PATH)
+    return r.overlaps(node->bounds());
+  Path2D outline = flatOutline(node);
+  for(int ii = 0; ii < outline.size(); ++ii) {
+    if(r.contains(outline.point(ii)))
+      return true;
+    if(ii > 0 && outline.command(ii) != Path2D::MoveTo && segmentHitsRect(outline.point(ii-1), outline.point(ii), r))
+      return true;
+  }
+  return false;
+}
+
 bool RectSelector::selectHit(Element* s)
 {
   switch(rectSelMode) {
   case RECTSEL_BBOX:
     return selRect.contains(s->bbox());
+  case RECTSEL_ANY:
+    if(!selRect.overlaps(s->bbox()))
+      return false;
+    return selRect.contains(s->bbox()) || touchesRect(selRect, s->node);
   default:
     return false;
   }
@@ -1291,17 +1429,56 @@ static bool isEnclosedBy(const Path2D& lasso, SvgNode* node)
     return Path2D().addRect(node->bounds()).isEnclosedBy(lasso);
 }
 
+static bool segmentsCross(Point a, Point b, Point c, Point d)
+{
+  auto side = [](Point p, Point q, Point r) { return (q.x - p.x)*(r.y - p.y) - (q.y - p.y)*(r.x - p.x); };
+  Dim d1 = side(c, d, a), d2 = side(c, d, b), d3 = side(a, b, c), d4 = side(a, b, d);
+  return ((d1 > 0) != (d2 > 0)) && ((d3 > 0) != (d4 > 0));
+}
+
+// with no crossing between an outline and the lasso, each subpath of the outline is entirely inside or
+//  entirely outside, so one point per subpath decides it - and the lasso may instead be entirely inside
+//  an image or text box
+static bool touchesLasso(const Path2D& lasso, const Rect& lassoBBox, SvgNode* node)
+{
+  if(node->asContainerNode()) {
+    for(SvgNode* child : node->asContainerNode()->children())
+      if(touchesLasso(lasso, lassoBBox, child))
+        return true;
+    return false;
+  }
+  Path2D outline = flatOutline(node);
+  for(int ii = 0; ii < outline.size(); ++ii) {
+    Point p = outline.point(ii);
+    if(ii == 0 || outline.command(ii) == Path2D::MoveTo) {
+      Path2D single;
+      single.addPoint(p);
+      if(single.isEnclosedBy(lasso))
+        return true;
+      continue;
+    }
+    Point prev = outline.point(ii-1);
+    if(!lassoBBox.overlaps(Rect::corners(prev, p)))
+      continue;
+    for(int jj = 1; jj < lasso.size(); ++jj)
+      if(segmentsCross(prev, p, lasso.point(jj-1), lasso.point(jj)))
+        return true;
+  }
+  return node->type() != SvgNode::PATH && node->bounds().contains(lasso.point(0));
+}
+
 // even-odd rule approach - we use a horizontal line from the stroke point to x = +infinity
 bool LassoSelector::selectHit(Element* s)
 {
-  // reject if lasso bbox does not contain stroke bbox
-  if(!lassoBBox.contains(s->bbox()) || lasso.size() < 1)
+  // reject if lasso bbox does not contain (or, touching, overlap) stroke bbox
+  if(lasso.size() < 1 || !(touching ? lassoBBox.overlaps(s->bbox()) : lassoBBox.contains(s->bbox())))
     return false;
+  // still valid when touching: the lasso's region only changed inside the triangle
   if(checkCollision && !rectCollide(s->bbox())) {
     //SCRIBBLE_LOG("Quick accept %f %f %f %f", txmin, tymin, txmax, tymax);
     return s->isSelected(selection);  // no change in selection state
   }
-  return isEnclosedBy(lasso, s->node);
+  return touching ? touchesLasso(lasso, lassoBBox, s->node) : isEnclosedBy(lasso, s->node);
 }
 
 Rect LassoSelector::getBGBBox()
@@ -1606,6 +1783,8 @@ int RegionSelector::shapeHandleHit(Point pos, bool touch)
   //  dragging along its edges, the origin cannot
   if((pos - originHandlePos(params)).dist() <= a*1.2)
     return originHandleIndex();
+  if((pos - scaleHandlePos()).dist() <= a*1.2)
+    return resizeHandleIndex();
   for(int ii = int(params.corners.size()); ii-- > 0;) {
     if(std::abs(pos.x - params.corners[ii].x) <= a && std::abs(pos.y - params.corners[ii].y) <= a)
       return ii;
@@ -1624,15 +1803,27 @@ Point RegionSelector::rotHandleHit(Point pos, bool touch)
   return Point(NaN, NaN);
 }
 
-Point RegionSelector::scaleHandleHit(Point pos, bool touch)
+// A patch is a piece of paper: making it bigger gives more paper, not bigger lines.  So the size handle
+//  moves the outline only - spacing is the panel's slider - and, since the lines stay put, the ink on
+//  them stays put too.  Scaling ink with lines that did not scale would lift it off them.  Being free
+//  of the ruling, the size need not be uniform either.
+RulingRegionParams RegionSelector::resized(const RulingRegionParams& start, Point startPos, Point pos) const
 {
-  Dim a = ((touch ? 2*HANDLE_SIZE : HANDLE_SIZE) + 3)/mZoom;
-  if((pos - scaleHandlePos()).dist() <= a*1.2) {
-    // scale about the opposite (top-left) corner of the outline's box
-    Rect r = regionLocalBBox(region->regionParams());
-    return region->regionParams().frame().toPage(Point(r.left, r.top));
+  RulingRegionParams params = start;
+  RulingFrame f = start.frame();
+  Rect r = regionLocalBBox(start);
+  if(r.width() <= 0 || r.height() <= 0)
+    return params;
+  Point d = f.toLocalDir(pos - startPos);
+  Dim minsize = 4*HANDLE_SIZE/mZoom;
+  Dim sx = std::max(r.width() + d.x, minsize)/r.width();
+  Dim sy = std::max(r.height() + d.y, minsize)/r.height();
+  Point anchor(r.left, r.top);
+  for(Point& p : params.corners) {
+    Point local = f.toLocal(p) - anchor;
+    p = f.toPage(anchor + Point(local.x*sx, local.y*sy));
   }
-  return Point(NaN, NaN);
+  return params;
 }
 
 void RegionSelector::drawBG(Painter* painter)

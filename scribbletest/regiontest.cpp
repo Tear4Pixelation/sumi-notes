@@ -116,10 +116,10 @@ int runRegionTests()
   //  rather than turn upside down, or a band's line numbers would run up the page
   {
     RulingRegionParams m = RulingRegionParams::fromRect(Rect::ltrb(0, 0, 100, 100), 0, 20);
-    Point ink(50, 3*20 + 5);  // band 3
+    Point mirroredInk(50, 3*20 + 5);  // band 3
     Transform2D flip = Transform2D().scale(-1, 1);
     m.transform(flip);
-    regionCheck(m.frame().line(flip.map(ink), 40) == 3, "a horizontally mirrored region keeps its line numbers");
+    regionCheck(m.frame().line(flip.map(mirroredInk), 40) == 3, "a horizontally mirrored region keeps its line numbers");
   }
 
   // serialization

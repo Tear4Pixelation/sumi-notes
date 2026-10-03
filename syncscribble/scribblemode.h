@@ -63,7 +63,7 @@ public:
   int insSpaceMode;
   int moveSelMode;
   int drawTool;
-  // the shape row's Ruling Region tool: MODE_DRAWSHAPE draws a ruling region instead of shapeId.  Not
+  // the shape row's Paper Patch tool (a ruling region): MODE_DRAWSHAPE draws a ruling region instead of shapeId.  Not
   //  saved - it is a one-off, not a tool anyone keeps in hand
   bool drawRegion = false;
   // active shape for MODE_DRAWSHAPE; one of ShapeId (see shape.h)
@@ -71,13 +71,19 @@ public:
   // SHAPEFLAG_HEADSTART/HEADEND from the head toggles on the shape options row; applied to new shapes
   //  whose ShapeDef allows heads
   int shapeFlags;
-  // Switch back: return to the previous tool after one use.  These refine the global "doubleTapSticky"
-  //  pref, which stays the master switch: with it off nothing switches back, with it on the eraser, the
-  //  selection tool and insert space follow these flags and every other tool switches back as before.
-  //  Double tapping the tool locks it either way, as before.
+  // Switch back: return to the previous tool after one use.  The eraser, the selection tool and insert
+  //  space follow these flags; the draw tools, shapes, pan and page select always stay, and every other
+  //  tool is single use.  There is no double tap to lock: tapping the active tool is how its options row
+  //  is closed, so it locked tools by accident.
   bool eraseSwitchBack;
   bool selectSwitchBack;
   bool insSpaceSwitchBack;
+  // rect, lasso and ruled select take everything the selection area touches instead of only what lies
+  //  entirely inside it; path select always takes what it touches
+  bool selectTouching;
+  // ruled insert space treats the page as written on every second line: the pressed line and every
+  //  second line from it are text lines, each with half the blank line either side (skippedLineFrame())
+  bool insSpaceSkipLines;
   // DRAW_UNDER/EPHEMERAL are baked into these so drawing code can just check currPen()->hasFlag()
   ScribblePen drawPen;
   ScribblePen highlightPen;
@@ -87,7 +93,7 @@ public:
   //  ScribbleMode directly and never calls loadModes, so setMode() would otherwise read uninitialized
   ScribbleMode(ScribbleConfig* _cfg) : currMode(MODE_NONE), stickyMode(MODE_NONE),
       prevStickyMode(MODE_STROKE), cfg(_cfg), eraseSwitchBack(true), selectSwitchBack(true),
-      insSpaceSwitchBack(true),
+      insSpaceSwitchBack(true), selectTouching(false), insSpaceSkipLines(false),
       drawPen(Color::BLACK, 1), highlightPen(Color::BLACK, 1), ephemeralPen(Color::BLACK, 1) {}
 
   ScribblePen& penForDrawTool(int tool);

@@ -9,6 +9,7 @@
 #include "pentoolbar.h"
 #include "touchwidgets.h"
 #include "addpagemenu.h"
+#include "tagmenu.h"
 #include "configdialog.h"
 #include "sidebar.h"
 #include "usvg/svgparser.h"
@@ -318,6 +319,7 @@ void MainWindow::refreshUI(ScribbleDoc* doc, int reason)
   refreshScribbleWidget(app->bookmarkArea->widget, &areaState);
   updateMode();
   syncRegionRow();
+  syncTagPlaceHint();
   if(sidebar)
     sidebar->refreshIfChanged();
 
@@ -418,12 +420,13 @@ void MainWindow::updateMode()
   eraseRuledToggle->setChecked(eraserMode == MODE_ERASERULED || eraserMode == MODE_ERASEFREERULED);
   eraseSwitchBackToggle->setChecked(app->scribbleMode->eraseSwitchBack);
   selectSwitchBackToggle->setChecked(app->scribbleMode->selectSwitchBack);
+  // path select always takes what it touches
+  selectTouchingToggle->setChecked(app->scribbleMode->selectTouching);
+  selectTouchingToggle->setEnabled(app->scribbleMode->selectMode != MODE_SELECTPATH);
   insSpaceSwitchBackToggle->setChecked(app->scribbleMode->insSpaceSwitchBack);
-  // with the master pref off no tool switches back, so the toggles would do nothing - say so instead
-  bool stickyPref = ScribbleApp::cfg->Bool("doubleTapSticky");
-  eraseSwitchBackToggle->setEnabled(stickyPref);
-  selectSwitchBackToggle->setEnabled(stickyPref);
-  insSpaceSwitchBackToggle->setEnabled(stickyPref);
+  // only ruled insert space works in lines
+  insSpaceSkipLinesToggle->setChecked(app->scribbleMode->insSpaceSkipLines);
+  insSpaceSkipLinesToggle->setEnabled(app->scribbleMode->insSpaceMode == MODE_INSSPACERULED);
   // an options row left open follows a mode change made outside the tools toolbar
   int modeType = ScribbleMode::getModeType(mode);
   if(openOptionsRow && openOptionsRow != modeType)
@@ -458,7 +461,6 @@ void MainWindow::selectTool(int modeType)
 {
   bool close = openOptionsRow == modeType
       && ScribbleMode::getModeType(app->scribbleMode->getMode()) == modeType;
-  // always set the mode so that double tap to lock still works
   app->setMode(modeType);
   showOptionsRow(close ? 0 : modeType);
 }
@@ -606,6 +608,9 @@ void MainWindow::refreshSelPopup()
   const Selection* sel = area ? area->selection() : NULL;
   if(!doc || !moveLayerPopup)
     return;
+  // a selected ruling region is not ink, so the pen toolbar stays on the pen and these would edit that
+  app->updatePenToolbar();
+  bool inkSel = app->penToolbar->mode == PenToolbar::SELECTION_MODE;
   // a selection gesture that caught nothing leaves only its area, and the only thing to do with that is
   //  capture it
   bool hasInk = sel && !sel->strokes.empty();
@@ -613,6 +618,8 @@ void MainWindow::refreshSelPopup()
     btn->setVisible(hasInk);
   moveLayerBtn->setVisible(hasInk);
   actionScreenshot->setEnabled(area && (area->hasShotRegion() || hasInk));
+  selColorItem->setVisible(inkSel && hasInk);
+  selWidthItem->setVisible(inkSel && hasInk);
   window()->gui()->deleteContents(moveLayerPopup->selectFirst(".child-container"));
   const LayerList& layerList = doc->layers();
   moveLayerBtn->setEnabled(layerList.size() > 1 && sel && !sel->strokes.empty());
@@ -688,7 +695,7 @@ void MainWindow::buildRegionPanel()
     });
   }
   setupPopupMenu(regionKindBtn, kindMenu);
-  setupTooltip(regionKindBtn, _("Lines, squares or dots inside the region"));
+  setupTooltip(regionKindBtn, _("Lines, squares or dots inside the patch"));
   addPanel({regionKindBtn});
 
   // spacing: squared and dotted keep their cells square
@@ -743,7 +750,7 @@ void MainWindow::buildRegionPanel()
     }
     return false;
   });
-  setupTooltip(regionSpacingSlider, _("Spacing of the lines inside the region"));
+  setupTooltip(regionSpacingSlider, _("Spacing of the lines inside the patch"));
   addPanel({regionSpacingSlider, regionSpacingText});
 
   // on/off settings get a checkbox in place of the icon: it reads as on/off, which a tinted icon did not
@@ -768,14 +775,14 @@ void MainWindow::buildRegionPanel()
   regionPaperToggle->onClicked = [this](){
     editSelRegion([](RulingRegionParams& p){ p.opaque = !p.opaque; });
   };
-  setupTooltip(regionPaperToggle, _("Cover what is behind the region with plain paper"));
+  setupTooltip(regionPaperToggle, _("Cover what is behind the patch with plain paper"));
   addPanel({regionPaperToggle});
 
   Button* outlineToggle = checkButton(_("Outline"), regionOutlineCheck);
   outlineToggle->onClicked = [this](){
     editSelRegion([](RulingRegionParams& p){ p.outline = !p.outline; });
   };
-  setupTooltip(outlineToggle, _("Draw the region's edge, so it stands out from the page"));
+  setupTooltip(outlineToggle, _("Draw the patch's edge, so it stands out from the page"));
   addPanel({outlineToggle});
 
   // lines back to horizontal, keeping the outline: the usual fix after rotating to match a tilted scan
@@ -787,7 +794,7 @@ void MainWindow::buildRegionPanel()
 
   Button* deleteBtn = titledButton(SvgGui::useFile(":/icons/ic_menu_discard.svg"), _("Delete"));
   deleteBtn->onClicked = [this](){ app->activeDoc()->doCommand(ID_DELSEL); };
-  setupTooltip(deleteBtn, _("Delete the region; its writing stays"));
+  setupTooltip(deleteBtn, _("Delete the patch; its writing stays"));
   addPanel({deleteBtn});
 
   regionPanel->setVisible(false);
@@ -828,6 +835,47 @@ void MainWindow::syncRegionRow()
   }
   if(regionPanel->isVisible() != show)
     regionPanel->setVisible(show);
+}
+
+// Up exactly while page tags ride on the pointer: a pen that does not hover shows no preview until it touches
+//  down, so without this nothing says the next press on the page will drop a tag there.  The cancel button is
+//  the touch equivalent of Esc.
+void MainWindow::syncTagPlaceHint()
+{
+  ScribbleArea* area = app->activeArea();
+  size_t count = area ? area->numPendingTags() : 0;
+  if(!tagPlaceHint) {
+    if(!count)
+      return;
+    tagPlaceHint = createToolbar();
+    tagPlaceHint->node->setAttribute("box-anchor", "top");  // centred, hugging its contents
+    SvgRect* bg = static_cast<SvgRect*>(tagPlaceHint->selectFirst(".toolbar-bg")->node);
+    bg->setRect(bg->getRect(), floatCorner, floatCorner);
+    tagPlaceHint->selectFirst(".child-container")->setMargins(0, floatPad, 0, 2*floatPad);
+    tagPlaceHintText = new TextBox(createTextNode(""));
+    tagPlaceHint->addWidget(tagPlaceHintText);
+    Button* cancelBtn = createToolbutton(SvgGui::useFile("icons/ic_menu_cancel.svg"), _("Cancel"));
+    cancelBtn->onClicked = [this](){
+      if(app->activeArea())
+        app->activeArea()->cancelTagPlacement();
+    };
+    tagPlaceHint->addWidget(cancelBtn);
+    scaleFloatPanel(tagPlaceHint, floatIconSize);
+    selectFirst("#main-toolbar-container")->addWidget(tagPlaceHint);
+  }
+  if(count) {
+    tagPlaceHintText->setText(count > 1 ? _("Place your tags: tap where they go, or drag them there")
+        : _("Place your tag: tap where it goes, or drag it there"));
+    // just below the floating toolbar, which lies over the top of the canvas
+    Dim top = floatTopInset;
+    if(mainToolbarPanel && mainToolbarPanel->isVisible()) {
+      Dim containerTop = selectFirst("#main-toolbar-container")->node->bounds().top;
+      top = mainToolbarPanel->node->bounds().bottom - containerTop + floatInset/2;
+    }
+    tagPlaceHint->setMargins(top, 0, 0, 0);
+  }
+  if(tagPlaceHint->isVisible() != (count > 0))
+    tagPlaceHint->setVisible(count > 0);
 }
 
 void MainWindow::setShapeOptions()
@@ -886,36 +934,16 @@ void MainWindow::toggleFullscreen()
 #endif
 }
 
-// COLORS_SPEC.md §10.1, resolved: for a themed document the theme's dark paper supersedes the old
-//  XOR inversion.
-//
-// `colorXorMask` is a photographic negative - it flips every channel, so a themed cyan comes out an
-//  unrelated orange. That was always true (red has always inverted to cyan), but a palette that was
-//  computed to sit on a particular paper is exactly the thing a negative destroys: the contrast the
-//  walk guaranteed is against the *old* paper, and the hues no longer belong to any theme.
-//
-// So a themed document inverts by **mirroring its own recipe** - `paperL -> 1 - paperL`, which is the
-//  case the generator already handles by walking up from the cusp instead of down - and remapping the
-//  strokes through `Palette::mapFrom()`. The result is a real dark-paper rendering of the same theme
-//  rather than a negative of it, and round-trips exactly, since the mapping is by ordinal and variant.
-//
-// The cost, stated plainly: this makes Invert Colors a **document edit** rather than a view filter.
-//  It is one undo step, but it is saved and it syncs - so it is no longer a way to read in the dark
-//  without changing the file. Documents with no palette keep the original XOR path.
+// Night mode (docs/agent/night-mode.md): a view setting, never a document edit.  The canvas draws through
+//  NightColorMap - a themed document in its mirrored theme, anything else with its lightness flipped and
+//  hue kept.  This replaced both earlier paths: the XOR negative (hue-destroying) and, for themed
+//  documents, restyling the file to its dark variant (which was saved and synced).
 void MainWindow::toggleInvertColors()
 {
-  ScribbleDoc* doc = app->activeDoc();
-  if(doc && !doc->palette().families.empty()) {
-    PaletteRecipe mirrored = doc->cfg->themeRecipe();
-    mirrored.paperL = 1 - mirrored.paperL;
-    doc->restyleToTheme(mirrored, true, false);
-    actionInvertColors->setChecked(doc->palette().isDarkPaper());
-    redraw();
-    return;
-  }
   bool invert = !actionInvertColors->checked();
   actionInvertColors->setChecked(invert);
   ScribbleApp::cfg->set("invertColors", invert);
+  app->penToolbar->refreshDisplayColors();
   redraw();
 }
 
@@ -973,9 +1001,8 @@ void MainWindow::toggleSplitView(int newstate)
     app->openSplit();
     // pane starts blank, offering a choice instead of immediately popping up the document list; set the
     //  fill here (not in CSS) so it tracks light/dark theme and invert colors like the canvas does
-    Color canvas = ScribbleArea::BACKGROUND_COLOR;
-    if(ScribbleApp::cfg->Bool("invertColors"))
-      canvas.color ^= color_t(ScribbleApp::cfg->Int("colorXorMask"));
+    Color canvas = ScribbleApp::cfg->Bool("invertColors") ?
+        ScribbleArea::BACKGROUND_COLOR_DARK : ScribbleArea::BACKGROUND_COLOR;
     splitPlaceholder->selectFirst(".split-placeholder-bg")->node->setAttr<color_t>("fill", canvas.color);
     splitPlaceholder->setVisible(true);
   }
@@ -1205,6 +1232,7 @@ static Tooltips tooltipsInst;
 void MainWindow::setupUI(ScribbleApp* a)
 {
   app = a;
+  PenPreview::colorMap = [a](){ return a->activeArea() ? a->activeArea()->nightColorMap() : NULL; };
   // too lazy to do translations for tooltips (also, probably should use keys instead of English)
   if(!app->hasI18n)
     Tooltips::inst = &tooltipsInst;
@@ -1286,6 +1314,14 @@ void MainWindow::setupUI(ScribbleApp* a)
   setupPopupMenu(moveLayerBtn, moveLayerPopup);
   setupTooltip(moveLayerBtn, _("Move the selection to another layer"));
   selToolbar->addWidget(moveLayerBtn);
+  // color and width, as on the shape row: they edit the selection through the pen toolbar, which is in
+  //  SELECTION_MODE whenever ink is selected.  Their popups close only themselves, so a color and a
+  //  width can be picked in one visit.
+  PenToolbar* selPenToolbar = static_cast<PenToolbar*>(penToolbarAutoAdj->contents);
+  selColorItem = selPenToolbar->createSingleSwatch();
+  selWidthItem = selPenToolbar->createSingleWidth();
+  selToolbar->addWidget(selColorItem);
+  selToolbar->addWidget(selWidthItem);
   // rounded like the floating toolbar panels, with their button sizes
   SvgRect* selBg = static_cast<SvgRect*>(selToolbar->selectFirst(".toolbar-bg")->node);
   selBg->setRect(selBg->getRect(), floatCorner, floatCorner);
@@ -1317,6 +1353,10 @@ void MainWindow::setupUI(ScribbleApp* a)
     }
     // don't let repeat key events close popup (happens with Ctrl key held down for sel mode on Windows)
     if(event->type == SDL_KEYDOWN && !event->key.repeat) {
+      // typing a width into the width popup's box is not a reason to close (Esc still is)
+      Widget* focused = selPopup->window() ? selPopup->window()->focusedWidget : NULL;
+      if(focused && focused->isDescendantOf(selPopup) && event->key.keysym.sym != SDLK_ESCAPE)
+        return false;
       gui->closeMenus();
       dropLoneRegion();
       if(event->key.keysym.sym == SDLK_ESCAPE)  // only swallow Esc key
@@ -1440,6 +1480,10 @@ void MainWindow::createToolBars()
         addTBWidget(titleButton, 2);
       }
       else if(tbcfg[jj] == "addPage") {
+        // tags go beside Add Page: both act on the page being written on (docs/agent/page-tags.md)
+        Widget* tagBtn = TagMenu::createTagButton();
+        tb->addWidget(tagBtn);
+        addTBWidget(tagBtn, 2);
         Widget* addPageBtn = AddPageMenu::createAddPageButton(actionScan_Page);
         tb->addWidget(addPageBtn);
         // adding a page is the one thing this button does that nothing else on a narrow toolbar does,
@@ -1531,6 +1575,10 @@ void MainWindow::createToolBars()
     // file ops: add page, save, undo/redo (the mockup's order)
     fileopsRow = createToolbar();
     // the universal "add page" button - see addpagemenu.cpp for why the ruling is chosen here
+    // tag this page or notebook (docs/agent/page-tags.md), left of Add Page
+    Widget* tagBtn = TagMenu::createTagButton();
+    fileopsRow->addWidget(tagBtn);
+    addTBWidget(tagBtn, 2);
     Widget* addPageBtn = AddPageMenu::createAddPageButton(actionScan_Page);
     fileopsRow->addWidget(addPageBtn);
     addTBWidget(addPageBtn, 3);
@@ -1627,7 +1675,7 @@ void MainWindow::createToolBars()
   eraseRow->addWidget(createStretch());
   // settings sits at the very end of the row, past the stretch that centres the tools
   eraseRow->addWidget(smallFloatBtn(createToolSettingsButton(
-      "Eraser Settings", {"eraseOnImage", "doubleTapSticky"})));
+      "Eraser Settings", {"eraseOnImage"})));
   floatRow(eraseRow);
 
   Toolbar* selectRow = createToolbar();
@@ -1637,6 +1685,15 @@ void MainWindow::createToolBars()
   selectRow->addAction(actionRect_Select);
   selectRow->addAction(actionRuled_Select);
   selectRow->addAction(actionPath_Select);
+  selectTouchingToggle = createToolbutton(
+      SvgGui::useFile(":/icons/ic_menu_toggle_select_touch.svg"), _("Select Touching"));
+  selectTouchingToggle->setChecked(app->scribbleMode->selectTouching);
+  selectTouchingToggle->onClicked = [this](){
+    app->scribbleMode->selectTouching = !selectTouchingToggle->isChecked();
+    selectTouchingToggle->setChecked(app->scribbleMode->selectTouching);
+  };
+  setupTooltip(selectTouchingToggle, _("Select everything the selection touches, not only what is inside it"));
+  selectRow->addWidget(selectTouchingToggle);
   selectSwitchBackToggle = createToolbutton(
       SvgGui::useFile(":/icons/ic_menu_switch_back.svg"), _("Switch Back"));
   selectSwitchBackToggle->setChecked(app->scribbleMode->selectSwitchBack);
@@ -1651,10 +1708,11 @@ void MainWindow::createToolBars()
     {"ic_menu_select.svg", "Rect Select", "Selects everything inside a rectangle you drag."},
     {"ic_menu_select_ruled.svg", "Ruled Select", "Selects handwritten text; use in the margin to select whole lines."},
     {"ic_menu_select_path.svg", "Path Select", "Selects the strokes crossed by a freehand path."},
+    {"ic_menu_toggle_select_touch.svg", "Select Touching", "Lasso, rect and ruled select take everything they touch, not only what lies entirely inside."},
     {"ic_menu_switch_back.svg", "Switch Back", "Returns to the previous tool after one selection."} })));
   selectRow->addWidget(createStretch());
   selectRow->addWidget(smallFloatBtn(createToolSettingsButton("Selection Settings",
-      {"popupToolbar", "applyPenToSel", "columnDetectMode", "doubleTapSticky"})));
+      {"popupToolbar", "applyPenToSel", "columnDetectMode"})));
   floatRow(selectRow);
 
   Toolbar* shapeRow = createToolbar();
@@ -1664,13 +1722,13 @@ void MainWindow::createToolBars()
     shapeRow->addAction(actionShape[ii]);
   shapeRow->addAction(actionRulingRegion);
   shapeRow->addSeparator();
-  // One swatch, not the draw row's saved list: that would make this row too wide.  Shapes are drawn
-  //  with the current draw pen, so the swatch shows and sets that pen's color.  With a shape selected
-  //  the pen toolbar is in SELECTION_MODE and the pick recolors it - so the pen is set here as well,
-  //  just as the toggles below arm the next shape as well as editing the selected one.
+  // One swatch and one width, not the draw row's saved lists: those would make this row too wide.
+  //  Shapes are drawn with the current draw pen, so these show and set that pen's color, width and
+  //  line style.  With a shape selected the pen toolbar is in SELECTION_MODE and a change edits the
+  //  shape - so the pen is set here as well, just as the toggles below arm the next shape as well as
+  //  editing the selected one.
   PenToolbar* penToolbar = static_cast<PenToolbar*>(penToolbarAutoAdj->contents);
-  shapeRow->addWidget(penToolbar->createSingleSwatch());
-  penToolbar->onSingleSwatchPicked = [this, penToolbar](Color color){
+  shapeRow->addWidget(penToolbar->createSingleSwatch([this, penToolbar](Color color){
     if(penToolbar->mode == PenToolbar::PEN_MODE)
       return;  // updateColor() has already set the pen
     ScribblePen pen = *app->getPen();
@@ -1678,7 +1736,22 @@ void MainWindow::createToolBars()
     pen.color = color;
     pen.color.setAlpha(alpha);
     app->setPen(pen);
-  };
+  }));
+  shapeRow->addWidget(penToolbar->createSingleWidth([this, penToolbar](){
+    if(penToolbar->mode == PenToolbar::PEN_MODE)
+      return;  // updateWidth()/setDashStyle() have already set the pen
+    ScribblePen pen = *app->getPen();
+    Dim width = penToolbar->pen.width;  // the selection's, in document units; -1 if it has several
+    if(width > 0) {
+      // a relative pen (the marker) holds its width in line heights
+      Page* page = app->activeArea()->getCurrPage();
+      Dim lineHeight = page ? page->yruling(true) : Page::BLANK_Y_RULING;
+      pen.width = pen.hasFlag(ScribblePen::WIDTH_RELATIVE) ? width/lineHeight : width;
+    }
+    if(penToolbar->dashStyle >= 0)
+      pen.setDashStyle(penToolbar->dashStyle);
+    app->setPen(pen);
+  }));
   shapeHeadStartToggle = createToolbutton(
       SvgGui::useFile(":/icons/ic_menu_shape_head_start.svg"), _("Start Arrowhead"));
   shapeHeadStartToggle->onClicked = [this](){
@@ -1709,14 +1782,15 @@ void MainWindow::createToolBars()
     {"ic_menu_shape_ellipse.svg", "Ellipse", "Drag to draw an ellipse."},
     {"ic_menu_shape_polyline.svg", "Polyline", "Tap to place points; tap the last point to finish, the first to close."},
     {"ic_menu_shape_fitpoly.svg", "Curve", "A smooth curve through your points; drag the red handle to trade smoothness for following them exactly."},
-    {"ic_menu_toggle_ruled.svg", "Ruling Region", "Drag a box that has its own lines. Writing inside it follows them. Select it with the ... button in its corner."},
+    {"ic_menu_toggle_ruled.svg", "Paper Patch", "Drag a box with its own paper - lined, squared or dotted. Writing inside it follows its lines. Select it with the ... button in its corner."},
     {"ic_menu_add_color.svg", "Color", "The pen's color, which shapes are drawn in. Recolors the selected shape if there is one."},
+    {"ic_menu_set_pen.svg", "Width", "The pen's width and line style (solid, dashed or dotted), which shapes are drawn with. Changes the selected shape if there is one."},
     {"ic_menu_shape_head_start.svg", "Start Arrowhead", "Puts an arrowhead on the start. Edits the selected shape if there is one."},
     {"ic_menu_shape_head_end.svg", "End Arrowhead", "Puts an arrowhead on the end. A line with an end arrowhead is an arrow."},
     {"ic_menu_shape_rounded.svg", "Rounded Corners", "Rounds the corners of a box or polyline; drag the red handle to set the radius."} })));
   shapeRow->addWidget(createStretch());
   shapeRow->addWidget(smallFloatBtn(createToolSettingsButton("Shape Settings",
-      {"shapeCornerRadius", "shapeCurveTightness", "shapeEditAfterDraw", "shapeSnapDelay", "shapeAngleSnap", "doubleTapSticky"})));
+      {"shapeCornerRadius", "shapeCurveTightness", "shapeEditAfterDraw", "shapeSnapDelay", "shapeAngleSnap"})));
   floatRow(shapeRow);
 
   Toolbar* insSpaceRow = createToolbar();
@@ -1724,6 +1798,15 @@ void MainWindow::createToolBars()
   insSpaceRow->addWidget(createStretch());
   insSpaceRow->addAction(actionInsert_Space_Vert);
   insSpaceRow->addAction(actionRuled_Insert_Space);
+  insSpaceSkipLinesToggle = createToolbutton(
+      SvgGui::useFile(":/icons/ic_menu_toggle_skip_lines.svg"), _("Skip Lines"));
+  insSpaceSkipLinesToggle->setChecked(app->scribbleMode->insSpaceSkipLines);
+  insSpaceSkipLinesToggle->onClicked = [this](){
+    app->scribbleMode->insSpaceSkipLines = !insSpaceSkipLinesToggle->isChecked();
+    insSpaceSkipLinesToggle->setChecked(app->scribbleMode->insSpaceSkipLines);
+  };
+  setupTooltip(insSpaceSkipLinesToggle, _("Text is written on every second line: move and reflow by text lines"));
+  insSpaceRow->addWidget(insSpaceSkipLinesToggle);
   insSpaceSwitchBackToggle = createToolbutton(
       SvgGui::useFile(":/icons/ic_menu_switch_back.svg"), _("Switch Back"));
   insSpaceSwitchBackToggle->setChecked(app->scribbleMode->insSpaceSwitchBack);
@@ -1736,10 +1819,11 @@ void MainWindow::createToolBars()
   insSpaceRow->addWidget(smallFloatBtn(createHelpButton({
     {"ic_menu_insert_space.svg", "Insert Space", "Drags everything below the line you draw up or down."},
     {"ic_menu_insert_space_ruled.svg", "Ruled Insert Space", "Inserts whole lines and reflows handwritten text."},
+    {"ic_menu_toggle_skip_lines.svg", "Skip Lines", "For text written on every second line: the line you press on and every second line from it are text lines, so Ruled Insert Space moves and reflows two lines at a time."},
     {"ic_menu_switch_back.svg", "Switch Back", "Returns to the previous tool after inserting space once."} })));
   insSpaceRow->addWidget(createStretch());
   insSpaceRow->addWidget(smallFloatBtn(createToolSettingsButton("Insert Space Settings",
-      {"reflow", "insSpaceErase", "minWordSep", "columnDetectMode", "blankYRuling", "doubleTapSticky"})));
+      {"reflow", "insSpaceErase", "minWordSep", "columnDetectMode", "blankYRuling"})));
   floatRow(insSpaceRow);
 
   // thin divider between the tools row and the open options row (both are one panel)
@@ -1970,7 +2054,7 @@ void MainWindow::setupActions()
   actionSplitView->addMenuAction(actionSplitV21);
 
   actionInvertColors = createAction("actionInvertColors",
-      "Invert Colors", "", "", [this](){ toggleInvertColors(); });
+      "Dark Mode", "", "", [this](){ toggleInvertColors(); });
   actionInvertColors->setCheckable(true);
   actionInvertColors->setChecked(ScribbleApp::cfg->Bool("invertColors"));
 
@@ -2143,7 +2227,7 @@ void MainWindow::setupActions()
     actionShape[ii]->setCheckable(true);
   }
   // not a shape: dragging a box with it makes a ruling region, an area with its own lines
-  actionRulingRegion = createAction("actionRulingRegion", "Ruling Region", ":/icons/ic_menu_toggle_ruled.svg", "",
+  actionRulingRegion = createAction("actionRulingRegion", "Paper Patch", ":/icons/ic_menu_toggle_ruled.svg", "",
       [this](){
         app->scribbleMode->drawRegion = true;
         app->setMode(MODE_DRAWSHAPE);

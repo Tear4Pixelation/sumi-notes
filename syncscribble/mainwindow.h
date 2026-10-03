@@ -167,6 +167,9 @@ public:
   // selection popup buttons that act on ink, hidden when the gesture caught none (Screenshot remains)
   std::vector<Button*> selInkButtons;
   ArrowPopup* moveLayerPopup = NULL;
+  // color and width on the selection popup, shown only for an ink selection (PenToolbar::SELECTION_MODE)
+  Widget* selColorItem = NULL;
+  Widget* selWidthItem = NULL;
   void refreshSelPopup();
   AutoAdjContainer* penToolbarAutoAdj;
   Widget* eraseOptsRow;
@@ -188,6 +191,10 @@ public:
   void buildRegionPanel();
   void syncRegionRow();
   void editSelRegion(const std::function<void(RulingRegionParams&)>& change);
+  // "Place your tag" under the toolbar while page tags ride on the pointer (docs/agent/page-tags.md)
+  Toolbar* tagPlaceHint = NULL;
+  TextBox* tagPlaceHintText = NULL;
+  void syncTagPlaceHint();
   Button* shapeHeadStartToggle = NULL;
   Button* shapeHeadEndToggle = NULL;
   Button* shapeRoundedToggle = NULL;
@@ -202,7 +209,9 @@ public:
   Button* eraseRuledToggle;
   Button* eraseSwitchBackToggle;
   Button* selectSwitchBackToggle;
+  Button* selectTouchingToggle;
   Button* insSpaceSwitchBackToggle;
+  Button* insSpaceSkipLinesToggle;
   // mode type of the options row currently shown, 0 if none
   int openOptionsRow = 0;
   std::vector<Widget*> tbWidgets;

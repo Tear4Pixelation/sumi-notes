@@ -302,7 +302,145 @@ void ScribbleDoc::updateDocConfig(Document::saveflags_t flags)
   cfg->set("xOffset", docpos.pos.x);
   cfg->set("yOffset", docpos.pos.y);
   cfg->set("docFormatVersion", Document::docFormatVersion);
+  updatePageTagSummary(document, cfg);
   cfg->saveConfig(document->resetConfigNode());
+}
+
+// Page tags (docs/agent/page-tags.md)
+
+// small enough that a notebook with many tagged pages stays small; wide enough for a hi-dpi card
+static const int PAGE_THUMB_WIDTH = 200;
+
+static std::string renderPageThumb(Page* page)
+{
+  if(!page->ensureLoaded() || page->width() <= 0 || page->height() <= 0)
+    return "";
+  int height = std::min(int(PAGE_THUMB_WIDTH*page->height()/page->width() + 0.5), 4*PAGE_THUMB_WIDTH);
+  Image image(PAGE_THUMB_WIDTH, std::max(height, 1), Image::PNG);
+  Painter painter(Painter::PAINT_SW, &image);
+  painter.beginFrame();
+  painter.setAntiAlias(true);
+  Dim scale = PAGE_THUMB_WIDTH/page->width();
+  painter.scale(scale, scale);
+  bool shadow = Page::enableDropShadow;
+  Page::enableDropShadow = false;
+  Element::FORCE_NORMAL_DRAW = true;  // no selection styling
+  page->draw(&painter, page->rect());
+  Element::FORCE_NORMAL_DRAW = false;
+  Page::enableDropShadow = shadow;
+  painter.endFrame();
+  return base64_encode(image.encode(Image::PNG));
+}
+
+void ScribbleDoc::updatePageTagSummary(Document* doc, ScribbleConfig* docCfg)
+{
+  std::vector<TagStore::PageTags> summary;
+  for(int ii = 0; ii < doc->numPages(); ++ii) {
+    Page* page = doc->pages[ii];
+    if(page->pageTagIds.empty()) {
+      page->pageTagThumb.clear();
+      continue;
+    }
+    bool loaded = page->loadStatus == Page::LOAD_OK;
+    // a page that has not been loaded has not changed, so its thumbnail from the file still holds
+    if(page->pageTagThumb.empty() || (loaded && page->dirtyCount != 0))
+      page->pageTagThumb = renderPageThumb(page);
+    TagStore::PageTags entry;
+    entry.page = ii;
+    entry.tagIds = page->pageTagIds;
+    entry.title = page->loadStatus == Page::LOAD_OK ? page->outlineTitle : page->pageTagTitle;
+    summary.push_back(entry);
+  }
+  docCfg->set("pagetags", TagStore::formatPageTags(summary).c_str());
+}
+
+// outside any input event, nothing else would refresh the page number and the rest of the UI
+void ScribbleDoc::gotoPage(int pagenum)
+{
+  if(!activeArea)
+    return;
+  activeArea->gotoPage(pagenum);
+  doRefresh();
+}
+
+bool ScribbleDoc::removePageTags(int pagenum, const std::vector<std::string>& tagIds)
+{
+  if(pagenum < 0 || pagenum >= document->numPages() || tagIds.empty())
+    return false;
+  Page* page = document->pages[pagenum];
+  if(!page->ensureLoaded())
+    return false;
+  std::vector<Element*> toRemove;
+  for(Element* s : page->children()) {
+    if(s->isPageTag() && std::find(tagIds.begin(), tagIds.end(), s->pageTagId()) != tagIds.end())
+      toRemove.push_back(s);
+  }
+  if(toRemove.empty())
+    return false;
+  clearSelection();
+  startAction(pagenum);
+  for(Element* s : toRemove)
+    page->removeStroke(s);
+  endAction();
+  return true;
+}
+
+void ScribbleDoc::setDocTags(const std::vector<std::string>& tagIds)
+{
+  cfg->set("tags", TagStore::formatTagList(tagIds).c_str());
+  // nothing else marks the document as needing to be written (see layersChanged())
+  document->dirtyCount++;
+  uiChanged(UIState::SetPageProps);
+  doRefresh();
+}
+
+int ScribbleDoc::removePageTagElements(Document* doc, const std::vector<std::string>& tagIds)
+{
+  int changed = 0;
+  for(Page* page : doc->pages) {
+    if(!page->ensureLoaded())
+      continue;
+    std::vector<Element*> toRemove;
+    for(Element* s : page->children()) {
+      if(s->isPageTag() && std::find(tagIds.begin(), tagIds.end(), s->pageTagId()) != tagIds.end())
+        toRemove.push_back(s);
+    }
+    for(Element* s : toRemove)
+      page->removeStroke(s);  // not in an action, so deleted outright
+    if(!toRemove.empty())
+      page->pageTagThumb.clear();
+    changed += int(toRemove.size());
+  }
+  return changed;
+}
+
+int ScribbleDoc::renamePageTagElements(Document* doc, const std::string& tagId, const std::string& name)
+{
+  int changed = 0;
+  for(Page* page : doc->pages) {
+    if(!page->ensureLoaded())
+      continue;
+    std::vector<Element*> tags;
+    for(Element* s : page->children()) {
+      if(s->isPageTag() && tagId == s->pageTagId())
+        tags.push_back(s);
+    }
+    // a new label changes the pill's width, so the tag is rebuilt, keeping its right edge where it was
+    for(Element* s : tags) {
+      Rect bbox = s->bbox();
+      Element* renamed = Element::createPageTag(tagId.c_str(), name.c_str(), Point(bbox.right, bbox.top));
+      // keep a color the user gave it
+      Color color = s->node->getColorAttr("fill", Color::INVALID_COLOR);
+      if(color.isValid())
+        setSvgFillColor(renamed->node, color.mulAlphaF(s->node->getFloatAttr("fill-opacity", 1)));
+      page->addStroke(renamed, s, s->layer());
+      page->removeStroke(s);
+    }
+    if(!tags.empty())
+      page->pageTagThumb.clear();
+    changed += int(tags.size());
+  }
+  return changed;
 }
 
 bool ScribbleDoc::checkAndClearErrors(bool forceload)
@@ -378,6 +516,18 @@ bool ScribbleDoc::deleteDocument(const char* filename)
 
 Image ScribbleDoc::extractThumbnail(const char* filename)
 {
+  return extractEmbeddedImage(filename, "thumbnail", 1 << 18);  // 256KB
+}
+
+// Tagged pages' thumbnails follow the document's (and, in a plain .svg, its config), so the head read
+//  for a plain file is larger; .svgz reads its whole final block either way.
+Image ScribbleDoc::extractPageThumbnail(const char* filename, int pagenum)
+{
+  return extractEmbeddedImage(filename, fstring("pagethumb-%d", pagenum).c_str(), 1 << 22);
+}
+
+Image ScribbleDoc::extractEmbeddedImage(const char* filename, const char* id, size_t headLen)
+{
   //static const size_t MAX_BUFF_SIZE = (1 << 20);
 
   StringRef buff;
@@ -395,11 +545,11 @@ Image ScribbleDoc::extractThumbnail(const char* filename)
     buff = StringRef(infstrm.data(), infstrm.size());  //buff.len = zstrm.readp((void**)&buff.str, SIZE_MAX);
   }
   else
-    buff.len = istrm.readp((void**)&buff.str, 1 << 18);  // 256KB
+    buff.len = istrm.readp((void**)&buff.str, headLen);
 
-  int idx = buff.find("id=\"thumbnail\"");
+  int idx = buff.find(fstring("id=\"%s\"", id).c_str());
   if(idx < 0)
-    idx = buff.find("id='thumbnail'");
+    idx = buff.find(fstring("id='%s'", id).c_str());
   if(idx >= 0) {
     idx = buff.find("base64,", idx);
     if(idx >= 0) {
@@ -443,7 +593,7 @@ std::string ScribbleDoc::extractDocConfigValue(const char* filename, const char*
   if(idx < 0)
     return "";
   idx += 6;
-  char quote = idx < buff.len ? buff[idx] : '\0';
+  char quote = size_t(idx) < buff.len ? buff[idx] : '\0';
   if(quote != '"' && quote != '\'')
     return "";
   ++idx;
@@ -481,6 +631,17 @@ Document::loadresult_t ScribbleDoc::openDocument(IOStream* strm, bool delayload)
   history = document->history;
   cfg = new ScribbleConfig(globalCfg);
   cfg->loadConfig(document->getConfigNode());
+  // a page that is not loaded yet cannot say what it is tagged with, so it starts with what the summary
+  //  saved with it says; a loaded page's own elements are the answer, and loading replaces this
+  for(const TagStore::PageTags& entry : TagStore::parsePageTags(cfg->String("pagetags", ""))) {
+    if(entry.page < 0 || entry.page >= document->numPages())
+      continue;
+    Page* page = document->pages[entry.page];
+    if(page->loadStatus == Page::LOAD_OK)
+      continue;
+    page->pageTagIds = entry.tagIds;
+    page->pageTagTitle = entry.title;
+  }
   loadConfig(false);
   if(res == Document::LOAD_EMPTYDOC)
     document->insertPage(generatePage(0), 0);

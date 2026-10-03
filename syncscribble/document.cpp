@@ -46,6 +46,24 @@ R"(
 static const int SVGZ_BORDER = 10;
 size_t Document::memoryLimit = 0;
 
+// Page tags (docs/agent/page-tags.md): a thumbnail for each tagged page, beside the document's own, so
+//  the document browser can show the page without opening the file.  Keyed by page index, which is fine
+//  for a snapshot written from the pages as they are now.  Pages with no tags write nothing.
+static void writePageThumbs(IOStream* strm, const std::vector<Page*>& pages, bool html)
+{
+  for(size_t ii = 0; ii < pages.size(); ++ii) {
+    const Page* page = pages[ii];
+    if(page->pageTagIds.empty() || page->pageTagThumb.empty())
+      continue;
+    if(html)
+      *strm << "  <img id='pagethumb-" << fstring("%d", int(ii)).c_str()
+            << "' style='display:none;' src='data:image/png;base64," << page->pageTagThumb.c_str() << "'/>\n";
+    else
+      *strm << "<image id=\"pagethumb-" << fstring("%d", int(ii)).c_str()
+            << "\" xlink:href=\"data:image/png;base64," << page->pageTagThumb.c_str() << "\"/>\n";
+  }
+}
+
 Document::Document()
 {
   history = new UndoHistory;
@@ -162,6 +180,8 @@ bool Document::save(IOStream* outstrm, const char* thumb, saveflags_t flags)
     pugi::xml_node cfgnode = getConfigNode();
     if(cfgnode)
       cfgnode.print(xmlWriter, "  ");
+    // after the config, which the browser reads from a fixed-size head of the file
+    writePageThumbs(outstrm, pages, false);
     *outstrm << "</defs>\n";
   }
   else {
@@ -186,6 +206,7 @@ bool Document::save(IOStream* outstrm, const char* thumb, saveflags_t flags)
     *outstrm << "\n";
     if(thumb)
       *outstrm << "  <img id='thumbnail' style='display:none;' src='data:image/png;base64," << thumb << "'/>\n\n";
+    writePageThumbs(outstrm, pages, true);
   }
 
   // for svg(z), pages have to be manually positioned and total width and height have to be set on top-level
@@ -338,6 +359,7 @@ bool Document::saveBgz(IOStream* outstrm, const char* thumb, saveflags_t flags)
   tempstrm << "<defs id=\"write-defs\">\n";
   if(thumb)  // style='display:none;' ... not needed inside <defs>
     tempstrm << "<image id=\"thumbnail\" xlink:href=\"data:image/png;base64," << thumb << "\"/>\n\n";
+  writePageThumbs(&tempstrm, pages, false);
 
   // page sizes
   tempstrm << "<g id=\"write-pages\">\n";
@@ -401,6 +423,16 @@ Document::loadresult_t Document::loadBgzDoc(IOStream* instrm)
         int blockidx = 1;
         for(; pg; pg = pg.next_sibling())
           insertPage(new Page(pg.attribute("width").as_float(0), pg.attribute("height").as_float(0), blockidx++));
+        // tagged pages' thumbnails, kept so a save need not load a page just to draw it again
+        for(pugi::xml_node img = doc.child("defs").child("image"); img; img = img.next_sibling("image")) {
+          StringRef id(img.attribute("id").value());
+          const char* href = strstr(img.attribute("xlink:href").value(), "base64,");
+          if(!id.startsWith("pagethumb-") || !href)
+            continue;
+          size_t pagenum = strtoul(id.constData() + 10, NULL, 10);
+          if(pagenum < pages.size())
+            pages[pagenum]->pageTagThumb = href + 7;
+        }
         resetConfigNode(doc.child("defs").find_child_by_attribute("script", "type", "text/writeconfig"));
         return LOAD_OK;
       }
@@ -537,6 +569,13 @@ Document::loadresult_t Document::load(const pugi::xml_document& doc, const char*
   // for html, we preserve the doc contents; for svg, we just copy the config
   if(body) {
     body.remove_child(body.find_child_by_attribute("img", "id", "thumbnail"));
+    // tagged pages' thumbnails too, or each save would write them again after the kept ones
+    for(pugi::xml_node img = body.child("img"); img;) {
+      pugi::xml_node next = img.next_sibling("img");
+      if(StringRef(img.attribute("id").value()).startsWith("pagethumb-"))
+        body.remove_child(img);
+      img = next;
+    }
     xmldoc.reset(doc);  // copies contents of doc to xmldoc, including config node if present
   }
   else

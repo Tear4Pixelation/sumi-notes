@@ -14,6 +14,7 @@ const char* Element::FLAT_PEN_CLASS = "write-flat-pen";
 const char* Element::ROUND_PEN_CLASS = "write-round-pen";
 const char* Element::CHISEL_PEN_CLASS = "write-chisel-pen";
 const char* Element::RULING_REGION_CLASS = "write-ruling-region";
+const char* Element::PAGE_TAG_CLASS = "write-pagetag";
 
 Element::Element(SvgNode* n)
     : SvgNodeExtension(n), m_selection(NULL), m_timestamp(0), m_com(NaN, NaN)
@@ -66,6 +67,54 @@ void Element::deleteNode()
   delete node;  // deletes this (Element) since SvgNodeExtension is owned by SvgNode
 }
 
+// the node's own stroke-dasharray, without the parser's terminating -1
+static std::vector<Dim> nodeDashes(const SvgNode* node)
+{
+  std::vector<Dim> dashes;
+  const SvgAttr* attr = node->getAttr("stroke-dasharray");
+  if(attr && attr->valueIs(SvgAttr::StringVal)) {
+    // stored as floats, but not aligned in general (see SvgWriter)
+    std::vector<float> dashesf(attr->stringLen()/sizeof(float));
+    memcpy(dashesf.data(), attr->stringVal(), dashesf.size()*sizeof(float));
+    for(float dash : dashesf) {
+      if(dash < 0)
+        break;
+      dashes.push_back(dash);
+    }
+  }
+  return dashes;
+}
+
+static std::string dashesToString(const std::vector<Dim>& dashes)
+{
+  if(dashes.empty())
+    return "none";
+  std::string str;
+  for(Dim dash : dashes)
+    str += fstring(str.empty() ? "%.9g" : " %.9g", dash);
+  return str;
+}
+
+// "none" (or anything else with no numbers in it) removes the pattern
+static void setNodeDashes(SvgNode* node, const std::string& dashes)
+{
+  if(dashes.empty() || dashes == "none")
+    node->removeAttr("stroke-dasharray");
+  else
+    node->setAttribute("stroke-dasharray", dashes.c_str());  // dasharray is special, so let parser handle
+}
+
+// a dash pattern is part of how thick a line looks, so it scales with the width
+static void scaleNodeDashes(SvgNode* node, Dim scale)
+{
+  std::vector<Dim> dashes = nodeDashes(node);
+  if(dashes.empty() || scale == 1)
+    return;
+  for(Dim& dash : dashes)
+    dash *= scale;
+  setNodeDashes(node, dashesToString(dashes));
+}
+
 StrokeProperties Element::getProperties() const
 {
   if(isMultiStroke())
@@ -79,7 +128,14 @@ StrokeProperties Element::getProperties() const
     color = node->getColorAttr("stroke").mulAlphaF(node->getFloatAttr("stroke-opacity", 1));
   Dim avgScale = node->hasTransform() ? node->getTransform().avgScale() : 1;
   width = node->getFloatAttr("stroke-width", -1) * avgScale;
-  return StrokeProperties(color, width);
+  StrokeProperties props(color, width);
+  std::vector<Dim> dashes = nodeDashes(node);
+  props.dashArray = dashesToString(dashes);
+  // pattern and width are both in the node's own units, so the transform does not enter into the style
+  bool stroked = node->getColorAttr("stroke", Color::NONE) != Color::NONE;
+  props.dashStyle = !stroked || dashes.empty() ? ScribblePen::DASH_SOLID : ScribblePen::dashStyleOf(
+      dashes[0], dashes.size() > 1 ? dashes[1] : dashes[0], node->getFloatAttr("stroke-width", 0));
+  return props;
 }
 
 void setSvgFillColor(SvgNode* node, Color color)
@@ -131,8 +187,24 @@ static bool applyProperties(const StrokeProperties& props, SvgNode* node)
     if(scale != 1) {
       if(node->hasExt())
         static_cast<Element*>(node->ext())->scaleWidth(scale, scale);
-      else
+      else {
         node->setAttr<float>("stroke-width", sw * scale);
+        scaleNodeDashes(node, scale);
+      }
+    }
+  }
+  // after the width, since a style is sized by the width the node ends up with
+  if(!props.dashArray.empty())
+    setNodeDashes(node, props.dashArray);
+  else if(props.dashStyle >= 0 && node->getColorAttr("stroke", Color::NONE) != Color::NONE) {
+    Dim width = node->getFloatAttr("stroke-width", 0);
+    if(width > 0) {
+      Dim dash, gap;
+      ScribblePen::dashFor(props.dashStyle, width, &dash, &gap);
+      setNodeDashes(node, props.dashStyle == ScribblePen::DASH_SOLID ? "none" : fstring("%.9g %.9g", dash, gap));
+      // a dot is a dash shorter than the line is wide, which a flat cap would all but hide
+      if(props.dashStyle == ScribblePen::DASH_DOTTED)
+        node->setAttr<int>("stroke-linecap", Painter::RoundCap);
     }
   }
   // TODO: return false if no change to element's properties
@@ -151,6 +223,50 @@ bool Element::setProperties(const StrokeProperties& props)
   if(changed && isShape())
     rebuildShapePath();  // arrowhead size follows stroke-width
   return changed;
+}
+
+bool Element::isFilledPenStroke() const
+{
+  return isPathElement() && !isShape() && node->getColorAttr("stroke", Color::NONE) == Color::NONE
+      && (node->hasClass(FLAT_PEN_CLASS) || node->hasClass(ROUND_PEN_CLASS)
+          || node->hasClass(CHISEL_PEN_CLASS) || node->hasClass("write-fstroke"));
+}
+
+bool Element::convertToStroked()
+{
+  if(!isFilledPenStroke())
+    return false;
+  std::vector<PenPoint> pts = toPenPoints();
+  if(pts.empty())
+    return false;
+  // the mean of the drawn width, not the pen's nominal width: under pressure a stroke is mostly
+  //  narrower than its pen, and the line should look as heavy as it did
+  Dim totalWidth = 0;
+  for(const PenPoint& pt : pts)
+    totalWidth += pt.dr.dist();
+  Dim width = totalWidth > 0 ? totalWidth/pts.size() : node->getFloatAttr("stroke-width", 1);
+  Color color = node->getColorAttr("fill").mulAlphaF(node->getFloatAttr("fill-opacity", 1));
+
+  Path2D& path = *static_cast<SvgPath*>(node)->path();
+  path.clear();
+  for(const PenPoint& pt : pts) {
+    if(pt.moveTo() || path.empty())
+      path.moveTo(pt.p);
+    else
+      path.lineTo(pt.p);
+  }
+  node->setAttr<color_t>("fill", Color::NONE);
+  node->removeAttr("fill-opacity");
+  setSvgStrokeColor(node, color);
+  node->setAttr<float>("stroke-width", width);
+  node->setAttr<int>("stroke-linecap", Painter::RoundCap);
+  node->setAttr<int>("stroke-linejoin", Painter::RoundJoin);
+  for(const char* cls : {FLAT_PEN_CLASS, ROUND_PEN_CLASS, CHISEL_PEN_CLASS, "write-fstroke"})
+    node->removeClass(cls);
+  node->addClass(STROKE_PEN_CLASS);
+  penPoints.clear();
+  node->invalidate(true);
+  return true;
 }
 
 static bool erasePenPoints(std::vector<PenPoint>& in, const std::vector<Point>& clip)
@@ -537,7 +653,9 @@ void Element::scaleWidth(Dim sx_int, Dim sy_int)
 
   node->invalidate(false);
   Dim sw = node->getFloatAttr("stroke-width", 1);
-  node->setAttr<float>("stroke-width", sw * std::sqrt(std::abs(sx_int * sy_int)));
+  Dim scale = std::sqrt(std::abs(sx_int * sy_int));
+  node->setAttr<float>("stroke-width", sw * scale);
+  scaleNodeDashes(node, scale);
   // an arrowhead is sized from the stroke width, so the path has to follow it
   if(isShape())
     rebuildShapePath();
@@ -838,6 +956,35 @@ Element* Element::createRulingRegion(const RulingRegionParams& params, Color pap
   region->setRegionParams(params);
   region->rebuildRegion(paper, rule);
   return region;
+}
+
+// Built from nodes rather than parsed from a string, so a tag name needs no escaping.  The color sits on
+//  the <g> alone - the pill is the same fill at low opacity - so the selection's color button restyles the
+//  whole tag.  The font is on the <text> itself, since its bounds are measured before it has a parent.
+Element* Element::createPageTag(const char* tagId, const char* name, Point topRight)
+{
+  static const Dim FONT_SIZE = 15, PAD_X = 12, HEIGHT = 28;
+  SvgText* text = new SvgText();
+  text->setAttribute("font-family", "satoshi, ui-sans, sans-serif");
+  text->setAttribute("font-size", fstring("%g", FONT_SIZE).c_str());
+  text->addText(fstring("#%s", name).c_str());
+  Rect textBounds = text->bounds();
+  Dim textWidth = textBounds.isValid() ? textBounds.width() : FONT_SIZE*strlen(name)*0.55;
+  Dim width = textWidth + 2*PAD_X;
+  // baseline placed so the cap height sits in the middle of the pill
+  text->setTransform(Transform2D::translating(PAD_X, HEIGHT/2 + 0.35*FONT_SIZE));
+
+  SvgRect* pill = new SvgRect(Rect::wh(width, HEIGHT), HEIGHT/2, HEIGHT/2);  // ry does not default to rx
+  pill->setAttr<float>("fill-opacity", 0.16f);
+
+  SvgG* g = new SvgG;
+  g->addClass(PAGE_TAG_CLASS);
+  g->setAttr("__pagetag", tagId);
+  setSvgFillColor(g, Color(0x2F, 0x6B, 0xB8));
+  g->addChild(pill);
+  g->addChild(text);
+  g->setTransform(Transform2D::translating(topRight.x - width, topRight.y));
+  return new Element(g);
 }
 
 void Element::dropShape()

@@ -242,9 +242,12 @@ PenToolbar::PenToolbar(bool _compact)
   if (!widthProto)
     widthProto.reset(loadSVGFragment(
         compact ? compactWidthBtnSVG.c_str() : widthBtnSVG));
-  // built even for a roomy toolbar: the single swatch (createSingleSwatch) always uses the compact cell
+  // built even for a roomy toolbar: the single swatch and width (createSingleSwatch/Width) always use
+  //  the compact cells
   if (!compactColorBtnNode)
     compactColorBtnNode.reset(loadSVGFragment(compactColorBtnSVG.c_str()));
+  if (!compactWidthBtnNode)
+    compactWidthBtnNode.reset(loadSVGFragment(compactWidthBtnSVG.c_str()));
 
   const char *colorStr =
       ScribbleApp::cfg->String("savedColors", "black,red,green,blue");
@@ -411,7 +414,7 @@ PenToolbar::PenToolbar(bool _compact)
     savedColors[colorPopupIdx] = c;
     colorPalette->items[colorPopupIdx]
         ->selectFirst(".btn-color")
-        ->node->setAttr<color_t>("fill", c.color);
+        ->node->setAttr<color_t>("fill", ScribbleApp::displayColor(c).color);
     if (colorPalette->items[colorPopupIdx]->isChecked()) {
       colorPicker->setColor(c);
       updateColor();
@@ -430,16 +433,8 @@ PenToolbar::PenToolbar(bool _compact)
   colorPopup->addWidget(colorPopupSliders);
   setupAutoClosePopup(colorPopup);
 
-  // filter to help reduce creation of unnecessary undo items
-  auto focusFilt = [this](SvgGui *gui, SDL_Event *event) {
-    if (event->type == SvgGui::FOCUS_GAINED)
-      changesSinceFocused = 0;
-    else if (event->type == SvgGui::FOCUS_LOST)
-      changesSinceFocused = -1;
-    return false; // continue
-  };
-  colorPicker->addHandler(focusFilt);
-  spinWidth->addHandler(focusFilt);
+  trackEditFocus(colorPicker);
+  trackEditFocus(spinWidth);
 
   Menu *overflowMenu = createMenu(Menu::VERT_LEFT);
   cbSnaptoGrid = createCheckBoxMenuItem(_("Snap to Grid"));
@@ -689,6 +684,14 @@ static std::vector<Color> defaultThemeSwatches(const Palette *pal) {
   return out;
 }
 
+// every swatch and preview shows its color through ScribbleApp::displayColor(), so a dark mode toggle
+//  has to repaint them all
+void PenToolbar::refreshDisplayColors() {
+  rebuildGrids();
+  updateSingles();
+  updateWidthPopup();
+}
+
 void PenToolbar::refreshPalette() {
   const Palette *pal = docPalette();
   themed = pal && !pal->families.empty();
@@ -812,7 +815,7 @@ void PenToolbar::fillColorGrid(Widget *grid, const std::function<void(Color)> &o
   };
   for (Color c : offer) {
     Button *btn = new Button(loadSVGFragment(cellSVG.c_str()));
-    btn->selectFirst(".btn-color")->node->setAttr<color_t>("fill", toolColor(c).color);
+    btn->selectFirst(".btn-color")->node->setAttr<color_t>("fill", ScribbleApp::displayColor(toolColor(c)).color);
     setupTooltip(btn, colorToHex(c).c_str());
     btn->onClicked = [onPick, c]() { onPick(c); };
     addCell(btn);
@@ -824,56 +827,107 @@ void PenToolbar::fillColorGrid(Widget *grid, const std::function<void(Color)> &o
   addCell(customBtn);
 }
 
-Widget *PenToolbar::createSingleSwatch() {
-  singleSwatchBtn = new Button(compactColorBtnNode->clone());
-  singleSwatchBtn->setMargins(0);  // the swatch cell already includes the mockup's spacing
-  setupTooltip(singleSwatchBtn, _("Color"));
-  singleSwatchBtn->onClicked = [this]() { openSingleSwatch(); };
+// filter to help reduce creation of unnecessary undo items
+void PenToolbar::trackEditFocus(Widget *field) {
+  field->addHandler([this](SvgGui *gui, SDL_Event *event) {
+    if (event->type == SvgGui::FOCUS_GAINED)
+      changesSinceFocused = 0;
+    else if (event->type == SvgGui::FOCUS_LOST)
+      changesSinceFocused = -1;
+    return false; // continue
+  });
+}
 
-  singlePalettePopup = createArrowPopup(Menu::VERT_LEFT);
-  singlePalettePopup->selectFirst(".child-container")->setMargins(8);  // as for palettePopup
-  singlePaletteGrid = createRow({}, "0 0", "flex-start");
-  singlePaletteGrid->node->setAttribute("flex-wrap", "wrap");
-  singlePaletteGrid->node->setAttribute("margin", "4 4");
-  singlePalettePopup->addWidget(singlePaletteGrid);
-  setupAutoClosePopup(singlePalettePopup);
+// the menu a single control sits in (the selection popup), or NULL on a toolbar row
+static Widget *enclosingMenu(Widget *widget) {
+  for (Widget *ancestor = widget->parent(); ancestor; ancestor = ancestor->parent()) {
+    if (ancestor->node->hasClass("menu"))
+      return ancestor;
+  }
+  return NULL;
+}
+
+// Closes the popups opened from `btn`, but not the menu `btn` sits in.  closeAutoClosePopup() closes
+//  every open menu, which inside the selection popup would take the selection popup down with it.
+static void closePopupsFrom(Button *btn) {
+  SvgGui *gui = btn->window() ? btn->window()->gui() : NULL;
+  if (gui)
+    gui->closeMenus(btn);
+}
+
+// setupAutoClosePopup(), except that a press elsewhere in the menu holding `btn` closes only this popup
+//  and then goes on to what was pressed - the selection popup's other items stay usable with one of
+//  these open.  A press on `btn` itself is swallowed: it only closes the popup, where its click would
+//  otherwise open it straight back up.
+static void setupSinglePopup(ArrowPopup *popup, Button *btn) {
+  popup->isPressedGroupContainer = true;
+  popup->addHandler([btn](SvgGui *gui, SDL_Event *event) {
+    if (event->type != SvgGui::OUTSIDE_PRESSED && event->type != SvgGui::OUTSIDE_MODAL)
+      return false;
+    Widget *target = static_cast<Widget *>(event->user.data2);
+    Widget *menu = enclosingMenu(btn);
+    if (menu && target && target->isDescendantOf(menu))
+      gui->closeMenus(btn);
+    else
+      gui->closeMenus();
+    bool onBtn = target && target->isDescendantOf(btn);
+    return event->type == SvgGui::OUTSIDE_PRESSED || onBtn;
+  });
+}
+
+Widget *PenToolbar::createSingleSwatch(std::function<void(Color)> onPicked) {
+  singleSwatches.emplace_back(new SingleSwatch());
+  SingleSwatch *sw = singleSwatches.back().get();
+  sw->onPicked = onPicked;
+  sw->btn = new Button(compactColorBtnNode->clone());
+  sw->btn->setMargins(0);  // the swatch cell already includes the mockup's spacing
+  setupTooltip(sw->btn, _("Color"));
+  sw->btn->onClicked = [this, sw]() { openSingleSwatch(sw); };
+
+  sw->palettePopup = createArrowPopup(Menu::VERT_LEFT);
+  sw->palettePopup->selectFirst(".child-container")->setMargins(8);  // as for palettePopup
+  sw->paletteGrid = createRow({}, "0 0", "flex-start");
+  sw->paletteGrid->node->setAttribute("flex-wrap", "wrap");
+  sw->paletteGrid->node->setAttribute("margin", "4 4");
+  sw->palettePopup->addWidget(sw->paletteGrid);
+  setupSinglePopup(sw->palettePopup, sw->btn);
 
   // the custom color editor, as for a saved swatch, but setting the pen directly
-  singleCustomPopup = createArrowPopup(Menu::VERT_LEFT);
+  sw->customPopup = createArrowPopup(Menu::VERT_LEFT);
   ColorSliders *sliders = new ColorSliders(new SvgG());
-  singleCustomPicker = createColorEditBox(true, sliders);
-  singleCustomPicker->setMargins(0, 0, 0, 4);
-  singleCustomPicker->onColorChanged = [this](Color c) { pickSingleSwatch(c); };
+  sw->customPicker = createColorEditBox(true, sliders);
+  sw->customPicker->setMargins(0, 0, 0, 4);
+  sw->customPicker->onColorChanged = [this, sw](Color c) { pickSingleSwatch(sw, c); };
   Widget *tabs = createTabBar({"RGB", "HSV"}, [sliders](int tabnum) {
     sliders->setVisibleGroup(tabnum != 0);
   });
   tabs->setMargins(12, 0, 0, 0);
-  Widget *title = createTitledRow(_("Color"), singleCustomPicker);
+  Widget *title = createTitledRow(_("Color"), sw->customPicker);
   title->selectFirst(".row-text")->node->addClass("color-popup-title");
-  singleCustomPopup->addWidget(title);
-  singleCustomPopup->addWidget(tabs);
-  singleCustomPopup->addWidget(sliders);
-  setupAutoClosePopup(singleCustomPopup);
+  sw->customPopup->addWidget(title);
+  sw->customPopup->addWidget(tabs);
+  sw->customPopup->addWidget(sliders);
+  setupSinglePopup(sw->customPopup, sw->btn);
 
   Widget *group = createRow();
   group->node->setAttribute("box-anchor", "");
-  group->addWidget(singleSwatchBtn);
-  group->addWidget(singlePalettePopup);
-  group->addWidget(singleCustomPopup);
-  updateSingleSwatch();
+  group->addWidget(sw->btn);
+  group->addWidget(sw->palettePopup);
+  group->addWidget(sw->customPopup);
+  updateSingles();
   return group;
 }
 
-void PenToolbar::openSingleSwatch() {
-  if (singlePalettePopup->isVisible() || singleCustomPopup->isVisible()) {
-    closeAutoClosePopup(singlePalettePopup);
-    closeAutoClosePopup(singleCustomPopup);
+void PenToolbar::openSingleSwatch(SingleSwatch *sw) {
+  if (sw->palettePopup->isVisible() || sw->customPopup->isVisible()) {
+    closePopupsFrom(sw->btn);
     return;
   }
-  auto openCustom = [this]() {
-    closeAutoClosePopup(singlePalettePopup);
-    singleCustomPicker->setColor(pen.color);
-    openAutoClosePopup(singleCustomPopup);
+  closePopupsFrom(sw->btn);  // a sibling's popup, if one is open
+  auto openCustom = [this, sw]() {
+    closePopupsFrom(sw->btn);
+    sw->customPicker->setColor(pen.color);
+    openAutoClosePopup(sw->customPopup);
   };
   const Palette *pal = docPalette();
   // no theme: no grid to show, so straight to the color editor, as the "+" does
@@ -881,24 +935,160 @@ void PenToolbar::openSingleSwatch() {
     openCustom();
     return;
   }
-  fillColorGrid(singlePaletteGrid, [this](Color c) {
-    closeAutoClosePopup(singlePalettePopup);
-    pickSingleSwatch(toolColor(c));
+  fillColorGrid(sw->paletteGrid, [this, sw](Color c) {
+    closePopupsFrom(sw->btn);
+    pickSingleSwatch(sw, toolColor(c));
   }, openCustom);
-  openAutoClosePopup(singlePalettePopup);
+  openAutoClosePopup(sw->palettePopup);
 }
 
 // updateColor() does the snapping and, in SELECTION_MODE, recolors the selection
-void PenToolbar::pickSingleSwatch(Color color) {
+void PenToolbar::pickSingleSwatch(SingleSwatch *sw, Color color) {
   colorPicker->setColor(color);
   updateColor();
-  if (onSingleSwatchPicked)
-    onSingleSwatchPicked(pen.color);
+  if (sw->onPicked)
+    sw->onPicked(pen.color);
 }
 
-void PenToolbar::updateSingleSwatch() {
-  if (singleSwatchBtn)
-    singleSwatchBtn->selectFirst(".btn-color")->node->setAttr<color_t>("fill", pen.color.color);
+Widget *PenToolbar::createSingleWidth(std::function<void()> onWidthChanged) {
+  singleWidths.emplace_back(new SingleWidth());
+  SingleWidth *sw = singleWidths.back().get();
+  sw->onChanged = onWidthChanged;
+  // the draw row's thickness cell, with a longer line so that a dash pattern has room to show
+  std::string btnSVG = fstring(R"#(
+    <g class="toolbutton swatch-btn" layout="box">
+      <rect class="background" width="%g" height="%g"/>
+      <line class="icon width-line" x1="%g" y1="%g" x2="%g" y2="%g"
+          fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round"/>
+    </g>
+  )#", 56*floatUIScale, 64*floatUIScale, 12*floatUIScale, 32*floatUIScale, 44*floatUIScale, 32*floatUIScale);
+  sw->btn = new Button(loadSVGFragment(btnSVG.c_str()));
+  sw->btn->setMargins(0);
+  setupTooltip(sw->btn, _("Width"));
+  sw->btn->onClicked = [this, sw]() { openSingleWidth(sw); };
+
+  sw->popup = createArrowPopup(Menu::VERT_LEFT);
+  // the presets, filled in on each open since the list can change in between (see openSingleWidth)
+  sw->presetRow = createRow({}, "0 0", "flex-start");
+  sw->popup->addWidget(sw->presetRow);
+  sw->spin = createTextSpinBox(1.25, 0.01, 0, 200, "%.3g", 120);
+  // spinWidth always holds the same value as this one (setSingleWidth), so its stepping applies as is
+  sw->spin->onStep = spinWidth->onStep;
+  sw->spin->onValueChanged = [this, sw](Dim width) { setSingleWidth(sw, width); };
+  trackEditFocus(sw->spin);
+  sw->spinRow = createTitledRow(_("Width"), sw->spin);
+  sw->popup->addWidget(sw->spinRow);
+
+  // solid, dashed, dotted: each drawn as what it gives, at a thickness where the pattern reads
+  const char *titles[] = {_("Solid"), _("Dashed"), _("Dotted")};
+  const Dim iconWidth = 3;
+  Widget *dashRow = createRow({}, "0 0", "flex-start");
+  for (int style = ScribblePen::DASH_SOLID; style <= ScribblePen::DASH_DOTTED; ++style) {
+    Dim dash, gap;
+    ScribblePen::dashFor(style, iconWidth, &dash, &gap);
+    std::string dashAttr = style == ScribblePen::DASH_SOLID ? ""
+        : fstring("stroke-dasharray=\"%g %g\"", dash, gap);
+    std::string iconSVG = fstring(R"#(
+      <g class="toolbutton swatch-btn" layout="box">
+        <rect class="background" width="60" height="34"/>
+        <line class="icon" x1="10" y1="17" x2="50" y2="17"
+            fill="none" stroke="currentColor" stroke-width="%g" stroke-linecap="round" %s/>
+      </g>
+    )#", iconWidth, dashAttr.c_str());
+    Button *btn = new Button(loadSVGFragment(iconSVG.c_str()));
+    btn->setMargins(0);
+    setupTooltip(btn, titles[style]);
+    btn->onClicked = [this, sw, style]() {
+      setDashStyle(style);
+      if (sw->onChanged)
+        sw->onChanged();
+    };
+    dashRow->addWidget(btn);
+    sw->dashBtns[style] = btn;
+  }
+  sw->popup->addWidget(createTitledRow(_("Line"), dashRow));
+  setupSinglePopup(sw->popup, sw->btn);
+
+  Widget *group = createRow();
+  group->node->setAttribute("box-anchor", "");
+  group->addWidget(sw->btn);
+  group->addWidget(sw->popup);
+  updateWidthPopup();  // the spin box's limits and label for the width's unit
+  updateSingles();
+  return group;
+}
+
+void PenToolbar::openSingleWidth(SingleWidth *sw) {
+  if (sw->popup->isVisible()) {
+    closePopupsFrom(sw->btn);
+    return;
+  }
+  closePopupsFrom(sw->btn);  // a sibling's popup, if one is open
+  // the presets are those of the tool in hand, which differ per tool and change as they are edited
+  SvgGui *gui = sw->btn->window() ? sw->btn->window()->gui() : NULL;
+  if (gui)
+    gui->deleteContents(sw->presetRow);
+  sw->presets.clear();
+  bool relwidths = relativeWidths();
+  for (Dim width : activeWidths()) {
+    Button *btn = new Button(compactWidthBtnNode->clone());
+    btn->containerNode()->selectFirst(".width-line")->setAttr("stroke-width", widthPreview(width));
+    btn->setMargins(0);
+    btn->onClicked = [this, sw, width]() { setSingleWidth(sw, width); };
+    setupTooltip(btn, relwidths ? fstring(_("Pen width: %.2g line heights"), width).c_str()
+                                : fstring(_("Pen width: %.1f"), width).c_str());
+    sw->presetRow->addWidget(btn);
+    sw->presets.push_back(btn);
+  }
+  updateSingles();
+  openAutoClosePopup(sw->popup);
+}
+
+// through spinWidth and updateWidth(), which resize the selection in SELECTION_MODE
+void PenToolbar::setSingleWidth(SingleWidth *sw, Dim width) {
+  spinWidth->setValue(width);
+  updateWidth();
+  if (sw->onChanged)
+    sw->onChanged();
+}
+
+void PenToolbar::updateSingles() {
+  for (auto &sw : singleSwatches)
+    sw->btn->selectFirst(".btn-color")->node->setAttr<color_t>("fill", ScribbleApp::displayColor(pen.color).color);
+  const std::vector<Dim> &widths = activeWidths();
+  for (auto &sw : singleWidths) {
+    // a selection of mixed widths has none to show, so it gets a hairline
+    Dim preview = pen.width > 0 ? widthPreview(pen.width) : floatUIScale;
+    SvgNode *line = sw->btn->containerNode()->selectFirst(".width-line");
+    line->setAttr("stroke-width", preview);
+    if (dashStyle > ScribblePen::DASH_SOLID) {
+      Dim dash, gap;
+      ScribblePen::dashFor(dashStyle, preview, &dash, &gap);
+      line->setAttribute("stroke-dasharray", fstring("%g %g", dash, gap).c_str());
+    }
+    else
+      line->removeAttr("stroke-dasharray");
+    // only when it differs: this runs on every edit, including the ones typed into this very box
+    if (pen.width > 0 && sw->spin->value() != pen.width)
+      sw->spin->setValue(pen.width);
+    for (size_t ii = 0; ii < sw->presets.size() && ii < widths.size(); ++ii)
+      sw->presets[ii]->setChecked(widths[ii] == pen.width);
+    for (int style = ScribblePen::DASH_SOLID; style <= ScribblePen::DASH_DOTTED; ++style)
+      sw->dashBtns[style]->setChecked(style == dashStyle);
+  }
+}
+
+void PenToolbar::setDashStyle(int style) {
+  if (mode == BOOKMARK_MODE)
+    return;
+  dashStyle = style;
+  // a pen carries the pattern itself; a selection's is applied by the app, element by element, since
+  //  each is sized by that element's own width
+  if (mode != SELECTION_MODE)
+    pen.setDashStyle(style);
+  updateSelected();
+  if (onChanged)
+    onChanged(mode == SELECTION_MODE ? DASH_CHANGED : PEN_CHANGED);
 }
 
 void PenToolbar::rebuildGrids() {
@@ -914,7 +1104,7 @@ void PenToolbar::rebuildGrids() {
     Color color = toolColor(savedColors[ii]);
     Button *btn =
         compact ? new Button(compactColorBtnNode->clone()) : createColorBtn();
-    btn->selectFirst(".btn-color")->node->setAttr<color_t>("fill", color.color);
+    btn->selectFirst(".btn-color")->node->setAttr<color_t>("fill", ScribbleApp::displayColor(color).color);
     // setting on <g class=toolbutton gets overridden by toolbutton CSS fill -
     // do we need class=toolbutton?
     btn->onClicked = [this, ii]() { selectColor(int(ii)); };
@@ -1014,7 +1204,7 @@ void PenToolbar::updateSelected() {
   const std::vector<Dim> &widths = activeWidths();
   for (size_t ii = 0; ii < widthPalette->items.size() && ii < widths.size(); ++ii)
     widthPalette->items[ii]->setChecked(widths[ii] == pen.width);
-  updateSingleSwatch();
+  updateSingles();
 }
 
 void PenToolbar::saveConfig(ScribbleConfig *cfg) const {
@@ -1043,8 +1233,9 @@ void PenToolbar::saveConfig(ScribbleConfig *cfg) const {
   cfg->set("savedEphemeralWidths", joinStr(ephWidthStrs, ",").c_str());
 }
 
-void PenToolbar::setPen(const ScribblePen &newpen, Mode m) {
+void PenToolbar::setPen(const ScribblePen &newpen, Mode m, int selDashStyle) {
   mode = m;
+  dashStyle = m == SELECTION_MODE ? selDashStyle : newpen.dashStyle();
   widthGroup->setEnabled(mode != BOOKMARK_MODE);
   overflowBtn->setEnabled(mode == PEN_MODE);
   overflowBtn->setVisible(!compact && mode != SELECTION_MODE);
@@ -1056,8 +1247,10 @@ void PenToolbar::setPen(const ScribblePen &newpen, Mode m) {
   int tool = drawToolForMode(m);
   centerLineToggle->setVisible(mode == PEN_MODE && tool == ScribbleMode::DRAWTOOL_HIGHLIGHT);
   centerLineToggle->setChecked(newpen.hasFlag(ScribblePen::CENTER_ON_LINE));
-  if (newpen == pen && tool == widthsTool)
+  if (newpen == pen && tool == widthsTool) {
+    updateSingles();  // a selection's line style is not part of its pen, so it may still have changed
     return;
+  }
   bool rebuild = tool != widthsTool
       || relativeWidths() != newpen.hasFlag(ScribblePen::WIDTH_RELATIVE);
   widthsTool = tool;
@@ -1120,6 +1313,9 @@ void PenToolbar::updateColor() {
 
 void PenToolbar::updateWidth() {
   pen.width = spinWidth->value();
+  // a pen's dash pattern is sized by its width (a selection's is rescaled element by element)
+  if (mode != SELECTION_MODE)
+    pen.setDashStyle(dashStyle);
   // editing the width while the detail popup is open redefines that preset
   if (widthPopup->isVisible() && widthPopupIdx >= 0 &&
       widthPopupIdx < int(activeWidths().size())) {
@@ -1249,6 +1445,7 @@ void PenToolbar::setRelativeWidth(bool relative) {
     w = relative ? w/lh : w*lh;
   pen.setFlag(ScribblePen::WIDTH_RELATIVE, relative);
   pen.width = relative ? pen.width/lh : pen.width*lh;
+  pen.setDashStyle(dashStyle);  // the pattern is in the width's unit
   updateWidthPopup();  // new limits for the new unit, so this must precede setValue
   spinWidth->setValue(pen.width);
   rebuildGrids();
@@ -1266,17 +1463,21 @@ void PenToolbar::updateWidthPopup() {
   spinWidth->setLimits(0.01, rel ? 4 : 200);
   widthSpinRow->selectFirst(".row-text")
       ->setText(rel ? _("Line heights") : _("Width"));
+  for (auto &sw : singleWidths) {
+    sw->spin->setLimits(0.01, rel ? 4 : 200);
+    sw->spinRow->selectFirst(".row-text")->setText(rel ? _("Line heights") : _("Width"));
+  }
   // the display is always up, so an absolute width is shown against the ruling too - it is drawn from
   //  the width in line heights either way, which is what the display's scale is
   Page *page = currentPage();
   rulingPreview->node->selectFirst(".page-bg")
-      ->setAttr<color_t>("fill", (page ? page->props.color : Color::WHITE).color);
-  Color rulecolor = page ? page->props.ruleColor : Color(0, 0, 0xFF, 0x9F);
+      ->setAttr<color_t>("fill", ScribbleApp::displayColor(page ? page->props.color : Color::WHITE).color);
+  Color rulecolor = ScribbleApp::displayColor(page ? page->props.ruleColor : Color(0, 0, 0xFF, 0x9F));
   for (SvgNode *rule : rulingPreview->node->select(".rule-line"))
     rule->setAttr<color_t>("stroke", rulecolor.color);
   Widget *penLine = rulingPreview->selectFirst(".pen-line");
   Dim lineheights = rel ? pen.width : pen.width/lineHeight();
-  penLine->node->setAttr<color_t>("stroke", pen.color.color);
+  penLine->node->setAttr<color_t>("stroke", ScribbleApp::displayColor(pen.color).color);
   // a stroke wider than the display is clamped rather than allowed to spill out of it
   penLine->node->setAttr("stroke-width", std::min(
       (RULING_PREVIEW_LINES - 1)*RULING_PREVIEW_SPACING, lineheights*RULING_PREVIEW_SPACING));

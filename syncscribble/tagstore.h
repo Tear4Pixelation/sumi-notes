@@ -54,21 +54,38 @@ public:
   // `afterId` among its new siblings if that is one of them, else last.
   void reparentTag(const std::string& id, const std::string& newParentId, const std::string& afterId = "");
 
-  // Per-document tag cache, keyed by path relative to the index file's own directory.
-  void setDocTags(const std::string& relPath, time_t mtime, const std::vector<std::string>& tagIds);
-  // Returns true and fills outTagIds only if the cache entry's mtime still matches; a mismatch
+  // Per-document tag cache, keyed by path relative to the index file's own directory.  pageTags is the
+  //  document's "pagetags" summary, kept as the string it is stored as (formatPageTags()).
+  void setDocTags(const std::string& relPath, time_t mtime, const std::vector<std::string>& tagIds,
+      const std::string& pageTags);
+  // Returns true and fills the outputs only if the cache entry's mtime still matches; a mismatch
   // (or missing entry) means the caller must reread the document's own tags and call setDocTags().
-  bool cachedDocTags(const std::string& relPath, time_t mtime, std::vector<std::string>* outTagIds) const;
+  bool cachedDocTags(const std::string& relPath, time_t mtime, std::vector<std::string>* outTagIds,
+      std::string* outPageTags = NULL) const;
   void removeDoc(const std::string& relPath);
 
   static std::vector<std::string> parseTagList(const char* s);
   static std::string formatTagList(const std::vector<std::string>& tagIds);
 
+  // One tagged page in a document's "pagetags" config summary (docs/agent/page-tags.md), written on
+  //  save from the pages' write-pagetag elements.  page is 0-based; title is the page's outline title.
+  struct PageTags {
+    int page = 0;
+    std::vector<std::string> tagIds;
+    std::string title;
+  };
+  // "page|t1,t2|title;page|t3|;..." with the title percent-encoded, so the string holds nothing XML
+  //  escapes - the browser reads config values raw out of the file (ScribbleDoc::extractDocConfigValue)
+  //  - and nothing that splits a record, a field, or a line of the index file
+  static std::vector<PageTags> parsePageTags(const char* s);
+  static std::string formatPageTags(const std::vector<PageTags>& pages);
+
 private:
   std::string indexPath;
   std::map<std::string, TagNode> tags;
   std::vector<std::string> rootIds;
-  struct DocEntry { time_t mtime; std::vector<std::string> tagIds; };
+  // pageTagsKnown is false for an entry from an index written before page tags, which must be reread
+  struct DocEntry { time_t mtime; std::vector<std::string> tagIds; std::string pageTags; bool pageTagsKnown = true; };
   std::map<std::string, DocEntry> docCache;
   unsigned int nextId = 1;
 

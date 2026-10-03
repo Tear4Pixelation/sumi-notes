@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<svg version="1.2" baseProfile="tiny" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+  x="0px" y="0px" viewBox="619 158.03 34 34" xml:space="preserve">
+<g class="icon">
+  <path d="M620.5,169L651.5,169" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+  <path d="M620.5,180L651.5,180" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+  <path d="M620.5,191L651.5,191" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+  <!-- handwriting on the first and third lines, none on the second -->
+  <path d="M621.5,165.3 q2,-7.2 4,0 q2.3,-10.4 4.6,0 q1.7,-6 3.4,0" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M639,165.3 q2.1,-8.8 4.2,0 q1.6,-5.2 3.2,0 q2.2,-7.6 4.4,0" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M621.5,187.3 q1.8,-6 3.6,0 q2.4,-8 4.8,0 q1.9,-6.8 3.8,0 q1.6,-4.8 3.2,0" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M641,187.3 q2.3,-7.6 4.6,0 q2.2,-6 4.4,0" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+</svg>

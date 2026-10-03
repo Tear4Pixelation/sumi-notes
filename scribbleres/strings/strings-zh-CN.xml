@@ -9,7 +9,7 @@
   <string name="docs_createdoc">新建文档</string>
 
   <!--  newer translations  -->
-  <string name="menu_invert_colors">反转颜色</string>
+  <string name="menu_dark_mode">深色模式</string>
   <string name="menu_screenshot">截图</string>
   <string name="screenshot_add_to_page">添加到页面</string>
   <string name="screenshot_background">PDF / 图片背景</string>

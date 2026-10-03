@@ -16,6 +16,7 @@
 #include "tagstore.h"
 #include "doclibrary.h"
 #include "pdfimport.h"
+#include "notefulimport.h"
 #include "rulingdialog.h"
 #include "themedialog.h"
 #include "scandialog.h"
@@ -145,6 +146,10 @@ ScribbleApp::ScribbleApp(int argc, char* argv[])
       if(pieces.size() > 1) {
         if(pieces[1][0] == '"' || pieces[1][0] == '\'')
           pieces[1].chop(1) += 1;  // remove delimiting quotes
+        if(pieces[0] == "library") {
+          libraryOverride = pieces[1].toString();
+          continue;
+        }
         // we don't want to save values passed on command line to permanent config file; temporary soln is
         //  to just disable config write; command-line config is just for testing, so this is fine
         disableConfigSave = true;
@@ -162,6 +167,8 @@ ScribbleApp::ScribbleApp(int argc, char* argv[])
           finish();  // exit immediately
         else if(arg == "out" && ii+1 < argc)
           outDoc = argv[++ii];
+        else if(arg == "library" && ii+1 < argc)
+          libraryOverride = argv[++ii];
         else if(arg.endsWith("test"))
           runType = arg.toString();
         else if(ii+1 < argc && argv[ii+1][0] != '-') {  // support space instead of '=' between arg and value
@@ -174,6 +181,13 @@ ScribbleApp::ScribbleApp(int argc, char* argv[])
       argDoc = argv[ii];
   }
   disableConfigSave = disableConfigSave && !saveconfig;
+  // --library DIR: a throwaway library for docs screenshots and demos. Nothing from the session may reach
+  //  the saved config (libraryPath, recent documents pointing into DIR), and the real library's recent
+  //  documents must not show up in the screenshots, so this overrides --saveconfig.
+  if(!libraryOverride.empty()) {
+    disableConfigSave = true;
+    cfg->set("recentDocs", "");
+  }
 }
 
 void ScribbleApp::init()
@@ -847,6 +861,12 @@ bool ScribbleApp::keyPressEvent(SDL_Event* event)
   ScribbleInput::pressedKey = 0;  // will only be set to new key if not handled
   switch(key) {
   case SDLK_ESCAPE:
+    // tags being placed (docs/agent/page-tags.md) ride on a hovering pointer, which never presses the
+    //  canvas, so ScribbleWidget does not see this Esc
+    if(activeArea() && activeArea()->placingTags()) {
+      activeArea()->cancelTagPlacement();
+      return true;
+    }
     // cancel action now handled in ScribbleWidget
     // quick exit for debugging version
     if(SCRIBBLE_DEBUG)
@@ -1316,9 +1336,11 @@ void ScribbleApp::penChanged(int changed)
     if(undoable)
       historyPos = hpos;
 
-    activeArea()->setStrokeProperties(StrokeProperties(
-        changed & PenToolbar::COLOR_CHANGED ? pen.color : Color::INVALID_COLOR,
-        changed & PenToolbar::WIDTH_CHANGED ? pen.width : -1), undoable);
+    StrokeProperties props(changed & PenToolbar::COLOR_CHANGED ? pen.color : Color::INVALID_COLOR,
+        changed & PenToolbar::WIDTH_CHANGED ? pen.width : -1);
+    if(changed & PenToolbar::DASH_CHANGED)
+      props.dashStyle = penToolbar->dashStyle;
+    activeArea()->setStrokeProperties(props, undoable);
   }
 }
 
@@ -1340,8 +1362,11 @@ void ScribbleApp::updatePenToolbar()
 {
   // a selected ruling region is not ink: picking a color then must not recolor the region or the ink it
   //  carries, so the toolbar stays on the pen
-  if(activeArea()->hasSelection() && !activeArea()->selectedRegion())
-    penToolbar->setPen(activeArea()->getPenForSelection(), PenToolbar::SELECTION_MODE);
+  if(activeArea()->hasSelection() && !activeArea()->selectedRegion()) {
+    int dashStyle;
+    ScribblePen pen = activeArea()->getPenForSelection(&dashStyle);
+    penToolbar->setPen(pen, PenToolbar::SELECTION_MODE, dashStyle);
+  }
   else if(scribbleMode->getMode() == MODE_BOOKMARK)
     penToolbar->setPen(ScribblePen(bookmarkColor, -1), PenToolbar::BOOKMARK_MODE);
   else
@@ -1576,21 +1601,8 @@ std::string ScribbleApp::execDocumentList(int mode, const char* exts, bool cance
 
 void ScribbleApp::execTagDocList(bool openResult)
 {
-  if(!tagDocList) {
-    // same effective root DocumentList's currDir starts from (scribbleapp.cpp docRoot is the platform
-    // default, e.g. raw $HOME on Linux - fine for DocumentList, which only ever lists one folder the
-    // user chose, but this view recurses the whole root unconditionally, so it needs the narrower,
-    // user-configured document folder when one is set)
-    FSPath root = libraryRoot;
-    if(!libraryManaged()) {
-      root = cfg->String("currFolder");
-      if(!root.isAbsolute())
-        root = canonicalPath(root);
-      if(!root.isDir() || !root.exists())
-        root = docRoot;
-    }
-    tagDocList = new TagDocList(root.c_str());
-  }
+  if(!tagDocList)
+    tagDocList = new TagDocList(tagBrowserRoot().c_str());
   if(libraryTemporary && PLATFORM_ANDROID)
     showNotify(_("Documents are in app storage and will be deleted if Kaku is uninstalled. "
         "Allow access to all files to keep them."), 2);
@@ -1600,8 +1612,42 @@ void ScribbleApp::execTagDocList(bool openResult)
   if(!openResult)
     return;
   if(tagDocList->result == TagDocList::EXISTING_DOC || tagDocList->result == TagDocList::NEW_DOC) {
-    if(!tagDocList->selectedFile.empty())
-      doOpenDocument(tagDocList->selectedFile);
+    if(!tagDocList->selectedFile.empty() && doOpenDocument(tagDocList->selectedFile))
+      gotoSelectedPage();
+  }
+  else if(tagDocList->result == TagDocList::IMPORT_PDF || tagDocList->result == TagDocList::IMPORT_NOTEFUL) {
+    std::string docPath = importFromBrowser(tagDocList->result == TagDocList::IMPORT_NOTEFUL);
+    if(docPath.empty() || !doOpenDocument(docPath))
+      execTagDocList(openResult);  // back to the browser, which now lists the imports
+  }
+}
+
+std::string ScribbleApp::tagBrowserRoot() const
+{
+  if(tagDocList)
+    return tagDocList->root().c_str();
+  // same effective root DocumentList's currDir starts from (scribbleapp.cpp docRoot is the platform
+  // default, e.g. raw $HOME on Linux - fine for DocumentList, which only ever lists one folder the
+  // user chose, but this view recurses the whole root unconditionally, so it needs the narrower,
+  // user-configured document folder when one is set)
+  FSPath root = libraryRoot;
+  if(!libraryManaged()) {
+    root = cfg->String("currFolder");
+    if(!root.isAbsolute())
+      root = canonicalPath(root);
+    if(!root.isDir() || !root.exists())
+      root = docRoot;
+  }
+  return root.c_str();
+}
+
+// a page card in the document browser opens its notebook at that page, not where it was left
+void ScribbleApp::gotoSelectedPage()
+{
+  int pagenum = tagDocList ? tagDocList->selectedPage : -1;
+  if(pagenum >= 0 && pagenum < activeDoc()->document->numPages()) {
+    activeDoc()->gotoPage(pagenum);
+    activeArea()->flashPageTags(tagDocList->selectedPageTags);
   }
 }
 
@@ -1658,6 +1704,21 @@ void ScribbleApp::initLibrary()
   // wasm has only a virtual filesystem, so it keeps its own document handling
   if(!cfg->Bool("useTagDocList") || PLATFORM_EMSCRIPTEN)
     return;
+  if(!libraryOverride.empty()) {
+    // the user named this folder explicitly, so unlike acquire() adopt it even if it already holds
+    //  documents (a prepared demo set); no fallback, no moving documents in from the fallback
+    FSPath dir(libraryOverride + "/");
+    if(createPath(dir.c_str()) && (DocLibrary::isLibraryDir(dir) || DocLibrary::markLibrary(dir))) {
+      libraryRoot = libraryTarget = dir.c_str();
+      // Save As / Insert still go through DocumentList, which starts in currFolder
+      cfg->set("currFolder", libraryRoot.c_str());
+      return;
+    }
+    // falling back to the real library would put the user's own documents in the screenshots
+    PLATFORM_LOG("--library: cannot use %s as the document library\n", dir.c_str());
+    finish();
+    return;
+  }
   std::string saved = cfg->String("libraryPath");
   libraryTarget = saved.empty() ? defaultLibraryBase() : FSPath(saved + "/").c_str();
   bool canWrite = true;
@@ -1672,8 +1733,10 @@ void ScribbleApp::initLibrary()
       libraryRoot = DocLibrary::acquire(libraryTarget);
     else if(DocLibrary::isLibraryDir(libraryTarget))
       libraryRoot = libraryTarget;
-    else if(!FSPath(libraryTarget).exists() && FSPath(libraryTarget).parent().exists())
-      libraryRoot = DocLibrary::acquire(libraryTarget, 1);  // the user deleted it: start a new one
+    // the user deleted it, or emptied it marker and all: start a new one there
+    else if(DocLibrary::isEmptyDir(libraryTarget)
+        || (!FSPath(libraryTarget).exists() && FSPath(libraryTarget).parent().exists()))
+      libraryRoot = DocLibrary::acquire(libraryTarget, 1);
   }
   if(!libraryRoot.empty()) {
     libraryTarget = libraryRoot;
@@ -1789,7 +1852,7 @@ bool ScribbleApp::relocateLibrary(const std::string& newBase)
 //  arrangement there.
 void ScribbleApp::offerLibraryMigration()
 {
-  if(!libraryManaged() || cfg->Bool("libraryMigrated"))
+  if(!libraryManaged() || cfg->Bool("libraryMigrated") || !libraryOverride.empty())
     return;
   cfg->set("libraryMigrated", true);
   std::vector<std::string> sources;
@@ -1894,8 +1957,15 @@ bool ScribbleApp::openOrCreateDocTagged(bool cancelable)
     if(!openSharedDoc())
       return openOrCreateDocTagged(cancelable);  // try again
   }
+  else if(res == TagDocList::IMPORT_PDF || res == TagDocList::IMPORT_NOTEFUL) {
+    std::string docPath = importFromBrowser(res == TagDocList::IMPORT_NOTEFUL);
+    if(docPath.empty() || !doOpenDocument(docPath))
+      return openOrCreateDocTagged(cancelable);  // back to the browser, which now lists the imports
+  }
   else if(res == TagDocList::EXISTING_DOC && !filename.empty()) {
-    return doOpenDocument(filename) || openOrCreateDocTagged(cancelable);
+    if(!doOpenDocument(filename))
+      return openOrCreateDocTagged(cancelable);
+    gotoSelectedPage();
   }
   else if(res == TagDocList::NEW_DOC && !filename.empty()) {
     if(!doOpenDocument(filename))
@@ -2606,7 +2676,7 @@ std::string ScribbleApp::importPdfToDocFile(const std::string& pdfPath, std::str
     float savedImageScale = SvgWriter::DEFAULT_SAVE_IMAGE_SCALED;
     SvgWriter::DEFAULT_SAVE_IMAGE_SCALED = 0;
     bool saved = numPages > 0
-        && pdfdoc.save(new FileStream(outinfo.c_str(), "wb"), NULL, Document::SAVE_FORCE);
+        && pdfdoc.save(new FileStream(outinfo.c_str(), "wb"), PdfImport::thumbnail(&pdfdoc).c_str(), Document::SAVE_FORCE);
     SvgWriter::DEFAULT_SAVE_IMAGE_SCALED = savedImageScale;
     if(numPages > 0 && !saved) {
       numPages = -1;
@@ -2620,6 +2690,65 @@ std::string ScribbleApp::importPdfToDocFile(const std::string& pdfPath, std::str
   }
   PLATFORM_LOG("Imported %d page(s) from %s to %s\n", numPages, pdfinfo.c_str(), outinfo.c_str());
   return outinfo.c_str();
+}
+
+std::string ScribbleApp::importFromBrowser(bool noteful)
+{
+  if(!noteful) {
+    if(!PdfImport::isAvailable()) {
+      messageBox(Warning, _("Import PDF"), _("This build of Kaku does not include PDF support."));
+      return "";
+    }
+    std::string filename = execDocumentList(DocumentList::CHOOSE_DOC, "pdf");
+    if(filename.empty())
+      return "";
+    std::string err, docPath = importPdfToDocFile(filename, &err);
+    if(docPath.empty())
+      messageBox(Warning, _("Import PDF"),
+          fstring(_("Error importing %s: %s"), FSPath(filename).fileName().c_str(), err.c_str()));
+    return docPath;
+  }
+
+  // a notebook, or a folder exported as .zip
+  std::string filename = execDocumentList(DocumentList::CHOOSE_DOC, "noteful zip");
+  if(filename.empty())
+    return "";
+  // into the library; without one, next to what was picked, as PDF import does
+  FSPath outDir = libraryManaged() ? FSPath(libraryRoot) : FSPath(filename).parent();
+  NotefulImport::ArchiveOptions opts;
+  opts.dpi = std::max(72, cfg->Int("pdfImportDPI"));
+  opts.folderTags = cfg->Bool("notefulFolderTags", true);
+  opts.onNotebook = [this](int index, int count, const std::string& path) {
+    showNotify(fstring(_("Importing %s (%d of %d)..."), FSPath(path).baseName().c_str(), index + 1, count), 0);
+    return true;
+  };
+  NotefulImport::ArchiveResult result;
+  std::string err;
+  int imported = NotefulImport::importArchive(filename.c_str(), outDir.c_str(), opts, &result, &err);
+  dismissNotify();
+  // the import rewrote the library's tag index; a browser still holding the old one would drop the new
+  //  tags on its next save
+  if(tagDocList)
+    tagDocList->setRoot(tagDocList->root().c_str());
+
+  if(result.failed > 0 || imported <= 0) {
+    std::string failures;
+    for(const NotefulImport::ArchiveEntry& entry : result.entries) {
+      if(entry.docPath.empty())
+        failures += fstring("\n%s: %s", FSPath(entry.archivePath).baseName().c_str(), entry.error.c_str());
+    }
+    messageBox(Warning, _("Import Noteful"), imported > 0 ?
+        fstring(_("Imported %d notebooks; these could not be read:%s"), imported, failures.c_str()) :
+        fstring(_("Error importing %s: %s"), FSPath(filename).fileName().c_str(),
+            failures.empty() ? err.c_str() : failures.c_str()));
+  }
+  PLATFORM_LOG("Imported %d notebook(s) from %s to %s\n", imported, filename.c_str(), outDir.c_str());
+  // one notebook opens; several stay in the browser, which now lists them
+  if(imported == 1 && result.entries.size() == 1)
+    return result.entries.front().docPath;
+  if(imported > 1)
+    showNotify(fstring(_("Imported %d notebooks"), imported), 1);
+  return "";
 }
 
 /// images
@@ -3485,3 +3614,10 @@ std::string ScribbleApp::runTest(std::string runtype)
 }
 
 #endif
+
+Color ScribbleApp::displayColor(Color c)
+{
+  ScribbleArea* area = app ? app->activeArea() : NULL;
+  const ColorMap* colorMap = area ? area->nightColorMap() : NULL;
+  return colorMap ? colorMap->map(c) : c;
+}

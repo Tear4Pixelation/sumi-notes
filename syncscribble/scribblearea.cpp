@@ -133,6 +133,12 @@ void ScribbleArea::reset()
   posHistoryPos = posHistory.begin();
   if(currSelection)
     clearSelection();
+  // tags picked for the old notebook must not land in the one being opened; not cancelTagPlacement(), whose
+  //  refresh would touch the document mid-switch - the SetDoc refresh takes the hint down
+  for(Element* s : pendingTags)
+    s->deleteNode();
+  pendingTags.clear();
+  placingPressed = false;
   currPage = NULL;
 }
 
@@ -431,11 +437,15 @@ void ScribbleArea::setStrokeProperties(const StrokeProperties& props, bool undoa
   doRefresh();
 }
 
-ScribblePen ScribbleArea::getPenForSelection() const
+ScribblePen ScribbleArea::getPenForSelection(int* dashStyle) const
 {
+  if(dashStyle)
+    *dashStyle = ScribblePen::DASH_SOLID;
   if(!currSelection)
     return ScribblePen(Color::INVALID_COLOR, -1);
   StrokeProperties props = currSelection->getStrokeProperties();
+  if(dashStyle)
+    *dashStyle = props.dashStyle;
   //auto isPressurePenFn = [](const Element* t) {
   //  return t->node->hasClass(Element::FLAT_PEN_CLASS) || t->node->hasClass(Element::ROUND_PEN_CLASS);
   //};
@@ -1052,6 +1062,149 @@ Element* ScribbleArea::addRulingRegion(const Rect& r)
   scribbleDoc->endAction();
   selectRegion(region);
   return region;
+}
+
+// Page tags (docs/agent/page-tags.md)
+
+static const Dim PENDING_TAG_STEP = 36;  // same stacking as ScribbleDoc's
+static const Dim PENDING_TAG_MARGIN = 8;  // how far inside the page edge a tag placed beyond it ends up
+
+void ScribbleArea::startTagPlacement(const std::vector<std::pair<std::string, std::string>>& tags)
+{
+  cancelTagPlacement();
+  if(tags.empty())
+    return;
+  // right-aligned under each other, the first one's centre under the pointer
+  for(size_t ii = 0; ii < tags.size(); ++ii)
+    pendingTags.push_back(Element::createPageTag(tags[ii].first.c_str(), tags[ii].second.c_str(),
+        Point(0, ii*PENDING_TAG_STEP)));
+  pendingTagsAnchor = pendingTags.front()->bbox().center();
+  // until the pointer moves - and a finger never hovers - they wait in the middle of the view
+  pendingTagsPos = dimToPageDim(screenToDim(Point(getViewWidth()/2, getViewHeight()/3)));
+  dirtyScreen(pendingTagsRect());
+  // puts up the "Place your tag" hint (MainWindow::syncTagPlaceHint()); this runs from the tag popup, outside
+  //  any canvas event, so nothing else would refresh the UI
+  uiChanged(UIState::Command);
+  doRefresh();
+}
+
+void ScribbleArea::cancelTagPlacement()
+{
+  if(pendingTags.empty())
+    return;
+  dirtyScreen(pendingTagsRect());
+  for(Element* s : pendingTags)
+    s->deleteNode();
+  pendingTags.clear();
+  placingPressed = false;
+  // takes the hint down; Esc and the hint's own cancel button are not canvas events either
+  uiChanged(UIState::Command);
+  doRefresh();
+}
+
+Rect ScribbleArea::pendingTagsRect() const
+{
+  Rect r;
+  for(Element* s : pendingTags)
+    r.rectUnion(s->bbox());
+  Point offset = pendingTagsPos - pendingTagsAnchor;
+  r.translate(offset.x, offset.y);
+  return r.pad(2);
+}
+
+void ScribbleArea::movePendingTags(Point pos)
+{
+  if(pos == pendingTagsPos)
+    return;
+  dirtyScreen(pendingTagsRect());
+  pendingTagsPos = pos;
+  dirtyScreen(pendingTagsRect());
+}
+
+void ScribbleArea::placePendingTags(bool select)
+{
+  dirtyScreen(pendingTagsRect());
+  // The press only switches page once it is well clear of the current one, and the drag can leave it, so the
+  //  pointer may be in the gap between pages, beside a page or below the last one.  The tags go onto the page
+  //  nearest the pointer, kept inside it: off the page they would still count, but no thumbnail would show
+  //  them and opening the card would pulse empty space.
+  Point gpos = pageDimToDim(pendingTagsPos);
+  setPageNum(dimToPageNum(gpos));  // clamps the ghost page past the end to the last page
+  pendingTagsPos = dimToPageDim(gpos);
+  Point offset = pendingTagsPos - pendingTagsAnchor;
+  Rect tagsRect;
+  for(Element* s : pendingTags)
+    tagsRect.rectUnion(s->bbox());
+  tagsRect.translate(offset.x, offset.y);
+  Rect pageRect = currPage->rect().pad(-PENDING_TAG_MARGIN);  // off the very edge
+  Point shift(0, 0);
+  if(tagsRect.right > pageRect.right)
+    shift.x = pageRect.right - tagsRect.right;
+  if(tagsRect.left + shift.x < pageRect.left)  // left and top win if the stack is bigger than the page
+    shift.x = pageRect.left - tagsRect.left;
+  if(tagsRect.bottom > pageRect.bottom)
+    shift.y = pageRect.bottom - tagsRect.bottom;
+  if(tagsRect.top + shift.y < pageRect.top)
+    shift.y = pageRect.top - tagsRect.top;
+  offset += shift;
+  scribbleDoc->startAction(currPageNum);
+  for(Element* s : pendingTags) {
+    s->applyTransform(ScribbleTransform(Transform2D::translating(offset.x, offset.y)));
+    s->commitTransform();
+    currPage->addStroke(s);
+  }
+  scribbleDoc->endAction();
+  if(select) {
+    // a pen that does not hover had no preview until it touched down, so leave the tags ready to nudge
+    clearSelection();
+    currSelection = new Selection(currPage);
+    currSelPageNum = currPageNum;
+    rectSelector = new RectSelector(currSelection, mZoom, true);
+    for(Element* s : pendingTags)
+      currSelection->addStroke(s);
+    currSelection->shrink();
+    dirtyScreen(currSelection->getBGBBox());
+    uiChanged(UIState::SelChange);
+  }
+  pendingTags.clear();  // the page owns them now
+  placingPressed = false;
+}
+
+// two fade-in, fade-out pulses of the active (--checked) blue, ~1.4 s in all
+static const int PAGETAG_FLASH_FRAME_MS = 30;
+static const int PAGETAG_FLASH_FRAMES = 48;
+static const int PAGETAG_FLASH_PULSES = 2;
+static const Dim PAGETAG_FLASH_STROKE = 3;  // screen pixels
+
+void ScribbleArea::flashPageTags(const std::vector<std::string>& tagIds)
+{
+  flashRects.clear();
+  for(Element* s : currPage->children()) {
+    if(s->isPageTag() && std::find(tagIds.begin(), tagIds.end(), s->pageTagId()) != tagIds.end())
+      flashRects.push_back(s->bbox().pad(4));
+  }
+  if(flashRects.empty())
+    return;
+  flashPageNum = currPageNum;
+  // opening at the page leaves its top in view; a tag further down would pulse off screen
+  Rect tagsRect;
+  for(const Rect& r : flashRects)
+    tagsRect.rectUnion(r);
+  viewRect(currPageNum, tagsRect);
+  flashTicks = PAGETAG_FLASH_FRAMES;
+  for(const Rect& r : flashRects)
+    dirtyScreen(Rect(r).pad(PAGETAG_FLASH_STROKE/mScale));
+  reqRepaint();
+  flashTimer = ScribbleApp::gui->setTimer(PAGETAG_FLASH_FRAME_MS, NULL, flashTimer, [this]() {
+    for(const Rect& r : flashRects)
+      dirtyScreen(Rect(r).pad(PAGETAG_FLASH_STROKE/mScale));
+    reqRepaint();
+    if(--flashTicks > 0)
+      return PAGETAG_FLASH_FRAME_MS;
+    flashRects.clear();
+    flashTimer = NULL;
+    return 0;
+  });
 }
 
 void ScribbleArea::editShapeAfterDraw(Element* shape)
@@ -2223,6 +2376,8 @@ ScribblePen ScribbleArea::resolvedPen(Point at) const
       pen.width *= currPage->yruling(true);
     else  // inside a ruling region, "a line" means the region's line
       pen.width *= currPage->rulingAt(at).yrulingOr(Page::BLANK_Y_RULING);
+    // the dash pattern is sized in the width's unit (ScribblePen::dashFor), so it resolves with it
+    pen.setDashStyle(currPen()->dashStyle());
   }
   return pen;
 }
@@ -2238,10 +2393,9 @@ int ScribbleArea::selectionHit(Point pos, bool touch)
   // check for selection scale handle hit
   scaleOrigin = currSelection->selector->scaleHandleHit(pos, touch);
   if(!scaleOrigin.isNaN()) {
-    // bottom right corner scales with fixed aspect ratio; others scale freely.  A region always scales
-    //  uniformly: its ruling has one pitch per direction, and a stretch would have to change the pitch
-    //  of lines the ink is already written on.
-    scaleLockRatio = regionSelector || (scaleOrigin.x < pos.x && scaleOrigin.y < pos.y);
+    // bottom right corner scales with fixed aspect ratio; others scale freely.  A region never gets here:
+    //  its size handle is a shape handle (RegionSelector::resized).
+    scaleLockRatio = scaleOrigin.x < pos.x && scaleOrigin.y < pos.y;
     prevXScale = 1;
     prevYScale = 1;
     return MODEMOD_SCALESEL;
@@ -2287,6 +2441,16 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
       setPageNum(newpagenum);
       pos = dimToPageDim(gpos);
     }
+  }
+
+  // tags waiting to be placed go where this press is, on the page it is on (the release puts them there)
+  if(placingTags()) {
+    placingPressed = true;
+    currMode = MODE_NONE;
+    movePendingTags(pos);
+    prevPos = initialPos = pos;
+    prevRawPos = rawpos;
+    return;
   }
 
   // offset should be a property of RuledSelector, not Page, but this is easier for now
@@ -2368,6 +2532,11 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
       lx = gestureFrame.toLocal(pos).x;
       marginLeft = MIN_DIM;
     }
+  }
+  // text written on every second line: insert space and reflow work in text lines (see skippedLineFrame)
+  if(currMode == MODE_INSSPACERULED && scribbleDoc->scribbleMode->insSpaceSkipLines) {
+    gestureFrame = skippedLineFrame(gestureFrame, pos);
+    prevLine = initialLine = gestureFrame.line(pos, Page::BLANK_Y_RULING);
   }
   if(currSelection) {
     // clear selection depending on mode
@@ -2590,15 +2759,20 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
   case MODE_SELECTRECT:
     currSelection = new Selection(currPage);  // cfg->Bool("liveSelect") ? Selection::SELMODE_NONE
     rectSelector = new RectSelector(currSelection, mZoom, false);  // no handles while selecting
+    if(scribbleDoc->scribbleMode->selectTouching)
+      rectSelector->rectSelMode = RectSelector::RECTSEL_ANY;
     break;
   case MODE_SELECTRULED:
     currSelection = new Selection(currPage);
     currSelection->ruling = gestureFrame;
     ruledSelector = new RuledSelector(currSelection, selColMode);
+    if(scribbleDoc->scribbleMode->selectTouching)
+      ruledSelector->selMode = RuledSelector::SEL_OVERLAP;
     break;
   case MODE_SELECTLASSO:
     currSelection = new Selection(currPage);
     lassoSelector = new LassoSelector(currSelection, 0.5/mZoom);
+    lassoSelector->touching = scribbleDoc->scribbleMode->selectTouching;
     lassoSelector->addPoint(pos.x, pos.y);
     break;
   case MODE_SELECTPATH:
@@ -2687,6 +2861,8 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
 
 void ScribbleArea::doMoveEvent(const InputEvent& event)
 {
+  if(placingPressed)
+    return;  // doMotionEvent moves the tags
   Point rawpos = Point(event.points[0].x, event.points[0].y);
   Point pos = dimToPageDim(screenToDim(rawpos));
   // tablet will happily send many points with same position
@@ -2894,13 +3070,16 @@ void ScribbleArea::doMoveEvent(const InputEvent& event)
   case MODE_SHAPEHANDLE:
   {
     if(regionSelector) {
-      // a corner reshapes the outline only; the origin handle slides the lines.  Neither moves ink.
+      // a corner reshapes the outline only, the size handle stretches it, and the origin handle slides
+      //  the lines.  None of them moves ink.
       Element* region = regionSelector->region;
       RulingRegionParams params = regionHandleStart;
       if(shapeHandleIdx >= 0 && shapeHandleIdx < int(params.corners.size()))
         params.corners[shapeHandleIdx] = pos;
       else if(shapeHandleIdx == int(params.corners.size()))
         params.origin = params.origin + (pos - regionHandleStartPos);
+      else if(shapeHandleIdx == int(params.corners.size()) + 1)
+        params = regionSelector->resized(regionHandleStart, regionHandleStartPos, pos);
       else
         break;
       dirtyScreen(currSelection->getBGBBox());
@@ -3012,7 +3191,7 @@ void ScribbleArea::doMoveEvent(const InputEvent& event)
       }
     }
     else
-      setPageDims(-1, initialPageSize.height() + currPage->yruling(true) * (line - initialLine), true);
+      setPageDims(-1, initialPageSize.height() + gestureFrame.yrulingOr(Page::BLANK_Y_RULING) * (line - initialLine), true);
     // erase for negative insert space
     if(insSpaceEraseSelection) {
       Dim lx0 = gestureFrame.toLocal(initialPos).x;
@@ -3033,6 +3212,11 @@ void ScribbleArea::doMoveEvent(const InputEvent& event)
 
 void ScribbleArea::doReleaseEvent(const InputEvent& event)
 {
+  if(placingPressed) {
+    placePendingTags(event.source == INPUTSOURCE_PEN);
+    uiChanged(UIState::ReleaseEvent);  // undo and save buttons, as at the end of every other release
+    return;
+  }
   // MODE_PAGESEL is unique in that it involves also clicking on pages
   if(event.modemod & MODEMOD_DBLCLICK && dimToPageNum(screenToDim(prevRawPos)) == numPages()
       && currMode != MODE_PAGESEL && currMode != MODE_DRAWSHAPE) {
@@ -3434,7 +3618,7 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
       growPage(tempSelection->getBBox(), 0, std::max(Dim(0), maxdy));
     }
     else if(!gestureFrame.region)  // a region's lines say nothing about the page's height
-      setPageDims(-1, currPage->height() + currPage->yruling(true) * (prevLine - initialLine));
+      setPageDims(-1, currPage->height() + gestureFrame.yrulingOr(Page::BLANK_Y_RULING) * (prevLine - initialLine));
     if(insSpaceEraseSelection)
       insSpaceEraseSelection->deleteStrokes();
   default:
@@ -3511,6 +3695,9 @@ void ScribbleArea::doCancelAction(bool refresh)
   cancelShape();
   if(!currSelection)
     clearShotRegion();  // Esc on an area marked with nothing selected
+  // a press placing tags is over, but the tags stay on the pointer: this runs on every save too, and an
+  //  autosave must not drop them - only Esc does (ScribbleApp::keyPressEvent)
+  placingPressed = false;
   switch(currMode) {
   case MODE_DRAWSHAPE:
     if(currStroke) {
@@ -3685,6 +3872,9 @@ void ScribbleArea::doMotionEvent(const InputEvent& event, inputevent_t eventtype
 {
   if(!event.points.empty() && eventtype != INPUTEVENT_RELEASE)
     rawPos = Point(event.points[0].x, event.points[0].y);
+  // hover and drag alike carry tags being placed
+  if(placingTags() && !event.points.empty() && eventtype != INPUTEVENT_RELEASE)
+    movePendingTags(dimToPageDim(screenToDim(rawPos)));
 
   // previously, this was a separate fn, but we need input source information to fully determine cursorMode
   // ideally, we would hide cursor and reset releasePos on pen proximity exit
@@ -3889,12 +4079,36 @@ void ScribbleArea::drawWatermark(Painter* painter, Page* page, const Rect& dirty
 
 // Note that we assume dirty rect is larger than clip rect so we don't have to deal with weirdness at the
 //  boundaries from some stuff being antialiased but other stuff not, non-pixel aligned boundaries, etc.
+// Night mode is "force dark": a document that is already dark is drawn as it is, not flipped to light.
+//  It is a per-device reading preference, hence the global config rather than the document's.
+const ColorMap* ScribbleArea::viewColorMap()
+{
+  if(!ScribbleApp::cfg->Bool("invertColors") || !scribbleDoc)
+    return NULL;
+  const Palette& pal = scribbleDoc->palette();
+  if(!pal.families.empty()) {
+    if(pal.isDarkPaper())
+      return NULL;
+    nightMap.setPalette(&pal);
+  }
+  else {
+    if(currPage && oklchFromColor(currPage->props.color).L < 0.5)
+      return NULL;
+    nightMap.setPalette(NULL);
+  }
+  return &nightMap;
+}
+
 void ScribbleArea::drawImage(Painter* painter, const Rect& dirty)
 {
-  // draw the gray background
+  // draw the gray background - UI chrome, not document, so it bypasses the night mode map; night mode
+  //  still wants the dark gray around dark pages whatever the UI theme is
+  painter->save();
+  Color background = painter->colorMap() ? BACKGROUND_COLOR_DARK : BACKGROUND_COLOR;
+  painter->setColorMap(NULL);
   painter->setAntiAlias(false);
-  painter->fillRect(dirty, BACKGROUND_COLOR);
-  painter->setAntiAlias(true);
+  painter->fillRect(dirty, background);
+  painter->restore();
 
   // handle special case of dirty rect limited to current page
   Rect pagedirty = dimToPageDim(dirty);
@@ -3984,6 +4198,31 @@ void ScribbleArea::drawScreen(Painter* painter, const Rect& dirty)
   if(regionInProgress)
     SvgPainter(painter).drawNode(regionInProgress->node);
   drawRegionButtons(painter);
+  // a tag found from the document browser: fades in and out PAGETAG_FLASH_PULSES times
+  if(!flashRects.empty() && flashPageNum < numPages()) {
+    Dim progress = Dim(PAGETAG_FLASH_FRAMES - flashTicks)/PAGETAG_FLASH_FRAMES;
+    float strength = float(0.5 - 0.5*std::cos(2*M_PI*PAGETAG_FLASH_PULSES*progress));
+    painter->save();
+    if(flashPageNum != currPageNum) {
+      Point origin = getPageOrigin(flashPageNum);
+      painter->translate(origin.x - currPageXOrigin, origin.y - currPageYOrigin);
+    }
+    Color checked(0x2E, 0xA3, 0xCF);  // the theme's --checked, same in light and dark (ugui/theme.cpp)
+    painter->setFillBrush(Color(checked).setAlphaF(0.3f*strength));
+    painter->setStroke(Color(checked).setAlphaF(strength), PAGETAG_FLASH_STROKE/mScale,
+        Painter::RoundCap, Painter::RoundJoin);
+    for(const Rect& r : flashRects)
+      painter->drawPath(Path2D().addRect(r));
+    painter->restore();
+  }
+  if(!pendingTags.empty()) {
+    painter->save();
+    Point offset = pendingTagsPos - pendingTagsAnchor;
+    painter->translate(offset.x, offset.y);
+    for(Element* s : pendingTags)
+      SvgPainter(painter).drawNode(s->node);
+    painter->restore();
+  }
 
   // the last selection gesture's area, dashed; it stays where it was drawn when the selection is moved
   if(!shotRegion.empty() && shotRegionPage < numPages()

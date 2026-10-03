@@ -517,8 +517,9 @@ void StrokeTranslateItem::serialize(IOStream& strm)
 void StrokeChangedItem::serialize(IOStream& strm)
 {
   StrokeProperties currprops = s->getProperties();
-  strm << fstring("<strokechanged strokeuuid='%llu' color='%u' width='%f'/>",
-      s->uuid, currprops.color.argb(), currprops.width);
+  // dash is numbers or "none", so fstring is safe; a peer that predates it ignores the attribute
+  strm << fstring("<strokechanged strokeuuid='%llu' color='%u' width='%f' dash='%s'/>",
+      s->uuid, currprops.color.argb(), currprops.width, currprops.dashArray.c_str());
 }
 
 // spec 7.5: undo items are the sync protocol, so a new item type needs a wire format of its own; the

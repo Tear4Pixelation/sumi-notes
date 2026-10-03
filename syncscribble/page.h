@@ -47,6 +47,14 @@ public:
   // those was missed.  Living on the page, an entry moves with its page for free.
   std::string outlineTitle;
   int outlineLevel = 0;
+  // Page tags (docs/agent/page-tags.md).  The write-pagetag elements are the storage; pageTagIds is a
+  //  cache of their ids, kept by onAddStroke/onRemoveStroke, so the document's summary can be written
+  //  on save without loading every page.  A page not loaded yet has whatever the summary said when the
+  //  document was opened, along with the outline title (unknown until the page loads) and thumbnail.
+  std::vector<std::string> pageTagIds;
+  std::string pageTagTitle;
+  std::string pageTagThumb;  // base64 PNG; empty means it must be rendered on the next save
+  void refreshPageTags(const Element* removing = NULL);
   enum loadstatus_t {LOAD_SVG_ERROR=-1, NOT_LOADED=0, LOAD_OK=1} loadStatus = NOT_LOADED;
   // dirtyCount is managed by undo system; page needs to be written out if != 0
   int dirtyCount = 0;

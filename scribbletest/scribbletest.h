@@ -21,11 +21,27 @@ public:
   int themeRoundTripTest();
   // restyling moves the theme's own ink, leaves everything else alone, and undoes in one step
   int restyleTest();
+  // solid/dashed/dotted on a selection: sized per element, filled strokes converted, scales with width,
+  //  one undo step that restores exactly
+  int dashStyleTest();
   int outlineTest();
   int outlineNestTest();
+  // a Noteful notebook becomes pages with their ruling, ink on the right layers, the outline and an
+  //  extended page for ink below the edge; the layer table survives a save of the bare Document
+  int notefulImportTest();
+  // a folder of notebooks (a directory or a zip) becomes one document each in the library, tagged with
+  //  its own tags and optionally its folder
+  int notefulArchiveTest();
   // a locked layer must be immune to selection and to every eraser, and moving an element between
   // layers must undo both the layer and the restacking it caused
   int layerTest();
+  // Select Touching: rect and lasso select take what they touch, including a stroke crossed with none of
+  //  its points inside; off, only what lies entirely inside
+  int selectTouchingTest();
+  // page tags: placing never leaves one off a page (gap, beside, below the last page), a pen placement is
+  //  selected, a tag dragged to another page moves its count there and undoes, and opening another document
+  //  drops tags still on the pointer
+  int pageTagTest();
   int docStateSyncTest();
   // the curve fit must take the whole-pixel lattice out of the stroke without moving it off the path
   // the samples came from, at both dense and sparse (mouse-rate) sample spacing
@@ -36,6 +52,8 @@ public:
   // ruling regions: the ruled tools follow a (tilted) region's lines, the region stays below all ink and
   // out of reach of ink selection and erasers, moves with its ink, and survives undo, reload and sync
   int rulingRegionTest();
+  int reflowIndentTest();
+  int skippedLinesTest();
   void performanceTest();
   void inputTest();
   void syncSlaveMsg(std::string msg, int level);

@@ -57,7 +57,22 @@ public:
   bool nestOutlineEntry(int srcpage, int parentpage);
   static constexpr int OUTLINE_OUTDENT = -2;
   std::vector<OutlineEntry> outline(bool loadpages = true) { return document->outline(loadpages); }
+  // Page tags (docs/agent/page-tags.md).  Take every tag element with one of `tagIds` off a page, as one
+  //  undoable action; false if there were none.  Adding is ScribbleArea::startTagPlacement().
+  bool removePageTags(int pagenum, const std::vector<std::string>& tagIds);
+  // the notebook's own tags ("tags" in its config), marking it unsaved; not undoable, like the layer choice
+  void setDocTags(const std::vector<std::string>& tagIds);
+  // Outside the editor, with no undo - the document browser deleting or renaming a tag across the
+  //  library.  Remove every tag element with one of `tagIds`; relabel those with `tagId`.  Both return
+  //  the number of elements changed, and leave changed pages to be re-thumbnailed on save.
+  static int removePageTagElements(Document* doc, const std::vector<std::string>& tagIds);
+  static int renamePageTagElements(Document* doc, const std::string& tagId, const std::string& name);
+  // bring the tagged pages' thumbnails up to date and write the summary into cfg's "pagetags"
+  static void updatePageTagSummary(Document* doc, ScribbleConfig* docCfg);
+  static Image extractPageThumbnail(const char* filename, int pagenum);
   void bookmarkHit(int pagenum, Element* bookmark);
+  // show the top of a page in the active view (a page card in the document browser)
+  void gotoPage(int pagenum);
 
   // a lot of stuff needs to be moved up from ScribbleDoc to application level
   int getScribbleMode(int modemod);
@@ -133,6 +148,8 @@ public:
 
   static bool deleteDocument(const char* filename);
   static Image extractThumbnail(const char* filename);
+  // the base64 PNG in the <image>/<img> with this id, found by the same partial read as the config
+  static Image extractEmbeddedImage(const char* filename, const char* id, size_t headLen);
   // Cheap partial read for the sidebar's tag view, same technique as extractThumbnail: scan the head
   // of the file (or first gzip block) for the "tags" string config entry rather than fully parsing
   // the document, so listing a folder of documents doesn't mean loading each one.

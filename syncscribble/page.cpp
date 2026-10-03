@@ -335,6 +335,9 @@ void Page::draw(Painter* painter, const Rect& dirty, bool rulelines)
     painter->fillRect(Rect::ltrb(-10, -10, width()+10, height()+10), Color::RED);
   // draw drop shadow
   if(enableDropShadow && (!dirty.isValid() || !rect().contains(dirty))) {
+    // UI decoration, not document: night mode would flip the black shadow into a white glow
+    painter->save();
+    painter->setColorMap(NULL);
     const Dim d = 4;  // was 6 for non-gradient version
     Gradient grad = Gradient::box(-2, -2, props.width+4, props.height+4, 0, 2*d);  // 2 == d-2
     grad.coordMode = Gradient::userSpaceOnUseMode;
@@ -352,6 +355,7 @@ void Page::draw(Painter* painter, const Rect& dirty, bool rulelines)
     painter->drawRect(Rect::ltwh(props.width, 0, 2*d, props.height));
     // Painter has pointer to Gradient, so we must clear before it is destroyed
     painter->setFillBrush(Color::NONE);
+    painter->restore();
   }
   // no ruling group means no page BG, so draw white BG manually
   if(!ruleNode)
@@ -591,6 +595,8 @@ bool Page::loadSVG(SvgDocument* doc)
     }
 
     // create elements for each stroke and find bookmarks - assuming implicit creation is disabled
+    // the page's own elements now say what it is tagged with, not the summary it was opened with
+    pageTagIds.clear();
     for(SvgNode* node : contentNode->children())
       onAddStroke(new Element(node));
     // regions go below all ink; a file (or an older build) may have put ink ahead of one
@@ -791,6 +797,10 @@ void Page::onAddStroke(Element* s)
     //bookmarks.push_back(s);
     document->bookmarksDirty = true;
   }
+  if(s->isPageTag()) {
+    refreshPageTags();
+    return;
+  }
   // a region arriving by undo or sync may have been drawn with colors from before a theme change; and
   //  it is not writing, so it takes no part in the page's time range
   if(s->isRulingRegion()) {
@@ -813,10 +823,25 @@ void Page::onRemoveStroke(Element* s)
     --numBookmarks;
     document->bookmarksDirty = true;
   }
+  if(s->isPageTag())
+    refreshPageTags(s);  // still in the page at this point
   // see if we must recalc timestamp range
   if(s->timestamp() == minTimestamp || s->timestamp() == maxTimestamp) {
     minTimestamp = MAX_TIMESTAMP;
     maxTimestamp = 0;
+  }
+}
+
+// in the order the tags sit on the page, each id once - a page can carry the same tag twice
+void Page::refreshPageTags(const Element* removing)
+{
+  pageTagIds.clear();
+  for(Element* s : children()) {
+    if(s == removing || !s->isPageTag() || !s->pageTagId()[0])
+      continue;
+    std::string id = s->pageTagId();
+    if(std::find(pageTagIds.begin(), pageTagIds.end(), id) == pageTagIds.end())
+      pageTagIds.push_back(id);
   }
 }
 
