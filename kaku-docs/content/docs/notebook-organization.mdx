@@ -1,0 +1,75 @@
+---
+title: "Notebook Organization: Tags"
+---
+
+In Kaku, the way to organize your notebooks (and sometimes pages) is **tags**.
+
+As a matter of fact, it *don't have folders at all*, because I believe for notebooks tags are superior in *every* way.&#x20;
+
+## Tags
+
+Firstly, tags can be nested like folders, so you can have
+
+<Files>
+  <Folder name="work">
+    <File name="project a" />
+  </Folder>
+  <File name="needs review" />
+</Files>
+
+Unlike folders though, a notebook can have many tags. So a notebook could have `project a` and `needs review`.
+
+<Callout type="info" title="Terminology">
+  A **subtag** is a tag like `project a` that has a tag that they sit inside of, like a file in a folder.
+
+  A **supertag** is a tag like  `work`, which has tags that sit inside of it, like a folder.
+</Callout>
+
+### Filtering
+
+If you want to show only notebooks with a certain tag, just click it.
+
+And if you want to find all notebooks that have multiple tags, click this button at the bottom of your sidebar:
+
+![image](./assets/mujp49af-image.png)
+
+and select multiple tags.
+
+Of course if you search while a tag is active, you only search in notebooks that fit the current tag selection
+
+Also, if you selected `work` , all notebooks with `project a` will also show up.
+
+### Create tags
+
+There are two ways to create a tag.
+
+- Click the plus button at the bottom of the sidebar
+- Right click a tag to add a new subtag.
+
+### Adding tags to notebooks and *pages*
+
+There are two places to add tags
+
+- From the library, long press or right click a notebook and select manage tags.
+- From the editor: press the `#` button in the top right and select whether you want to add the tag to the notebook or the page.
+  - Now you get your "manage tags" interface
+  - If you selected add to page, those tags will now be at your cursor/ pen to place them
+
+### Modify tags
+
+You can right click a tag to rename or delete it. Deleting has some special cases:
+
+- When deleting a tag with subtags, it will ask whether to delete those as well or just move them all out.
+- When deleting a tag with a supertag, you will be asked whether to assign notebooks that had this tag to the supertag or remove the tag entirely.&#x20;
+
+  <Callout type="info" title="Example">
+    A notebook is tagged only with `project a` . Now you delete that tag. Your two options are:
+
+    - The notebook is now tagged with `work`
+    - The notebook has not tags left.
+  </Callout>
+
+You can also drag a tag. Dropping it onto:
+
+- Another tag makes it a subtag of that tag
+- Its supertag moves it out of that tag.
