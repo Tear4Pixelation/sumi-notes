@@ -54,7 +54,7 @@ Recognition only runs on a deliberate hold, so the user has asked for *something
   everything else may come out as a scratch-out; it measures 1.2-1.3%, nearly all mmm arches and random
   wanders. Its defaults are `Params`'; it was 0.5% while the hold had to protect writing.
 - **The scratch-out on pen lift must leave writing alone** (`liftParams`, the app's "Scratch out without
-  holding": Off, Careful, Normal). It runs over every stroke written, with no hold to say the user meant
+  holding" toggle and its Careful / Normal eagerness). It runs over every stroke written, with no hold to say the user meant
   anything, so it needs a longer scratch-out (6 passes normal, 8 careful) and keeps the strict turn
   limits. Gated at 0.1% false erases over both suites, and every recorded scratch-out must pass at both
   levels:

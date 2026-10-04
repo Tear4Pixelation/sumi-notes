@@ -168,7 +168,8 @@ were all refused. 240 Hz sampling by itself cost nothing.
 - **Two scratch-out strengths.** The *hold* is eager (`Params` defaults: turns up to 0.3 of a pass, the
   loose long-stroke rule from 12 reversals, zigzags 3x wider than high) - holding says "erase", so it
   need not survive writing, and ~1.2% of other strokes erase. **Scratch out without holding**
-  (`scratchOutOnLift`: 0 off, 1 careful, 2 normal; Preferences > Shapes and Shape Settings) runs
+  (`liftScratchOut` on/off, `liftScratchOutLevel` 1 careful / 2 normal; Pen Settings, Shape Settings and
+  Preferences > Shapes) runs
   `recognizeScribble(liftParams(level))` as the pen lifts, over every stroke written: 6 or 8 passes, turns
   0.2, long rule from 24 - 0.07% / 0 false erases. Short scratch-outs are left to the hold on purpose.
   The lift path needs `shapeSnapDelay` > 0, since that is what collects `snapSamples`.

@@ -1495,7 +1495,7 @@ bool ScribbleArea::scratchOutOnLift()
   stroke.reserve(snapSamples.size());
   for(const Point& pt : snapSamples)
     stroke.emplace_back(pt.x*mScale, pt.y*mScale);
-  shaperec::Result result = shaperec::recognizeScribble(stroke, shaperec::liftParams(cfg->Int("scratchOutOnLift")));
+  shaperec::Result result = shaperec::recognizeScribble(stroke, shaperec::liftParams(cfg->Int("liftScratchOutLevel")));
   if(result.kind != shaperec::Kind::Scribble)
     return false;
   std::vector<Point> area;
@@ -2005,6 +2005,12 @@ bool ScribbleArea::doClickAction(Point pos)
   else
     scribbleDoc->openURL(href);
   return href != NULL;
+}
+
+// a two finger tap undoes one step
+void ScribbleArea::doTwoFingerTap()
+{
+  scribbleDoc->doCommand(ID_UNDO);
 }
 
 // consolidated fn for setting properties of current selection, including hyperref and bookmark creation
@@ -3456,7 +3462,7 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
   case MODE_STROKE:
   {
     // a scratch-out needs no hold: it erases as the pen lifts
-    if(!snapActive && snapSamples.size() > 2 && cfg->Int("scratchOutOnLift") > 0 && scratchOutOnLift()) {
+    if(!snapActive && snapSamples.size() > 2 && cfg->Bool("liftScratchOut") && scratchOutOnLift()) {
       stopShapeSnap();
       break;
     }
