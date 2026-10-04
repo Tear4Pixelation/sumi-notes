@@ -348,6 +348,14 @@ int iosSafeAreaInsets(float* top, float* bottom)
   return 1;
 }
 
+// top safe area in points on every device (iPad included, unlike iosSafeAreaInsets()): the status bar's
+//  height, the notch on a portrait iPhone, 0 when the status bar is hidden
+float iosTopSafeInset(void)
+{
+  UIWindow *window = UIApplication.sharedApplication.keyWindow;
+  return window ? (float)window.safeAreaInsets.top : 0;
+}
+
 // status bar color - for use with UIViewControllerBasedStatusBarAppearance = true in Info.plist
 
 #import "SDL/src/video/uikit/SDL_uikitviewcontroller.h"

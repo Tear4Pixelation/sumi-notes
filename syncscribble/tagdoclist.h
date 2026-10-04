@@ -79,6 +79,13 @@ protected:
   Widget* createDocTagRow(const std::string& tagId, int depth, const std::vector<std::string>& currentTags);
   void renameDoc(const FSPath& path);
   void deleteDoc(const FSPath& path);
+  // select mode: tapping a document toggles it instead of opening it, and selectBar's actions replace
+  //  the FABs - see setSelectMode()
+  void setSelectMode(bool on);
+  void toggleDocSelected(const std::string& path);
+  void setAllSelected(bool selected);
+  void deleteSelectedDocs();
+  void updateSelectBar();
   void setDocumentTags(const FSPath& path, const std::vector<std::string>& tagIds);
   // Load a document whole, let `edit` change it and its config, and save it back, keeping its
   //  thumbnail and bringing the page tag summary and the tag cache up to date.  See setDocumentTags()
@@ -103,6 +110,7 @@ private:
   Widget* createTagRow(const std::string& tagId, int depth);
   Widget* createNavRow(const char* iconPath, const char* title);
   Widget* createFab(const char* iconPath, real diameter, bool primary);
+  Button* createSelectBarButton(const char* iconPath, const char* tooltip);
   Widget* createRoundedBg(real w, real h, real radius, const char* fillColor);
 
   TagStore tagStore;
@@ -161,7 +169,22 @@ private:
   Button* importFab;
   Button* addDocFab;
   Button* backNoteFab;
+  Button* selectFab;
   Button* undoButton;
+  Widget* fabRow;
+
+  // Select mode.  Selection is by path and survives a grid rebuild, but is pruned to the documents
+  //  the grid shows (search, tag filter), so Delete never touches a document the user cannot see.
+  //  Page cards are not selectable: whether deleting one means the page or its notebook is unclear.
+  bool selectMode = false;
+  std::set<std::string> selectedDocs;
+  std::vector<std::string> shownDocs;  // documents in the grid, in grid order
+  std::multimap<std::string, Button*> docCells;  // a notebook can be in both groups of the grid
+  Widget* selectBar;
+  SvgText* selectCountText;
+  Button* selectAllBtn;
+  Button* selectNoneBtn;
+  Button* deleteSelectedBtn;
 
   // Right-click/long-press context menus in this app are ArrowPopups, not plain Menus - see
   // showTagMenu()'s comment for the mechanics (an ArrowPopup has no click-point anchoring; it has to

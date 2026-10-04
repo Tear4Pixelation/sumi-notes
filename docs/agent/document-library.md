@@ -145,3 +145,29 @@ Designed in the Penpot page "Create page" as a proposition, not followed to the 
 
 Known gaps: the classic `DocumentList` new-document path (non-library platforms) is unchanged; the Pages
 popup opens downwards and runs off a 720 px screen's bottom; no automated test; new strings are untranslated.
+
+# Select mode (browser)
+
+The Select FAB (`ic_menu_multiselect`, reicon `check-square`) puts `TagDocList` into select mode: the
+FAB row is hidden and `selectBar` takes its place - one rounded container with the count, Select All,
+Select None, Delete and Done (X). Escape also leaves it; every `setup()` starts outside it.
+
+- **Tapping a cell toggles it** instead of opening it, and the long-press menu is off. The ring and
+  check badge exist only on cells built in select mode, so entering/leaving rebuilds the grid, but a
+  toggle restyles the cell in place (`Button::setChecked()`, `.doc-cell.checked` in `ugui/theme.cpp`) -
+  a rebuild reloads every thumbnail.
+- **Selection is by path, pruned to what the grid shows** at every rebuild: a search or tag filter that
+  hides a selected document drops it, so Delete never removes something off screen. Clearing the search
+  does not bring it back.
+- **Page cards are not selectable** (dimmed): whether deleting one means the page or its notebook is
+  unclear. A notebook in both grid groups has two cells; `docCells` is a multimap for that.
+- Delete is permanent, like the context menu's `deleteDoc()`: one confirmation for the lot.
+
+# Top inset (iOS status bar)
+
+The editor used to paint `#ios-statusbar-bg`, a full-width toolbar-colored strip that pushed the whole
+canvas below the status bar. It is gone: the window draws edge to edge and `ScribbleApp::topInset`
+(`iosTopSafeInset()` - the top safe area on every device, iPad included - times `inputScale`, refreshed
+in `MainWindow::orientationChanged()` and on fullscreen toggles) steps down only the floating toolbar
+(`#main-toolbar-container`'s top margin), the sidebar panel (`Sidebar::updateInsets()`) and the browser's
+search row (`TagDocList::setup()`). On desktop `SUMI_TOP_INSET=24` previews it. Not yet run on a device.

@@ -4,7 +4,6 @@ const char* mainWindowSVG = R"#(
 <svg class="window" layout="box">
   <!-- rect fill="white" box-anchor="fill" width="20" height="20"/ -->
   <g class="window-layout" box-anchor="fill" layout="flex" flex-direction="column">
-    <rect id="ios-statusbar-bg" class="toolbar" display="none" box-anchor="hfill" width="20" height="20"/>
     <g id="pen-toolbar-container" box-anchor="hfill" layout="box">
     </g>
 

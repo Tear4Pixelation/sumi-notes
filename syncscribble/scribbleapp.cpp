@@ -41,6 +41,7 @@
 ScribbleApp* ScribbleApp::app = NULL;
 MainWindow* ScribbleApp::win = NULL;
 ScribbleConfig* ScribbleApp::cfg = NULL;
+Dim ScribbleApp::topInset = 0;
 Dialog* ScribbleApp::currDialog = NULL;
 Uint32 ScribbleApp::scribbleSDLEvent = 0;
 
