@@ -18,7 +18,8 @@
 
 namespace synth {
 
-// label: line, square, circle, ellipse, scribble (a scratch-out) or other
-std::vector<TestStroke> generate(const std::string& label, int count, std::mt19937& rng);
+// label: line, square, circle, ellipse, scribble (a scratch-out) or other.  `pencil` draws them as
+//  Apple Pencil input - 240 Hz, a long drifting hold - plus light arcs and wide zigzags (see synth.cpp)
+std::vector<TestStroke> generate(const std::string& label, int count, std::mt19937& rng, bool pencil = false);
 
 }  // namespace synth

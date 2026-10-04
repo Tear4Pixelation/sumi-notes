@@ -42,6 +42,12 @@ struct Params
   int scribbleMinReversals = 3;
   // a reversal must retreat this fraction of the stroke's extent along the scrub axis
   double scribbleHysteresis = 0.3;
+  // when the mean pass direction is not a scratch-out, this many other scrub axes evenly spread over
+  //  180 degrees are tried, for zigzags whose passes lean more than 45 degrees (0: only the mean) ...
+  int scribbleAxisSteps = 11;
+  // ... each only if the stroke's motion along it is at least this fraction of its arc length
+  //  (passes leaning 60 degrees: 0.5; the wobble across a line: a few percent)
+  double scribbleMinAlongFrac = 0.4;
   // every interior pass at least this fraction of the median pass length
   double scribbleMinPassFrac = 0.4;
   // passes are straight: median chord/arc, and the worst pass
@@ -54,9 +60,11 @@ struct Params
 
   // --- line ---
   // RMS distance from the fitted line, as a fraction of line length
-  double lineMaxRms = 0.035;
+  //  0.035 refused any stroke bowed more than 10-11% of its length, which a long line swung from the
+  //  wrist easily is; 0.05 takes a light arc up to ~16% (about 70 degrees of arc)
+  double lineMaxRms = 0.05;
   // largest distance of the middle part of the stroke from the line, as a fraction of line length
-  double lineMaxDev = 0.1;
+  double lineMaxDev = 0.13;
   // extent along the line / arc length; rejects back-and-forth strokes along one line
   double lineMinStraightness = 0.8;
   // a hook is a flick at either end whose direction differs from the line by more than this
@@ -66,10 +74,12 @@ struct Params
 
   // --- closed shapes ---
   // distance between the stroke's end and its start (or the nearest pass by it) over the perimeter
-  double maxClosureGap = 0.15;
+  //  (0.2: a circle may stop ~70 degrees short; 0.15 refused quick circles stopping 55-60 short)
+  double maxClosureGap = 0.25;
   int resampleCount = 128;
-  // RMS distance from the fitted shape over the perimeter's equivalent radius (perimeter / 2pi)
-  double closedMaxErr = 0.07;
+  // RMS distance from the fitted shape over the perimeter's equivalent radius (perimeter / 2pi);
+  //  0.07 refused rectangles with bowed sides and corners missed by 3-4%
+  double closedMaxErr = 0.09;
   // ellipses at least this round (minor/major) become circles; between circleEaseAspect and that, the
   //  radii are pulled part of the way together
   double circleMinAspect = 0.8;

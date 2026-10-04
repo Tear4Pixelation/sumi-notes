@@ -154,7 +154,15 @@ lifts. A held **scratch-out** (back and forth over something) erases what it was
 delay is 0.5-1.5 s, 0 turns it off (default 0.8), and is in Preferences > Shapes plus the Pen and Shape
 Settings buttons. The recognizer is `syncscribble/shaperec.*` (+ `shaperecgeom.h`); its tuning, test set
 and gates live in `labs/shape-recognition/`, whose `make test` compiles **this** copy - run it after
-touching a threshold.
+touching a threshold. It has two gated suites, and the **pencil** one (240 Hz, drifting hold, light
+arcs, wide zigzags, sloppier closed shapes) is the one that found the recognizer too strict: a line
+bowed over 10% of its length, a circle stopping 55 degrees short and any zigzag leaning past 45 degrees
+were all refused. 240 Hz sampling by itself cost nothing.
+
+- **A scratch-out's scrub axis has a fallback.** The mean chord direction is wrong for a wide zigzag
+  (half of a line scratched out at speed), so when it fails other axes are tried - but the mean always
+  goes first, and a fallback axis must carry 40% of the motion, or the wobble across a plain line reads
+  as reversals and the line erases what it crosses. See the lab README before touching either.
 
 - **The hold is a timer, not an event.** A pen held perfectly still sends no motion at all, so a callback
   timer (`SvgGui::setTimer`, its own rather than the widget's, which autoscroll and fling share) polls

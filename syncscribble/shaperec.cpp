@@ -252,100 +252,148 @@ bool fitScribble(const std::vector<Vec2>& pts, double arcLen, const Params& para
     sumCos += seg.length()*std::cos(angle);
     sumSin += seg.length()*std::sin(angle);
   }
-  double axisAngle = 0.5*std::atan2(sumSin, sumCos);
-  Vec2 axis(std::cos(axisAngle), std::sin(axisAngle)), across = axis.perp();
-  std::vector<double> proj(count);
-  for(int i = 0; i < count; ++i)
-    proj[i] = samples[i].dot(axis);
-  std::vector<double> sorted = proj;
-  std::sort(sorted.begin(), sorted.end());
-  double extent = sorted[size_t(0.95*(count - 1))] - sorted[size_t(0.05*(count - 1))];
-  if(extent <= 0)
-    return false;
+  double meanAngle = 0.5*std::atan2(sumSin, sumCos);
 
-  // extrema of the projection, with hysteresis so jitter is not a reversal
-  double hyst = params.scribbleHysteresis*extent;
-  std::vector<int> ends;
-  int dirSign = 0, candidate = 0, lowest = 0, highest = 0;
-  for(int i = 1; i < count; ++i) {
-    if(dirSign == 0) {
-      if(proj[i] < proj[lowest]) lowest = i;
-      if(proj[i] > proj[highest]) highest = i;
-      if(proj[i] - proj[lowest] > hyst) { ends.push_back(lowest); dirSign = 1; candidate = i; }
-      else if(proj[highest] - proj[i] > hyst) { ends.push_back(highest); dirSign = -1; candidate = i; }
+  // the pass ends along `angle`: extrema of the projection, with hysteresis so jitter is not a reversal
+  auto findEnds = [&](double angle, std::vector<double>& proj, std::vector<int>& ends) {
+    Vec2 dir(std::cos(angle), std::sin(angle));
+    proj.resize(count);
+    for(int i = 0; i < count; ++i)
+      proj[i] = samples[i].dot(dir);
+    std::vector<double> sorted = proj;
+    std::sort(sorted.begin(), sorted.end());
+    double extent = sorted[size_t(0.95*(count - 1))] - sorted[size_t(0.05*(count - 1))];
+    ends.clear();
+    if(extent <= 0)
+      return;
+    double hyst = params.scribbleHysteresis*extent;
+    int dirSign = 0, candidate = 0, lowest = 0, highest = 0;
+    for(int i = 1; i < count; ++i) {
+      if(dirSign == 0) {
+        if(proj[i] < proj[lowest]) lowest = i;
+        if(proj[i] > proj[highest]) highest = i;
+        if(proj[i] - proj[lowest] > hyst) { ends.push_back(lowest); dirSign = 1; candidate = i; }
+        else if(proj[highest] - proj[i] > hyst) { ends.push_back(highest); dirSign = -1; candidate = i; }
+      }
+      else if((proj[i] - proj[candidate])*dirSign > 0)
+        candidate = i;
+      else if((proj[candidate] - proj[i])*dirSign > hyst) {
+        ends.push_back(candidate);
+        dirSign = -dirSign;
+        candidate = i;
+      }
     }
-    else if((proj[i] - proj[candidate])*dirSign > 0)
-      candidate = i;
-    else if((proj[candidate] - proj[i])*dirSign > hyst) {
+    if(dirSign != 0)
       ends.push_back(candidate);
-      dirSign = -dirSign;
-      candidate = i;
+  };
+
+  // Everything below, along one candidate scrub axis; fills `res` and returns true if it is a scratch-out.
+  auto tryAxis = [&](double axisAngle, std::string& axisWhy) {
+    std::vector<double> proj;
+    std::vector<int> ends;
+    findEnds(axisAngle, proj, ends);
+    Vec2 axis(std::cos(axisAngle), std::sin(axisAngle)), across = axis.perp();
+    int reversals = int(ends.size()) - 2;
+    if(reversals < params.scribbleMinReversals) {
+      axisWhy = format("scribble: %.0f reversals", std::max(0, reversals));
+      return false;
     }
-  }
-  if(dirSign != 0)
-    ends.push_back(candidate);
-  int reversals = int(ends.size()) - 2;
-  if(reversals < params.scribbleMinReversals) {
-    why = format("scribble: %.0f reversals", std::max(0, reversals));
-    return false;
-  }
 
-  // interior passes: similar lengths, straight.  Neither test rejects anything in the synthetic set that
-  //  the reversal test below does not, so neither is covered by a gate; they stay because a false
-  //  scratch-out destroys work, and real handwriting is more varied than the generator.  Requiring
-  //  passes to be parallel to the axis was also tried: it rejected no false scratch-out and cost recall.
-  std::vector<double> passLen, straightness;
-  for(size_t k = 1; k + 2 < ends.size(); ++k) {
-    passLen.push_back(std::fabs(proj[ends[k+1]] - proj[ends[k]]));
-    double arc = 0;
-    for(int i = ends[k]; i < ends[k+1]; i += chord)
-      arc += dist(samples[i], samples[std::min(ends[k+1], i + chord)]);
-    straightness.push_back(arc > 0 ? dist(samples[ends[k]], samples[ends[k+1]])/arc : 0);
-  }
-  std::vector<double> sortedLen = passLen, sortedStraight = straightness;
-  std::sort(sortedLen.begin(), sortedLen.end());
-  std::sort(sortedStraight.begin(), sortedStraight.end());
-  double medianLen = sortedLen[sortedLen.size()/2];
-  if(sortedLen.front() < params.scribbleMinPassFrac*medianLen) {
-    why = format("scribble: uneven passes (%.2f of median)", sortedLen.front()/medianLen);
-    return false;
-  }
-  if(sortedStraight[sortedStraight.size()/2] < params.scribbleMinPassStraightness
-      || sortedStraight.front() < params.scribbleMinWorstStraightness) {
-    why = format("scribble: curved passes (median %.2f, worst %.2f)", sortedStraight[sortedStraight.size()/2], sortedStraight.front());
-    return false;
-  }
+    // interior passes: similar lengths, straight.  Neither test rejects anything in the synthetic set
+    //  that the reversal test below does not, so neither is covered by a gate; they stay because a false
+    //  scratch-out destroys work, and real handwriting is more varied than the generator.  Requiring
+    //  passes to be parallel to the axis was also tried: it rejected no false scratch-out and cost recall.
+    std::vector<double> passLen, straightness;
+    for(size_t k = 1; k + 2 < ends.size(); ++k) {
+      passLen.push_back(std::fabs(proj[ends[k+1]] - proj[ends[k]]));
+      double arc = 0;
+      for(int i = ends[k]; i < ends[k+1]; i += chord)
+        arc += dist(samples[i], samples[std::min(ends[k+1], i + chord)]);
+      straightness.push_back(arc > 0 ? dist(samples[ends[k]], samples[ends[k+1]])/arc : 0);
+    }
+    std::vector<double> sortedLen = passLen, sortedStraight = straightness;
+    std::sort(sortedLen.begin(), sortedLen.end());
+    std::sort(sortedStraight.begin(), sortedStraight.end());
+    double medianLen = sortedLen[sortedLen.size()/2];
+    if(sortedLen.front() < params.scribbleMinPassFrac*medianLen) {
+      axisWhy = format("scribble: uneven passes (%.2f of median)", sortedLen.front()/medianLen);
+      return false;
+    }
+    if(sortedStraight[sortedStraight.size()/2] < params.scribbleMinPassStraightness
+        || sortedStraight.front() < params.scribbleMinWorstStraightness) {
+      axisWhy = format("scribble: curved passes (median %.2f, worst %.2f)", sortedStraight[sortedStraight.size()/2], sortedStraight.front());
+      return false;
+    }
 
-  // Reversals turn straight back: fit a line to the middle of the passes either side of each reversal
-  //  and compare where the two lines are at the reversal, across the axis.  Comparing the pass ends
-  //  themselves was tried first and let 7% of mmm through - an arch's rounded top brings its two halves
-  //  together at the apex even though its sides are an arch-width apart.
-  auto passLine = [&](int from, int to) {
-    int span = to - from;
-    std::vector<Vec2> mid(samples.begin() + from + span/5, samples.begin() + to - span/5 + 1);
-    return fitLine(mid);
+    // Reversals turn straight back: fit a line to the middle of the passes either side of each reversal
+    //  and compare where the two lines are at the reversal, across the axis.  Comparing the pass ends
+    //  themselves was tried first and let 7% of mmm through - an arch's rounded top brings its two halves
+    //  together at the apex even though its sides are an arch-width apart.
+    auto passLine = [&](int from, int to) {
+      int span = to - from;
+      std::vector<Vec2> mid(samples.begin() + from + span/5, samples.begin() + to - span/5 + 1);
+      return fitLine(mid);
+    };
+    auto acrossAt = [&](const LineFit& line, double tip) {
+      // where the line crosses the plane proj == tip, as an across coordinate
+      double along = line.dir.dot(axis);
+      Vec2 pt = std::fabs(along) > 1e-6 ? line.centroid + line.dir*((tip - line.centroid.dot(axis))/along) : line.centroid;
+      return pt.dot(across);
+    };
+    double worstGap = 0;
+    for(size_t k = 1; k + 1 < ends.size(); ++k) {
+      if(ends[k] - ends[k-1] < 5 || ends[k+1] - ends[k] < 5)
+        continue;
+      double tip = proj[ends[k]];
+      LineFit before = passLine(ends[k-1], ends[k]), after = passLine(ends[k], ends[k+1]);
+      // across the passes rather than across the axis: on passes leaning far over (a wide zigzag), a
+      //  turn rounded a little along the axis puts the lines' crossings 1/cos(lean) further apart across
+      //  it.  Passes along the axis - the arches this test is for - are unaffected.
+      double lean = 0.5*(std::fabs(before.dir.dot(axis)) + std::fabs(after.dir.dot(axis)));
+      double gap = std::fabs(acrossAt(before, tip) - acrossAt(after, tip))*lean;
+      worstGap = std::max(worstGap, gap/medianLen);
+    }
+    if(worstGap > params.scribbleMaxReversalGap) {
+      axisWhy = format("scribble: reversal turns wide (%.2f of a pass)", worstGap);
+      return false;
+    }
+    res.points = convexHull(samples);
+    res.reason = format("scribble: %.0f reversals, widest turn %.2f", reversals, worstGap);
+    return true;
   };
-  auto acrossAt = [&](const LineFit& line, double tip) {
-    // where the line crosses the plane proj == tip, as an across coordinate
-    double along = line.dir.dot(axis);
-    Vec2 pt = std::fabs(along) > 1e-6 ? line.centroid + line.dir*((tip - line.centroid.dot(axis))/along) : line.centroid;
-    return pt.dot(across);
-  };
-  double worstGap = 0;
-  for(size_t k = 1; k + 1 < ends.size(); ++k) {
-    if(ends[k] - ends[k-1] < 5 || ends[k+1] - ends[k] < 5)
+
+  if(tryAxis(meanAngle, why))
+    return true;
+  // The mean chord direction is the scrub axis only while the passes lean less than 45 degrees.  A hand
+  //  travelling fast along what it erases (half of a line, say) draws passes leaning further over than
+  //  that, the mean then points along the travel, and along the travel the stroke never turns back - so
+  //  wide zigzags were never scratch-outs.  When the mean fails, other axes are tried, the ones the
+  //  stroke reverses along most often first, and each still has to pass every test above.  An axis
+  //  only counts if most of the motion is along it: across a line, its wobble reverses plenty of times,
+  //  and picking the axis with the most reversals outright took plain lines for scratch-outs.
+  std::vector<std::pair<int, double>> candidates;  // (pass ends, angle)
+  for(int step = 0; step < params.scribbleAxisSteps; ++step) {
+    double angle = meanAngle + PI*(step + 1)/(params.scribbleAxisSteps + 1);
+    std::vector<double> proj;
+    std::vector<int> ends;
+    findEnds(angle, proj, ends);
+    if(int(ends.size()) - 2 < params.scribbleMinReversals)
       continue;
-    double tip = proj[ends[k]];
-    double gap = std::fabs(acrossAt(passLine(ends[k-1], ends[k]), tip) - acrossAt(passLine(ends[k], ends[k+1]), tip));
-    worstGap = std::max(worstGap, gap/medianLen);
+    double along = 0;
+    for(int i = 1; i < count; ++i)
+      along += std::fabs(proj[i] - proj[i-1]);
+    if(along < params.scribbleMinAlongFrac*spacing*(count - 1))
+      continue;
+    candidates.emplace_back(int(ends.size()), angle);
   }
-  if(worstGap > params.scribbleMaxReversalGap) {
-    why = format("scribble: reversal turns wide (%.2f of a pass)", worstGap);
-    return false;
+  std::stable_sort(candidates.begin(), candidates.end(),
+      [](const auto& lhs, const auto& rhs) { return lhs.first > rhs.first; });
+  for(const auto& candidate : candidates) {
+    std::string ignored;
+    if(tryAxis(candidate.second, ignored))
+      return true;
   }
-  res.points = convexHull(samples);
-  res.reason = format("scribble: %.0f reversals, widest turn %.2f", reversals, worstGap);
-  return true;
+  return false;
 }
 
 // Replace the samples left by holding the pen still at the end with a single point where it rested.
