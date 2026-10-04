@@ -931,9 +931,8 @@ void MainWindow::toggleFullscreen()
     SDL_MaximizeWindow(sdlWindow);  // otherwise switches to some partial screen video mode!
   SDL_SetWindowFullscreen(sdlWindow, fs ? SDL_WINDOW_FULLSCREEN : 0);
   actionFullscreen->setChecked(fs);
-#if PLATFORM_IOS
-  selectFirst("#ios-statusbar-bg")->setVisible(!fs);
-#endif
+  // the status bar comes and goes with fullscreen on iOS, and its inset with it
+  orientationChanged();
 }
 
 // Night mode (docs/agent/night-mode.md): a view setting, never a document edit.  The canvas draws through
@@ -1033,21 +1032,26 @@ void MainWindow::toggleSplitView(int newstate)
 
 void MainWindow::orientationChanged()
 {
+  // The window draws edge to edge: nothing is painted behind the status bar any more (there used to be a
+  //  full-width toolbar-colored strip, #ios-statusbar-bg, pushing the whole canvas down), so the page runs
+  //  under it and only the floating toolbar and the pinned sidebar step down by the inset.
 #if PLATFORM_IOS
-  // the crux here is iPhone notch - we need a big offset in portrait but none in landscape
-  // note that iPhone point sizes are roughly the same as our UI units, so no conversion needed
-  Widget* statusBarBG = selectFirst("#ios-statusbar-bg");
   float top, bottom;
   // iosSafeAreaInsets will return 1 for iPhone, 0 for iPad (for which we assume our default insets)
   if(iosSafeAreaInsets(&top, &bottom)) {
-    // non-notch iPhone status bar doesn't seem to be included in safe area inset; unfortunately, SDL
-    //  only hides status bar if fullscreen is set, whereas default iOS behavior is to hide in phone landscape
-    static_cast<SvgRect*>(statusBarBG->node)->setRect(Rect::wh(20, std::max(20.0f, top)));
     // this will only matter for initial call (before ScribbleAreas are created)
     scribbleAreaStatusInset.y = std::min(std::max(bottom, 6.0f), 18.0f);
   }
-  statusBarBG->setVisible(!(SDL_GetWindowFlags(sdlWindow) & SDL_WINDOW_FULLSCREEN));
+  // safe area insets are in points, i.e. SDL window coordinates
+  ScribbleApp::topInset = iosTopSafeInset()*Application::gui->inputScale;
+#else
+  // SUMI_TOP_INSET previews a status bar inset on desktop, where there is none
+  const char* previewInset = getenv("SUMI_TOP_INSET");
+  ScribbleApp::topInset = previewInset ? atof(previewInset) : 0;
 #endif
+  selectFirst("#main-toolbar-container")->setMargins(ScribbleApp::topInset, 0, 0, 0);
+  if(sidebar)
+    sidebar->updateInsets();
 }
 
 /// Setup

@@ -85,6 +85,11 @@ MAPPING = {
   'ic_menu_redo': 'redo',
   'ic_menu_refresh': 'refresh',
   'ic_menu_save': 'floppy2',
+  # the document browser's select mode (tagdoclist.cpp); not ic_menu_select*, which are the editor's
+  #  Penpot-drawn selection tools
+  'ic_menu_multiselect': 'check-square',
+  'ic_menu_select_all': 'checklist',
+  'ic_menu_select_none': 'minus-square',
   'ic_menu_send': 'send',
   'ic_menu_send_now': 'plane2',
   'ic_menu_set_pen': 'pen-add',

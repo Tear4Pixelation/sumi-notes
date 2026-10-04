@@ -108,7 +108,7 @@ relevant file before changing that area.
 
 - [pdf-import.md](docs/agent/pdf-import.md) - MuPDF compiled inline, size trimming (`NO_CJK`, `-Os`, gc-sections), rule-layer page images
 - [noteful-import.md](docs/agent/noteful-import.md) - reverse-engineered `.noteful` format, units, pressure strokes, archives, the Import FAB
-- [document-library.md](docs/agent/document-library.md) - the single library folder, `.write-library` marker, import/migration, iOS library mode and `/private/var`; the system file picker (`filepicker.cpp`, every platform); browser fonts; Create Notebook dialog and covers
+- [document-library.md](docs/agent/document-library.md) - the single library folder, `.write-library` marker, import/migration, iOS library mode and `/private/var`; the system file picker (`filepicker.cpp`, every platform); browser fonts; Create Notebook dialog and covers; browser select mode; iOS top inset (no status bar strip)
 - [paper.md](docs/agent/paper.md) - default page size prompt (A4/Letter), dotted paper (`dotRadius`), Add Page layouts popup
 - [ruling-regions.md](docs/agent/ruling-regions.md) - Paper Patch: per-area ruling, `rulingAt()`, tilted frames, region panel
 - [document-scanning.md](docs/agent/document-scanning.md) - homography, warp, enhance, quad detection in `ulib`; capture per platform (Android camera apps, iOS camera sheet, desktop `Camera` backends + `CameraDialog`), the MJPEG Huffman-table trap
@@ -125,6 +125,7 @@ relevant file before changing that area.
 - [navigation.md](docs/agent/navigation.md) - wheel/zoom/pan, sdl2-compat `preciseX/Y`, `SDL_Event = {}`, modifier tracking, testing scroll in agent-display
 - [stroke-input.md](docs/agent/stroke-input.md) - `CurveFitFilter` (measurements, failed Bezier fit), experimental Linux sub-pixel input
 - [tests.md](docs/agent/tests.md) - standalone test binaries (scan, shape, color, layer) and what each in-app `ScribbleTest` check pins
+- [ui-floating-bar.md](docs/agent/ui-floating-bar.md) - **the reference UI component**: floating action bar (rounded container of FAB-sized buttons replacing the FABs in a mode), exact padding/radii/colors, card selection marks, top inset - build new floating UI like this
 - [agent-display.md](docs/agent/agent-display.md) - two displays (Wayland pointer vs Xwayland keys) and the traps when driving the app
 - [ios-build.md](docs/agent/ios-build.md) - manual iOS workflow, ad hoc signing secrets set up from Linux, installing on the iPad
 

@@ -50,6 +50,8 @@ public:
   void setOpen(bool open);
   bool isOpen() const { return isVisible(); }
   void toggleOpen() { setOpen(!isOpen()); }
+  // reapply the panel's margins, e.g. after ScribbleApp::topInset changed
+  void updateInsets();
 
 private:
   void createUI();

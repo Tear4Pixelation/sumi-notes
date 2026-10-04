@@ -207,6 +207,9 @@ public:
   static MainWindow* win;
   static ScribbleConfig* cfg;
   static Dialog* currDialog;
+  // UI units at the top of the window that system UI covers (the iOS status bar, the notch); the window
+  //  draws edge to edge, so the toolbar and the browser's search row step down by this much
+  static Dim topInset;
 
   enum MessageType {Info, Question, Warning, Error};
   static std::string messageBox(

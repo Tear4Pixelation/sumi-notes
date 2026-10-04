@@ -16,6 +16,7 @@ extern void iosSendFile(const char* filename);
 extern int iosClipboardChangeCount(void);
 extern int iosGetClipboardImage(void);
 extern int iosSafeAreaInsets(float* top, float* bottom);
+extern float iosTopSafeInset(void);
 
 //extern void freeSecuredURL(void* data);
 extern void initDocumentBrowser(const char* bkmkBase64);

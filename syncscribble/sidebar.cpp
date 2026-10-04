@@ -386,6 +386,19 @@ void Sidebar::applyPlacement(bool wasOpen)
     setOpen(true);
 }
 
+void Sidebar::updateInsets()
+{
+  if(!panel)
+    return;
+  // Anchored to the window edge, not left to the box layout's default centring: with the two
+  //  horizontal margins deliberately unequal (window edge vs canvas gutter) a centred panel splits
+  //  the difference and drifts out of line with the toolbar above it.
+  panel->node->setAttribute("box-anchor", onLeft ? "left vfill" : "right vfill");
+  // below the toolbar, which steps down past the status bar (MainWindow::orientationChanged())
+  panel->setMargins(sbTopInset + ScribbleApp::topInset, onLeft ? sbCanvasGutter : sbEdgeInset,
+      sbEdgeInset, onLeft ? sbEdgeInset : sbCanvasGutter);
+}
+
 void Sidebar::reparent()
 {
   removeFromParent();
@@ -404,14 +417,7 @@ void Sidebar::reparent()
   //  panel).  With zero margins the sidebar owns its whole column and paints all of it.
   //  Same insets in both modes, so the panel lines up with the toolbar whether or not it is pinned.
   setMargins(0);
-  if(panel) {
-    // Anchored to the window edge, not left to the box layout's default centring: with the two
-    //  horizontal margins deliberately unequal (window edge vs canvas gutter) a centred panel splits
-    //  the difference and drifts out of line with the toolbar above it.
-    panel->node->setAttribute("box-anchor", onLeft ? "left vfill" : "right vfill");
-    panel->setMargins(sbTopInset, onLeft ? sbCanvasGutter : sbEdgeInset,
-        sbEdgeInset, onLeft ? sbEdgeInset : sbCanvasGutter);
-  }
+  updateInsets();
   if(pinned) {
     // first or last child of the flex row decides which side it occupies
     if(onLeft)

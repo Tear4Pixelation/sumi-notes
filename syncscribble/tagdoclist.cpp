@@ -94,6 +94,23 @@ Widget* TagDocList::createFab(const char* iconPath, real diameter, bool primary)
   return fab;
 }
 
+// A button of select mode's bar: a FAB-sized slot with no background of its own, since the bar's
+//  container is the background; only hovering/pressing lights up its rounded square (theme.cpp).
+Button* TagDocList::createSelectBarButton(const char* iconPath, const char* tooltip)
+{
+  Button* btn = new Button(new SvgG());
+  btn->node->addClass("selectbar-btn");
+  btn->node->setAttribute("layout", "box");
+  SvgRect* bg = new SvgRect(Rect::wh(44, 44), 10, 10);
+  bg->addClass("selectbar-btn-bg");
+  btn->containerNode()->addChild(bg);
+  SvgUse* icon = new SvgUse(Rect::wh(20, 20), "", SvgGui::useFile(iconPath));
+  icon->addClass("icon");
+  btn->containerNode()->addChild(icon);
+  setupTooltip(btn, tooltip);
+  return btn;
+}
+
 // A plain left-aligned icon+label row, used for "All Documents" - the standard toolbutton chrome
 // (centered content, fixed 36x42 background, its own internal margins) doesn't match the tight,
 // hand-tuned padding of the tag rows next to it, so it read as having far more padding than them.
@@ -397,6 +414,8 @@ void TagDocList::rebuildDocGrid()
   docTagsPopup->removeFromParent();
   if(gui())
     gui()->deleteContents(docGrid);
+  docCells.clear();
+  shownDocs.clear();
 
   Rect iconSize = Rect::wh(iconWidth, (5*iconWidth)/3);
   Rect symbolSize = Rect::wh(iconSize.width()/2, iconSize.height()/2);
@@ -455,14 +474,24 @@ void TagDocList::rebuildDocGrid()
   auto addCell = [this, &iconSize, &symbolSize](Widget* group, const DocEntry& doc){
     Button* item = new Button(gridItemProto->clone());
     item->node->addClass("doc-cell");
-    item->onClicked = [this, doc](){
-      selectedFile = doc.path.c_str();
+    std::string pathStr = doc.path.c_str();
+    item->onClicked = [this, doc, pathStr](){
+      if(selectMode) {
+        toggleDocSelected(pathStr);
+        return;
+      }
+      selectedFile = pathStr;
       selectedPage = -1;
       finish(EXISTING_DOC);
     };
     SvgGui::setupRightClick(item, [this, doc, item](SvgGui* gui, Widget* w, Point p){
-      showDocMenu(doc.path, item);
+      if(!selectMode)
+        showDocMenu(doc.path, item);
     });
+    docCells.emplace(pathStr, item);
+    if(std::find(shownDocs.begin(), shownDocs.end(), pathStr) == shownDocs.end())
+      shownDocs.push_back(pathStr);
+    item->setChecked(selectedDocs.count(pathStr) > 0);
 
     SvgContainerNode* container = item->selectFirst(".image-container")->containerNode();
     real itemWidth = iconSize.width();
@@ -494,6 +523,27 @@ void TagDocList::rebuildDocGrid()
       container->addChild(spacer);
       container->addChild(fileUseNode->clone());
     }
+    if(selectMode) {
+      // a ring around the preview and a check badge in its corner; the badge is an empty circle until
+      //  the cell is checked, so every selectable cell shows it can be picked (theme.cpp)
+      SvgRect* ring = new SvgRect(Rect::wh(20, 20), 6, 6);
+      ring->addClass("select-ring");
+      ring->setAttribute("box-anchor", "fill");
+      container->addChild(ring);
+      SvgG* badge = new SvgG();
+      badge->addClass("select-badge");
+      badge->setAttribute("box-anchor", "top right");
+      badge->setAttribute("layout", "box");
+      badge->setAttribute("margin", "8 8 0 0");
+      SvgRect* badgeBg = new SvgRect(Rect::wh(24, 24), 12, 12);
+      badgeBg->addClass("select-badge-bg");
+      badge->addChild(badgeBg);
+      SvgUse* check = new SvgUse(Rect::wh(16, 16), "", SvgGui::useFile("icons/ic_menu_accept.svg"));
+      check->addClass("icon");
+      check->addClass("select-check");
+      badge->addChild(check);
+      container->addChild(badge);
+    }
 
     group->addWidget(item);
     std::string name = doc.path.extension() == docFileExt ? doc.path.baseName() : doc.path.fileName();
@@ -508,7 +558,12 @@ void TagDocList::rebuildDocGrid()
     item->node->addClass("doc-cell");
     item->node->addClass("page-cell");
     int pagenum = card.page.page;
+    // not selectable (see selectMode), so dimmed while selecting rather than opening on a stray tap
+    if(selectMode)
+      item->node->setAttribute("opacity", "0.35");
     item->onClicked = [this, card, pagenum](){
+      if(selectMode)
+        return;
       selectedFile = card.path.c_str();
       selectedPage = pagenum;
       selectedPageTags = card.matched;
@@ -571,6 +626,15 @@ void TagDocList::rebuildDocGrid()
     for(const PageCard& card : somePages)
       addPageCell(someGroup, card);
   }
+
+  // documents the search or tag filter now hides drop out of the selection (see selectMode)
+  std::set<std::string> stillShown;
+  for(const std::string& path : selectedDocs) {
+    if(docCells.count(path))
+      stillShown.insert(path);
+  }
+  selectedDocs.swap(stillShown);
+  updateSelectBar();
 }
 
 void TagDocList::setRoot(const char* root)
@@ -1125,6 +1189,81 @@ void TagDocList::deleteDoc(const FSPath& path)
   refresh();
 }
 
+// The grid is rebuilt rather than restyled, since only select mode's cells carry the ring and badge.
+void TagDocList::setSelectMode(bool on)
+{
+  if(selectMode == on)
+    return;
+  closeAllContextPopups();
+  selectMode = on;
+  selectedDocs.clear();
+  fabRow->setVisible(!on);
+  selectBar->setVisible(on);
+  rebuildDocGrid();
+}
+
+// restyles the cell(s) in place: a rebuild would reload every thumbnail on each tap
+void TagDocList::toggleDocSelected(const std::string& path)
+{
+  bool selected = !selectedDocs.count(path);
+  if(selected)
+    selectedDocs.insert(path);
+  else
+    selectedDocs.erase(path);
+  auto cells = docCells.equal_range(path);
+  for(auto it = cells.first; it != cells.second; ++it)
+    it->second->setChecked(selected);
+  updateSelectBar();
+}
+
+void TagDocList::setAllSelected(bool selected)
+{
+  selectedDocs.clear();
+  if(selected)
+    selectedDocs.insert(shownDocs.begin(), shownDocs.end());
+  for(auto& cell : docCells)
+    cell.second->setChecked(selected);
+  updateSelectBar();
+}
+
+void TagDocList::updateSelectBar()
+{
+  size_t count = selectedDocs.size();
+  selectCountText->setText(count ? fstring(_("%d selected"), int(count)).c_str() : _("Select documents"));
+  deleteSelectedBtn->setEnabled(count > 0);
+  selectNoneBtn->setEnabled(count > 0);
+  selectAllBtn->setEnabled(count < shownDocs.size());
+}
+
+// Permanent, like deleteDoc(): one confirmation for the lot, naming the document when there is just one.
+void TagDocList::deleteSelectedDocs()
+{
+  if(selectedDocs.empty())
+    return;
+  std::string message = selectedDocs.size() == 1
+      ? fstring(_("Delete \"%s\"? This cannot be undone."), FSPath(*selectedDocs.begin()).baseName().c_str())
+      : fstring(_("Delete %d documents? This cannot be undone."), int(selectedDocs.size()));
+  auto res = ScribbleApp::messageBox(ScribbleApp::Warning, _("Delete Documents"), message,
+      {_("Delete"), _("Cancel")});
+  if(res != _("Delete"))
+    return;
+  std::vector<std::string> failed;
+  for(const std::string& path : selectedDocs) {
+    ScribbleApp::app->closeDocs(FSPath(path));
+    if(removeFile(path.c_str()))
+      tagStore.removeDoc(path.c_str());
+    else
+      failed.push_back(FSPath(path).baseName());
+  }
+  tagStore.save();
+  selectedDocs.clear();
+  refresh();
+  if(!failed.empty()) {
+    ScribbleApp::messageBox(ScribbleApp::Error, _("Delete Documents"),
+        fstring(_("Unable to delete: %s"), joinStr(failed, ", ").c_str()));
+  }
+}
+
 void TagDocList::createUI()
 {
   // ---- sidebar ----
@@ -1317,7 +1456,7 @@ void TagDocList::createUI()
   // "Screen" reference. Open Whiteboard (not in the mockup) sits between them at the secondary size.
   // The back-to-note FAB is also new and sits to their left, shown only when there's a document open
   // behind this browser.
-  Widget* fabRow = new Widget(new SvgG());
+  fabRow = new Widget(new SvgG());
   fabRow->node->setAttribute("box-anchor", "bottom right");
   fabRow->node->setAttribute("layout", "flex");
   fabRow->node->setAttribute("flex-direction", "row");
@@ -1327,6 +1466,11 @@ void TagDocList::createUI()
   backNoteFab->setVisible(false);
   backNoteFab->onClicked = [this](){ finish(REJECTED); };
   fabRow->addWidget(backNoteFab);
+  selectFab = static_cast<Button*>(createFab("icons/ic_menu_multiselect.svg", 44, false));
+  selectFab->setMargins(0, 17, 0, 0);
+  setupTooltip(selectFab, _("Select"));
+  selectFab->onClicked = [this](){ setSelectMode(true); };
+  fabRow->addWidget(selectFab);
   // DocumentList's "Open Whiteboard" toolbar button, as a secondary FAB; the connect dialog itself is
   //  ScribbleApp::openSharedDoc(), reached through the OPEN_WHITEBOARD result
   whiteboardFab = static_cast<Button*>(createFab("icons/ic_menu_people.svg", 44, false));
@@ -1356,6 +1500,48 @@ void TagDocList::createUI()
   addDocFab->onClicked = [this](){ newDoc(); };
   fabRow->addWidget(addDocFab);
   content->addWidget(fabRow);
+
+  // Select mode's actions take the FABs' place: one rounded container holding the count and a row of
+  //  FAB-sized buttons, the way the FABs would look grouped.  Done (X) is last, where Add Document was.
+  selectBar = new Widget(new SvgG());
+  selectBar->node->addClass("selectbar");
+  selectBar->node->setAttribute("box-anchor", "bottom right");
+  selectBar->node->setAttribute("layout", "box");
+  selectBar->setMargins(0, 48, 43, 0);
+  SvgRect* selectBarBg = new SvgRect(Rect::wh(20, 20), 14, 14);
+  selectBarBg->addClass("selectbar-bg");
+  selectBarBg->setAttribute("box-anchor", "fill");
+  selectBar->containerNode()->addChild(selectBarBg);
+  Widget* selectBarRow = new Widget(new SvgG());
+  selectBarRow->node->setAttribute("layout", "flex");
+  selectBarRow->node->setAttribute("flex-direction", "row");
+  selectBarRow->node->setAttribute("align-items", "center");
+  selectBarRow->setMargins(6);
+  selectCountText = createTextNode(_("Select documents"));
+  selectCountText->addClass("selectbar-count");
+  Widget* selectCount = new Widget(selectCountText);
+  selectCount->setMargins(0, 14, 0, 12);
+  selectBarRow->addWidget(selectCount);
+  selectAllBtn = createSelectBarButton("icons/ic_menu_select_all.svg", _("Select All"));
+  selectAllBtn->onClicked = [this](){ setAllSelected(true); };
+  selectBarRow->addWidget(selectAllBtn);
+  selectNoneBtn = createSelectBarButton("icons/ic_menu_select_none.svg", _("Select None"));
+  selectNoneBtn->onClicked = [this](){ setAllSelected(false); };
+  selectBarRow->addWidget(selectNoneBtn);
+  deleteSelectedBtn = createSelectBarButton("icons/ic_menu_discard.svg", _("Delete"));
+  deleteSelectedBtn->node->addClass("selectbar-delete");
+  deleteSelectedBtn->onClicked = [this](){ deleteSelectedDocs(); };
+  selectBarRow->addWidget(deleteSelectedBtn);
+  Widget* selectBarSep = new Widget(new SvgRect(Rect::wh(1, 28)));
+  selectBarSep->node->addClass("selectbar-sep");
+  selectBarSep->setMargins(0, 6);
+  selectBarRow->addWidget(selectBarSep);
+  Button* selectDoneBtn = createSelectBarButton("icons/ic_menu_cancel.svg", _("Done"));
+  selectDoneBtn->onClicked = [this](){ setSelectMode(false); };
+  selectBarRow->addWidget(selectDoneBtn);
+  selectBar->addWidget(selectBarRow);
+  selectBar->setVisible(false);
+  content->addWidget(selectBar);
 
   Widget* mainLayout = selectFirst("#main-layout");
   mainLayout->addWidget(sidebar);
@@ -1511,6 +1697,10 @@ void TagDocList::createUI()
   // everything, so this only ever runs when nothing more specific (a button, a row, the text edit
   // itself) already consumed the press.
   addHandler([this](SvgGui* gui, SDL_Event* event){
+    if(event->type == SDL_KEYDOWN && event->key.keysym.sym == SDLK_ESCAPE && selectMode) {
+      setSelectMode(false);
+      return true;
+    }
     // SvgGui::setFocused() dereferences its argument unconditionally (widget->window()), so it has
     // no way to express "clear focus" - clearing focusedWidget directly and sending FOCUS_LOST
     // ourselves is the same thing setFocused() itself does internally before assigning a new one.
@@ -1532,6 +1722,13 @@ void TagDocList::setup(Window* parent, bool hasCurrentNote)
   // a previous visit must not leave undo looking available on this one.
   hideUndo();
   selectedPage = -1;
+  // cached across opens like undo above: always back to the plain browser
+  selectMode = false;
+  selectedDocs.clear();
+  fabRow->setVisible(true);
+  selectBar->setVisible(false);
+  // clear of the status bar, which the window extends under (ScribbleApp::topInset)
+  docSearchRow->setMargins(8 + ScribbleApp::topInset, 24, 0, 24);
   // the editor's Tag Page dialog adds tags to the same index file; every edit here is saved as it is
   //  made, so reading the file back loses nothing
   tagStore.load();
