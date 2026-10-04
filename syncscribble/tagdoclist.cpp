@@ -83,8 +83,10 @@ Widget* TagDocList::createFab(const char* iconPath, real diameter, bool primary)
   // child that wasn't box-anchor="fill" deferring to a parent size nothing was actually setting).
   Button* fab = new Button(new SvgG());
   fab->node->setAttribute("layout", "box");
+  if(primary)
+    fab->node->addClass("fab-primary");
   SvgRect* bg = new SvgRect(Rect::wh(diameter, diameter), 10, 10);
-  bg->setAttribute("fill", primary ? "#2EA3CF" : "#444444");
+  bg->addClass("fab-bg");  // colors are theme variables (.tagdoclist .fab-bg in theme.cpp)
   fab->containerNode()->addChild(bg);
 
   real iconSize = primary ? 27 : 18;
