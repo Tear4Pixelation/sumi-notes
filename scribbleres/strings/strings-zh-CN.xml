@@ -300,7 +300,7 @@
   <string name="menu_page">页面</string>
   <string name="menu_newpageafter">在后面页新建页</string>
   <string name="menu_newpagebefore">在前面页新建页</string>
-  <string name="menu_deletepage">删除页</string>
+  <string name="menu_deletepage">删除当前页</string>
   <string name="menu_expanddown">向下扩展</string>
   <string name="menu_expandright">向右扩展</string>
   <string name="menu_zoom">缩放</string>

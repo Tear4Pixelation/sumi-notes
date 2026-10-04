@@ -305,7 +305,7 @@
   <string name="menu_page">Page</string>
   <string name="menu_newpageafter">New Page After</string>
   <string name="menu_newpagebefore">New Page Before</string>
-  <string name="menu_deletepage">Delete Page</string>
+  <string name="menu_deletepage">Delete Current Page</string>
   <string name="menu_expanddown">Expand Down</string>
   <string name="menu_expandright">Expand Right</string>
   <string name="menu_zoom">Zoom</string>

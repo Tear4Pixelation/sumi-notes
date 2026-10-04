@@ -268,6 +268,8 @@ void MainWindow::refreshCommonUI(ScribbleDoc* doc, const UIState* uiState)
   actionNew_Page_After->setEnabled(!uiState->rxOnly);
   actionNew_Page_Before->setEnabled(!uiState->rxOnly);
   actionSelect_Pages->setEnabled(!uiState->rxOnly);
+  // ScribbleDoc::deletePage() refuses to delete the only page
+  actionDelete_Page->setEnabled(!uiState->rxOnly && uiState->totalPages > 1);
   actionInsertDocument->setEnabled(!uiState->rxOnly);
   // change title button icon to a cloud when connected
   titleButton->setIcon(uiState->syncActive ? swbIcon : appIcon);
@@ -2068,6 +2070,9 @@ void MainWindow::setupActions()
       "Expand Right", ":/icons/ic_menu_expandright.svg", "", SLOT(doCommand(ID_EXPANDRIGHT)));
   actionSelect_Pages = createAction("actionSelect_Pages", "Select Pages", ":/icons/ic_menu_pagesel.svg", "Ctrl+Shift+P",
       SLOT(setMode(app->scribbleMode->getMode() == MODE_PAGESEL ? MODE_STROKE : MODE_PAGESEL);));
+  // no shortcut: deleting a page is undoable, but not something to trigger by a stray keypress
+  actionDelete_Page = createAction("actionDelete_Page",
+      "Delete Current Page", ":/icons/ic_menu_discard.svg", "", SLOT(doCommand(ID_DELPAGE)));
 
   actionUndo = createAction("actionUndo", "&Undo", ":/icons/ic_menu_undo.svg", "Ctrl+Z", SLOT(doCommand(ID_UNDO)));
   actionRedo = createAction("actionRedo", "&Redo", ":/icons/ic_menu_redo.svg", "Ctrl+Y", SLOT(doCommand(ID_REDO)));
@@ -2350,6 +2355,7 @@ void MainWindow::setupActions()
   pagemenu->addAction(actionExpand_Down);
   pagemenu->addAction(actionExpand_Right);
   pagemenu->addAction(actionSelect_Pages);
+  pagemenu->addAction(actionDelete_Page);
   pagemenu->addAction(actionScan_Page);
 
   ArrowPopup* viewmenu = createArrowPopup(Menu::HORZ);
@@ -2402,6 +2408,8 @@ void MainWindow::setupActions()
   menuWhiteboardBtn = overflowPopup->addSubmenu(_("Whiteboard"), menuWhiteboard);
   overflowPopup->addSubmenu(_("Document"), docmenu);
   overflowPopup->addSubmenu(_("Page"), pagemenu);
+  // also at the top level, not only under Page: it is important and would otherwise be hard to find
+  overflowPopup->addAction(actionDelete_Page);
   overflowPopup->addSubmenu(_("View"), viewmenu);
   overflowPopup->addSubmenu(_("Selection"), selectionmenu);
   overflowPopup->addAction(actionPage_Setup);
