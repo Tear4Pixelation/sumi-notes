@@ -141,6 +141,7 @@ public:
   Action* actionFullscreen;
   Action* actionSplitView;
   Action* actionSelect_Pages;
+  Action* actionDelete_Page;
   Action* actionViewSync;
   Action* actionViewSyncMaster;
   Action* actionBookmarksClose;
