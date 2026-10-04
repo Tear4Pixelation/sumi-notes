@@ -150,7 +150,8 @@ would make free erase work but would split curved shapes (ellipse, rounded box) 
 
 With the pen tool, **hold the pen still at the end of a stroke** for `shapeSnapDelay` seconds and the ink
 becomes the line, rectangle or ellipse it looks like; the rest of the gesture then scales it until the pen
-lifts. A held **scratch-out** (back and forth over something) erases what it was drawn over instead. The
+lifts. A **scratch-out** (back and forth over something) erases what it was drawn over instead - held,
+or, by default, as soon as the pen lifts (below). The
 delay is 0.5-1.5 s, 0 turns it off (default 0.8), and is in Preferences > Shapes plus the Pen and Shape
 Settings buttons. The recognizer is `syncscribble/shaperec.*` (+ `shaperecgeom.h`); its tuning, test set
 and gates live in `labs/shape-recognition/`, whose `make test` compiles **this** copy - run it after
@@ -164,10 +165,17 @@ were all refused. 240 Hz sampling by itself cost nothing.
   goes first, and a fallback axis must carry 40% of the motion, or the wobble across a plain line reads
   as reversals and the line erases what it crosses. See the lab README before touching either.
 
+- **Two scratch-out strengths.** The *hold* is eager (`Params` defaults: turns up to 0.3 of a pass, the
+  loose long-stroke rule from 12 reversals, zigzags 3x wider than high) - holding says "erase", so it
+  need not survive writing, and ~1.2% of other strokes erase. **Scratch out without holding**
+  (`scratchOutOnLift`: 0 off, 1 careful, 2 normal; Preferences > Shapes and Shape Settings) runs
+  `recognizeScribble(liftParams(level))` as the pen lifts, over every stroke written: 6 or 8 passes, turns
+  0.2, long rule from 24 - 0.07% / 0 false erases. Short scratch-outs are left to the hold on purpose.
+  The lift path needs `shapeSnapDelay` > 0, since that is what collects `snapSamples`.
 - **Long scratch-outs are judged more loosely.** Real ones over a line of text (25-45 reversals, loops,
-  arches, spikes) always have a short pass or a turn over the 0.2 gap limit: pass length and gap ignore
-  their worst 20%, and from 20 reversals a turn may be 0.6 wide. Don't loosen the base limit instead -
-  0.3 tripled false erases - nor start the long rule below 20 (16 fails the false-erase gate on mmm).
+  arches, spikes) always have a short pass or a turn over the gap limit: pass length and gap ignore
+  their worst 20-25%, and long strokes get a wider turn limit. On lift, don't start that rule below 24
+  or loosen the base 0.2 - long mmm arches then erase as you write.
 - **Real strokes:** config `recordShapeStrokes` = 1 logs every held stroke to `shape-strokes.strokes` in
   the library (lab format, plus what it was recognized as). Wrong ones, labelled, go in
   `labs/shape-recognition/fixtures/`, where `make test` gates their class.

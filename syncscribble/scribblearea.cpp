@@ -1495,14 +1495,15 @@ bool ScribbleArea::scratchOutOnLift()
   stroke.reserve(snapSamples.size());
   for(const Point& pt : snapSamples)
     stroke.emplace_back(pt.x*mScale, pt.y*mScale);
-  shaperec::Result result = shaperec::recognizeScribble(stroke);
+  shaperec::Result result = shaperec::recognizeScribble(stroke, shaperec::liftParams(cfg->Int("scratchOutOnLift")));
   if(result.kind != shaperec::Kind::Scribble)
     return false;
   std::vector<Point> area;
   for(const shaperec::Vec2& pt : result.points)
     area.push_back(Point(pt.x/mScale, pt.y/mScale));
   discardStrokeBuilder();
-  scratchOut(area);
+  // doReleaseEvent has already started the action for this stroke and ends it
+  scratchOut(area, false);
   return true;
 }
 
@@ -1682,7 +1683,7 @@ void ScribbleArea::commitSnapShape()
 }
 
 // returns the number of elements erased
-int ScribbleArea::scratchOut(const std::vector<Point>& area)
+int ScribbleArea::scratchOut(const std::vector<Point>& area, bool ownAction)
 {
   if(area.size() < 3)
     return 0;
@@ -1692,9 +1693,11 @@ int ScribbleArea::scratchOut(const std::vector<Point>& area)
   erased.doSelect();
   int count = erased.count();
   if(count > 0) {
-    scribbleDoc->startAction(currPageNum);
+    if(ownAction)
+      scribbleDoc->startAction(currPageNum);
     erased.deleteStrokes();
-    scribbleDoc->endAction();
+    if(ownAction)
+      scribbleDoc->endAction();
   }
   return count;
 }
@@ -3453,7 +3456,7 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
   case MODE_STROKE:
   {
     // a scratch-out needs no hold: it erases as the pen lifts
-    if(!snapActive && snapSamples.size() > 2 && cfg->Int("scribbleOnLift") && scratchOutOnLift()) {
+    if(!snapActive && snapSamples.size() > 2 && cfg->Int("scratchOutOnLift") > 0 && scratchOutOnLift()) {
       stopShapeSnap();
       break;
     }

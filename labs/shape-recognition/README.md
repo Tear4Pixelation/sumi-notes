@@ -49,10 +49,24 @@ Recognition only runs on a deliberate hold, so the user has asked for *something
 - **Line, rectangle and circle lean towards recognizing.** A wrong shape costs one undo, a missed one
   costs a redraw. Their recall gates are 99%. A stroke that is none of these (the "other" class) becoming
   a line or circle is reported, not gated.
-- **A scratch-out erases whatever is under it, so it must be unmistakable.** It is tested first, with
-  criteria of its own, and the gate is the other way round: at most 0.5% of everything else may come
-  out as a scratch-out. The measured rate is 0.1–0.4%, which is the price of making scratch-outs eager
-  (see below).
+- **A held scratch-out is eager.** Holding still after going back and forth plainly says "erase", and
+  the hold need not survive normal writing (a held mmm may erase). It is tested first, and at most 2% of
+  everything else may come out as a scratch-out; it measures 1.2-1.3%, nearly all mmm arches and random
+  wanders. Its defaults are `Params`'; it was 0.5% while the hold had to protect writing.
+- **The scratch-out on pen lift must leave writing alone** (`liftParams`, the app's "Scratch out without
+  holding": Off, Careful, Normal). It runs over every stroke written, with no hold to say the user meant
+  anything, so it needs a longer scratch-out (6 passes normal, 8 careful) and keeps the strict turn
+  limits. Gated at 0.1% false erases over both suites, and every recorded scratch-out must pass at both
+  levels:
+
+  | | scratch-outs caught | false erases |
+  |---|---|---|
+  | hold | 99.9% | 1.2-1.3% |
+  | lift, normal | 78-80% (the rest are 4-5 passes: hold for those) | 0.06-0.07% |
+  | lift, careful | 57-58% | 0 |
+
+  Mutation-tested: lift with the hold's parameters (1.26%), and lift's long rule from 12 reversals
+  (0.6%), each fail.
 
 ## Position
 

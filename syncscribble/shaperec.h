@@ -37,6 +37,12 @@ struct Params
   int holdMinSamples = 6;
 
   // --- scratch-out ---
+  // These defaults are the hold's, and eager: holding still after a back-and-forth says "erase" so
+  //  plainly that the hold need not survive normal writing (a held mmm may erase).  Measured over both
+  //  synthetic suites: 99.9% of scratch-outs, every recorded one, zigzags three times wider than high;
+  //  about 1% of everything else, nearly all mmm arches and random wanders.  The scratch-out on pen lift
+  //  runs over every stroke written and is far stricter - see liftParams().
+  //
   // back-and-forth passes: at least this many reversals (3 = four passes); 4 took recall on messy
   //  scratch-outs from 99.7% down to 87%
   int scribbleMinReversals = 3;
@@ -46,8 +52,9 @@ struct Params
   //  180 degrees are tried, for zigzags whose passes lean more than 45 degrees (0: only the mean) ...
   int scribbleAxisSteps = 11;
   // ... each only if the stroke's motion along it is at least this fraction of its arc length
-  //  (passes leaning 60 degrees: 0.5; the wobble across a line: a few percent)
-  double scribbleMinAlongFrac = 0.4;
+  //  (passes leaning 60 degrees: 0.5; 72 degrees, a zigzag three times wider than high: 0.3; the wobble
+  //  across a line: a few percent)
+  double scribbleMinAlongFrac = 0.25;
   // every interior pass at least this fraction of the median pass length
   double scribbleMinPassFrac = 0.4;
   // passes are straight: median chord/arc, and the worst pass
@@ -55,17 +62,16 @@ struct Params
   double scribbleMinWorstStraightness = 0.65;
   // at a reversal the pen comes straight back: the lines of the two passes either side of it meet
   //  within this fraction of the pass length of each other, across the axis.  The sides of an arch
-  //  (m, n) are an arch-width apart
-  double scribbleMaxReversalGap = 0.2;
+  //  (m, n) are an arch-width apart.  0.2 kept held mmm from erasing; the hold no longer has to
+  double scribbleMaxReversalGap = 0.3;
   // ... and at least this many reversals may turn up to the second limit: a scribble along a whole line
-  //  of text is loose - loops, arches, spikes.  Below it, mmm and cursive are the strokes that turn
-  //  wide; 16 reversals already let long synthetic mmm through above the false-erase gate
-  int scribbleLongReversals = 20;
-  double scribbleLongMaxReversalGap = 0.6;
+  //  of text is loose - loops, arches, spikes
+  int scribbleLongReversals = 12;
+  double scribbleLongMaxReversalGap = 0.8;
   // the pass-length and reversal tests ignore their worst fraction: a scratch-out over a line of text
   //  (30 reversals) always has a few passes cut short and turns just over the limit.  The arches of mmm
   //  are every other reversal, far more than this
-  double scribbleOutlierFrac = 0.2;
+  double scribbleOutlierFrac = 0.25;
 
   // --- line ---
   // RMS distance from the fitted line, as a fraction of line length
@@ -141,5 +147,9 @@ struct Result
 Result recognize(const std::vector<Vec2>& stroke, const Params& params = Params());
 // only the scratch-out test, for a stroke that just ended without a hold: Kind::Scribble or Kind::None
 Result recognizeScribble(const std::vector<Vec2>& stroke, const Params& params = Params());
+// The scratch-out on pen lift, which runs over every stroke written, so it must leave handwriting alone:
+//  1 careful, 2 normal (anything else: normal).  Both need longer scratch-outs than the hold - a short
+//  one of four passes is what holding is for
+Params liftParams(int level);
 
 }  // namespace shaperec
