@@ -150,7 +150,9 @@ private:
 
   Button* cbSnaptoGrid;
   Button* cbLineDrawing;
-  //Button* comboPressure;
+  // how much thinner a light touch draws than a full press, in percent (ScribblePen::pressureSensitivity)
+  SpinBox* spinPressure;
+  Widget* pressureRow;
   SpinBox* spinWidth;
   Widget* widthSpinRow;
   CheckBox* cbRelWidth;

@@ -37,6 +37,26 @@ public:
   bool hasVarWidth() const { return flags & WIDTH_MASK; }
   bool usesPressure() const { return hasFlag(WIDTH_PR); }
 
+  // Pressure sensitivity as the user sees it: how much thinner the lightest touch draws than a full press,
+  //  as a fraction of the width - wRatio, read as 0 for a pen that ignores pressure.  wRatio is shared with
+  //  the speed and direction variants, so a fountain pen's direction range moves with it; 0 turns pressure
+  //  off but leaves wRatio alone when another variant still needs it.
+  Dim pressureSensitivity() const { return usesPressure() ? wRatio : 0; }
+  void setPressureSensitivity(Dim amount)
+  {
+    amount = std::min(std::max(amount, Dim(0)), Dim(1));
+    if(amount <= 0) {
+      setFlag(WIDTH_PR, false);
+      if(!hasVarWidth())
+        wRatio = 0;
+      return;
+    }
+    setFlag(WIDTH_PR, true);
+    wRatio = amount;
+    if(prParam == 0)
+      prParam = 2;  // the default pens' curve; 0 would make the width ignore pressure entirely
+  }
+
   // Line style.  What is stored - on a pen as dash/gap, on a path as stroke-dasharray - is the absolute
   //  pattern; the style is derived from it by measuring against the width, never stored, so a pattern
   //  written by anything else still reads as one of the three.  Dashes are sized in widths so that a
