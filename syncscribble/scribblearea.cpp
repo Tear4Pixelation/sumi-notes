@@ -2152,18 +2152,24 @@ void ScribbleArea::ungroupSelection()
   scribbleDoc->endAction();
 }
 
-void ScribbleArea::insertImage(Image image)
+Rect ScribbleArea::insertImage(Image image, const Rect& below)
 {
+  static constexpr Dim STACK_GAP = 20;
+
   doCancelAction();
   Clipboard clip;
-  Point center = screenToDim(screenRect.center());
   Dim imgw = image.getWidth()*unitsPerPx, imgh = image.getHeight()*unitsPerPx;
   Dim s = std::min(Dim(1), std::min(currPage->width()/2/imgw, currPage->height()/2/imgh));
+  // doPasteAt pulls an image that would hang off the page back onto it, so a stack that runs out of
+  //  room overlaps at the bottom of the page rather than disappearing
+  Point center = below.isValid() ? Point(below.center().x, below.bottom + STACK_GAP + imgh*s/2)
+      : screenToDim(screenRect.center());
   Rect bbox = Rect::centerwh(center, imgw*s, imgh*s);
   clip.addStroke(new Element(new SvgImage(std::move(image), bbox)));
   doPasteAt(&clip, center, PasteFlags(PasteOrigPos | PasteMoveClipboard | PasteUndoable));
   uiChanged(UIState::Paste);
   doRefresh();
+  return currSelection ? pageDimToDim(currSelection->getBBox()) : Rect();
 }
 
 // page units around ink captured without a drawn outline: ~4 mm, enough that the capture does not look

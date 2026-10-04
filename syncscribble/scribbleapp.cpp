@@ -2985,8 +2985,19 @@ void ScribbleApp::pickImage()
 //   no camera means straight to the file picker, as before
 void ScribbleApp::scanDocument(bool asPage)
 {
-  pendingScan = true;
   pendingScanAsPage = asPage;
+  // a fresh scan, not the continuation of an earlier Add more run (which may have been abandoned in the
+  //  picker, leaving these set)
+  lastScanPage = -1;
+  lastScanRect = Rect();
+  captureScan();
+}
+
+// gets a photo and hands it to finishScan(), directly on desktop or via the picker's INSERT_IMAGE event on
+//  mobile; separate from scanDocument() so Add more can run it again without losing its place
+void ScribbleApp::captureScan()
+{
+  pendingScan = true;
 #if PLATFORM_IOS
   showScanImagePicker();
 #elif PLATFORM_ANDROID
@@ -3022,16 +3033,28 @@ void ScribbleApp::finishScan(Image photo)
   pendingScan = false;
   if(photo.isNull())
     return;
-  ScanDialog dialog(std::move(photo));
-  if(execDialog(&dialog) != Dialog::ACCEPTED)
-    return;
-  Image scan = dialog.takeResult();
+  int res;
+  Image scan(0, 0);
+  {
+    ScanDialog dialog(std::move(photo));
+    res = execDialog(&dialog);
+    if(res == Dialog::ACCEPTED || res == ScanDialog::ADD_MORE)
+      scan = dialog.takeResult();
+  }  // frees the full size photo before Add more goes and fetches another one
   if(scan.isNull() || scan.width <= 0 || scan.height <= 0)
     return;
-  if(!asPage) {
-    activeArea()->insertImage(std::move(scan));
-    return;
-  }
+  if(asPage)
+    insertScanPage(std::move(scan));
+  else
+    lastScanRect = activeArea()->insertImage(std::move(scan), lastScanRect);
+  // Add more: the dialog has already closed, so on desktop this nests one level per extra page, which is
+  //  harmless; on mobile it just opens the picker and returns
+  if(res == ScanDialog::ADD_MORE)
+    captureScan();
+}
+
+void ScribbleApp::insertScanPage(Image scan)
+{
   // As a page, the scan is the background, exactly as an imported PDF page is: in the rule layer, so it
   //  cannot be selected, dragged or erased while writing on top of it.  See pdfimport.cpp for why
   //  isCustomRuling and the two classes below are what make that survive a page resize and a save/load.
@@ -3051,11 +3074,15 @@ void ScribbleApp::finishScan(Image photo)
   // unlike PDF import, which writes a file and reopens it, this goes into the open document, so it has
   //  to go through ScribbleDoc to get undo and sync - which needs the start/endAction pair, or the
   //  insertion is not recorded as an undoable action
+  // the first scan goes after the current page, each Add more scan after the one before it - clamped, in
+  //  case a sync peer deleted pages while the picker was open
   ScribbleDoc* doc = activeDoc();
-  int where = activeArea()->getCurrPageNum() + 1;
+  int where = lastScanPage >= 0 ? std::min(lastScanPage + 1, doc->document->numPages())
+      : activeArea()->getCurrPageNum() + 1;
   doc->startAction(where);
   doc->insertPage(page, where);
   doc->endAction();
+  lastScanPage = where;
 }
 
 void ScribbleApp::insertImage(const std::string& filename)

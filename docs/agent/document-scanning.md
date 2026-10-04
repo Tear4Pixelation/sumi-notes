@@ -36,6 +36,18 @@ the nearest corner (no hit radius), and the corner then moves `DRAG_RATIO` (0.4)
 from where it went down. The corner never jumps to the finger, so it is never hidden under it and can be
 placed more finely than a fingertip can point. Making it follow the finger again undoes both.
 
+Dialog layout: Back (arrow) and Cancel (cross) are in a header around the title, not the bottom row - the
+template's `.window-title` node is moved into that row rather than recreated, so it keeps its theme
+styling. The bottom row holds only the ways forward: Next on the corner step, **Add More** and Done on the
+filter step. `cancelBtn` is still the dialog's cancel button, so Escape / Android back keep working.
+
+**Add More** finishes with `ScanDialog::ADD_MORE`; `finishScan()` inserts that scan as usual and then calls
+`captureScan()` again (the photo half of `scanDocument()`, split out so it does not reset the run). Each
+follow-up goes right after the previous one: as a page at `lastScanPage + 1`, as an element stacked
+below `lastScanRect` (`ScribbleArea::insertImage()` takes and returns that rect). `scanDocument()` resets
+both, because a run abandoned in a mobile picker leaves them set. On desktop the next capture runs nested
+inside the previous `finishScan()`; the `ScanDialog` (and its full size photo) is destroyed before it.
+
 Where the photo comes from is per platform (`ScribbleApp::scanDocument()`); in every case a
 `pendingScan` flag on `ScribbleApp` diverts it into `ScanDialog`:
 

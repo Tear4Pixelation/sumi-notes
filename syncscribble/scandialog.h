@@ -18,7 +18,10 @@ class ScanDialog : public PopupDialog
 public:
   explicit ScanDialog(Image photo);
 
-  // the flattened, filtered image - only meaningful once the dialog has finished with ACCEPTED
+  // Done, but go on to scan another page straight after this one (front and back of a sheet, say)
+  enum { ADD_MORE = ACCEPTED + 1 };
+
+  // the flattened, filtered image - only meaningful once the dialog has finished with ACCEPTED or ADD_MORE
   Image takeResult() { return std::move(result); }
 
 private:
@@ -34,6 +37,7 @@ private:
   Button* rotateBtn;
   Button* backBtn;
   Button* nextBtn;
+  Button* addMoreBtn;
   int quarterTurns = 0;
   int step = 0;
 };
