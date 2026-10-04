@@ -18,5 +18,7 @@
 	<string>Sumi</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.styluslabs.write3mac</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Sumi uses the camera to scan paper pages into your notes.</string>
 </dict>
 </plist>

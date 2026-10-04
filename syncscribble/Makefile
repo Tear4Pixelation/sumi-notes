@@ -48,6 +48,8 @@ SOURCES = \
   tagmenu.cpp \
   addpagemenu.cpp \
   scandialog.cpp \
+  camera.cpp \
+  cameradialog.cpp \
   configdialog.cpp \
   linkdialog.cpp \
   pentoolbar.cpp \
@@ -126,6 +128,7 @@ ifeq ($(OS),Windows_NT)
 
 SOURCES += \
   windows/winhelper.cpp \
+  windows/camera_mf.cpp \
   windows/wintab/Utils.c \
   ../nanovgXC/glad/glad.c
 
@@ -140,7 +143,8 @@ FWDSLASH := /
 BACKSLASH_ESC := [\\]
 DEPENDBASE ?= $(subst $(FWDSLASH),$(BACKSLASH_ESC),$(abspath ..))
 
-# shell32 for ShellExecute; user32 for clipboard fns; libs below opengl32.lib needed only for static SDL
+# shell32 for ShellExecute; user32 for clipboard fns; libs below opengl32.lib needed only for static SDL,
+#  except mf* (Media Foundation, for the camera in windows/camera_mf.cpp)
 LIBS = \
   ws2_32.lib \
   shell32.lib \
@@ -154,7 +158,11 @@ LIBS = \
   advapi32.lib \
   setupapi.lib \
   imm32.lib \
-  version.lib
+  version.lib \
+  mfplat.lib \
+  mf.lib \
+  mfreadwrite.lib \
+  mfuuid.lib
 
 SDL_LIB ?= ../SDL/Release/SDL2.lib
 LIBS += $(SDL_LIB)
@@ -180,11 +188,11 @@ else ifneq ($(MACOS),)
 # pass MACOS=1 to make to force macOS build (instead of default of iOS on mac)
 
 APPDIR = Sumi.app
-SOURCES += macos/macoshelper.m ../nanovgXC/glad/glad.c
+SOURCES += macos/macoshelper.m macos/camera_avf.m macos/camera_mac.cpp ../nanovgXC/glad/glad.c
 INCSYS += ../SDL/include
 DEFS += SCRIBBLE_TEST_PATH='"$(CURDIR)/../scribbletest"'
 LIBS = ../SDL/MacRelease/libSDL2.a -liconv
-FRAMEWORKS = CoreServices CoreGraphics IOKit Metal OpenGL AppKit CoreVideo Carbon
+FRAMEWORKS = CoreServices CoreGraphics IOKit Metal OpenGL AppKit CoreVideo Carbon AVFoundation CoreMedia
 #AudioToolbox CoreAudio ForceFeedback
 # copied to root of app bundle
 INFOPLIST = macos/Info.plist
@@ -337,7 +345,7 @@ $(OBJDIR)/resources.o: wasm/Roboto-Regular.c
 
 else
 
-SOURCES += linux/linuxtablet.c linux/sdl3input.cpp ../nanovgXC/glad/glad.c
+SOURCES += linux/linuxtablet.c linux/sdl3input.cpp linux/camera_v4l2.cpp ../nanovgXC/glad/glad.c
 DEFS += SCRIBBLE_TEST_PATH='"$(CURDIR)/../scribbletest"'
 DEBUG ?= 0
 USE_SYSTEM_SDL ?= 0

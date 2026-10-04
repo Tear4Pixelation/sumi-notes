@@ -70,6 +70,8 @@
 	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Sumi uses the camera to scan paper pages into your notes.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Sumi can save an image of the document to your photo library for easy sharing.</string>
 	<key>UIFileSharingEnabled</key>

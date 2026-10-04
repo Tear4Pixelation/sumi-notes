@@ -21,6 +21,7 @@
 #include "rulingdialog.h"
 #include "themedialog.h"
 #include "scandialog.h"
+#include "cameradialog.h"
 #include "pentoolbar.h"
 #include "linkdialog.h"
 #include "configdialog.h"
@@ -2877,15 +2878,42 @@ void ScribbleApp::pickImage()
 #endif
 }
 
-// Scanning reuses insertImage()'s picker - on Android that is already a chooser merging every camera
-//  app with the gallery, and it needs no Play Services and no CAMERA permission, since the camera app
-//  does the capturing.  pendingScan then diverts the picked image into ScanDialog.
+// Where the photo comes from depends on the platform, and pendingScan then diverts it into ScanDialog:
+// - Android: insertImage()'s picker, which is already a chooser merging every camera app with the
+//   gallery - no Play Services and no CAMERA permission, since the camera app does the capturing
+// - iOS: Take Photo / Photo Library when the device has a camera, the library alone when it does not
+// - desktop: CameraDialog when Camera::list() finds a camera, with the file picker one button away;
+//   no camera means straight to the file picker, as before
 void ScribbleApp::scanDocument(bool asPage)
 {
   pendingScan = true;
   pendingScanAsPage = asPage;
+#if PLATFORM_IOS
+  showScanImagePicker();
+#elif PLATFORM_ANDROID
   pickImage();
-  // if the user cancelled the picker the flag stays set, which is harmless: the next plain insert
+#else
+  std::vector<CameraInfo> cameras = Camera::list();
+  if(cameras.empty()) {
+    pickImage();
+    return;
+  }
+  int res;
+  Image photo(0, 0);
+  {
+    CameraDialog dialog(std::move(cameras));
+    res = execDialog(&dialog);
+    if(res == Dialog::ACCEPTED)
+      photo = dialog.takePhoto();
+  }  // closes the camera before the scan dialog opens, so its light goes off while cropping
+  if(res == Dialog::ACCEPTED)
+    finishScan(std::move(photo));
+  else if(res == CameraDialog::CHOOSE_FILE)
+    pickImage();
+  else
+    pendingScan = false;
+#endif
+  // if the user cancelled a picker the flag stays set, which is harmless: the next plain insert
   //  clears it and the next scan overwrites it
 }
 

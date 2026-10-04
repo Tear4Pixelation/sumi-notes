@@ -49,6 +49,17 @@ static void uiImagePicked(UIImage* image, BOOL isJpeg, int fromclip)
   //for(id key in info) NSLog(@"key=%@ value=%@", key, [info objectForKey:key]);
   UIImage* image = info[UIImagePickerControllerOriginalImage];  //UIImagePickerControllerEditedImage];
   [picker dismissViewControllerAnimated:YES completion:nil];
+  // a camera photo is stored sideways with an EXIF orientation, which stb_image ignores - redraw it
+  //  upright, or a scan would open rotated a quarter turn
+  if(image.imageOrientation != UIImageOrientationUp) {
+    UIGraphicsImageRendererFormat* format = [UIGraphicsImageRendererFormat defaultFormat];
+    format.scale = image.scale;
+    format.opaque = YES;
+    UIGraphicsImageRenderer* renderer = [[UIGraphicsImageRenderer alloc] initWithSize:image.size format:format];
+    image = [renderer imageWithActions:^(UIGraphicsImageRendererContext* ctx) {
+      [image drawInRect:CGRectMake(0, 0, image.size.width, image.size.height)];
+    }];
+  }
   // UIImagePickerControllerMediaType is public.image, so not useful for determined type
   NSURL* url = info[UIImagePickerControllerImageURL];
   BOOL isPng = url && [url.pathExtension caseInsensitiveCompare:@"png"] == NSOrderedSame;
@@ -57,17 +68,49 @@ static void uiImagePicked(UIImage* image, BOOL isJpeg, int fromclip)
 
 @end
 
-void showImagePicker(void)
+static void presentImagePicker(UIImagePickerControllerSourceType source)
 {
   //UIViewController* viewController = UIApplication.sharedApplication.delegate.window.rootViewController;
   ImagePicker* picker = [[ImagePicker alloc] init];
   picker.delegate = picker;
   picker.allowsEditing = NO;
-  picker.sourceType = UIImagePickerControllerSourceTypePhotoLibrary;  //UIImagePickerControllerSourceTypeCamera;
+  picker.sourceType = source;
   // FormSheet and Popover are too small; PageSheet fills screen in portrait orientation; default seems to fill
-  //  the screen in both orientations
-  picker.modalPresentationStyle = UIModalPresentationPageSheet;
+  //  the screen in both orientations.  The camera is always full screen.
+  picker.modalPresentationStyle = source == UIImagePickerControllerSourceTypeCamera ?
+      UIModalPresentationFullScreen : UIModalPresentationPageSheet;
   [sdlViewController presentViewController:picker animated:YES completion:nil];
+}
+
+void showImagePicker(void)
+{
+  presentImagePicker(UIImagePickerControllerSourceTypePhotoLibrary);
+}
+
+// The camera picker has no way across to the library, so a scan asks first.  Without a camera (the
+//  simulator, an old iPad) there is nothing to ask and the library opens directly, as for Insert Image.
+void showScanImagePicker(void)
+{
+  if(![UIImagePickerController isSourceTypeAvailable:UIImagePickerControllerSourceTypeCamera]) {
+    showImagePicker();
+    return;
+  }
+  UIAlertController* sheet = [UIAlertController alertControllerWithTitle:nil message:nil
+      preferredStyle:UIAlertControllerStyleActionSheet];
+  [sheet addAction:[UIAlertAction actionWithTitle:@(_("Take Photo")) style:UIAlertActionStyleDefault
+      handler:^(UIAlertAction* action) { presentImagePicker(UIImagePickerControllerSourceTypeCamera); }]];
+  [sheet addAction:[UIAlertAction actionWithTitle:@(_("Photo Library")) style:UIAlertActionStyleDefault
+      handler:^(UIAlertAction* action) { presentImagePicker(UIImagePickerControllerSourceTypePhotoLibrary); }]];
+  [sheet addAction:[UIAlertAction actionWithTitle:@(_("Cancel")) style:UIAlertActionStyleCancel handler:nil]];
+  // on iPad an action sheet is a popover, and presenting one without an anchor throws
+  UIPopoverPresentationController* popover = sheet.popoverPresentationController;
+  if(popover) {
+    UIView* view = sdlViewController.view;
+    popover.sourceView = view;
+    popover.sourceRect = CGRectMake(CGRectGetMidX(view.bounds), CGRectGetMidY(view.bounds), 0, 0);
+    popover.permittedArrowDirections = 0;
+  }
+  [sdlViewController presentViewController:sheet animated:YES completion:nil];
 }
 
 // clipboard state

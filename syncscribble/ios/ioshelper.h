@@ -7,6 +7,8 @@ extern "C" {
 extern void iosPumpEventsBlocking(void);
 extern void iosWakeEventLoop(void);
 extern void showImagePicker(void);
+// Take Photo / Photo Library when there is a camera; results go to imagePicked() like showImagePicker()
+extern void showScanImagePicker(void);
 extern void iosOpenUrl(const char* url);
 extern void iosRequestReview(void);
 extern const char* iosGetLocale(void);

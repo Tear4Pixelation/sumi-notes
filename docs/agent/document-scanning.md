@@ -31,14 +31,44 @@ Imaging lives in `ulib` (no dependency on `Painter`/nanovg, so it is unit testab
     **iterated three times** - one pass only sees pixels inside its own window and is biased toward the
     middle of the edge. This is what takes worst-corner error from 160 px to 11 px.
 
-Capture needs no new platform code and **no Play Services and no CAMERA permission**: `scanDocument()`
-reuses `insertImage()`'s picker, which on Android is already a chooser merging every
-`MediaStore.ACTION_IMAGE_CAPTURE` activity with the gallery (`MainActivity.getImage()`), delegating the
-actual capture to whatever camera app is installed. A `pendingScan` flag on `ScribbleApp` diverts the
-picked photo into `ScanDialog`. Note that flag must be checked in **two** places: Android and iOS post
-an `INSERT_IMAGE` event, but the desktop picker returns a filename and calls `insertImage(filename)`
-directly, never touching that event - miss it and desktop silently inserts the raw photo. `insertImage()`
-clears the flag so a cancelled picker cannot hijack a later plain image insert.
+Where the photo comes from is per platform (`ScribbleApp::scanDocument()`); in every case a
+`pendingScan` flag on `ScribbleApp` diverts it into `ScanDialog`:
+
+- **Android** - `insertImage()`'s picker, which is already a chooser merging every
+  `MediaStore.ACTION_IMAGE_CAPTURE` activity with the gallery (`MainActivity.getImage()`). The installed
+  camera app does the capture, so this needs **no Play Services and no CAMERA permission**.
+- **iOS** - `showScanImagePicker()` (`ios/ioshelper.m`): a Take Photo / Photo Library action sheet when
+  `UIImagePickerController` reports a camera, the library directly when not (simulator). The camera
+  picker cannot reach the library, hence asking first. On iPad the sheet is a popover and must be given
+  an anchor, or presenting it throws. Camera photos arrive sideways with an EXIF orientation that
+  stb_image ignores, so the picker delegate **redraws any non-`Up` image upright** before encoding - this
+  also fixes rotated library photos for plain Insert Image. Needs `NSCameraUsageDescription` in both
+  iOS plists, or iOS kills the app when the camera opens.
+- **Desktop** - `Camera::list()` (`camera.h`); if it finds anything, `CameraDialog` shows a live preview
+  with Capture, a camera combo when there are several, and Choose File... to fall back to the picker.
+  No camera means the file picker, exactly as before. Backends, all with the largest frame size the
+  camera offers, since a scan wants pixels:
+  - Linux `linux/camera_v4l2.cpp` - raw V4L2 mmap streaming, MJPEG preferred over YUYV (bandwidth limited
+    to a few fps at full size). Filters on `device_caps`, because a UVC camera exposes a second
+    metadata-only `/dev/videoN`. Verified on an eMeet Nova: 1920x1080 MJPEG at ~26 fps, live preview,
+    Capture into `ScanDialog`, and the device is closed again on both Capture and Cancel.
+  - Windows `windows/camera_mf.cpp` - Media Foundation source reader asked for RGB32 with
+    `MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING`, so it inserts the MJPEG/NV12 decoder itself. **Not yet
+    compiled or run** - written without a Windows toolchain.
+  - macOS `macos/camera_avf.m` (plain C interface, so no Objective-C++ rule) + `macos/camera_mac.cpp`.
+    Needs `NSCameraUsageDescription` in `macos/Info.plist`, and the `com.apple.security.device.camera`
+    entitlement once the app is signed with a hardened runtime. **Not yet compiled or run.**
+  - everything else (wasm) compiles the stub in `camera.cpp`, which lists no cameras.
+
+  **MJPEG trap:** UVC webcams may omit the Huffman tables (DHT) from each frame, and stb_image does not
+  fail on that - it decodes noise. `decodeMjpegFrame()` inserts the standard Annex K tables when a frame
+  has none (checked: without them stb's output differed from the original by 466832 summed byte values,
+  with them by 0).
+
+The `pendingScan` flag must be checked in **two** places: Android and iOS post an `INSERT_IMAGE` event,
+but the desktop picker returns a filename and calls `insertImage(filename)` directly, never touching that
+event - miss it and desktop silently inserts the raw photo. `insertImage()` clears the flag so a
+cancelled picker cannot hijack a later plain image insert.
 
 Output is either an element (`ScribbleArea::insertImage()`, unchanged) or a page background. The page
 path follows the same convention as PDF import - image in `ruleNode`, `write-std-ruling` removed,
