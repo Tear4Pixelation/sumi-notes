@@ -23,6 +23,12 @@
         <Component Id="DroidSansFallback_ttf" Guid="*">
          <File Id="DroidSansFallback_ttf_File" Source="DroidSansFallback.ttf"/>
         </Component>
+        <Component Id="Raleway_Bold_ttf" Guid="*">
+         <File Id="Raleway_Bold_ttf_File" Source="Raleway-Bold.ttf"/>
+        </Component>
+        <Component Id="Satoshi_Medium_otf" Guid="*">
+         <File Id="Satoshi_Medium_otf_File" Source="Satoshi-Medium.otf"/>
+        </Component>
       </Directory>
     </Directory>
 
@@ -58,6 +64,8 @@
     <ComponentRef Id="Intro_svg"/>
     <ComponentRef Id="Roboto_Regular_ttf"/>
     <ComponentRef Id="DroidSansFallback_ttf"/>
+    <ComponentRef Id="Raleway_Bold_ttf"/>
+    <ComponentRef Id="Satoshi_Medium_otf"/>
     <ComponentRef Id="ApplicationShortcuts"/>
   </Feature>
 </Product>

@@ -13,6 +13,10 @@ public:
   static void openUrl(const char* url);
   static void sendFile(const char* filename, const char* mimetype, const char* title);
   static void getImage();
+  // the system file picker (ACTION_OPEN_DOCUMENT / ACTION_CREATE_DOCUMENT) for FilePicker; the result
+  //  comes back through jniFilePicked
+  static void pickFile(int requestId, const char* exts);
+  static void exportFile(int requestId, const char* srcPath, const char* suggestedName);
   static bool rawResourceToFile(const char* resname, const char* outfile);
   static void blitSurface(void* pixels, int width, int height, int x, int y, int w, int h);
 

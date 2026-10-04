@@ -93,6 +93,17 @@ static void testContains(const FSPath& scratch)
   libraryCheckTrue(!DocLibrary::contains(library, scratch.child("Lib/../doc.svgz")), "a path escaping with .. is outside");
   libraryCheckTrue(!DocLibrary::contains(library, library), "the library itself is not a document inside it");
   libraryCheckTrue(!DocLibrary::contains(FSPath(""), library.child("doc.svgz")), "no library contains nothing");
+  // iOS: /var is a symlink to /private/var and paths come in either spelling, the library's own included.
+  //  Only stripping the file's prefix made every document look external, so each open imported a copy.
+  FSPath iosLibrary("/private/var/mobile/Containers/Data/Application/A1/Documents/Sumi/");
+  libraryCheckTrue(DocLibrary::contains(iosLibrary, iosLibrary.child("doc.svgz")),
+      "an iOS library under /private/var contains its own documents");
+  libraryCheckTrue(DocLibrary::contains(iosLibrary, FSPath("/var/mobile/Containers/Data/Application/A1/Documents/Sumi/doc.svgz")),
+      "a /var spelling of a document is inside a /private/var library");
+  libraryCheckTrue(DocLibrary::contains(FSPath("/var/mobile/Containers/Data/Application/A1/Documents/Sumi/"), iosLibrary.child("doc.svgz")),
+      "a /private/var spelling of a document is inside a /var library");
+  libraryCheckTrue(!DocLibrary::contains(iosLibrary, FSPath("/var/mobile/Containers/Data/Application/A1/Documents/doc.svgz")),
+      "a document next to the iOS library is still outside it");
 }
 
 static void testUniquePath(const FSPath& scratch)

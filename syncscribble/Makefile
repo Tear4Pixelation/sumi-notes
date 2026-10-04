@@ -36,6 +36,7 @@ SOURCES = \
   tagstore.cpp \
   tagdoclist.cpp \
   doclibrary.cpp \
+  filepicker.cpp \
   notefulfile.cpp \
   notefulimport.cpp \
   sidebar.cpp \
@@ -167,6 +168,8 @@ ZIPDIR = Sumi
 DISTRES = \
   ..\scribbleres\fonts\Roboto-Regular.ttf \
   ..\scribbleres\fonts\DroidSansFallback.ttf \
+  ..\scribbleres\fonts\Raleway-Bold.ttf \
+  ..\scribbleres\fonts\Satoshi-Medium.otf \
   ..\scribbleres\Intro.svg
 # installer
 WXS = windows\InstallWrite.wxs
@@ -190,6 +193,8 @@ DISTRES = \
   ../scribbleres/macos/write.icns \
   ../scribbleres/fonts/SanFranciscoDisplay-Regular.otf \
   ../scribbleres/fonts/DroidSansFallback.ttf \
+  ../scribbleres/fonts/Raleway-Bold.ttf \
+  ../scribbleres/fonts/Satoshi-Medium.otf \
   ../scribbleres/Intro.svg
 # copied to root of dmg
 DMGRES = ../scribbleres/macos/Readme.txt
@@ -207,6 +212,8 @@ XCASSETS = ../scribbleres/Assets.xcassets
 IOSRES = \
   ../scribbleres/fonts/SanFranciscoDisplay-Regular.otf \
   ../scribbleres/fonts/DroidSansFallback.ttf \
+  ../scribbleres/fonts/Raleway-Bold.ttf \
+  ../scribbleres/fonts/Satoshi-Medium.otf \
   ../scribbleres/Intro.svg
 INFOPLIST = ios/Info.plist
 IOS_MIN_VERSION ?= 15.0
@@ -250,7 +257,7 @@ ifneq ($(IOS_SIGN_ID),)
 endif
 
 INCSYS += ../SDL/include
-FRAMEWORKS = AVFoundation GameController CoreMotion Foundation UIKit CoreGraphics OpenGLES QuartzCore CoreAudio AudioToolbox Metal StoreKit
+FRAMEWORKS = AVFoundation GameController CoreMotion Foundation UIKit CoreGraphics OpenGLES QuartzCore CoreAudio AudioToolbox Metal StoreKit UniformTypeIdentifiers
 
 SIM ?= 0
 ifneq ($(SIM), 0)
@@ -362,6 +369,8 @@ TGZ = write$(GITCOUNT).tar.gz
 DISTRES = \
   ../scribbleres/fonts/Roboto-Regular.ttf \
   ../scribbleres/fonts/DroidSansFallback.ttf \
+  ../scribbleres/fonts/Raleway-Bold.ttf \
+  ../scribbleres/fonts/Satoshi-Medium.otf \
   ../scribbleres/Intro.svg \
   ../scribbleres/linux/Sumi.desktop \
   ../scribbleres/linux/Sumi144x144.png \

@@ -25,6 +25,9 @@ extern char* iosGetSecuredBookmark(void* _doc);
 extern void iosSetDocThumbnail(void* _doc, void* data, int width, int height);
 extern void iosSaveAs(long mode);
 extern void iosPickDocument(long mode);
+// the system document picker, for any file (FilePicker in filepicker.cpp); results go to filePicked()
+extern void iosPickFile(int requestId, const char* exts);
+extern void iosExportFile(int requestId, const char* path);
 
 enum PickerMode_t { iosOpenDocMode = 0, iosUpdateDocMode, iosChooseDocMode, iosInsertDocMode,
     iosSaveAsMode, iosExportPdfMode, iosConflictSaveMode };
@@ -32,6 +35,7 @@ enum PickerMode_t { iosOpenDocMode = 0, iosUpdateDocMode, iosChooseDocMode, iosI
 // functions expected to be available in Write
 extern void imagePicked(const void* data, int len, int fromclip);
 extern void pencilBarrelTap(void);
+extern void filePicked(int requestId, const char* path);  // path NULL if cancelled
 extern void* loadDocumentContents(void* data, size_t len, size_t reserve, const char* url, void* uidoc);
 extern const char* getCfgString(const char* name, const char* dflt);
 extern const char* _(const char*);  // translations

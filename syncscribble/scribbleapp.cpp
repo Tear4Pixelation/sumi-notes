@@ -15,6 +15,7 @@
 #include "addpagemenu.h"
 #include "tagstore.h"
 #include "doclibrary.h"
+#include "filepicker.h"
 #include "pdfimport.h"
 #include "notefulimport.h"
 #include "rulingdialog.h"
@@ -124,6 +125,14 @@ ScribbleApp::ScribbleApp(int argc, char* argv[])
     createPath(savedPath.c_str());
     AndroidHelper::rawResourceToFile("DroidSansFallback.ttf", fallbackFont.c_str());
   }
+  // the document browser's typefaces (setupResources() in resources.cpp)
+  for(const char* designFont : {"Raleway-Bold.ttf", "Satoshi-Medium.otf"}) {
+    FSPath fontFile(savedPath, designFont);
+    if(!fontFile.exists()) {
+      createPath(savedPath.c_str());
+      AndroidHelper::rawResourceToFile(designFont, fontFile.c_str());
+    }
+  }
 #endif
   createPath(tempPath.c_str());
 
@@ -193,6 +202,15 @@ ScribbleApp::ScribbleApp(int argc, char* argv[])
 void ScribbleApp::init()
 {
   scribbleSDLEvent = SDL_RegisterEvents(1);
+  // every file is picked with the system's dialog; the in-app list only where there is none
+  FilePicker::setTempDir(tempPath);
+  FilePicker::setFallback([this](bool save, const char* exts, const std::string& name){
+    std::string extstr = exts ? exts : "";
+    int mode = save ? (extstr == "pdf" ? DocumentList::SAVE_PDF : DocumentList::SAVE_DOC)
+        : (extstr == "jpg jpeg png" ? DocumentList::CHOOSE_IMAGE : DocumentList::CHOOSE_DOC);
+    std::string filename = execDocumentList(mode, exts);
+    return documentList && documentList->result > 0 ? filename : std::string();
+  });
   // Default pens
   auto dflttip = ScribblePen::TIP_FLAT | ScribblePen::WIDTH_PR;
   switch(std::max(0, 8 - int(cfg->pens.size()))) {
@@ -691,6 +709,8 @@ static int systemClipboardSerial()
 // main event dispatcher
 bool ScribbleApp::sdlEventHandler(SDL_Event* event)
 {
+  if(FilePicker::handleEvent(event))
+    return true;
   switch(event->type) {
   case SDL_QUIT:
     maybeQuit();
@@ -1565,9 +1585,10 @@ bool ScribbleApp::oneTimeTip(const char* id, Point pos, const char* message)
 
 void ScribbleApp::insertDocument()
 {
-  std::string filename = execDocumentList(DocumentList::CHOOSE_DOC);
-  if(!filename.empty() && activeDoc()->insertDocument(new FileStream(filename.c_str(), "rb")) != Document::LOAD_OK)
-    messageBox(Warning, _("Error inserting document"), fstring(_("An error occured opening %s"), docDisplayName(filename).c_str()));
+  FilePicker::openFile(_("Insert Document"), "svgz svg html htm", [this](const std::string& filename){
+    if(!filename.empty() && activeDoc()->insertDocument(new FileStream(filename.c_str(), "rb")) != Document::LOAD_OK)
+      messageBox(Warning, _("Error inserting document"), fstring(_("An error occured opening %s"), docDisplayName(filename).c_str()));
+  });
 }
 
 std::string ScribbleApp::execDocumentList(int mode, const char* exts, bool cancelable)
@@ -1615,10 +1636,9 @@ void ScribbleApp::execTagDocList(bool openResult)
     if(!tagDocList->selectedFile.empty() && doOpenDocument(tagDocList->selectedFile))
       gotoSelectedPage();
   }
-  else if(tagDocList->result == TagDocList::IMPORT_PDF || tagDocList->result == TagDocList::IMPORT_NOTEFUL) {
-    std::string docPath = importFromBrowser(tagDocList->result == TagDocList::IMPORT_NOTEFUL);
-    if(docPath.empty() || !doOpenDocument(docPath))
-      execTagDocList(openResult);  // back to the browser, which now lists the imports
+  else if(TagDocList::isImport(tagDocList->result)) {
+    importFromBrowser(tagDocList->result);
+    execTagDocList(openResult);  // back to the browser; the picked file arrives while it is showing
   }
 }
 
@@ -1660,15 +1680,8 @@ bool ScribbleApp::libraryManaged() const
 
 bool ScribbleApp::isInLibrary(const std::string& filename) const
 {
-  if(libraryRoot.empty())
-    return false;
-#if PLATFORM_IOS
-  // /var is a symlink to /private/var: $HOME comes without the prefix, UIDocument URLs sometimes with it,
-  //  and canonicalPath() does not resolve symlinks - so a library file would look external and be copied
-  if(StringRef(filename).startsWith("/private/var/"))
-    return DocLibrary::contains(libraryRoot, filename.substr(strlen("/private")));
-#endif
-  return DocLibrary::contains(libraryRoot, filename);
+  // contains() also evens out iOS's /var vs. /private/var, on both sides
+  return !libraryRoot.empty() && DocLibrary::contains(libraryRoot, filename);
 }
 
 // where a fresh install puts its library: somewhere that survives uninstalling Write (on Android that means
@@ -1720,6 +1733,15 @@ void ScribbleApp::initLibrary()
     return;
   }
   std::string saved = cfg->String("libraryPath");
+#if PLATFORM_IOS
+  // the app's container (.../Containers/Data/Application/<UUID>/) can move when the app is updated, and
+  //  the config moves with it - so a saved path into the old container means the same folder in this one
+  const char* containerDir = "/Containers/Data/Application/";
+  size_t containerPos = saved.find(containerDir);
+  size_t uuidEnd = containerPos == std::string::npos ? containerPos : saved.find('/', containerPos + strlen(containerDir));
+  if(uuidEnd != std::string::npos && getenv("HOME"))
+    saved = FSPath(getenv("HOME"), saved.substr(uuidEnd + 1)).c_str();
+#endif
   libraryTarget = saved.empty() ? defaultLibraryBase() : FSPath(saved + "/").c_str();
   bool canWrite = true;
 #if PLATFORM_ANDROID
@@ -1926,12 +1948,13 @@ bool ScribbleApp::importDocument()
 {
   if(!maybeSave())
     return false;
-#if PLATFORM_IOS
-  iosPickDocument(iosOpenDocMode);  // asynchronous: the picked document arrives in dropEvent()
+  // doOpenDocument() copies it into the library; the document may have changed while the picker was up
+  FilePicker::openFile(_("Import Document"), PdfImport::isAvailable() ? "svgz svg html htm pdf" : "svgz svg html htm",
+      [this](const std::string& filename){
+    if(!filename.empty() && maybeSave())
+      doOpenDocument(filename);
+  });
   return true;
-#endif
-  std::string filename = execDocumentList(DocumentList::CHOOSE_DOC, PdfImport::isAvailable() ? "svgz svg html htm pdf" : NULL);
-  return !filename.empty() && doOpenDocument(filename);
 }
 
 bool ScribbleApp::openOrCreateDoc(bool cancelable)
@@ -1957,10 +1980,9 @@ bool ScribbleApp::openOrCreateDocTagged(bool cancelable)
     if(!openSharedDoc())
       return openOrCreateDocTagged(cancelable);  // try again
   }
-  else if(res == TagDocList::IMPORT_PDF || res == TagDocList::IMPORT_NOTEFUL) {
-    std::string docPath = importFromBrowser(res == TagDocList::IMPORT_NOTEFUL);
-    if(docPath.empty() || !doOpenDocument(docPath))
-      return openOrCreateDocTagged(cancelable);  // back to the browser, which now lists the imports
+  else if(TagDocList::isImport(res)) {
+    importFromBrowser(res);
+    return openOrCreateDocTagged(cancelable);  // back to the browser; the picked file arrives while it is showing
   }
   else if(res == TagDocList::EXISTING_DOC && !filename.empty()) {
     if(!doOpenDocument(filename))
@@ -2514,13 +2536,55 @@ bool ScribbleApp::doSaveAs()
   return true;
 }
 #else
+#if PLATFORM_MOBILE
+// Save As on Android and iOS: the system's export dialog gets a copy, and the document stays in the
+//  library - nothing outside the app's storage can be edited in place there. iOS without the library keeps
+//  its UIDocument based Save As (iosSaveAs, through execDocumentList).
+bool ScribbleApp::doSaveAs()
+{
+  ScribbleDoc* doc = activeDoc();
+  doc->checkAndClearErrors(true);  // clear errors so document can be saved
+  if(PLATFORM_IOS && !libraryManaged()) {
+    execDocumentList(DocumentList::SAVE_DOC, "pdf svgz svg html htm");
+    return false;
+  }
+  if(!doc->fileName()[0]) {
+    // never saved: it gets a name in the library first, as a document created from the browser would
+    if(!libraryManaged()) {
+      execDocumentList(DocumentList::SAVE_DOC, "pdf svgz svg html htm");
+      return false;
+    }
+    FSPath dest = DocLibrary::uniquePath(FSPath(libraryRoot), "Untitled", cfg->String("docFileExt"));
+    if(!doc->saveDocument(dest.c_str(), Document::SAVE_FORCE)) {
+      messageBox(Error, _("Save As"), _("Error saving document."));
+      return false;
+    }
+    onLoadFile(dest.c_str());
+  }
+  else if(!saveDocument())
+    return false;
+  std::string src = doc->fileName();
+  FilePicker::saveFile(_("Save As"), FSPath(src).fileName(), FSPath(src).extension().c_str(),
+      [src](const std::string& dest){ return copyFile(FSPath(src), FSPath(dest)); },
+      [this](const std::string& dest){ if(!dest.empty()) showNotify(_("Saved a copy"), 1); });
+  return true;
+}
+#else
 bool ScribbleApp::doSaveAs()
 {
   activeDoc()->checkAndClearErrors(true);  // clear errors so document can be saved
-  // standard UX is to always create document file before editing, but on desktop document list can be
-  //  cancelled to allow editing new unnamed file; for now, we use document list to get name to save new file;
-  //  previously native OS file save dialog was used to get name
-  std::string filename = execDocumentList(DocumentList::SAVE_DOC, "pdf svgz svg html htm");
+  // standard UX is to always create document file before editing, but on desktop the document list can
+  //  be cancelled to allow editing a new unnamed file; the name comes from the system's save dialog
+  const char* currName = activeDoc()->fileName();
+  std::string suggested = (currName[0] ? FSPath(currName).baseName() : std::string("Untitled"))
+      + "." + cfg->String("docFileExt");
+  // the document's own format first: a dialog that adds no extension gets that one
+  std::string exts = cfg->String("docFileExt");
+  for(const char* ext : {"svgz", "svg", "html", "htm", "pdf"}) {
+    if(exts != ext)
+      exts += std::string(" ") + ext;
+  }
+  std::string filename = FilePicker::savePath(_("Save As"), suggested, exts.c_str());
   if(filename.empty())
     return false;
   if(FSPath(filename).extension() == "pdf") {
@@ -2536,7 +2600,8 @@ bool ScribbleApp::doSaveAs()
   //syncRequired = true;
   return true;
 }
-#endif
+#endif  // PLATFORM_MOBILE
+#endif  // PLATFORM_EMSCRIPTEN
 
 // for now, this is actually "Discard Changes"
 void ScribbleApp::revert()
@@ -2617,9 +2682,10 @@ void ScribbleApp::importPDF()
   }
   if(!maybeSave())
     return;
-  std::string filename = execDocumentList(DocumentList::CHOOSE_DOC, "pdf");
-  if(!filename.empty())
-    doImportPdf(filename);
+  FilePicker::openFile(_("Import PDF"), "pdf", [this](const std::string& filename){
+    if(!filename.empty() && maybeSave())
+      doImportPdf(filename);
+  });
 }
 
 // Renders every page of the PDF into a new Write document saved alongside the PDF, then opens it.
@@ -2692,27 +2758,64 @@ std::string ScribbleApp::importPdfToDocFile(const std::string& pdfPath, std::str
   return outinfo.c_str();
 }
 
-std::string ScribbleApp::importFromBrowser(bool noteful)
+// The browser's Import menu. The system picker answers later, from the event loop (on iOS and Android it
+//  cannot do otherwise), by which time the caller has shown the browser again - so the result is handled
+//  by browserImportDone() rather than returned.
+void ScribbleApp::importFromBrowser(int kind)
 {
-  if(!noteful) {
+  if(kind == TagDocList::IMPORT_PDF) {
     if(!PdfImport::isAvailable()) {
       messageBox(Warning, _("Import PDF"), _("This build of Sumi does not include PDF support."));
-      return "";
+      return;
     }
-    std::string filename = execDocumentList(DocumentList::CHOOSE_DOC, "pdf");
-    if(filename.empty())
-      return "";
-    std::string err, docPath = importPdfToDocFile(filename, &err);
-    if(docPath.empty())
-      messageBox(Warning, _("Import PDF"),
-          fstring(_("Error importing %s: %s"), FSPath(filename).fileName().c_str(), err.c_str()));
-    return docPath;
+    FilePicker::openFile(_("Import PDF"), "pdf", [this](const std::string& filename){
+      if(filename.empty())
+        return;
+      std::string err, docPath = importPdfToDocFile(filename, &err);
+      if(docPath.empty())
+        messageBox(Warning, _("Import PDF"),
+            fstring(_("Error importing %s: %s"), FSPath(filename).fileName().c_str(), err.c_str()));
+      browserImportDone(docPath);
+    });
   }
+  else if(kind == TagDocList::IMPORT_NOTEFUL) {
+    // a notebook, or a folder exported as .zip
+    FilePicker::openFile(_("Import Noteful"), "noteful zip", [this](const std::string& filename){
+      if(!filename.empty())
+        browserImportDone(importNoteful(filename));
+    });
+  }
+  else {
+    // a Sumi/Write document from anywhere: opening it copies it into the library (doOpenDocument)
+    FilePicker::openFile(_("Import Document"), "svgz svg html htm", [this](const std::string& filename){
+      if(!filename.empty())
+        browserImportDone(filename);
+    });
+  }
+}
 
-  // a notebook, or a folder exported as .zip
-  std::string filename = execDocumentList(DocumentList::CHOOSE_DOC, "noteful zip");
-  if(filename.empty())
-    return "";
+// Opens what an import produced as if it had been tapped in the browser (which ends it with EXISTING_DOC);
+//  with nothing to open, the browser just relists the library, which now holds the imports.
+void ScribbleApp::browserImportDone(const std::string& docPath)
+{
+  bool browserUp = tagDocList && tagDocList->isVisible();
+  if(docPath.empty()) {
+    if(browserUp)
+      tagDocList->setRoot(tagDocList->root().c_str());
+  }
+  else if(browserUp) {
+    tagDocList->selectedFile = docPath;
+    tagDocList->selectedPage = -1;
+    tagDocList->finish(TagDocList::EXISTING_DOC);
+  }
+  else if(maybeSave())
+    doOpenDocument(docPath);
+}
+
+// imports a Noteful notebook or .zip export into the library; returns the document to open (when exactly
+//  one was imported), else ""
+std::string ScribbleApp::importNoteful(const std::string& filename)
+{
   // into the library; without one, next to what was picked, as PDF import does
   FSPath outDir = libraryManaged() ? FSPath(libraryRoot) : FSPath(filename).parent();
   NotefulImport::ArchiveOptions opts;
@@ -2767,10 +2870,10 @@ void ScribbleApp::pickImage()
 #elif PLATFORM_IOS
   showImagePicker();
 #else
-  // TODO: also show "Choose Image" in place of new doc/new folder/help buttons
-  std::string filename = execDocumentList(DocumentList::CHOOSE_IMAGE, "jpg jpeg png");
-  if(documentList->result > 0 && !filename.empty())
-    insertImage(filename);
+  FilePicker::openFile(_("Insert Image"), "jpg jpeg png", [this](const std::string& filename){
+    if(!filename.empty())
+      insertImage(filename);
+  });
 #endif
 }
 
@@ -2923,11 +3026,13 @@ void ScribbleApp::exportPDF()
 #else
 void ScribbleApp::exportPDF()
 {
-  std::string filename = execDocumentList(DocumentList::SAVE_PDF, "pdf");
-  if(filename.empty())
-    return;
-  if(!writePDF(filename))
+  std::string name = activeDoc()->fileName()[0] ? FSPath(activeDoc()->fileName()).baseName() : std::string("Untitled");
+  FilePicker::saveFile(_("Export PDF"), name + ".pdf", "pdf", [this](const std::string& filename){
+    if(writePDF(filename))
+      return true;
     messageBox(Error, _("Export PDF"), _("Error saving document. Please try a different folder."));
+    return false;
+  });
 }
 #endif
 

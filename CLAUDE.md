@@ -108,7 +108,7 @@ relevant file before changing that area.
 
 - [pdf-import.md](docs/agent/pdf-import.md) - MuPDF compiled inline, size trimming (`NO_CJK`, `-Os`, gc-sections), rule-layer page images
 - [noteful-import.md](docs/agent/noteful-import.md) - reverse-engineered `.noteful` format, units, pressure strokes, archives, the Import FAB
-- [document-library.md](docs/agent/document-library.md) - the single library folder, `.write-library` marker, import/migration, iOS library mode; Create Notebook dialog and covers
+- [document-library.md](docs/agent/document-library.md) - the single library folder, `.write-library` marker, import/migration, iOS library mode and `/private/var`; the system file picker (`filepicker.cpp`, every platform); browser fonts; Create Notebook dialog and covers
 - [paper.md](docs/agent/paper.md) - default page size prompt (A4/Letter), dotted paper (`dotRadius`), Add Page layouts popup
 - [ruling-regions.md](docs/agent/ruling-regions.md) - Paper Patch: per-area ruling, `rulingAt()`, tilted frames, region panel
 - [document-scanning.md](docs/agent/document-scanning.md) - homography, warp, enhance, quad detection in `ulib`; capture via the image picker

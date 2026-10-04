@@ -40,8 +40,9 @@ public:
   // with EXISTING_DOC, the page to open selectedFile at: a page card was picked (-1 = where it was left)
   int selectedPage = -1;
   std::vector<std::string> selectedPageTags;  // and the tags on it to point out (ScribbleArea::flashPageTags())
-  // IMPORT_*: the import FAB's menu picked a format; ScribbleApp runs the picker and the import
-  enum Result_t {REJECTED = 0, EXISTING_DOC, NEW_DOC, OPEN_WHITEBOARD, IMPORT_PDF, IMPORT_NOTEFUL} result;
+  // IMPORT_*: the import FAB's menu picked a format; ScribbleApp runs the system picker and the import
+  enum Result_t {REJECTED = 0, EXISTING_DOC, NEW_DOC, OPEN_WHITEBOARD, IMPORT_PDF, IMPORT_NOTEFUL, IMPORT_DOC} result;
+  static bool isImport(int res) { return res == IMPORT_PDF || res == IMPORT_NOTEFUL || res == IMPORT_DOC; }
 
   // hasCurrentNote: whether a "back to note" FAB should be offered (there is a real document open
   // behind this browser, as opposed to it being the very first thing shown at startup).
