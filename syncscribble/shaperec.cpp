@@ -749,6 +749,25 @@ static std::vector<Vec2> cleanStroke(const std::vector<Vec2>& stroke, const Para
   return trimHold(pts, params);
 }
 
+// Measured over both synthetic suites (everything that is not a scratch-out, 20000 strokes) and the
+//  recorded ones:
+//   normal  - 6 passes; 80% of the synthetic scratch-outs (the rest are 4-5 passes), every recorded one,
+//             0.06% false erases, all random wanders
+//   careful - 8 passes; 58%, every recorded one, no false erases
+//  Both keep the base reversal gap at 0.2 (0.3 lets mmm arches erase) and the loose long-stroke rule to
+//  24 reversals (from 12 the arches of a long held mmm get through).
+Params liftParams(int level)
+{
+  Params params;
+  params.scribbleMinReversals = level == 1 ? 7 : 5;
+  params.scribbleMinAlongFrac = 0.4;
+  params.scribbleMaxReversalGap = 0.2;
+  params.scribbleLongReversals = 24;
+  params.scribbleLongMaxReversalGap = 0.6;
+  params.scribbleOutlierFrac = 0.2;
+  return params;
+}
+
 Result recognizeScribble(const std::vector<Vec2>& stroke, const Params& params)
 {
   Result res;

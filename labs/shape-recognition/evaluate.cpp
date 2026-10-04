@@ -47,12 +47,17 @@ const std::map<std::string, double> MIN_RECALL = {{"line", 0.99}, {"square", 0.9
 //  into circles.  1-1.6% of the set, depending on the seed.
 const std::map<std::string, double> PENCIL_MIN_RECALL = {{"line", 0.99}, {"square", 0.99}, {"circle", 0.99},
     {"ellipse", 0.98}, {"scribble", 0.98}};
-// 0.5% rather than lower on purpose: scratch-outs were made more eager (3 reversals, not 4 - recall on
-//  messy ones 87% -> 99.7%), which puts false erases at 0.13-0.4% depending on the seed.  Every one of
-//  them is a random swooping curve swinging back and forth three times, arguably a scratch-out after a
-//  deliberate hold; no handwriting stroke in the set (arches, loops, N/Z, spirals) triggers one.  A
-//  tip-linger test (swoops turn wide, scratching turns sharp) was tried and did not separate them.
-const double MAX_FALSE_ERASE = 0.005;
+// The hold's scratch-out is eager on purpose: holding still after a back-and-forth plainly means
+//  "erase", and it need not survive normal writing - that is the scratch-out on pen lift's job, gated
+//  below.  It measures 1-1.5%, nearly all mmm arches and random swooping curves (it was 0.5% while the
+//  hold had to keep held mmm from erasing).
+const double MAX_FALSE_ERASE = 0.02;
+// The scratch-out on pen lift (shaperec::liftParams) runs over every stroke written, so it is gated
+//  hard on false erases, over everything in both suites that is not a scratch-out.  Its recall is lower
+//  by design - short scratch-outs are what the hold is for - and gated only against collapse.  Every
+//  recorded scratch-out must pass at both levels.
+const double LIFT_MAX_FALSE_ERASE = 0.001;
+const double LIFT_MIN_RECALL[] = {0, 0.5, 0.7};  // by level: 1 careful, 2 normal
 const std::map<std::string, double> MAX_P90_POS_ERR = {{"line", 0.02}, {"square", 0.055}, {"circle", 0.015}, {"ellipse", 0.035}, {"scribble", 0.1}};
 // and no single stroke may be off by more than this multiple of the p90 gate - a rare catastrophe
 //  (a line's end cut 14% short) is invisible to a percentile
@@ -557,6 +562,36 @@ int main(int argc, char* argv[])
   }
   else
     printf("\nNo recorded strokes in %s/ - draw some with recorder.html.\n", fixturesDir.c_str());
+
+  printf("\nScratch-out on pen lift (liftParams)\n");
+  for(int level : {1, 2}) {
+    Params liftParams = shaperec::liftParams(level);
+    int scratchOuts = 0, caught = 0, others = 0, erased = 0;
+    for(const std::vector<TestStroke>* suite : {&synthetic, &pencil}) {
+      for(const TestStroke& stroke : *suite) {
+        bool isScratchOut = recognizeScribble(stroke.points, liftParams).kind == Kind::Scribble;
+        if(stroke.label == "scribble") {
+          ++scratchOuts;
+          caught += isScratchOut;
+        }
+        else {
+          ++others;
+          erased += isScratchOut;
+        }
+      }
+    }
+    double recall = scratchOuts ? double(caught)/scratchOuts : 1, falseRate = others ? double(erased)/others : 0;
+    bool fail = recall < LIFT_MIN_RECALL[level] || falseRate > LIFT_MAX_FALSE_ERASE;
+    printf("  %-8s scratch-outs %.1f%%, false erases %d of %d (%.2f%%)%s\n", level == 1 ? "careful" : "normal",
+        recall*100, erased, others, falseRate*100, fail ? "  FAIL" : "");
+    pass = pass && !fail;
+    for(const TestStroke& stroke : recorded) {
+      if(stroke.label == "scribble" && recognizeScribble(stroke.points, liftParams).kind != Kind::Scribble) {
+        printf("  GATE recorded %s: not a scratch-out on lift\n", stroke.name.c_str());
+        pass = false;
+      }
+    }
+  }
 
   writeReport(reportPath, {{"Recorded strokes", &recordedOut}, {"Synthetic strokes", &synthOut},
       {"Pencil strokes", &pencilOut}});

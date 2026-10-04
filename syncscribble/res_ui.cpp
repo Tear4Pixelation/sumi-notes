@@ -188,6 +188,10 @@ const char* prefInfoXML = R"#(
   <pref name="shapeSnapDelay" type="float" min="0" max="1.5" step="0.1" group="Shapes"
       title="Snap to shape after holding"
       description="Seconds to hold the pen still at the end of a stroke before it becomes a line, rectangle or ellipse (0.5 to 1.5); a scratch-out erases what is under it. 0 turns this off" />
+  <pref name="scratchOutOnLift" type="int" group="Shapes"
+      enum="Off;Careful;Normal"
+      title="Scratch out without holding"
+      description="Scribble back and forth over something and it is erased as soon as the pen lifts. Careful needs a longer scratch-out, and leaves more of your writing alone. Holding still at the end always erases. Needs snap to shape on" />
   <pref name="shapeAngleSnap" type="float" min="0" max="22" step="1" group="Shapes"
       title="Snap lines to 45 degrees"
       description="Lines within this many degrees of horizontal, vertical or diagonal snap onto it, when drawing a shape, editing its handles or scaling a snapped shape. 0 turns this off" />
