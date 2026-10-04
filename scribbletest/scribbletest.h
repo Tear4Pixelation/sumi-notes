@@ -32,6 +32,9 @@ public:
   // a folder of notebooks (a directory or a zip) becomes one document each in the library, tagged with
   //  its own tags and optionally its folder
   int notefulArchiveTest();
+  // a PDF page renders straight to its encoded bytes (never kept decoded), crops, comes out at a lower
+  //  resolution when a memory limit cannot hold it, and an ImportSaver writes each page and unloads it
+  int pdfImportTest();
   // a locked layer must be immune to selection and to every eraser, and moving an element between
   // layers must undo both the layer and the restacking it caused
   int layerTest();

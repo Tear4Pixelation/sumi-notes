@@ -68,6 +68,14 @@ and the serialization round trip including a name containing the separators.
   locally. Also pins the joiner snapshot, a peer's hide moving our pen, and a peer's stroke on a
   layer we have hidden arriving hidden. Mutation-tested: dropping the re-add visibility, not
   recording the theme change, and ignoring a received removal each fail it.
+- `ScribbleTest::pdfImportTest()` - import memory ([pdf-import.md](pdf-import.md#memory-shared-with-noteful-import)),
+  on a three-page PDF written inline (no xref - MuPDF repairs it, printing warnings). A rendered page
+  is held encoded only (`data == NULL`), its blue square lands blue where the PDF put it (a swapped
+  channel in the RGB-direct encoder makes it red), a crop renders just that part with the content in
+  place, a 40 MB budget gets a smaller page and counts it, a spent budget still gets the page at 72 DPI
+  rather than dropping it, and `ImportSaver` leaves every written page unloaded while the file reloads
+  with all three backgrounds. Mutation-tested: keeping pages decoded, never lowering the DPI, never
+  unloading, and capping MuPDF at only what is left each fail it.
 
 - **Two-client sync (`--synctest`)** needs a real server: run stylusboard
   (github.com/styluslabs/stylusboard, Node; `npm install moment minimist` is enough without `--db`)

@@ -50,8 +50,8 @@ writes a `.svgz` into the document library (next to the PDF when there is no lib
 for a `--out` conversion) and then opens it like any other document, which keeps undo, views
 and sync entirely out of the import path. `.pdf` paths are routed to the importer from
 `doOpenDocument()` (doc list, drag-drop, Android intents) and from the command-line `argDoc` branch.
-Note the import temporarily forces `SvgWriter::DEFAULT_SAVE_IMAGE_SCALED = 0`, otherwise
-`savePicScaled` resamples the pages back down to 150 DPI and discards the chosen `pdfImportDPI`.
+Note the import temporarily forces `SvgWriter::DEFAULT_SAVE_IMAGE_SCALED = 0` (in `ImportSaver::save`),
+otherwise `savePicScaled` resamples the pages back down to 150 DPI and discards the chosen `pdfImportDPI`.
 
 Import runs synchronously on the UI thread, so nothing is drawn until it returns: a `showNotify()`
 set before it never appeared and the app looked frozen. `ProgressBox` (`scribbleapp.cpp`, also used
@@ -60,5 +60,49 @@ by Noteful import) is a buttonless popup over the top window - the browser too, 
 calls `Application::layoutAndDraw()` itself (throttled to 100 ms) and `SDL_PumpEvents()`, which only
 queues events, so nothing re-enters while the window keeps answering the compositor. The popup keeps
 the size of its first layout, hence the fixed-width sizer rect: without it longer messages were
-squashed horizontally. Saving the `.svgz` is often the slowest step (page images get compressed), so
-it gets its own "Saving..." message.
+squashed horizontally. There is no separate "Saving..." step any more: each page is written as it is
+made (below), so the end of an import only writes the closing block and the thumbnail.
+
+## Memory (shared with Noteful import)
+
+An iPad (A12, 3 GB) killed the app mid-import (jetsam `per-process-limit` at 1.94 GB, no crash report -
+look for `JetsamEvent-*.ips` with `idevicecrashreport -k -e <dir>`). Every page had been rendered to a
+**decoded** 32-bit bitmap - ~35 MB for A4 at 300 DPI - and kept that way until the save after the last
+page; `pdfImportLossy`/JPEG changed nothing, it only picks the format at save time. Measured on a
+21-page Noteful notebook: memory grew 17 MB a page, 395 MB at the end. What fixed it, in layers:
+
+- **Encoded-only images.** `PdfImport::Renderer::render()` encodes MuPDF's RGB pixmap straight to PNG/JPEG
+  (stb, 3 channels, no 32-bit copy) and returns an `Image` holding only `encData` (`data == NULL`) -
+  `Image::decodeBuffer` of the bytes. The writer saves those bytes as they are: `encode(fmt)` returns
+  `encData` when it is already that format, and `hasTransparency()` is only asked of JPEG, which answers
+  without decoding. `PdfImport::encodedOnly()` does the same for any image (Noteful pictures, crops).
+  A picture kept uncropped keeps the very bytes it came in.
+- **Streaming save.** `PdfImport::ImportSaver` saves after every page with Document's partial save
+  (`SAVE_BGZ_PARTIAL`, which the app's own saves use) and `Page::unload()`s what is written, so an import
+  holds about one page however long. An importer must not touch a page after `pageDone()` - Noteful's
+  outline entries are therefore set while each page is made, not after the loop: setting one on an
+  unloaded page reloads it, dirties it, and the final save rewrites everything from there. The saver
+  also compresses (`compressLevel`, 2): imports used to be saved with level 0, i.e. stored, base64 and
+  all - the same notebook is now 7.4 MB instead of 11.2.
+- **One open PDF.** `Renderer` keeps the document open across pages; Noteful used to re-open and re-parse
+  its embedded PDF for every page. A crop renders only that part (`renderArea`), not the page then a crop.
+- **MuPDF's cache at 64 MB** instead of `FZ_STORE_DEFAULT` (256 MB): an import renders each page once,
+  in order, and the store filled with an image-heavy PDF's scans to no use (measured: same 87 s either
+  way, 150 MB less).
+
+Result: the 31-page scanned `Geschichte.pdf` stays flat at ~187 MB (was 477 MB and climbing), Noteful
+peaks at 148 MB (was 395). Quality is unchanged - same pixel sizes and formats.
+
+**Limit memory** (Import popup, `importLimitMemory` + `importMemoryLimitMB`, 128 MB-2 GB): a
+`MemoryBudget` counts what the import *holds* - its input (`setInput`, a whole notebook), each
+`Renderer`'s MuPDF allocations (exact, through a tracking `fz_alloc_context`) and its in-memory PDF, and
+page images not yet written (`keep`/`written`). Not the process footprint: that was tried first and is
+wrong here - glibc keeps freed mid-size blocks and ASan quarantines everything, so a measured footprint
+only rose, starved later pages and (with the cap below) dropped them. A page that would not fit is
+rendered at a lower DPI, chosen from a peak of 9 bytes/pixel for PNG (pixmap, stb's filtered copy, the
+output twice) or 4 for JPEG plus a 32 MB reserve for MuPDF itself. MuPDF's allocations are capped at
+what is left - but never below what the page takes at 72 DPI, so a page comes out coarse rather than
+not at all, and the limit gives way by that much. MuPDF reacts to a failed allocation by emptying its
+cache and retrying, then throws; that fails the one page (logged), never the app. The app reports
+reduced pages in a message box (`reportReducedPages`, not for `--out`). 128 MB holds the 300 DPI pages
+of both test files with at most one reduced; at 48 MB every page still imports, at >= 94 DPI.

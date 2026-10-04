@@ -19,6 +19,7 @@
 #include "basics.h"
 
 class Document;
+namespace PdfImport { struct MemoryBudget; class ImportSaver; }
 
 namespace NotefulImport {
 
@@ -30,6 +31,10 @@ struct Options {
   bool lossy = true;
   // called before each page; return false to stop, keeping the pages imported so far
   std::function<bool(int pageNum, int numPages)> onProgress;
+  // optional memory limit for rendering PDF backgrounds, owned by the caller (see PdfImport::MemoryBudget)
+  PdfImport::MemoryBudget* budget = NULL;
+  // optional: write each page as soon as it is made (PdfImport::ImportSaver); importArchive sets its own
+  PdfImport::ImportSaver* saver = NULL;
 };
 
 struct Result {

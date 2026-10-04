@@ -8,6 +8,7 @@
 #include "scribblesync.h"
 #include "scribbleapp.h"  // only for sync tests
 #include "notefulimport.h"
+#include "pdfimport.h"
 #include "tagstore.h"
 #include "miniz/miniz_zip.h"
 
@@ -649,6 +650,110 @@ int ScribbleTest::notefulArchiveTest()
   check(imported == 2 && brokenResult.failed == 1, "a broken notebook fails alone");
 
   removeDir(base);
+  return nbad;
+}
+
+int ScribbleTest::pdfImportTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: pdf import: %s\n", what); }
+  };
+  if(!PdfImport::isAvailable())
+    return 0;
+  // three A4 pages, each with a blue square at (100, 100)-(300, 300) pt, PDF's y up - so 542..742 pt from
+  //  the top.  No xref: MuPDF repairs that, as it would any damaged file.
+  std::string pdf = "%PDF-1.4\n"
+      "1 0 obj <</Type/Catalog/Pages 2 0 R>> endobj\n"
+      "2 0 obj <</Type/Pages/Kids[3 0 R 5 0 R 6 0 R]/Count 3>> endobj\n"
+      "3 0 obj <</Type/Page/Parent 2 0 R/MediaBox[0 0 595 842]/Contents 4 0 R>> endobj\n"
+      "5 0 obj <</Type/Page/Parent 2 0 R/MediaBox[0 0 595 842]/Contents 4 0 R>> endobj\n"
+      "6 0 obj <</Type/Page/Parent 2 0 R/MediaBox[0 0 595 842]/Contents 4 0 R>> endobj\n"
+      "4 0 obj <</Length 29>> stream\n0 0 1 rg 100 100 200 200 re f\nendstream endobj\n"
+      "trailer <</Root 1 0 R>>\n%%EOF\n";
+  // RGBA of a decoded pixel
+  auto pixel = [](Image& image, int x, int y) {
+    const unsigned char* bytes = image.bytes() + (size_t(y)*image.width + x)*4;
+    return std::vector<int>{bytes[0], bytes[1], bytes[2]};
+  };
+  auto isBlue = [](const std::vector<int>& rgb) { return rgb[0] < 40 && rgb[1] < 40 && rgb[2] > 200; };
+  auto isWhite = [](const std::vector<int>& rgb) { return rgb[0] > 240 && rgb[1] > 240 && rgb[2] > 240; };
+  const Dim scale = 300.0/72;
+
+  PdfImport::Renderer renderer;
+  check(renderer.openMemory(pdf, NULL) && renderer.numPages() == 3, "opened from memory");
+  Dim widthPt = 0, heightPt = 0;
+  Image page = renderer.render(0, 300, Image::PNG, &widthPt, &heightPt);
+  // kept decoded, a 300 DPI page is ~35 MB, and a notebook of them ended the app on an iPad
+  check(!page.isNull() && page.data == NULL && !page.encData.empty(), "page kept as its encoded bytes only");
+  check(widthPt == 595 && heightPt == 842 && std::abs(page.width - int(595*scale + 0.5)) <= 1, "page size and resolution");
+  if(!page.isNull()) {
+    // MuPDF's RGB samples go to the encoder as they are: a swapped channel would make the square red
+    check(isBlue(pixel(page, int(200*scale), int(642*scale))) && isWhite(pixel(page, int(50*scale), int(50*scale))),
+        "square blue where the PDF put it, page white around it");
+  }
+
+  // the bottom-left quarter only, rendered no further: the square moves up by the 421 pt cut off above
+  Image quarter = renderer.render(0, 300, Image::JPEG, NULL, NULL, Rect::ltrb(0, 0.5, 0.5, 1));
+  check(!quarter.isNull() && std::abs(quarter.width - int(297.5*scale + 0.5)) <= 1
+      && std::abs(quarter.height - int(421*scale + 0.5)) <= 1, "crop renders just that part");
+  if(!quarter.isNull())
+    check(isBlue(pixel(quarter, int(200*scale), int(221*scale))), "crop keeps the content in place");
+
+  // a budget that cannot hold a 300 DPI page (8.7 Mpx) gets one at a lower resolution, and says so
+  {
+    PdfImport::MemoryBudget budget(size_t(40) << 20);
+    PdfImport::Renderer limited;
+    Image small = limited.openMemory(pdf, &budget) ? limited.render(0, 300, Image::PNG) : Image(0, 0);
+    check(!small.isNull() && small.width < page.width/2 && small.width >= 594,
+        "a page that does not fit the budget comes out smaller, never under 72 DPI");
+    check(budget.reducedPages == 1 && budget.lowestDpi < 300, "the reduced page is counted");
+  }
+  // with the budget spent (a whole notebook held, say), a page still comes out, at 72 DPI - capped at
+  //  what was left, MuPDF used to fail it and the page was dropped
+  {
+    PdfImport::MemoryBudget budget(size_t(1) << 20);
+    budget.setInput(size_t(4) << 20);
+    PdfImport::Renderer spent;
+    Image coarse = spent.openMemory(pdf, &budget) ? spent.render(1, 300, Image::PNG) : Image(0, 0);
+    check(!coarse.isNull() && std::abs(coarse.width - 595) <= 1, "a spent budget still gets a page, at 72 DPI");
+  }
+
+  // ImportSaver: each page written as it is made and unloaded, the file whole at the end
+  const char* tmpdir = getenv("TMPDIR") ? getenv("TMPDIR") : "/tmp";
+  std::string pdfPath = fstring("%s/sumi-pdf-import-%lld.pdf", tmpdir, (long long)mSecSinceEpoch());
+  std::string savedPath = pdfPath + ".svgz";
+  {
+    FileStream out(pdfPath.c_str(), "wb");
+    out.write(pdf.data(), pdf.size());
+  }
+  int pages = -1;
+  bool allUnloaded = true;
+  bool finished = false;
+  {
+    Document doc;
+    PdfImport::ImportSaver saver(&doc, savedPath);
+    PdfImport::Options opts;
+    opts.dpi = 72;  // the size of the pages does not matter here
+    opts.saver = &saver;
+    pages = PdfImport::importPdf(&doc, pdfPath.c_str(), opts);
+    for(Page* imported : doc.pages)
+      allUnloaded = allUnloaded && imported->loadStatus == Page::NOT_LOADED;
+    finished = pages == 3 && saver.finish();
+  }
+  check(pages == 3, "every page imported");
+  check(allUnloaded, "pages written are unloaded, so the import holds one at a time");
+  check(finished, "saved");
+  Document reloaded;
+  check(reloaded.load(new FileStream(savedPath.c_str(), "rb")) == Document::LOAD_OK && reloaded.numPages() == 3,
+      "the file written page by page loads with all its pages");
+  bool backgrounds = reloaded.numPages() == 3;
+  for(Page* loaded : reloaded.pages)
+    backgrounds = backgrounds && loaded->ensureLoaded(false) && loaded->ruleNode && loaded->ruleNode->selectFirst("image");
+  check(backgrounds, "every page has its background image");
+
+  removeFile(pdfPath);
+  removeFile(savedPath);
   return nbad;
 }
 
@@ -2640,6 +2745,7 @@ void ScribbleTest::runAll(bool runsynctest)
   nUnitFailed += outlineNestTest();
   nUnitFailed += notefulImportTest();
   nUnitFailed += notefulArchiveTest();
+  nUnitFailed += pdfImportTest();
   nUnitFailed += layerTest();
   nUnitFailed += selectTouchingTest();
   nUnitFailed += pageTagTest();
