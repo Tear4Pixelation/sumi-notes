@@ -14,13 +14,13 @@ two-argument call is (vertical, horizontal).
 
 ```
  selectBar  (box layout, box-anchor "bottom right", margins 0 48 43 0)
- ├─ background rect   box-anchor fill, radius 14, fill #2A2A2A, stroke #444444 1
+ ├─ background rect   box-anchor fill, radius 14, fill var(--floating-bg), stroke var(--floating-outline) 1
  └─ row               flex row, align-items center, margins 6 on all sides
     ├─ label          "2 selected", font-size 15, fill var(--text), margins 0 14 0 12
     ├─ button  44x44  Select All
     ├─ button  44x44  Select None
     ├─ button  44x44  Delete (destructive)
-    ├─ separator      1x28 rect, fill #555555, margins 0 6
+    ├─ separator      1x28 rect, fill var(--floating-separator), margins 0 6
     └─ button  44x44  Done (X) - always last, where the primary FAB sits
 ```
 
@@ -29,14 +29,14 @@ two-argument call is (vertical, horizontal).
 | Element | Value |
 |---|---|
 | Bar position | anchored bottom right, **48** from the right, **43** from the bottom (same as the FAB row, so the bar replaces it in place) |
-| Container | corner radius **14**, fill **#2A2A2A**, 1-unit stroke **#444444** |
+| Container | corner radius **14**, fill `--floating-bg`, 1-unit stroke `--floating-outline` |
 | Container padding | **6** on every side, between the container edge and its contents |
 | Buttons | **44 x 44** slot, corner radius **10**, no gap between neighbouring buttons |
-| Button background | none at rest, **#444444** hovered, **#555555** pressed |
+| Button background | none at rest, `--floating-hovered` hovered, `--floating-pressed` pressed |
 | Button icon | **20 x 20**, theme `--icon` color; disabled: `var(--icon-disabled)` |
 | Destructive icon | **#E5534B** (red), `--icon-disabled` when disabled |
 | Label | font-size **15**, `var(--text)`, Satoshi (inherited from `.tagdoclist`); **12** left, **14** right |
-| Separator | **1 x 28**, fill **#555555**, **6** on either side |
+| Separator | **1 x 28**, fill `--floating-separator`, **6** on either side |
 
 The inner radius works out: a 10-radius button 6 units inside a 14-radius container keeps the
 corners concentric (14 - 6 = 8, close enough to 10 that it reads as parallel at this size).
@@ -45,8 +45,8 @@ corners concentric (14 - 6 = 8, close enough to 10 that it reads as parallel at 
 
 | | Size | Radius | Fill | Icon | Spacing |
 |---|---|---|---|---|---|
-| Secondary FAB | 44 x 44 | 10 | #444444 | 18 x 18 | 17 to the right |
-| Primary FAB | 56 x 56 | 10 | #2EA3CF (accent) | 27 x 27 | - |
+| Secondary FAB | 44 x 44 | 10 | `--doclist-field` | 18 x 18 | 17 to the right |
+| Primary FAB | 56 x 56 | 10 | #2EA3CF (accent) | 27 x 27, `--fab-primary-icon` | - |
 
 The bar's buttons are the secondary FAB's size and radius minus the fill: the container is their
 shared background.
@@ -99,18 +99,33 @@ bar->addWidget(row);
 ```
 
 ```css
-.tagdoclist .selectbar-bg { fill: #2A2A2A; stroke: #444444; stroke-width: 1; }
+.tagdoclist .selectbar-bg { fill: var(--floating-bg); stroke: var(--floating-outline); stroke-width: 1; }
 .tagdoclist .selectbar-count { fill: var(--text); font-size: 15; }
-.tagdoclist .selectbar-sep { fill: #555555; }
+.tagdoclist .selectbar-sep { fill: var(--floating-separator); }
 .tagdoclist .selectbar-btn-bg { fill: none; }
-.tagdoclist .selectbar-btn.hovered .selectbar-btn-bg { fill: #444444; }
-.tagdoclist .selectbar-btn.pressed .selectbar-btn-bg { fill: #555555; }
+.tagdoclist .selectbar-btn.hovered .selectbar-btn-bg { fill: var(--floating-hovered); }
+.tagdoclist .selectbar-btn.pressed .selectbar-btn-bg { fill: var(--floating-pressed); }
 .tagdoclist .selectbar-btn.disabled .icon { fill: var(--icon-disabled); color: var(--icon-disabled); }
 .tagdoclist .selectbar-delete .icon { fill: #E5534B; color: #E5534B; }
 ```
 
-The colors are hardcoded dark-theme values, like the rest of the browser's styles. A light theme
-would need them as theme variables.
+Surface colors are theme variables defined in both blocks at the top of `ugui/theme.cpp`
+(`svg.window` and `svg.window.light`), so the bar follows the light/dark UI theme. Never write a
+surface color as a literal hex in a `.tagdoclist` rule - the browser used to, and in the light theme
+that left a black grid, dark search boxes and dark-on-dark FAB icons (`--icon` *does* flip, so a
+hardcoded background under a themed icon is the worst case). Only the accent (#2EA3CF) and the
+destructive red are fixed. Values:
+
+| Variable | Dark | Light |
+|---|---|---|
+| `--doclist-bg` (grid) | #000000 | #E6E6E6 - not white, blank pages are white cards |
+| `--doclist-field` (search boxes, secondary FABs) | #444444 | #FFFFFF |
+| `--fab-primary-icon` | #CDCDCD | #FFFFFF |
+| `--floating-bg` / `--floating-outline` | #2A2A2A / #444444 | #FFFFFF / #CCCCCC |
+| `--floating-hovered` / `--floating-pressed` | #444444 / #555555 | #E4E4E4 / #D0D0D0 |
+| `--floating-separator` | #555555 | #CCCCCC |
+
+Light mode is `uiTheme=2`; preview it with `tools/agent-display.sh run --debug -- --uiTheme=2`.
 
 ## Top padding (status bar)
 
