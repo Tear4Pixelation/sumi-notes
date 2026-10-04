@@ -285,12 +285,16 @@ public:
   Element* addRulingRegion(const Rect& r);
 
   // Page tags (docs/agent/page-tags.md).  Tags picked in the toolbar's tag popup ride on the pointer until
-  //  a press puts them on the page under it (one undo step); Esc drops them.  `tags` is {id, name}.
-  void startTagPlacement(const std::vector<std::pair<std::string, std::string>>& tags);
+  //  a press puts them on the page under it (one undo step); Esc drops them.  `tags` is {id, name}; `todo`
+  //  gives each a checkbox.
+  void startTagPlacement(const std::vector<std::pair<std::string, std::string>>& tags, bool todo = false);
   void cancelTagPlacement();
   bool placingTags() const { return !pendingTags.empty(); }
   size_t numPendingTags() const { return pendingTags.size(); }
-  bool capturesPointer() const override { return placingTags(); }
+  bool capturesPointer(const InputEvent& event) const override;
+  // tick or untick a to-do tag on the current page, as one undo step: a ticked to-do stays on the page but
+  //  no longer tags it.  Returns the element now on the page.
+  Element* toggleTodoTag(Element* tag);
   // scroll to the tags with these ids on the current page and pulse them, to show where they are (a page
   //  card was opened)
   void flashPageTags(const std::vector<std::string>& tagIds);
@@ -303,6 +307,9 @@ protected:
   Rect pendingTagsRect() const;  // current page coordinates
   void movePendingTags(Point pos);
   void placePendingTags(bool select);
+  // a press on a to-do tag's checkbox; the release ticks it if it is still on the box
+  Element* todoPressed = NULL;
+  Element* todoBoxHit(Point pos, bool touch) const;  // current page coordinates
   std::vector<Rect> flashRects;  // page coordinates on flashPageNum
   int flashPageNum = -1;
   int flashTicks = 0;  // frames left of the pulse animation, counting down

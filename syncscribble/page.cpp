@@ -832,12 +832,13 @@ void Page::onRemoveStroke(Element* s)
   }
 }
 
-// in the order the tags sit on the page, each id once - a page can carry the same tag twice
+// in the order the tags sit on the page, each id once - a page can carry the same tag twice.  A ticked to-do
+//  stays on the page but no longer tags it: the page drops out of that tag's list until it is unticked.
 void Page::refreshPageTags(const Element* removing)
 {
   pageTagIds.clear();
   for(Element* s : children()) {
-    if(s == removing || !s->isPageTag() || !s->pageTagId()[0])
+    if(s == removing || !s->isPageTag() || !s->pageTagId()[0] || s->isTodoDone())
       continue;
     std::string id = s->pageTagId();
     if(std::find(pageTagIds.begin(), pageTagIds.end(), id) == pageTagIds.end())

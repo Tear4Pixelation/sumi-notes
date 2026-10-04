@@ -961,30 +961,100 @@ Element* Element::createRulingRegion(const RulingRegionParams& params, Color pap
 // Built from nodes rather than parsed from a string, so a tag name needs no escaping.  The color sits on
 //  the <g> alone - the pill is the same fill at low opacity - so the selection's color button restyles the
 //  whole tag.  The font is on the <text> itself, since its bounds are measured before it has a parent.
-Element* Element::createPageTag(const char* tagId, const char* name, Point topRight)
+static const Dim PAGETAG_FONT_SIZE = 15, PAGETAG_PAD_X = 12, PAGETAG_HEIGHT = 28;
+// a to-do tag's checkbox, in the tag's own coordinates: at the left end of the pill, before the name
+static const Dim TODO_BOX_SIZE = 14, TODO_BOX_GAP = 7, TODO_BOX_LINE = 1.75;
+static const Rect TODO_BOX_RECT = Rect::ltwh(PAGETAG_PAD_X - 2, (PAGETAG_HEIGHT - TODO_BOX_SIZE)/2,
+    TODO_BOX_SIZE, TODO_BOX_SIZE);
+static const char* TODO_CHECK_CLASS = "write-todo-check";
+static const char* PAGETAG_TEXT_CLASS = "write-pagetag-text";
+
+// Built from nodes rather than parsed from a string, so a tag name needs no escaping.  The color sits on
+//  the <g> alone - the pill is the same fill at low opacity - so the selection's color button restyles the
+//  whole tag.  The font is on the <text> itself, since its bounds are measured before it has a parent.
+// A to-do tag's box and tick are filled shapes with no color of their own (the box an outline drawn as a
+//  ring with even-odd), for the same reason: a stroke color would be recolored to the tag's fill, and a
+//  white tick on a filled box would vanish.  The tick is always there and hidden while open, so ticking a
+//  clone of the tag keeps any move, scale or color it was given (ScribbleArea::toggleTodoTag()).
+Element* Element::createPageTag(const char* tagId, const char* name, Point topRight, bool todo, bool done)
 {
-  static const Dim FONT_SIZE = 15, PAD_X = 12, HEIGHT = 28;
   SvgText* text = new SvgText();
+  text->addClass(PAGETAG_TEXT_CLASS);
   text->setAttribute("font-family", "satoshi, ui-sans, sans-serif");
-  text->setAttribute("font-size", fstring("%g", FONT_SIZE).c_str());
+  text->setAttribute("font-size", fstring("%g", PAGETAG_FONT_SIZE).c_str());
   text->addText(fstring("#%s", name).c_str());
   Rect textBounds = text->bounds();
-  Dim textWidth = textBounds.isValid() ? textBounds.width() : FONT_SIZE*strlen(name)*0.55;
-  Dim width = textWidth + 2*PAD_X;
+  Dim textWidth = textBounds.isValid() ? textBounds.width() : PAGETAG_FONT_SIZE*strlen(name)*0.55;
+  Dim textLeft = PAGETAG_PAD_X + (todo ? TODO_BOX_RECT.width() - 2 + TODO_BOX_GAP : 0);
+  Dim width = textLeft + textWidth + PAGETAG_PAD_X;
   // baseline placed so the cap height sits in the middle of the pill
-  text->setTransform(Transform2D::translating(PAD_X, HEIGHT/2 + 0.35*FONT_SIZE));
+  text->setTransform(Transform2D::translating(textLeft, PAGETAG_HEIGHT/2 + 0.35*PAGETAG_FONT_SIZE));
 
-  SvgRect* pill = new SvgRect(Rect::wh(width, HEIGHT), HEIGHT/2, HEIGHT/2);  // ry does not default to rx
+  // ry does not default to rx
+  SvgRect* pill = new SvgRect(Rect::wh(width, PAGETAG_HEIGHT), PAGETAG_HEIGHT/2, PAGETAG_HEIGHT/2);
   pill->setAttr<float>("fill-opacity", 0.16f);
 
   SvgG* g = new SvgG;
   g->addClass(PAGE_TAG_CLASS);
   g->setAttr("__pagetag", tagId);
+  if(todo)
+    g->setAttr("__todo", "0");  // makes it a to-do tag; setTodoDone() below gives the real state
   setSvgFillColor(g, Color(0x2F, 0x6B, 0xB8));
   g->addChild(pill);
+  if(todo) {
+    const Rect& box = TODO_BOX_RECT;
+    Dim inset = TODO_BOX_LINE;
+    Path2D ring;
+    ring.addRect(box);
+    ring.addRect(Rect(box).pad(-inset));
+    SvgPath* boxNode = new SvgPath(ring);
+    boxNode->setAttribute("fill-rule", "evenodd");
+    g->addChild(boxNode);
+    // a tick as a filled polygon: two bars meeting at the bottom
+    Dim left = box.left, top = box.top, size = box.width();
+    Path2D tick;
+    tick.moveTo(left + 0.20*size, top + 0.50*size);
+    tick.lineTo(left + 0.42*size, top + 0.72*size);
+    tick.lineTo(left + 0.82*size, top + 0.24*size);
+    tick.lineTo(left + 0.90*size, top + 0.34*size);
+    tick.lineTo(left + 0.42*size, top + 0.90*size);
+    tick.lineTo(left + 0.10*size, top + 0.60*size);
+    tick.closeSubpath();
+    SvgPath* tickNode = new SvgPath(tick);
+    tickNode->addClass(TODO_CHECK_CLASS);
+    g->addChild(tickNode);
+  }
   g->addChild(text);
   g->setTransform(Transform2D::translating(topRight.x - width, topRight.y));
-  return new Element(g);
+  Element* tag = new Element(g);
+  if(todo)
+    tag->setTodoDone(done);
+  return tag;
+}
+
+void Element::setTodoDone(bool done)
+{
+  if(!isTodoTag())
+    return;
+  node->setAttr("__todo", done ? "1" : "0");
+  for(SvgNode* child : containerNode()->children()) {
+    if(child->hasClass(TODO_CHECK_CLASS))
+      child->setDisplayMode(done ? SvgNode::BlockMode : SvgNode::NoneMode);
+    // a finished to-do reads as done at a glance
+    else if(child->hasClass(PAGETAG_TEXT_CLASS)) {
+      if(done)
+        child->setAttr<float>("opacity", 0.5f);
+      else
+        child->removeAttr("opacity");
+    }
+  }
+}
+
+Rect Element::todoBoxRect() const
+{
+  if(!isTodoTag())
+    return Rect();
+  return node->hasTransform() ? node->getTransform().mapRect(TODO_BOX_RECT) : TODO_BOX_RECT;
 }
 
 void Element::dropShape()

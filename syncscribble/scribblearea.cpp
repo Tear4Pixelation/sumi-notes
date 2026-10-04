@@ -139,6 +139,7 @@ void ScribbleArea::reset()
     s->deleteNode();
   pendingTags.clear();
   placingPressed = false;
+  todoPressed = NULL;
   currPage = NULL;
 }
 
@@ -1069,7 +1070,7 @@ Element* ScribbleArea::addRulingRegion(const Rect& r)
 static const Dim PENDING_TAG_STEP = 36;  // same stacking as ScribbleDoc's
 static const Dim PENDING_TAG_MARGIN = 8;  // how far inside the page edge a tag placed beyond it ends up
 
-void ScribbleArea::startTagPlacement(const std::vector<std::pair<std::string, std::string>>& tags)
+void ScribbleArea::startTagPlacement(const std::vector<std::pair<std::string, std::string>>& tags, bool todo)
 {
   cancelTagPlacement();
   if(tags.empty())
@@ -1077,7 +1078,7 @@ void ScribbleArea::startTagPlacement(const std::vector<std::pair<std::string, st
   // right-aligned under each other, the first one's centre under the pointer
   for(size_t ii = 0; ii < tags.size(); ++ii)
     pendingTags.push_back(Element::createPageTag(tags[ii].first.c_str(), tags[ii].second.c_str(),
-        Point(0, ii*PENDING_TAG_STEP)));
+        Point(0, ii*PENDING_TAG_STEP), todo));
   pendingTagsAnchor = pendingTags.front()->bbox().center();
   // until the pointer moves - and a finger never hovers - they wait in the middle of the view
   pendingTagsPos = dimToPageDim(screenToDim(Point(getViewWidth()/2, getViewHeight()/3)));
@@ -1170,6 +1171,47 @@ void ScribbleArea::placePendingTags(bool select)
   placingPressed = false;
 }
 
+bool ScribbleArea::capturesPointer(const InputEvent& event) const
+{
+  if(placingTags())
+    return true;
+  // a finger that would pan still ticks a to-do it lands on
+  Point pos = dimToPageDim(screenToDim(Point(event.points[0].x, event.points[0].y)));
+  return todoBoxHit(pos, event.source == INPUTSOURCE_TOUCH) != NULL;
+}
+
+// the topmost, as it is the one drawn over the others; a tag on a locked or hidden layer is out of reach
+//  like any other element there
+Element* ScribbleArea::todoBoxHit(Point pos, bool touch) const
+{
+  Dim reach = (touch ? 6 : 2)/mZoom;
+  Element* hit = NULL;
+  for(Element* s : currPage->children()) {
+    if(s->isTodoTag() && currPage->isEditable(s) && s->todoBoxRect().pad(reach).contains(pos))
+      hit = s;  // later in the list is higher up
+  }
+  return hit;
+}
+
+// The ticked tag is a copy of the old one with the box flipped, swapped in as one action: undo, redo and sync
+//  are then the ordinary add and delete, and Page::onAddStroke/onRemoveStroke recount the page's tags.
+Element* ScribbleArea::toggleTodoTag(Element* tag)
+{
+  if(!tag || !tag->isTodoTag() || tag->node->parent() != currPage->contentNode)
+    return NULL;
+  if(tag->selection())
+    clearSelection();
+  Element* toggled = tag->cloneNode();
+  toggled->setTodoDone(!tag->isTodoDone());
+  scribbleDoc->startAction(currPageNum);
+  currPage->addStroke(toggled, tag, tag->layer());
+  currPage->removeStroke(tag);
+  scribbleDoc->endAction();
+  // a page that gains or loses a tag needs its thumbnail in the browser redrawn
+  currPage->pageTagThumb.clear();
+  return toggled;
+}
+
 // two fade-in, fade-out pulses of the active (--checked) blue, ~1.4 s in all
 static const int PAGETAG_FLASH_FRAME_MS = 30;
 static const int PAGETAG_FLASH_FRAMES = 48;
@@ -1180,7 +1222,9 @@ void ScribbleArea::flashPageTags(const std::vector<std::string>& tagIds)
 {
   flashRects.clear();
   for(Element* s : currPage->children()) {
-    if(s->isPageTag() && std::find(tagIds.begin(), tagIds.end(), s->pageTagId()) != tagIds.end())
+    // a ticked to-do of the same tag is not what the card was listed for
+    if(s->isPageTag() && !s->isTodoDone()
+        && std::find(tagIds.begin(), tagIds.end(), s->pageTagId()) != tagIds.end())
       flashRects.push_back(s->bbox().pad(4));
   }
   if(flashRects.empty())
@@ -2453,6 +2497,21 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
     return;
   }
 
+  // a to-do tag's checkbox, like a region's "..." button, is tested before the tool gets the press - but
+  //  not for the eraser, which should be able to start on one
+  todoPressed = NULL;
+  if(!(modemod & (MODEMOD_PENBTN | MODEMOD_ERASE | MODEMOD_EDGEMASK))) {
+    int toolMode = scribbleDoc->getScribbleMode(modemod);
+    bool erasing = toolMode == MODE_ERASE || toolMode == MODE_ERASESTROKE || toolMode == MODE_ERASERULED
+        || toolMode == MODE_ERASEFREE || toolMode == MODE_ERASEFREERULED;
+    if(!erasing && (todoPressed = todoBoxHit(pos, event.source == INPUTSOURCE_TOUCH))) {
+      currMode = MODE_NONE;
+      prevPos = initialPos = pos;
+      prevRawPos = rawpos;
+      return;
+    }
+  }
+
   // offset should be a property of RuledSelector, not Page, but this is easier for now
   if(currPage->yruling() == 0)
     currPage->yRuleOffset = fmod(pos.y - Page::BLANK_Y_RULING/2, Page::BLANK_Y_RULING);
@@ -2861,8 +2920,8 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
 
 void ScribbleArea::doMoveEvent(const InputEvent& event)
 {
-  if(placingPressed)
-    return;  // doMotionEvent moves the tags
+  if(placingPressed || todoPressed)
+    return;  // doMotionEvent moves the tags; a press on a to-do box waits for its release
   Point rawpos = Point(event.points[0].x, event.points[0].y);
   Point pos = dimToPageDim(screenToDim(rawpos));
   // tablet will happily send many points with same position
@@ -3215,6 +3274,17 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
   if(placingPressed) {
     placePendingTags(event.source == INPUTSOURCE_PEN);
     uiChanged(UIState::ReleaseEvent);  // undo and save buttons, as at the end of every other release
+    return;
+  }
+  if(todoPressed) {
+    // only if the release is still on the box it pressed - a hit test, so a tag deleted meanwhile (sync)
+    //  is never touched through a stale pointer
+    Point pos = dimToPageDim(screenToDim(Point(event.points[0].x, event.points[0].y)));
+    Element* tag = todoBoxHit(pos, event.source == INPUTSOURCE_TOUCH);
+    if(tag == todoPressed)
+      toggleTodoTag(tag);
+    todoPressed = NULL;
+    uiChanged(UIState::ReleaseEvent);
     return;
   }
   // MODE_PAGESEL is unique in that it involves also clicking on pages
@@ -3698,6 +3768,7 @@ void ScribbleArea::doCancelAction(bool refresh)
   // a press placing tags is over, but the tags stay on the pointer: this runs on every save too, and an
   //  autosave must not drop them - only Esc does (ScribbleApp::keyPressEvent)
   placingPressed = false;
+  todoPressed = NULL;
   switch(currMode) {
   case MODE_DRAWSHAPE:
     if(currStroke) {

@@ -207,9 +207,15 @@ public:
   //  and undo and sync handle it like any other element.  The id is what counts; the text is a label.
   bool isPageTag() const { return node->type() == SvgNode::G && node->hasClass(PAGE_TAG_CLASS); }
   const char* pageTagId() const { return node->getStringAttr("__pagetag", ""); }
-  // a tag with its top right corner at `topRight`, in page coordinates
-  static Element* createPageTag(const char* tagId, const char* name, Point topRight);
+  // a tag with its top right corner at `topRight`, in page coordinates; a to-do tag has a checkbox left of
+  //  its name, and while that is ticked the page does not count as carrying the tag
+  static Element* createPageTag(const char* tagId, const char* name, Point topRight,
+      bool todo = false, bool done = false);
   static const char* PAGE_TAG_CLASS;
+  bool isTodoTag() const { return isPageTag() && node->getStringAttr("__todo", "")[0]; }
+  bool isTodoDone() const { return isTodoTag() && node->getStringAttr("__todo", "")[0] == '1'; }
+  void setTodoDone(bool done);  // only the attribute and the look; recording it is the caller's business
+  Rect todoBoxRect() const;  // the checkbox, in page coordinates; invalid if this is not a to-do tag
   bool isBookmark() const { return node->hasClass("bookmark"); }
   bool isHyperRef() const;
   // all children of multi-stroke have Element exts; may extend to include bookmark groups later

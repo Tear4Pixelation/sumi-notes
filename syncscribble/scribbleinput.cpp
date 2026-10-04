@@ -258,7 +258,7 @@ void ScribbleInput::doInputEvent(InputEvent& event)
 
   if(scribbling == NOT_SCRIBBLING) {
     if(npoints > prevpoints) {
-      bool captured = npoints == 1 && parent->capturesPointer();
+      bool captured = npoints == 1 && parent->capturesPointer(event);
       if(!captured && event.source == INPUTSOURCE_TOUCH && ((npoints == 1 && singleTouchMode == INPUTMODE_NONE)
           || (npoints > 1 && multiTouchMode == INPUTMODE_NONE)))
         return;

@@ -24,6 +24,7 @@ struct State {
   TextBox* tagsTitle = NULL;
   TextEdit* searchEdit = NULL;
   Widget* tagList = NULL;
+  CheckBox* todoCheck = NULL;  // This Page only: the tags placed get a checkbox
   std::unique_ptr<TagStore> store;
   bool pageMode = false;
   int pagenum = -1;
@@ -67,6 +68,9 @@ void State::showTags(bool forPage)
     tagsTitle->setText(_("Tag Notebook"));
   }
   tags = initialTags;
+  // a to-do is a choice for these tags, not a setting, so it starts unticked each time
+  todoCheck->setChecked(false);
+  todoCheck->setVisible(forPage);
   query.clear();
   searchEdit->setText("");
   choiceView->setVisible(false);
@@ -189,6 +193,7 @@ void State::done()
     if(std::find(tags.begin(), tags.end(), id) == tags.end())
       removed.push_back(id);
   }
+  bool todo = todoCheck->isChecked();
   std::vector<std::pair<std::string, std::string>> toPlace;
   for(const std::string& id : tags) {
     if(std::find(initialTags.begin(), initialTags.end(), id) == initialTags.end()) {
@@ -202,7 +207,7 @@ void State::done()
   if(!forPage || !doc)
     return;
   doc->removePageTags(pagenum, removed);
-  ScribbleApp::app->activeArea()->startTagPlacement(toPlace);
+  ScribbleApp::app->activeArea()->startTagPlacement(toPlace, todo);
 }
 
 Button* createTagButton()
@@ -259,6 +264,11 @@ Button* createTagButton()
   state->tagList = createColumn({}, "", "", "left");
   state->tagList->setMargins(0, 12, 8, 12);
   state->tagsView->addWidget(state->tagList);
+  // a ticked to-do stays on the page, but the page no longer counts as tagged (docs/agent/page-tags.md)
+  state->todoCheck = createCheckBox(_("Add it as a to-do"), false);
+  state->todoCheck->setMargins(0, 12, 10, 12);
+  state->todoCheck->node->setAttribute("box-anchor", "left");
+  state->tagsView->addWidget(state->todoCheck);
   popup->addWidget(state->tagsView);
 
   setupAutoClosePopup(popup);

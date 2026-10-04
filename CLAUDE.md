@@ -119,7 +119,7 @@ relevant file before changing that area.
 - [screenshot.md](docs/agent/screenshot.md) - region kept dashed after a selection (even an empty one), capture without paper/ruling, white-to-alpha, crop dialog, Copy / Add to page
 - [themes.md](docs/agent/themes.md) - palette generator (`cusp-walk-1` is FROZEN), theme storage, restyle, themed picker, `ThemeChangedItem`
 - [outlines.md](docs/agent/outlines.md) - per-page outline entries, `PageOutlineItem`, why no document-level index
-- [page-tags.md](docs/agent/page-tags.md) - tags on pages as `write-pagetag` elements, the toolbar tag button and placing tags on the pointer, the `pagetags` summary and page thumbnails, page cards, inheritance and the blink
+- [page-tags.md](docs/agent/page-tags.md) - tags on pages as `write-pagetag` elements, the toolbar tag button and placing tags on the pointer, to-do tags (ticked = page untagged), the `pagetags` summary and page thumbnails, page cards, inheritance and the blink
 - [layers.md](docs/agent/layers.md) - `__layer` tag not `<g>`, edit gate, lock semantics, `LayerTableItem`, sync of the table
 - [sidebar.md](docs/agent/sidebar.md) - outline/layers sidebar, pinned vs floating, sizing traps, row drag (`rowdrag.cpp`)
 - [navigation.md](docs/agent/navigation.md) - wheel/zoom/pan, sdl2-compat `preciseX/Y`, `SDL_Event = {}`, modifier tracking, testing scroll in agent-display

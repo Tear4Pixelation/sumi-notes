@@ -428,7 +428,8 @@ int ScribbleDoc::renamePageTagElements(Document* doc, const std::string& tagId, 
     // a new label changes the pill's width, so the tag is rebuilt, keeping its right edge where it was
     for(Element* s : tags) {
       Rect bbox = s->bbox();
-      Element* renamed = Element::createPageTag(tagId.c_str(), name.c_str(), Point(bbox.right, bbox.top));
+      Element* renamed = Element::createPageTag(tagId.c_str(), name.c_str(), Point(bbox.right, bbox.top),
+          s->isTodoTag(), s->isTodoDone());
       // keep a color the user gave it
       Color color = s->node->getColorAttr("fill", Color::INVALID_COLOR);
       if(color.isValid())
