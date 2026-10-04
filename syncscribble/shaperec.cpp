@@ -739,14 +739,33 @@ EllipseFit fitEllipse(const std::vector<Vec2>& pts, double eqRadius)
 
 }  // namespace
 
-Result recognize(const std::vector<Vec2>& stroke, const Params& params)
+// the stroke without repeated points or the samples left by a hold at the end
+static std::vector<Vec2> cleanStroke(const std::vector<Vec2>& stroke, const Params& params)
 {
-  Result res;
   std::vector<Vec2> pts;
   for(const Vec2& pt : stroke)
     if(pts.empty() || dist(pts.back(), pt) > 1e-9)
       pts.push_back(pt);
-  pts = trimHold(pts, params);
+  return trimHold(pts, params);
+}
+
+Result recognizeScribble(const std::vector<Vec2>& stroke, const Params& params)
+{
+  Result res;
+  std::vector<Vec2> pts = cleanStroke(stroke, params);
+  if(pts.size() < 3) {
+    res.reason = "too few points";
+    return res;
+  }
+  if(fitScribble(pts, cumulativeLengths(pts).back(), params, res, res.reason))
+    res.kind = Kind::Scribble;
+  return res;
+}
+
+Result recognize(const std::vector<Vec2>& stroke, const Params& params)
+{
+  Result res;
+  std::vector<Vec2> pts = cleanStroke(stroke, params);
   if(pts.size() < 3) {
     res.reason = "too few points";
     return res;

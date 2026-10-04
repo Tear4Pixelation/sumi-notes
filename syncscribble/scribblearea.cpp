@@ -1487,6 +1487,25 @@ void ScribbleArea::discardStrokeBuilder()
   }
 }
 
+// The scratch-out test alone over a stroke just finished; if it is one, its ink is dropped and what it
+//  was drawn over erased.
+bool ScribbleArea::scratchOutOnLift()
+{
+  std::vector<shaperec::Vec2> stroke;
+  stroke.reserve(snapSamples.size());
+  for(const Point& pt : snapSamples)
+    stroke.emplace_back(pt.x*mScale, pt.y*mScale);
+  shaperec::Result result = shaperec::recognizeScribble(stroke);
+  if(result.kind != shaperec::Kind::Scribble)
+    return false;
+  std::vector<Point> area;
+  for(const shaperec::Vec2& pt : result.points)
+    area.push_back(Point(pt.x/mScale, pt.y/mScale));
+  discardStrokeBuilder();
+  scratchOut(area);
+  return true;
+}
+
 // Runs the recognizer over the stroke so far and, if it is a shape, swaps the ink for it.  Returns false
 //  (and changes nothing) if the stroke is not recognized.
 bool ScribbleArea::snapStroke()
@@ -3433,6 +3452,11 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
     break;
   case MODE_STROKE:
   {
+    // a scratch-out needs no hold: it erases as the pen lifts
+    if(!snapActive && snapSamples.size() > 2 && cfg->Int("scribbleOnLift") && scratchOutOnLift()) {
+      stopShapeSnap();
+      break;
+    }
     stopShapeSnap();
     if(snapActive) {
       commitSnapShape();

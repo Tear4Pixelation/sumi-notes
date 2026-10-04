@@ -139,5 +139,7 @@ struct Result
 };
 
 Result recognize(const std::vector<Vec2>& stroke, const Params& params = Params());
+// only the scratch-out test, for a stroke that just ended without a hold: Kind::Scribble or Kind::None
+Result recognizeScribble(const std::vector<Vec2>& stroke, const Params& params = Params());
 
 }  // namespace shaperec
