@@ -63,12 +63,24 @@ std::string acquire(const FSPath& base, int maxTries)
   return "";
 }
 
+// On Apple platforms /var and /tmp are symlinks to /private/var and /private/tmp, and which spelling a
+//  path arrives in depends on where it came from ($HOME, a UIDocument URL, a picker). canonicalPath() does
+//  not resolve symlinks, so both sides are reduced to the short form - stripping only the file's prefix
+//  (as isInLibrary() once did) made every document of a library whose own path had the prefix look
+//  external, and opening it imported yet another copy. Not limited to Apple: no other system has these.
+static std::string withoutPrivatePrefix(std::string path)
+{
+  if(StringRef(path).startsWith("/private/var/") || StringRef(path).startsWith("/private/tmp/"))
+    path.erase(0, strlen("/private"));
+  return path;
+}
+
 bool contains(const FSPath& library, const FSPath& file)
 {
   if(library.isEmpty())
     return false;  // asDir() would turn "" into "/", which contains everything
-  std::string root = canonicalPath(asDir(library));
-  std::string path = canonicalPath(file);
+  std::string root = withoutPrivatePrefix(canonicalPath(asDir(library)));
+  std::string path = withoutPrivatePrefix(canonicalPath(file));
   if(root.empty() || path.size() <= root.size())
     return false;
 #if PLATFORM_WIN

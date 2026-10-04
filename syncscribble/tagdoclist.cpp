@@ -1338,6 +1338,7 @@ void TagDocList::createUI()
   importFab = static_cast<Button*>(createFab("icons/ic_menu_import.svg", 44, false));
   importFab->setMargins(0, 17, 0, 0);
   ArrowPopup* importPopup = createArrowPopup(Menu::VERT_LEFT | Menu::ABOVE);
+  importPopup->addItem(_("Document"), NULL, [this](){ selectedFile.clear(); finish(IMPORT_DOC); });
   Button* importPdfItem = importPopup->addItem(_("PDF"), NULL,
       [this](){ selectedFile.clear(); finish(IMPORT_PDF); });
   importPdfItem->setEnabled(PdfImport::isAvailable());
@@ -1350,8 +1351,6 @@ void TagDocList::createUI()
   folderTagsBox->onToggled = [](bool on){ ScribbleApp::cfg->set("notefulFolderTags", on); };
   importPopup->addWidget(folderTagsBox);
   setupPopupMenu(importFab, importPopup);
-  // iOS picks files asynchronously through UIDocumentPicker (svg only), which this flow cannot wait for
-  importFab->setVisible(!PLATFORM_IOS);
   fabRow->addWidget(importFab);
   addDocFab = static_cast<Button*>(createFab("icons/ic_menu_plus.svg", 56, true));
   addDocFab->onClicked = [this](){ newDoc(); };

@@ -38,6 +38,42 @@ int macosClipboardChangeCount(void)
   return [NSPasteboard generalPasteboard].changeCount;
 }
 
+char* macosFileDialog(int save, const char* title, const char* name, const char* exts)
+{
+  @autoreleasepool {
+    NSSavePanel* panel = save ? [NSSavePanel savePanel] : [NSOpenPanel openPanel];
+    panel.title = @(title);
+    panel.message = @(title);
+    NSMutableArray<NSString*>* types = [NSMutableArray array];
+    for(NSString* ext in [@(exts) componentsSeparatedByString:@" "]) {
+      if(ext.length > 0)
+        [types addObject:ext];
+    }
+    // allowedContentTypes needs macOS 11 and system types; extensions also cover svgz and noteful
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    if(types.count > 0)
+      panel.allowedFileTypes = types;
+#pragma clang diagnostic pop
+    if(save) {
+      panel.nameFieldStringValue = @(name);
+      panel.allowsOtherFileTypes = YES;  // Save As offers several formats, chosen by extension
+    }
+    else {
+      NSOpenPanel* openPanel = (NSOpenPanel*)panel;
+      openPanel.canChooseFiles = YES;
+      openPanel.canChooseDirectories = NO;
+      openPanel.allowsMultipleSelection = NO;
+    }
+    NSWindow* keyWindow = NSApp.keyWindow;
+    NSModalResponse response = [panel runModal];
+    [keyWindow makeKeyAndOrderFront:nil];
+    if(response != NSModalResponseOK || !panel.URL)
+      return NULL;
+    return strdup(panel.URL.fileSystemRepresentation);
+  }
+}
+
 //#import "SDL/src/video/cocoa/SDL_cocoawindow.h"
 @interface Cocoa_WindowListener : NSResponder <NSWindowDelegate>
 - (void)mouseDown:(NSEvent *)event;

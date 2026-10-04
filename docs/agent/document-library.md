@@ -44,15 +44,22 @@ the system `UIDocumentBrowserViewController`.
   root instead of being presented over a `UIDocumentBrowserViewController`, and library documents are plain
   `FileStream`s rather than `UIDocument`s - so recents work there too (the title button's menu was hidden
   on iOS only because recents needed security-scoped bookmarks), and the browser is cancelable. Anything
-  arriving from outside - Files, "Open in", Import Document... (the system picker, `iosPickDocument`) -
-  still comes in as a `UIDocument`-backed `UIDocStream`, since that is what handles security-scoped and
-  coordinated reads; `dropEvent()` then imports it and never keeps editing through that `UIDocument`,
-  which would write the original back. A picked file that is already in the library is reopened as a
-  plain file instead of copied. `isInLibrary()` strips a leading `/private` on iOS: `/var` is a symlink to
-  `/private/var`, `$HOME` comes without the prefix and `UIDocument` URLs sometimes with it, and
-  `canonicalPath()` does not resolve symlinks, so otherwise library files would be imported again.
-- **The classic folder browser is gone as a browser**; its menu entry is now **Import Document...**, the file
-  picker whose result `doOpenDocument()` then copies in.
+  arriving from Files or another app's "Open in" still comes in as a `UIDocument`-backed `UIDocStream`;
+  `dropEvent()` then imports it and never keeps editing through that `UIDocument`, which would write the
+  original back. Import Document... and the browser's Import menu go through `FilePicker` instead (below).
+  A file that is already in the library is reopened as a plain file instead of copied.
+- **`/var` vs `/private/var`** (iOS, also macOS): `/var` is a symlink to `/private/var`, paths arrive in
+  either spelling - the library's own included - and `canonicalPath()` does not resolve symlinks.
+  `DocLibrary::contains()` strips the prefix from **both** sides. It used to be stripped from the file
+  only, in `isInLibrary()`; with a library path that had the prefix, every document then looked external
+  and every open from the browser imported another copy ("Copied ... into the document library", a new
+  duplicate each time). `librarytest.cpp` pins both spellings.
+- **The iOS container moves.** `.../Containers/Data/Application/<UUID>/` can change when the app is
+  updated, while the saved `libraryPath` is absolute. `initLibrary()` rebases a saved path into another
+  container onto the current `$HOME`, or every update would land in the fallback library.
+- **The classic folder browser is gone as a browser**; its menu entry is now **Import Document...**, the
+  system file picker whose result `doOpenDocument()` then copies in. The browser's Import FAB offers
+  Document, PDF and Noteful on every platform (it used to be hidden on iOS).
 - **Migration is a one-time offer, copying not moving** (`offerLibraryMigration()`, `libraryMigrated`):
   documents under the old `currFolder` (plus the legacy Android folders), depth 3 since that may be a home
   directory, excluding multi-file HTML. `.write-tags` is carried over so tag names survive; recent
@@ -61,11 +68,53 @@ the system `UIDocumentBrowserViewController`.
   repoints a live browser with `TagDocList::setRoot()` - deleting it could free a window still inside
   `execWindow`.
 
-Known gaps: Save As still writes wherever it is pointed and the document then lives there; the library
-folder pref is a text field, not a folder picker; merging a fallback into a library that already has a
-`.write-tags` keeps the destination's and leaves the other behind; PDFs cannot be picked on iOS (the
-picker offers `public.svg-image` only); none of this has run on Android, iOS, Windows or macOS yet (verified
-on Linux only; the iOS C++ was syntax-checked with the platform forced, `ioshelper.m` not at all).
+Known gaps: desktop Save As still writes wherever it is pointed and the document then lives there; the
+library folder pref is a text field, not a folder picker; merging a fallback into a library that already
+has a `.write-tags` keeps the destination's and leaves the other behind; verified on Linux only.
+
+# System file picker (`filepicker.cpp`)
+
+Every place a file is picked or saved uses the operating system's dialog - Import Document/PDF/Noteful,
+the browser's Import menu, Insert Document, Insert Image (desktop; mobile already used the photo/camera
+pickers), Save As and Export PDF. `DocumentList` is only the fallback (`FilePicker::setFallback()`), for
+wasm and a Linux desktop with none of the dialogs below.
+
+- **Linux:** the xdg-desktop-portal FileChooser over D-Bus (libdbus `dlopen`ed, so the binary still starts
+  without it), then `zenity`, then `kdialog`. The wait pumps SDL so the window stays responsive, and drops
+  the input queued meanwhile. `SUMI_FILE_PICKER=portal|zenity|kdialog|none` forces one;
+  **`SUMI_FILE_PICKER=fixed:/path`** answers every pick with that path - use it in the agent display,
+  where a portal dialog would open on the user's real desktop instead of inside cage.
+- **Windows** `IFileOpenDialog`/`IFileSaveDialog`; **macOS** `NSOpenPanel`/`NSSavePanel` (`macoshelper.m`).
+- **iOS** `UIDocumentPickerViewController` (`ioshelper.m`, `iosPickFile`), opened in place, not as a copy:
+  a file under the app's own home is passed on by path (a copy of a library document would be imported
+  as a duplicate); anything else is copied to `tmp/picked/<uuid>/` under security-scoped, coordinated
+  access. Extensions without a system type (svgz, noteful) map to `public.data`.
+- **Android** `ACTION_OPEN_DOCUMENT`; `MainActivity.copyToCache()` copies the content URI into
+  `cache/picked/<n>/` on a worker thread and reports back through `jniFilePicked`.
+- **Results are always asynchronous**: the callback runs from the event loop (`FilePicker::handleEvent`,
+  first thing in `sdlEventHandler`), never inside `openFile()`, even on desktop where the dialog is modal.
+  iOS and Android cannot do otherwise, and this way the desktop runs - and tests - the same path. The
+  browser's Import therefore shows the browser again right after starting the picker; the result arrives
+  while it is up, and `browserImportDone()` ends it with `EXISTING_DOC` on the imported document, as if
+  it had been tapped.
+- **Saving:** desktop asks for the path synchronously (`FilePicker::savePath()`), since Save As and
+  `maybeSave()` need the answer at once. On Android and iOS `saveFile()` writes to `tmp/export/` and hands
+  that file to `ACTION_CREATE_DOCUMENT` / the export picker - so mobile **Save As saves a copy** and the
+  document stays in the library (iOS without the library keeps `iosSaveAs`). This also made Export PDF
+  work on iOS, where it used to do nothing.
+
+Gaps: only the Linux implementation has run; the Windows, macOS, Android and iOS code was written
+without a compiler for those platforms. New strings are untranslated.
+
+# Browser fonts
+
+The browser's theme uses Raleway (the "Sumi" title) and Satoshi (everything else) with no fallback family
+(`ugui/theme.cpp`). fontstash reads a font file only when it first draws with it, so `loadFont()` succeeds
+for a file that does not exist and the text silently never appears: that is how the iOS browser lost its
+title, "All Documents", both search placeholders, tag names and document names - the fonts were never
+in `IOSRES`. Both now ship on every platform (`DISTRES`/`IOSRES`, Android assets extracted to `.saved/`,
+the WiX installer), and `setupResources()` registers the UI sans font under a face's name when its file
+is missing - checking existence, not `loadFont()`'s result.
 
 # Create Notebook (new document dialog)
 

@@ -1,5 +1,6 @@
 #import <UIKit/UIKit.h>
 #import <StoreKit/StoreKit.h>
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #include "ioshelper.h"
 #include "ugui/svggui_platform.h"  // for SDL and pen ids
 
@@ -929,6 +930,97 @@ void iosPickDocument(long mode)
   documentPicker.delegate = documentPicker;
   documentPicker.modalPresentationStyle = UIModalPresentationFormSheet;
   [sdlViewController presentViewController:documentPicker animated:YES completion:nil];
+}
+
+// FilePicker (filepicker.cpp): the system picker for any file, and the export dialog for saving one
+
+// A file in Sumi's own storage (the library, which Files shows under Sumi) is used where it is - a copy of
+//  a library document would be imported as a duplicate. Anything else is copied to tmp while the picker's
+//  security-scoped access lasts, since the C++ side only reads it later, from the event loop; the
+//  coordinated read also makes the system download an iCloud file that is not local yet.
+static NSString* localCopyOfPickedFile(NSURL* url)
+{
+  // resolving symlinks also drops a /private prefix, so both sides compare in the same spelling
+  NSString* home = [NSHomeDirectory().stringByResolvingSymlinksInPath stringByAppendingString:@"/"];
+  if([url.path.stringByResolvingSymlinksInPath hasPrefix:home])
+    return url.path;
+  BOOL scoped = [url startAccessingSecurityScopedResource];
+  NSString* dir = [NSTemporaryDirectory() stringByAppendingPathComponent:
+      [@"picked" stringByAppendingPathComponent:NSUUID.UUID.UUIDString]];
+  [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+  NSURL* dest = [NSURL fileURLWithPath:[dir stringByAppendingPathComponent:url.lastPathComponent]];
+  __block BOOL copied = NO;
+  __block NSError* copyError = nil;
+  NSError* coordError = nil;
+  NSFileCoordinator* coordinator = [[NSFileCoordinator alloc] initWithFilePresenter:nil];
+  [coordinator coordinateReadingItemAtURL:url options:NSFileCoordinatorReadingWithoutChanges
+      error:&coordError byAccessor:^(NSURL* readURL) {
+    copied = [[NSFileManager defaultManager] copyItemAtURL:readURL toURL:dest error:&copyError];
+  }];
+  if(scoped)
+    [url stopAccessingSecurityScopedResource];
+  if(!copied)
+    NSLog(@"Could not copy picked file %@: %@", url.path, copyError ? copyError : coordError);
+  return copied ? dest.path : nil;
+}
+
+@interface FilePickerController : UIDocumentPickerViewController <UIDocumentPickerDelegate>
+
+@property int requestId;
+@property BOOL exporting;
+
+@end
+
+@implementation FilePickerController
+
+- (void)documentPicker:(UIDocumentPickerViewController*)picker didPickDocumentsAtURLs:(NSArray<NSURL*>*)urls
+{
+  NSURL* url = urls.firstObject;
+  if(!url)
+    filePicked(self.requestId, NULL);
+  else if(self.exporting)
+    filePicked(self.requestId, url.path.UTF8String);
+  else
+    filePicked(self.requestId, localCopyOfPickedFile(url).UTF8String);  // nil -> NULL, i.e. failed
+}
+
+- (void)documentPickerWasCancelled:(UIDocumentPickerViewController*)picker
+{
+  filePicked(self.requestId, NULL);
+}
+
+@end
+
+static void presentFilePicker(FilePickerController* picker, int requestId)
+{
+  picker.requestId = requestId;
+  picker.delegate = picker;
+  picker.modalPresentationStyle = UIModalPresentationFormSheet;
+  [sdlViewController presentViewController:picker animated:YES completion:nil];
+}
+
+void iosPickFile(int requestId, const char* exts)
+{
+  NSMutableArray<UTType*>* types = [NSMutableArray array];
+  for(NSString* ext in [@(exts) componentsSeparatedByString:@" "]) {
+    if(ext.length == 0)
+      continue;
+    // an extension the system has no type for (svgz, noteful) only gets a dynamic type, which matches no
+    //  file at all - offer any data file instead and let Sumi reject what it cannot read
+    UTType* type = [UTType typeWithFilenameExtension:ext];
+    [types addObject:(type && !type.dynamic) ? type : UTTypeData];
+  }
+  if(types.count == 0)
+    [types addObject:UTTypeItem];
+  presentFilePicker([[FilePickerController alloc] initForOpeningContentTypes:types asCopy:NO], requestId);
+}
+
+void iosExportFile(int requestId, const char* path)
+{
+  NSURL* url = [NSURL fileURLWithPath:@(path)];
+  FilePickerController* picker = [[FilePickerController alloc] initForExportingURLs:@[url] asCopy:YES];
+  picker.exporting = YES;
+  presentFilePicker(picker, requestId);
 }
 
 //void iosMoveDocument(void* _doc, const char* newurl)

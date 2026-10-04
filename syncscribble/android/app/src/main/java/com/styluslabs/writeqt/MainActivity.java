@@ -49,6 +49,7 @@ public class MainActivity extends SDLActivity implements View.OnTouchListener, V
   private static native void jniOpenFile(String filename);
   private static native void jniOpenFileDesc(String filename, int fd);
   private static native int  jniNotify(int code);
+  private static native void jniFilePicked(int requestId, String path);
   private static native void jniTouchEvent(
       int devId, int ptrId, int action, int t, float x, float y, float p, float major, float minor);
 
@@ -509,8 +510,144 @@ public class MainActivity extends SDLActivity implements View.OnTouchListener, V
         }, false);
       }
     }
+    else if(requestCode == ID_PICKFILE) {
+      final int requestId = pickFileRequestId;
+      pickFileRequestId = -1;
+      final Uri uri = (resultCode == RESULT_OK && intent != null) ? intent.getData() : null;
+      if(uri == null)
+        jniFilePicked(requestId, null);
+      else {
+        // copying a large PDF can take a while - not on the UI thread
+        new Thread(new Runnable() { public void run() { jniFilePicked(requestId, copyToCache(uri)); } }).start();
+      }
+    }
+    else if(requestCode == ID_EXPORTFILE) {
+      final int requestId = exportFileRequestId;
+      final String srcPath = exportFileSource;
+      exportFileRequestId = -1;
+      exportFileSource = null;
+      final Uri uri = (resultCode == RESULT_OK && intent != null) ? intent.getData() : null;
+      if(uri == null || srcPath == null)
+        jniFilePicked(requestId, null);
+      else {
+        new Thread(new Runnable() { public void run() {
+          boolean ok = false;
+          try {
+            // "wt": truncate, or overwriting a longer file would leave its tail behind
+            ok = copyStream(new FileInputStream(srcPath), getContentResolver().openOutputStream(uri, "wt"));
+          } catch(IOException e) { Log.v("Sumi", "Export failed: " + e); }
+          jniFilePicked(requestId, ok ? uri.toString() : null);
+        } }).start();
+      }
+    }
     else
       super.onActivityResult(requestCode, resultCode, intent);
+  }
+
+  // FilePicker (filepicker.cpp): the system's document picker and export dialog. Picked files are copied
+  //  into the cache, since native code reads a path, not a content URI.
+  private static final int ID_PICKFILE = 1023;
+  private static final int ID_EXPORTFILE = 1024;
+  private int pickFileRequestId = -1;
+  private int exportFileRequestId = -1;
+  private String exportFileSource = null;
+
+  // null if any extension has no well-known type (svgz, noteful): those cannot be filtered on, so every
+  //  file is offered and Sumi rejects what it cannot read
+  private static String[] mimeTypesFor(String exts)
+  {
+    java.util.ArrayList<String> types = new java.util.ArrayList<String>();
+    for(String ext : exts.trim().split(" +")) {
+      String type = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext.toLowerCase());
+      if(ext.isEmpty() || type == null)
+        return null;
+      if(!types.contains(type))
+        types.add(type);
+    }
+    return types.toArray(new String[0]);
+  }
+
+  public void pickFile(final int requestId, final String exts)
+  {
+    final String[] mimeTypes = mimeTypesFor(exts);
+    runOnUiThread(new Runnable() { public void run() {
+      Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+      intent.addCategory(Intent.CATEGORY_OPENABLE);
+      intent.setType("*/*");
+      if(mimeTypes != null)
+        intent.putExtra(Intent.EXTRA_MIME_TYPES, mimeTypes);
+      pickFileRequestId = requestId;
+      try {
+        startActivityForResult(intent, ID_PICKFILE);
+      } catch(android.content.ActivityNotFoundException e) {
+        pickFileRequestId = -1;
+        jniFilePicked(requestId, null);
+      }
+    } });
+  }
+
+  public void exportFile(final int requestId, final String srcPath, final String suggestedName)
+  {
+    runOnUiThread(new Runnable() { public void run() {
+      String ext = suggestedName.substring(suggestedName.lastIndexOf('.') + 1).toLowerCase();
+      String type = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext);
+      Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+      intent.addCategory(Intent.CATEGORY_OPENABLE);
+      intent.setType(type != null ? type : "application/octet-stream");
+      intent.putExtra(Intent.EXTRA_TITLE, suggestedName);
+      exportFileRequestId = requestId;
+      exportFileSource = srcPath;
+      try {
+        startActivityForResult(intent, ID_EXPORTFILE);
+      } catch(android.content.ActivityNotFoundException e) {
+        exportFileRequestId = -1;
+        exportFileSource = null;
+        jniFilePicked(requestId, null);
+      }
+    } });
+  }
+
+  private static boolean copyStream(InputStream in, java.io.OutputStream out) throws IOException
+  {
+    if(in == null || out == null)
+      return false;
+    try {
+      byte[] buf = new byte[65536];
+      int len;
+      while((len = in.read(buf)) > 0)
+        out.write(buf, 0, len);
+    } finally {
+      in.close();
+      out.close();
+    }
+    return true;
+  }
+
+  // the picked document as a file, named like the original (so an import is named after it), in a fresh
+  //  directory so two picks of the same name cannot collide; null on failure
+  private String copyToCache(Uri uri)
+  {
+    String name = null;
+    try {
+      android.database.Cursor cursor = getContentResolver().query(uri,
+          new String[]{android.provider.OpenableColumns.DISPLAY_NAME}, null, null, null);
+      if(cursor != null) {
+        if(cursor.moveToFirst())
+          name = cursor.getString(0);
+        cursor.close();
+      }
+    } catch(Exception e) {}
+    if(name == null || name.isEmpty())
+      name = uri.getLastPathSegment() != null ? uri.getLastPathSegment() : "picked";
+    name = name.replace('/', '_');
+    File dir = new File(getCacheDir(), "picked/" + System.nanoTime());
+    dir.mkdirs();
+    File dest = new File(dir, name);
+    try {
+      if(copyStream(getContentResolver().openInputStream(uri), new FileOutputStream(dest)))
+        return dest.getAbsolutePath();
+    } catch(IOException e) { Log.v("Sumi", "Could not copy picked file: " + e); }
+    return null;
   }
 
   private boolean penBtnPressed = false;

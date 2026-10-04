@@ -5,6 +5,7 @@
 #include "android/bitmap.h"
 #include "android/native_window_jni.h"
 #include "scribbleapp.h"
+#include "filepicker.h"
 
 ScribbleApp* AndroidHelper::mainWindowInst = NULL;
 bool AndroidHelper::acceptVolKeys = false;
@@ -161,7 +162,44 @@ void AndroidHelper::getImage()
   fn.env->CallVoidMethod(fn.activity, fn.method_id);
 }
 
+void AndroidHelper::pickFile(int requestId, const char* exts)
+{
+  AndroidMethod fn("pickFile", "(ILjava/lang/String;)V");
+  if(!fn.method_id) {
+    FilePicker::deliver(requestId, NULL);
+    return;
+  }
+  jstring jexts = fn.env->NewStringUTF(exts);
+  fn.env->CallVoidMethod(fn.activity, fn.method_id, jint(requestId), jexts);
+  fn.env->DeleteLocalRef(jexts);
+}
+
+void AndroidHelper::exportFile(int requestId, const char* srcPath, const char* suggestedName)
+{
+  AndroidMethod fn("exportFile", "(ILjava/lang/String;Ljava/lang/String;)V");
+  if(!fn.method_id) {
+    FilePicker::deliver(requestId, NULL);
+    return;
+  }
+  jstring jsrc = fn.env->NewStringUTF(srcPath);
+  jstring jname = fn.env->NewStringUTF(suggestedName);
+  fn.env->CallVoidMethod(fn.activity, fn.method_id, jint(requestId), jsrc, jname);
+  fn.env->DeleteLocalRef(jsrc);
+  fn.env->DeleteLocalRef(jname);
+}
+
 // fns called from Java
+
+// a FilePicker request finished: the path of the picked file's copy (or the export's destination), or
+//  null if cancelled. Called from a Java worker thread; deliver() hands it to the SDL thread.
+static void jniFilePicked(JNIEnv* env, jclass, jint requestId, jstring jpath)
+{
+  const char* path = jpath ? env->GetStringUTFChars(jpath, 0) : NULL;
+  FilePicker::deliver(requestId, path);
+  if(path)
+    env->ReleaseStringUTFChars(jpath, path);
+}
+
 static jint jniNotify(JNIEnv* env, jclass, jint code)
 {
   if(code == A_VOL_KEYS)
@@ -242,7 +280,8 @@ static JNINativeMethod jniMethods[] = {
   {"jniOpenFile", "(Ljava/lang/String;)V", (void*)jniOpenFile},
   {"jniOpenFileDesc", "(Ljava/lang/String;I)V", (void*)jniOpenFileDesc},
   {"jniInsertImage", "(Landroid/graphics/Bitmap;Ljava/lang/String;Z)V", (void*)jniInsertImage},
-  {"jniTouchEvent", "(IIIIFFFFF)V", (void*)jniTouchEvent}
+  {"jniTouchEvent", "(IIIIFFFFF)V", (void*)jniTouchEvent},
+  {"jniFilePicked", "(ILjava/lang/String;)V", (void*)jniFilePicked}
 };
 
 jint JNICALL JNI_OnLoad(JavaVM *vm, void*)

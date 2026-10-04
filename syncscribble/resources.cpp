@@ -128,15 +128,33 @@ void setupResources()
   // so CSS for them should leave font-weight unset (normal) rather than asking Painter::resolveFont
   // to faux-bold an already-bold face on top of itself. Loaded the same way as the base sans font:
   // prefer a copy next to the binary, fall back to the scribbleres checkout for a dev build run
-  // without that copy step.
-  FSPath ralewayPath(Application::appDir, "Raleway-Bold.ttf");
-  FSPath satoshiPath(Application::appDir, "Satoshi-Medium.otf");
-  if(!ralewayPath.exists())
-    ralewayPath = FSPath(Application::appDir, "../../scribbleres/fonts/Raleway-Bold.ttf");
-  if(!satoshiPath.exists())
-    satoshiPath = FSPath(Application::appDir, "../../scribbleres/fonts/Satoshi-Medium.otf");
-  Painter::loadFont("raleway", ralewayPath.c_str());
-  Painter::loadFont("satoshi", satoshiPath.c_str());
+  // without that copy step. Every package must ship both (DISTRES/IOSRES in the Makefile, the
+  // Android assets, the WiX installer): the theme names them without a fallback family, so a face
+  // that is missing draws no text at all - the whole document browser went blank on iOS that way.
+  // fontstash only reads a font file when it is first drawn, so loadFont() "succeeds" for a file that
+  // does not exist; existence is what has to be checked. A missing face gets the UI sans font instead.
+#if PLATFORM_ANDROID
+  FSPath fontDir(extStorage, ".saved/");  // extracted from the APK's assets by ScribbleApp
+#else
+  FSPath fontDir(Application::appDir);
+#endif
+  static const struct { const char* family; const char* file; } designFaces[] =
+      {{"raleway", "Raleway-Bold.ttf"}, {"satoshi", "Satoshi-Medium.otf"}};
+  for(const auto& face : designFaces) {
+    FSPath facePath = fontDir.child(face.file);
+    if(!facePath.exists())
+      facePath = FSPath(Application::appDir, "../../scribbleres/fonts/").child(face.file);
+    if(facePath.exists()) {
+      Painter::loadFont(face.family, facePath.c_str());
+      continue;
+    }
+    PLATFORM_LOG("Font %s not found (%s); using the UI font\n", face.family, face.file);
+#if PLATFORM_EMSCRIPTEN
+    Painter::loadFontMem(face.family, Roboto_Regular_ttf, Roboto_Regular_ttf_len);
+#else
+    Painter::loadFont(face.family, sans && FSPath(sans).exists() ? sans : sansBackupPath.c_str());
+#endif
+  }
 
   // load user fallbacks
   const char* userFontsStr = ScribbleApp::cfg->String("userFonts", "");

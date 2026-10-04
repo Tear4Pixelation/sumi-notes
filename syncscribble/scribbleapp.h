@@ -90,7 +90,9 @@ public:
   std::string importPdfToDocFile(const std::string& pdfPath, std::string* errorOut = NULL);
   // the document browser's import FAB: pick a file of the format and import it into the library;
   //  returns a document to open (one PDF or notebook), empty for an archive, a cancel or a failure
-  std::string importFromBrowser(bool noteful);
+  void importFromBrowser(int kind);
+  void browserImportDone(const std::string& docPath);
+  std::string importNoteful(const std::string& filename);
   void insertImage();
   void pickImage();
   void insertImage(const std::string& filename);
