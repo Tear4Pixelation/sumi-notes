@@ -8,11 +8,39 @@ compiles, so this suite tests the copy Write ships (see "Hold to snap" in the to
 Nothing else here is built into Write. `INTEGRATION.md` is the plan the integration followed.
 
 ```
-make test                     # synthetic suite + recorded strokes in fixtures/, writes report.html
+make test                     # both synthetic suites + recorded strokes in fixtures/, writes report.html
 ./evaluate --only square      # one class
+./evaluate --misses 5         # also print up to 5 wrongly recognized strokes per class, with the reason
 python3 playground.py         # draw live, see the result the moment the pen lifts (also from an iPad)
 python3 serve.py              # recorder.html for other devices; saves straight into fixtures/
 ```
+
+## Two synthetic suites
+
+Both are gated. The **default** set is the one every number below was measured on. The **pencil** set
+draws the same classes the way Apple Pencil input arrives, and adds strokes the default set never had:
+
+- every coalesced touch at 240 Hz (0.6–3 units apart), low jitter, no whole-unit rounding
+- a hold of 120–360 samples that creeps up to 5.5 units, inside the app's 6-unit hold radius, rather
+  than a few samples jittering in place
+- lines bowed into a light arc, up to 15% of their length off straight
+- wide zigzag scratch-outs whose passes lean 30–60° because the hand travels fast along what it erases
+- sloppier closed shapes: sides bowed 3%, corners missed by 3.5%, round shapes stopping up to 60° short
+
+Its corners are missed by more on purpose, so it gates *what* is recognized (recall, false erases) and
+only reports position. Before the pencil set existed it measured line 74%, circle 96.5%, ellipse 92%,
+scratch-out 84%; the 240 Hz sampling and the drifting hold turned out to cost nothing by themselves. What
+failed was the bow, the stopping short, and the leaning passes:
+
+| change | why |
+|---|---|
+| `lineMaxRms` 0.035 → 0.05, `lineMaxDev` 0.1 → 0.13 | a bow over 10–11% of the length was never a line; now up to ~16% |
+| `maxClosureGap` 0.15 → 0.25 | quick circles stop 55–60° short |
+| `closedMaxErr` 0.07 → 0.09 | bowed sides and missed corners |
+| scrub-axis fallback (below) | wide zigzags had no scrub axis at all |
+
+The cost is in the "other" class (reported, not gated): 94–95% of it stays ink rather than 98.5%, the
+difference mostly spirals and wanders taken for ellipses. After a deliberate hold that is one undo.
 
 ## The two mistakes cost different amounts
 
@@ -70,6 +98,23 @@ straight back: lines fitted to the passes either side meet within 20% of a pass 
 does the real work, because it rejects the handwriting strokes that also go up and down (m, n: their
 sides are an arch-width apart).
 
+**The scrub axis.** It is the mean direction of the stroke's short chords, which is the scrub axis only
+while the passes lean less than 45°. A wide zigzag (scratching out half of a line, moving fast along
+it) leans further, the mean then points along the travel, and along the travel the stroke never turns
+back: 0 reversals. So when the mean axis fails, 11 more axes spread over 180° are tried, those the
+stroke reverses along most often first, and each must pass every test above. Two things keep that from
+erasing more than before:
+
+- The mean axis is still tried first and alone decides whenever it passes, so nothing that was a
+  scratch-out changes. Picking the axis with the most reversals outright took 4% of scratch-outs away.
+- A fallback axis must carry at least 40% of the stroke's motion. Across a line its wobble reverses
+  plenty of times; without this, 2.6% of the default set's lines became scratch-outs and false erases went
+  to 0.68%.
+
+On a leaning pass the reversal gap is measured across the passes, not across the axis (times the cosine
+of the lean): a turn rounded a little along the axis otherwise puts the lines 1/cos(lean) further apart.
+Passes along the axis, which is where m and n are, are unaffected.
+
 **Eagerness trade-off.** The test scratch-outs are deliberately messy: some have only 4 passes, turns
 rounded up to 15% of a pass, and ends landing ±15% short of or past the edge.
 
@@ -107,8 +152,13 @@ Each gate was checked against a deliberately broken recognizer, and every one of
 - a free quad instead of a rectangle
 - no snap to the screen axes (rectangles, and ellipses separately)
 - the old 0.85 circle cutoff
+- (pencil set) no scrub-axis fallback, no 40%-of-motion test on a fallback axis (false erases), the
+  reversal gap measured across the axis instead of across leaning passes, and each of the old line,
+  closure-gap and closed-error limits
 
 **Not covered by any gate:**
+- `maxClosureGap` 0.25 rather than 0.2: 0.2 still passes the gate, while 0.25 recovers about half of the
+  thin ellipses that stop short (the pencil ellipse gate is 98% for those, see `PENCIL_MIN_RECALL`)
 - the straight-stretch veto (hexagons, spirals and octagons becoming circles is reported, not gated,
   given the recall bias). It is measured against the fitted ellipse's own curvature: measured against
   a circle's steady rate, it rejected 60% of real ellipses as "straight".
@@ -143,6 +193,9 @@ Each of these was measured and made no difference, or made things worse:
 
 - **Tuned on synthetic strokes only;** no stylus data yet. Mouse input showed two things that
   synthetic data did not: whole-pixel staircases (now handled) and lopsided circles near the
-  straight-stretch veto (limit loosened to 0.5).
+  straight-stretch veto (limit loosened to 0.5). The pencil set models Apple Pencil from how iOS
+  delivers it (`coalescedTouchesForTouch`), not from a recording.
+- Thin ellipses (minor/major ~0.3) stopped 60° short are refused: the gap at the pointed end is
+  0.26–0.33 of the perimeter. 1–1.6% of the pencil ellipses.
 - Spirals and octagons are often taken for circles. That is acceptable given the recall bias.
 - Scratch-outs are zigzags only; a loopy scrubbing motion (round and round) is not recognized.

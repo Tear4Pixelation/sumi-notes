@@ -13,6 +13,15 @@ constexpr double STEP = 0.5;
 
 using Path = std::vector<Vec2>;
 
+// Apple Pencil input (generate(..., pencil = true)): every coalesced touch at 240 Hz, so samples a
+//  fraction of a unit apart, and a hold of several hundred samples that drifts rather than jitters.
+//  Also adds the strokes that the default set never draws: lines bowed into a light arc and zigzag
+//  scratch-outs whose passes lean far over because the hand travels fast along what it erases.
+bool pencilHand = false;
+
+// how far a polygon's sides bow, as a fraction of its size
+double sideSag() { return pencilHand ? 0.03 : 0.008; }
+
 struct Rand
 {
   std::mt19937& engine;
@@ -65,7 +74,7 @@ void cornerTo(Path& path, const Vec2& corner, const Vec2& next, double size, Ran
   Vec2 from = path.back();
   double lenIn = dist(from, corner), lenOut = dist(corner, next);
   Vec2 dirIn = (corner - from).normalized(), dirOut = (next - corner).normalized();
-  double sag = size*rand.uniform(-0.008, 0.008);
+  double sag = size*rand.uniform(-sideSag(), sideSag());
   double roll = rand.uniform(0, 1);
   if(roll < 0.3) {
     bowTo(path, corner, sag);
@@ -97,7 +106,7 @@ Path polygonPath(const std::vector<Vec2>& corners, bool closed, double size, Ran
     path.push_back(corners[0]);
     for(size_t i = 1; i + 1 < num; ++i)
       cornerTo(path, corners[i], corners[i+1], size, rand, variant);
-    bowTo(path, corners[num-1], size*rand.uniform(-0.008, 0.008));
+    bowTo(path, corners[num-1], size*rand.uniform(-sideSag(), sideSag()));
     return path;
   }
   double startFrac = rand.chance(0.5) ? 0 : rand.uniform(0.2, 0.8);
@@ -115,20 +124,20 @@ Path polygonPath(const std::vector<Vec2>& corners, bool closed, double size, Ran
     // back along the first side to (around) the start: negative stops short, positive runs past
     double sideLen = dist(corners[0], corners[1]);
     double endAt = std::clamp(startFrac*sideLen + size*rand.uniform(-0.12, 0.25), 0.15*sideLen, 0.95*sideLen);
-    bowTo(path, corners[0] + firstDir*endAt, size*rand.uniform(-0.008, 0.008));
+    bowTo(path, corners[0] + firstDir*endAt, size*rand.uniform(-sideSag(), sideSag()));
     variant += endAt < startFrac*sideLen ? " gap" : " overlap";
   }
   else {
     Vec2 lastDir = (corners[0] - corners[num-1]).normalized();
     if(rand.chance(0.3)) {
       // round the start corner and continue a little way along the first side
-      bowTo(path, corners[0], size*rand.uniform(-0.008, 0.008));
+      bowTo(path, corners[0], size*rand.uniform(-sideSag(), sideSag()));
       lineTo(path, corners[0] + firstDir*(size*rand.uniform(0.05, 0.25)));
       variant += " overlap";
     }
     else {
       double endAt = size*rand.uniform(-0.1, 0.05);
-      bowTo(path, corners[0] + lastDir*endAt, size*rand.uniform(-0.008, 0.008));
+      bowTo(path, corners[0] + lastDir*endAt, size*rand.uniform(-sideSag(), sideSag()));
       variant += endAt < 0 ? " gap" : " overshoot";
     }
   }
@@ -162,6 +171,8 @@ struct HandStyle
 
 HandStyle randomStyle(double size, Rand& rand)
 {
+  if(pencilHand)
+    return HandStyle{size*rand.uniform(0.002, 0.006), rand.uniform(0.03, 0.15), rand.uniform(0.6, 3), false};
   return HandStyle{size*rand.uniform(0.002, 0.006), rand.uniform(0.1, 0.4), rand.uniform(1.5, 8),
       rand.chance(0.5)};
 }
@@ -248,7 +259,9 @@ TestStroke makeLine(Rand& rand)
   Vec2 center = randomCenter(rand);
   Vec2 start = center - dir*(size/2), end = center + dir*(size/2);
   Path path = rand.chance(0.3) ? hookInto(start, dir, size, rand, stroke.variant) : Path{start};
-  bowTo(path, end, size*rand.uniform(-0.012, 0.012));
+  // with the pencil hand, a light arc: up to 15% of the length off straight (about 65 degrees of arc), still meant as a line
+  double maxSag = pencilHand ? 0.15 : 0.012;
+  bowTo(path, end, size*rand.uniform(-maxSag, maxSag));
   if(rand.chance(0.3)) {
     Path hook = hookInto(end, dir*-1, size, rand, stroke.variant);
     path.insert(path.end(), hook.rbegin() + 1, hook.rend());
@@ -296,7 +309,8 @@ TestStroke makeSquare(Rand& rand)
     Vec2 offset = corner - center;
     Vec2 tilted = center + Vec2(offset.x*std::cos(handTilt) - offset.y*std::sin(handTilt),
         offset.x*std::sin(handTilt) + offset.y*std::cos(handTilt));
-    drawn.push_back(tilted + Vec2(rand.gaussian(0.02*size), rand.gaussian(0.02*size)));
+    double miss = pencilHand ? 0.035 : 0.02;
+    drawn.push_back(tilted + Vec2(rand.gaussian(miss*size), rand.gaussian(miss*size)));
   }
   Path path = polygonPath(drawn, true, size, rand, stroke.variant);
   stroke.points = drawPath(path, size, randomStyle(size, rand), rand, stroke.variant);
@@ -313,13 +327,13 @@ TestStroke makeCircle(Rand& rand)
   double radius = rand.uniform(25, 200);
   Vec2 center = randomCenter(rand);
   double startAngle = rand.uniform(0, 2*PI), dirSign = rand.sign();
-  double sweep = rand.uniform(330, 410)*PI/180;
+  double sweep = (pencilHand ? rand.uniform(300, 420) : rand.uniform(330, 410))*PI/180;
   // a circle drawn by hand comes out oval: up to 0.82 minor/major here, which must still become a circle
   double ecc = rand.uniform(0, 0.1), eccAngle = rand.uniform(0, PI);
-  double spiral = rand.uniform(-0.03, 0.03);
+  double spiral = rand.uniform(-0.03, 0.03)*(pencilHand ? 2 : 1);
   double harmAmp[3], harmPhase[3];
   for(int k = 0; k < 3; ++k) {
-    harmAmp[k] = rand.uniform(0, 0.006);
+    harmAmp[k] = rand.uniform(0, pencilHand ? 0.015 : 0.006);
     harmPhase[k] = rand.uniform(0, 2*PI);
   }
   int steps = int(std::ceil(sweep*radius/STEP));
@@ -357,11 +371,11 @@ TestStroke makeEllipse(Rand& rand)
   if(angle != 0)
     angle = drawnAngle;
   double startAngle = rand.uniform(0, 2*PI), dirSign = rand.sign();
-  double sweep = rand.uniform(330, 410)*PI/180;
-  double spiral = rand.uniform(-0.03, 0.03);
+  double sweep = (pencilHand ? rand.uniform(300, 420) : rand.uniform(330, 410))*PI/180;
+  double spiral = rand.uniform(-0.03, 0.03)*(pencilHand ? 2 : 1);
   double harmAmp[3], harmPhase[3];
   for(int k = 0; k < 3; ++k) {
-    harmAmp[k] = rand.uniform(0, 0.006);
+    harmAmp[k] = rand.uniform(0, pencilHand ? 0.015 : 0.006);
     harmPhase[k] = rand.uniform(0, 2*PI);
   }
   Vec2 axisU = fromAngle(drawnAngle), axisV = axisU.perp();
@@ -402,10 +416,18 @@ std::vector<Vec2> regularPolygon(const Vec2& center, double radius, int sides, d
 TestStroke makeScribble(Rand& rand)
 {
   TestStroke stroke;
-  int mode = rand.integer(0, 2);
+  int mode = rand.integer(0, pencilHand ? 3 : 2);
   double passLen, advance;
   int passes;
-  if(mode == 0) {
+  if(mode == 3) {
+    // wide: the hand travels fast along what it erases (half of a line, say), so every pass leans 30
+    //  to 60 degrees over - past 45 the passes point more along the travel than across it
+    passLen = rand.uniform(25, 100);
+    advance = passLen*rand.uniform(0.6, 1.7);
+    passes = rand.integer(4, 10);
+    stroke.variant = "wide-zigzag: ";
+  }
+  else if(mode == 0) {
     passLen = rand.uniform(25, 120);
     advance = passLen*rand.uniform(0.08, 0.35);
     passes = std::clamp(int(rand.uniform(60, 400)/advance), 4, 20);
@@ -591,8 +613,9 @@ TestStroke makeOther(Rand& rand)
 
 }  // namespace
 
-std::vector<TestStroke> generate(const std::string& label, int count, std::mt19937& rng)
+std::vector<TestStroke> generate(const std::string& label, int count, std::mt19937& rng, bool pencil)
 {
+  pencilHand = pencil;
   Rand rand{rng};
   std::vector<TestStroke> out;
   for(int i = 0; i < count; ++i) {
@@ -601,7 +624,21 @@ std::vector<TestStroke> generate(const std::string& label, int count, std::mt199
         : label == "scribble" ? makeScribble(rand) : makeOther(rand);
     // recognition is triggered by holding the pen still at the end, which leaves a cluster of samples
     //  around the last point (unless the app strips them first, hence not always)
-    if(rand.chance(0.7) && !stroke.points.empty()) {
+    if(pencilHand && !stroke.points.empty()) {
+      // 0.5-1.5 s at 240 Hz, the pen creeping up to 5.5 units - inside the app's 6-unit hold radius,
+      //  which is all it takes for the hold to fire
+      Vec2 rest = stroke.points.back(), pos = rest;
+      Vec2 creep = fromAngle(rand.uniform(0, 2*PI))*rand.uniform(0.5, 4.5);
+      int held = rand.integer(120, 360);
+      for(int k = 1; k <= held; ++k) {
+        pos += Vec2(rand.gaussian(0.15), rand.gaussian(0.15));
+        if(dist(pos, rest + creep*(double(k)/held)) > 1.0)
+          pos = rest + creep*(double(k)/held) + (pos - rest - creep*(double(k)/held)).normalized();
+        stroke.points.push_back(pos);
+      }
+      stroke.variant += " +drifting hold";
+    }
+    else if(rand.chance(0.7) && !stroke.points.empty()) {
       Vec2 rest = stroke.points.back();
       double drift = rand.uniform(0.2, 0.8);
       bool whole = rand.chance(0.5);
@@ -613,7 +650,7 @@ std::vector<TestStroke> generate(const std::string& label, int count, std::mt199
       stroke.variant += " +hold";
     }
     stroke.label = label;
-    stroke.name = "synth-" + label + "-" + std::to_string(i);
+    stroke.name = std::string(pencil ? "pencil-" : "synth-") + label + "-" + std::to_string(i);
     out.push_back(stroke);
   }
   return out;

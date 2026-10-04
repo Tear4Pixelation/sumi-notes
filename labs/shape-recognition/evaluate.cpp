@@ -1,7 +1,7 @@
 // Shape recognition test bench: runs the recognizer over synthetic strokes and any recorded strokes in
 //  fixtures/, scores both *what* it recognized and *where* it put it, and writes an HTML report.
 //
-//   ./evaluate [--count N] [--seed S] [--only LABEL] [--fixtures DIR] [--report FILE] [--dump FILE]
+//   ./evaluate [--count N] [--seed S] [--only LABEL] [--misses N] [--fixtures DIR] [--report FILE] [--dump FILE]
 //
 // Exit code is 0 only if every synthetic gate below passes.  Recorded strokes are reported but not
 //  gated - there are too few of them, and their truth is only as good as the tracing.
@@ -38,6 +38,13 @@ const int LABEL_COUNT = 6;
 // a circle only counts if it came out as a true circle, and an ellipse only if it did not
 const std::map<std::string, double> MIN_RECALL = {{"line", 0.99}, {"square", 0.99}, {"circle", 0.99},
     {"ellipse", 0.99}, {"scribble", 0.95}};
+// The pencil set (Gates::Recognition).  Scratch-outs higher than above: it holds the wide zigzags, which
+//  the scrub-axis fallback in fitScribble() takes from 84% to 99.5%, and this is what catches losing it.
+//  Ellipses lower: its thinnest ones (minor/major ~0.3) stopped 60 degrees short leave a gap of 0.26-0.33
+//  of the perimeter at the pointed end, past maxClosureGap; raising that further turns 270-degree arcs
+//  into circles.  1-1.6% of the set, depending on the seed.
+const std::map<std::string, double> PENCIL_MIN_RECALL = {{"line", 0.99}, {"square", 0.99}, {"circle", 0.99},
+    {"ellipse", 0.98}, {"scribble", 0.98}};
 // 0.5% rather than lower on purpose: scratch-outs were made more eager (3 reversals, not 4 - recall on
 //  messy ones 87% -> 99.7%), which puts false erases at 0.13-0.4% depending on the seed.  Every one of
 //  them is a random swooping curve swinging back and forth three times, arguably a scratch-out after a
@@ -209,9 +216,17 @@ double percentile(std::vector<double> values, double frac)
   return values[std::min(values.size() - 1, size_t(frac*(values.size() - 1) + 0.5))];
 }
 
-// prints the table for one set of outcomes; returns false if a gate failed (when gated)
-bool summarize(const char* title, std::vector<Outcome>& outcomes, bool gated)
+// which gates a set of outcomes is held to.  The pencil set misses corners and stops short by more on
+//  purpose, so its truth is looser and only *what* was recognized is gated there, not where.
+enum class Gates { None, Recognition, All };
+
+// --misses N: print up to N wrongly recognized strokes per class, with the recognizer's reason
+int showMisses = 0;
+
+// prints the table for one set of outcomes; returns false if a gate failed
+bool summarize(const char* title, std::vector<Outcome>& outcomes, Gates gates)
 {
+  bool gated = gates != Gates::None;
   printf("\n%s\n", title);
   printf("  %-9s %5s %8s   %5s %5s %7s %5s %5s   %-28s %s\n", "class", "n", "correct", "line", "quad",
       "ellipse", "scrib", "none", "position err % median/p90/max", "naive corners");
@@ -239,12 +254,13 @@ bool summarize(const char* title, std::vector<Outcome>& outcomes, bool gated)
       snprintf(naiveText, sizeof(naiveText), "%6.2f %6.2f %6.2f", percentile(naive, 0.5), percentile(naive, 0.9), percentile(naive, 1));
     std::string verdict;
     if(gated) {
-      auto recall = MIN_RECALL.find(label);
-      if(recall != MIN_RECALL.end() && accuracy < recall->second) {
+      const auto& minRecall = gates == Gates::All ? MIN_RECALL : PENCIL_MIN_RECALL;
+      auto recall = minRecall.find(label);
+      if(recall != minRecall.end() && accuracy < recall->second) {
         pass = false;
         verdict += "  FAIL recall";
       }
-      auto gate = MAX_P90_POS_ERR.find(label);
+      auto gate = gates == Gates::All ? MAX_P90_POS_ERR.find(label) : MAX_P90_POS_ERR.end();
       if(gate != MAX_P90_POS_ERR.end() && !pos.empty() && percentile(pos, 0.9) > gate->second*100) {
         pass = false;
         verdict += "  FAIL position";
@@ -262,6 +278,11 @@ bool summarize(const char* title, std::vector<Outcome>& outcomes, bool gated)
     printf("  %-9s %5d %7.1f%%   %5d %5d %7d %5d %5d   %-28s %s%s\n", label, total, accuracy*100,
         got[Kind::Line], got[Kind::Quad], got[Kind::Ellipse], got[Kind::Scribble], got[Kind::None], posText,
         naiveText, verdict.c_str());
+    int shown = 0;
+    for(const Outcome& out : outcomes)
+      if(out.stroke->label == label && !out.correct && shown++ < showMisses)
+        printf("    %s -> %s: %s | %s\n", out.stroke->name.c_str(), kindName(out.result.kind),
+            out.result.reason.c_str(), out.stroke->variant.c_str());
   }
   // the one mistake that destroys work: anything but a scratch-out taken for one
   int others = 0;
@@ -467,13 +488,15 @@ int main(int argc, char* argv[])
     else if(arg == "--report" && hasValue) reportPath = argv[++i];
     else if(arg == "--dump" && hasValue) dumpPath = argv[++i];
     else if(arg == "--only" && hasValue) only = argv[++i];
+    else if(arg == "--misses" && hasValue) showMisses = atoi(argv[++i]);
     else {
-      fprintf(stderr, "usage: %s [--count N] [--seed S] [--only LABEL] [--fixtures DIR] [--report FILE] [--dump FILE]\n", argv[0]);
+      fprintf(stderr, "usage: %s [--count N] [--seed S] [--only LABEL] [--misses N] [--fixtures DIR] [--report FILE] [--dump FILE]\n", argv[0]);
       return 2;
     }
   }
 
-  std::vector<TestStroke> synthetic;
+  // the default hand, and Apple Pencil input (240 Hz, drifting hold, light arcs, wide zigzags); both gated
+  std::vector<TestStroke> synthetic, pencil;
   for(int labelIdx = 0; labelIdx < LABEL_COUNT; ++labelIdx) {
     const char* label = LABELS[labelIdx];
     if(!only.empty() && only != label)
@@ -482,9 +505,15 @@ int main(int argc, char* argv[])
     std::mt19937 rng(seed*LABEL_COUNT + labelIdx);
     std::vector<TestStroke> batch = synth::generate(label, count, rng);
     synthetic.insert(synthetic.end(), batch.begin(), batch.end());
+    std::mt19937 pencilRng(seed*LABEL_COUNT + labelIdx + 1000003);
+    batch = synth::generate(label, count, pencilRng, true);
+    pencil.insert(pencil.end(), batch.begin(), batch.end());
   }
-  if(!dumpPath.empty())
-    writeStrokeFile(dumpPath, synthetic);
+  if(!dumpPath.empty()) {
+    std::vector<TestStroke> all = synthetic;
+    all.insert(all.end(), pencil.begin(), pencil.end());
+    writeStrokeFile(dumpPath, all);
+  }
 
   std::vector<TestStroke> recorded;
   namespace fs = std::filesystem;
@@ -501,21 +530,26 @@ int main(int argc, char* argv[])
     }
   }
 
-  std::vector<Outcome> synthOut, recordedOut;
+  std::vector<Outcome> synthOut, pencilOut, recordedOut;
   for(const TestStroke& stroke : synthetic)
     synthOut.push_back(evaluateOne(stroke));
+  for(const TestStroke& stroke : pencil)
+    pencilOut.push_back(evaluateOne(stroke));
   for(const TestStroke& stroke : recorded)
     recordedOut.push_back(evaluateOne(stroke));
 
   char title[128];
   snprintf(title, sizeof(title), "Synthetic strokes (seed %u, %d per class)", seed, count);
-  bool pass = summarize(title, synthOut, true);
+  bool pass = summarize(title, synthOut, Gates::All);
+  snprintf(title, sizeof(title), "Pencil strokes (seed %u, %d per class)", seed, count);
+  pass = summarize(title, pencilOut, Gates::Recognition) && pass;
   if(!recordedOut.empty())
-    summarize(("Recorded strokes (" + fixturesDir + ", not gated)").c_str(), recordedOut, false);
+    summarize(("Recorded strokes (" + fixturesDir + ", not gated)").c_str(), recordedOut, Gates::None);
   else
     printf("\nNo recorded strokes in %s/ - draw some with recorder.html.\n", fixturesDir.c_str());
 
-  writeReport(reportPath, {{"Recorded strokes", &recordedOut}, {"Synthetic strokes", &synthOut}});
+  writeReport(reportPath, {{"Recorded strokes", &recordedOut}, {"Synthetic strokes", &synthOut},
+      {"Pencil strokes", &pencilOut}});
   printf("\nReport: %s\n%s\n", reportPath.c_str(), pass ? "PASS" : "FAIL");
   return pass ? 0 : 1;
 }
