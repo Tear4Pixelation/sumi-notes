@@ -266,6 +266,9 @@ void ScribbleConfig::init()
   cfgF["shapeSnapDelay"] = 0.8;
   // degrees: a shape's line segment within this of a multiple of 45 degrees snaps onto it; 0 is off
   cfgF["shapeAngleSnap"] = 8;
+  // 1: append every stroke held for shape snapping, with what it was recognized as, to
+  //  shape-strokes.strokes in the library - real strokes for labs/shape-recognition/fixtures
+  cfg["recordShapeStrokes"] = 0;
   // for continuous view
   cfgF["pageSpacing"] = 20;
   // allow slight overzoom for visual indication of zoom limits

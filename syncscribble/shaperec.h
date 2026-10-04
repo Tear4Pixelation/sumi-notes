@@ -57,6 +57,15 @@ struct Params
   //  within this fraction of the pass length of each other, across the axis.  The sides of an arch
   //  (m, n) are an arch-width apart
   double scribbleMaxReversalGap = 0.2;
+  // ... and at least this many reversals may turn up to the second limit: a scribble along a whole line
+  //  of text is loose - loops, arches, spikes.  Below it, mmm and cursive are the strokes that turn
+  //  wide; 16 reversals already let long synthetic mmm through above the false-erase gate
+  int scribbleLongReversals = 20;
+  double scribbleLongMaxReversalGap = 0.6;
+  // the pass-length and reversal tests ignore their worst fraction: a scratch-out over a line of text
+  //  (30 reversals) always has a few passes cut short and turns just over the limit.  The arches of mmm
+  //  are every other reversal, far more than this
+  double scribbleOutlierFrac = 0.2;
 
   // --- line ---
   // RMS distance from the fitted line, as a fraction of line length

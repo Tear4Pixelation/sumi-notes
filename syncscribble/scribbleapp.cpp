@@ -105,7 +105,18 @@ ScribbleApp::ScribbleApp(int argc, char* argv[])
   const char* env_home = getenv("HOME");
   env_home = env_home && env_home[0] ? env_home : basepath;
   FSPath baseCfg(basepath, "write.xml");
-  cfgFile = baseCfg.exists("r+") ? baseCfg.c_str() : FSPath(env_home, ".config/styluslabs/write.xml").c_str();
+  FSPath homeCfg(env_home, ".config/sumi/sumi.xml");
+  // Write kept its config in ~/.config/styluslabs/; move ours out once (config, saved/ and library/, which
+  //  live beside it) - only those, since a Stylus Labs install of Write may share the folder
+  FSPath oldCfgDir(env_home, ".config/styluslabs/");
+  if(!baseCfg.exists("r+") && !homeCfg.exists() && oldCfgDir.child("write.xml").exists()
+      && createPath(homeCfg.parent())) {
+    moveFile(oldCfgDir.child("write.xml"), homeCfg);
+    for(const char* subdir : {"saved", "library"})
+      if(isDirectory(oldCfgDir.childPath(subdir).c_str()) && !isDirectory(homeCfg.parent().childPath(subdir).c_str()))
+        moveFile(oldCfgDir.child(subdir), homeCfg.parent().child(subdir));
+  }
+  cfgFile = baseCfg.exists("r+") ? baseCfg.c_str() : homeCfg.c_str();
   docRoot = FSPath(env_home, "/").c_str();
   tempPath = "/tmp/.styluslabs/";
 #endif

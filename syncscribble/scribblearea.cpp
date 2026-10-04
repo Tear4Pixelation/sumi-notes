@@ -8,6 +8,7 @@
 #include "strokebuilder.h"
 #include "bookmarkview.h"
 #include "shaperec.h"
+#include <fstream>
 
 
 const Dim ScribbleArea::ERASESTROKE_RADIUS = 7;
@@ -1497,6 +1498,16 @@ bool ScribbleArea::snapStroke()
   for(const Point& pt : snapSamples)
     stroke.emplace_back(pt.x*mScale, pt.y*mScale);
   shaperec::Result result = shaperec::recognize(stroke);
+  if(cfg->Int("recordShapeStrokes") && !ScribbleApp::app->libraryRoot.empty()) {
+    // the lab's .strokes format (labs/shape-recognition/strokefile.h); the label is left for a person to
+    //  fill in with what was meant, the comment says what the recognizer made of it
+    std::ofstream file(FSPath(ScribbleApp::app->libraryRoot, "shape-strokes.strokes").path, std::ios::app);
+    file << "# recognized " << shaperec::kindName(result.kind) << ": " << result.reason << "\n"
+         << "stroke " << mSecSinceEpoch() << "\nlabel unlabeled\npoints";
+    for(const shaperec::Vec2& pt : stroke)
+      file << " " << pt.x << " " << pt.y;
+    file << "\nend\n";
+  }
   auto toPage = [this](const shaperec::Vec2& pt) { return Point(pt.x/mScale, pt.y/mScale); };
 
   ShapeParams params;

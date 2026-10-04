@@ -3,8 +3,10 @@
 //
 //   ./evaluate [--count N] [--seed S] [--only LABEL] [--misses N] [--fixtures DIR] [--report FILE] [--dump FILE]
 //
-// Exit code is 0 only if every synthetic gate below passes.  Recorded strokes are reported but not
-//  gated - there are too few of them, and their truth is only as good as the tracing.
+// Exit code is 0 only if every synthetic gate below passes and every recorded stroke is recognized as
+//  what it is labelled.  Their position is reported but not gated - it is only as good as the tracing -
+//  but what they are is known: most are strokes the app got wrong (recordShapeStrokes), kept so they
+//  stay fixed.
 
 #include "shaperec.h"
 #include "strokefile.h"
@@ -543,8 +545,16 @@ int main(int argc, char* argv[])
   bool pass = summarize(title, synthOut, Gates::All);
   snprintf(title, sizeof(title), "Pencil strokes (seed %u, %d per class)", seed, count);
   pass = summarize(title, pencilOut, Gates::Recognition) && pass;
-  if(!recordedOut.empty())
-    summarize(("Recorded strokes (" + fixturesDir + ", not gated)").c_str(), recordedOut, Gates::None);
+  if(!recordedOut.empty()) {
+    summarize(("Recorded strokes (" + fixturesDir + ", class gated)").c_str(), recordedOut, Gates::None);
+    for(const Outcome& out : recordedOut) {
+      if(!out.correct) {
+        printf("  GATE recorded %s: %s, recognized %s (%s)\n", out.stroke->name.c_str(), out.stroke->label.c_str(),
+            kindName(out.result.kind), out.result.reason.c_str());
+        pass = false;
+      }
+    }
+  }
   else
     printf("\nNo recorded strokes in %s/ - draw some with recorder.html.\n", fixturesDir.c_str());
 
