@@ -2675,6 +2675,59 @@ void ScribbleApp::openRecentFile(const std::string& filename)
 
 /// PDF import
 
+// Busy box for work done on the UI thread (PDF and Noteful import).  Nothing is drawn while that work runs,
+//  so a notification set before it never appeared and the app looked frozen; update() paints the box
+//  itself.  It also pumps the OS queue (events are only queued, not dispatched, so nothing re-enters) so
+//  the window isn't flagged as not responding.  Shown over the top window - the browser as well as the
+//  main window - and not at all when there is no window yet (command line conversion).
+class ProgressBox
+{
+public:
+  ProgressBox(const std::string& title)
+  {
+    SvgGui* gui = Application::gui;
+    if(!gui || gui->windows.empty() || !gui->windows.front()->isVisible())
+      return;
+    dialog = createPopupDialog(title.c_str());
+    Widget* body = dialog->selectFirst(".body-container");
+    // the dialog keeps the size of its first layout, and a longer message ("page 10 of 120") was then
+    //  squeezed into it - so reserve the width up front
+    SvgRect* sizer = new SvgRect(Rect::wh(std::min(Dim(420), 0.8*gui->windows.front()->winBounds().width()), 0));
+    sizer->setAttribute("fill", "none");
+    body->containerNode()->addChild(sizer);
+    msgText = new TextBox(createTextNode(""));
+    body->addWidget(msgText);
+    gui->showModal(dialog, gui->windows.front()->modalOrSelf());
+  }
+
+  ~ProgressBox() { close(); }
+
+  void close()
+  {
+    if(!dialog) return;
+    Application::gui->closeWindow(dialog);
+    delete dialog;
+    dialog = NULL;
+  }
+
+  void update(const std::string& msg)
+  {
+    if(!dialog) return;
+    msgText->setText(msg.c_str());
+    // pages of a small PDF go by faster than they could be drawn
+    int64_t now = mSecSinceEpoch();
+    if(now - lastDraw < 100) return;
+    lastDraw = now;
+    SDL_PumpEvents();
+    Application::layoutAndDraw();
+  }
+
+private:
+  Dialog* dialog = NULL;
+  TextBox* msgText = NULL;
+  int64_t lastDraw = 0;
+};
+
 void ScribbleApp::importPDF()
 {
   if(!PdfImport::isAvailable()) {
@@ -2726,18 +2779,27 @@ std::string ScribbleApp::importPdfToDocFile(const std::string& pdfPath, std::str
   // don't overwrite an existing document
   FSPath outinfo = DocLibrary::uniquePath(outDir, pdfinfo.baseName(), "svgz");
 
-  // rendering is synchronous and can take a while for a long PDF; level 0 = notification stays up
-  showNotify(fstring(_("Importing %s..."), pdfinfo.fileName().c_str()), 0);
+  // rendering is synchronous and can take a while for a long PDF
+  std::string fileName = pdfinfo.fileName();
+  ProgressBox progress(_("Import PDF"));
+  progress.update(fstring(_("Importing %s..."), fileName.c_str()));
 
   PdfImport::Options opts;
   opts.dpi = std::max(72, cfg->Int("pdfImportDPI"));
   opts.lossy = cfg->Bool("pdfImportLossy");
+  opts.onProgress = [&](int pageNum, int numPages) {
+    progress.update(fstring(_("Importing %s (page %d of %d)..."), fileName.c_str(), pageNum + 1, numPages));
+    return true;
+  };
 
   std::string err;
   int numPages = -1;
   {
     Document pdfdoc;
     numPages = PdfImport::importPdf(&pdfdoc, pdfPath.c_str(), opts, &err);
+    // compressing the page images takes a while too
+    if(numPages > 0)
+      progress.update(fstring(_("Saving %s..."), FSPath(outinfo).fileName().c_str()));
     // savePicScaled would resample the page images down to one pixel per Write unit (i.e. 150 DPI),
     // throwing away exactly the extra resolution the user asked for with pdfImportDPI
     float savedImageScale = SvgWriter::DEFAULT_SAVE_IMAGE_SCALED;
@@ -2750,7 +2812,6 @@ std::string ScribbleApp::importPdfToDocFile(const std::string& pdfPath, std::str
       err = _("The imported document could not be saved.");
     }
   }
-  dismissNotify();
   if(numPages <= 0) {
     if(errorOut) *errorOut = err;
     return std::string();
@@ -2822,14 +2883,25 @@ std::string ScribbleApp::importNoteful(const std::string& filename)
   NotefulImport::ArchiveOptions opts;
   opts.dpi = std::max(72, cfg->Int("pdfImportDPI"));
   opts.folderTags = cfg->Bool("notefulFolderTags", true);
-  opts.onNotebook = [this](int index, int count, const std::string& path) {
-    showNotify(fstring(_("Importing %s (%d of %d)..."), FSPath(path).baseName().c_str(), index + 1, count), 0);
+  ProgressBox progress(_("Import Noteful"));
+  progress.update(fstring(_("Importing %s..."), FSPath(filename).fileName().c_str()));
+  // "Mathe (2 of 5)", then each page of it
+  std::string notebookLabel;
+  opts.onNotebook = [&](int index, int count, const std::string& path) {
+    notebookLabel = count > 1 ? fstring(_("%s (%d of %d)"), FSPath(path).baseName().c_str(), index + 1, count)
+        : FSPath(path).baseName();
+    progress.update(fstring(_("Importing %s..."), notebookLabel.c_str()));
+    return true;
+  };
+  opts.onProgress = [&](int pageNum, int numPages) {
+    progress.update(fstring(_("Importing %s, page %d of %d..."), notebookLabel.c_str(), pageNum + 1, numPages));
     return true;
   };
   NotefulImport::ArchiveResult result;
   std::string err;
   int imported = NotefulImport::importArchive(filename.c_str(), outDir.c_str(), opts, &result, &err);
-  dismissNotify();
+  // close it before any error box below
+  progress.close();
   // the import rewrote the library's tag index; a browser still holding the old one would drop the new
   //  tags on its next save
   if(tagDocList)
