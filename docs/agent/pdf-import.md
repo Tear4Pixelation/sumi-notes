@@ -52,3 +52,13 @@ and sync entirely out of the import path. `.pdf` paths are routed to the importe
 `doOpenDocument()` (doc list, drag-drop, Android intents) and from the command-line `argDoc` branch.
 Note the import temporarily forces `SvgWriter::DEFAULT_SAVE_IMAGE_SCALED = 0`, otherwise
 `savePicScaled` resamples the pages back down to 150 DPI and discards the chosen `pdfImportDPI`.
+
+Import runs synchronously on the UI thread, so nothing is drawn until it returns: a `showNotify()`
+set before it never appeared and the app looked frozen. `ProgressBox` (`scribbleapp.cpp`, also used
+by Noteful import) is a buttonless popup over the top window - the browser too, which is its own
+`Window` covering the main window's notify bar - that `onProgress` updates per page. Each update
+calls `Application::layoutAndDraw()` itself (throttled to 100 ms) and `SDL_PumpEvents()`, which only
+queues events, so nothing re-enters while the window keeps answering the compositor. The popup keeps
+the size of its first layout, hence the fixed-width sizer rect: without it longer messages were
+squashed horizontally. Saving the `.svgz` is often the slowest step (page images get compressed), so
+it gets its own "Saving..." message.
