@@ -49,9 +49,13 @@ synthesizes itself (no personal file is checked in), mutation-checked. `notefuli
   afterwards. Reads go through ulib (`readFile`, a `FILE*` for miniz) because ulib's `fopen` is the
   UTF-8-safe one on Windows; `miniz_zip.c` is now in the build for the reader.
 - Paper templates become Sumi ruling (editable paper); imported PDF pages, photos and covers become a
-  rule-layer image, as in PDF import - rendered from memory by `PdfImport::renderPage(data, ...)`,
-  JPEG by default (PNG made the 13 MB sample 81 MB). Ink below a page's edge (Noteful keeps it) makes
-  the page taller.
+  rule-layer image, as in PDF import - rendered from memory by a `PdfImport::Renderer` kept open across
+  pages (`PdfAssetCache`), JPEG by default (PNG made the 13 MB sample 81 MB). Ink below a page's edge
+  (Noteful keeps it) makes the page taller.
+- **Memory**: every image is kept encoded only, each notebook of an archive is written page by page by
+  an `ImportSaver` (so outline entries are set while the page is made, not after the loop), and the
+  Import popup's "Limit memory" applies - all in [pdf-import.md](pdf-import.md#memory-shared-with-noteful-import).
+  This is what ended the app on an iPad mid-import: decoded 300 DPI backgrounds, ~35 MB a page.
 - A single `importNoteful()` returns tags rather than applying them (the archive import applies them).
   Noteful keeps them per page and as `#tags` in text boxes. Text boxes are not imported (counted in `Result::textBoxesSkipped`); a
   second outline entry on one page is dropped with a warning.

@@ -150,6 +150,10 @@ void ScribbleConfig::init()
   cfg["pdfImportLossy"] = 0;
   // importing a Noteful folder export: tag each notebook with its folder path (NotefulImport::ArchiveOptions)
   cfg["notefulFolderTags"] = 1;
+  // the Import menu's "Limit memory": what a PDF or Noteful import may take on top of what the app uses
+  //  (PdfImport::MemoryBudget); a page that would not fit is rendered at a lower resolution instead
+  cfg["importLimitMemory"] = 0;
+  cfg["importMemoryLimitMB"] = 512;
 
   // save thumbnail to HTML file - currently only disabled when running tests
   cfg["saveThumbnail"] = 1;

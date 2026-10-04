@@ -116,12 +116,32 @@ static Element* shapeElement(const Noteful::Shape& shape)
   return new Element(svgPath);
 }
 
-// JPEG/PNG as is; a PDF rendered at opts.dpi
-static Image decodeAsset(const std::string& asset, int pdfPage, const NotefulImport::Options& opts, std::string* error)
+static bool isPdfAsset(const std::string& asset) { return asset.compare(0, 4, "%PDF") == 0; }
+
+// Every image the import keeps holds only its encoded bytes (PdfImport::encodedOnly) until the document
+//  is saved: kept decoded, a page background rendered at 300 DPI is ~35 MB, and a long notebook took more
+//  memory than an iPad allows an app.  Pictures keep the format they came in.
+static Image::Encoding keptEncoding(const Image& image)
 {
-  if(asset.compare(0, 4, "%PDF") == 0) {
-    Image image = PdfImport::renderPage(asset, pdfPage, opts.dpi, error);
-    image.encoding = opts.lossy ? Image::JPEG : Image::PNG;
+  return image.encoding == Image::JPEG ? Image::JPEG : Image::PNG;
+}
+
+// The PDF the page backgrounds come from, kept open from one page to the next: a notebook is mostly one
+//  imported PDF, page after page, and opening it for each page meant parsing all of it again each time.
+struct PdfAssetCache {
+  std::string assetId;
+  PdfImport::Renderer renderer;
+};
+
+// A picture: JPEG/PNG as is; a PDF's first page rendered at opts.dpi
+static Image decodePicture(const std::string& asset, const NotefulImport::Options& opts, std::string* error)
+{
+  if(isPdfAsset(asset)) {
+    PdfImport::Renderer renderer;
+    Image image = renderer.openMemory(asset, opts.budget)
+        ? renderer.render(0, opts.dpi, opts.lossy ? Image::JPEG : Image::PNG) : Image(0, 0);
+    if(image.isNull() && error)
+      *error = renderer.error();
     return image;
   }
   Image image = Image::decodeBuffer(asset.data(), asset.size());
@@ -130,7 +150,7 @@ static Image decodeAsset(const std::string& asset, int pdfPage, const NotefulImp
   return image;
 }
 
-static Element* imageElement(const Noteful::ImageItem& item, const Image& full)
+static Element* imageElement(const Noteful::ImageItem& item, const Image& full, PdfImport::MemoryBudget* budget)
 {
   // the crop is in display units; the frame shows exactly the crop region
   Dim sx = item.displayW > 0 ? full.width/item.displayW : 1;
@@ -139,10 +159,17 @@ static Element* imageElement(const Noteful::ImageItem& item, const Image& full)
       .rectIntersect(Rect::wh(full.width, full.height));
   if(crop.width() < 1 || crop.height() < 1)
     return NULL;
-  Image cropped = full.cropped(crop);
+  // an uncropped picture keeps the very bytes it came in, never decoded at all
+  bool whole = crop.left < 0.5 && crop.top < 0.5 && crop.right > full.width - 0.5 && crop.bottom > full.height - 0.5;
+  Image kept = whole ? PdfImport::encodedOnly(full, keptEncoding(full))
+      : PdfImport::encodedOnly(full.cropped(crop), keptEncoding(full));
+  if(kept.isNull())
+    return NULL;
+  if(budget)
+    budget->keep(kept.encData.size());
   Rect bounds = Rect::ltwh(item.x*NOTEFUL_SCALE, item.y*NOTEFUL_SCALE,
       item.width*NOTEFUL_SCALE, item.height*NOTEFUL_SCALE);
-  SvgImage* image = new SvgImage(std::move(cropped), bounds);
+  SvgImage* image = new SvgImage(std::move(kept), bounds);
   // rotated about the frame centre, as shapes are; a node transform is how Sumi rotates an image too
   if(item.rotation != 0)
     image->setTransform(Transform2D::rotating(item.rotation, bounds.center()));
@@ -150,7 +177,7 @@ static Element* imageElement(const Noteful::ImageItem& item, const Image& full)
 }
 
 static Page* createPage(const Noteful::Notebook& notebook, const Noteful::Page& src, const NotefulImport::Options& opts,
-    std::vector<std::string>* warnings)
+    PdfAssetCache* pdfCache, std::vector<std::string>* warnings)
 {
   Dim width = src.width*NOTEFUL_SCALE;
   Dim nominalHeight = src.height*NOTEFUL_SCALE;
@@ -167,30 +194,65 @@ static Page* createPage(const Noteful::Notebook& notebook, const Noteful::Page& 
 
   PageProperties props(width, height, 0, 0, 0, paper, Color::BLUE);
   Page* page = new Page(props);
-  std::string error;
-  std::string asset = notebook.asset(src.assetId);
-  Image background = asset.empty() ? Image(0, 0) : decodeAsset(asset, src.assetPage, opts, &error);
-  if(background.isNull()) {
-    if(!src.assetId.empty())
-      warnings->push_back("page background " + src.assetId + ": " + (error.empty() ? "missing" : error));
-    return page;
-  }
   // The background covers the page's nominal size; an extended page continues on plain paper below it.
-  //  A cropped page shows only part of its asset page: keep the pixels that land on the page.
+  //  A cropped page shows only part of its asset page: keep the pixels that land on the page - `part`, as
+  //  fractions of the asset page, so a PDF page is rendered only that far.
   Rect bounds = Rect::ltwh(0, 0, width, nominalHeight);
+  Rect part;  // invalid: the whole asset page
   if(src.hasAssetRect) {
     Rect placed = Rect::ltwh(src.assetRect[0]*NOTEFUL_SCALE, src.assetRect[1]*NOTEFUL_SCALE,
         src.assetRect[2]*NOTEFUL_SCALE, src.assetRect[3]*NOTEFUL_SCALE);
     Rect visible = Rect(placed).rectIntersect(bounds);
-    Dim sx = background.width/placed.width(), sy = background.height/placed.height();
-    Rect pixels = Rect::ltrb((visible.left - placed.left)*sx, (visible.top - placed.top)*sy,
-        (visible.right - placed.left)*sx, (visible.bottom - placed.top)*sy);
-    if(visible.width() >= 1 && visible.height() >= 1 && pixels.width() >= 1 && pixels.height() >= 1) {
-      Image::Encoding encoding = background.encoding;
-      background = background.cropped(pixels);
-      background.encoding = encoding;
+    if(visible.width() >= 1 && visible.height() >= 1 && placed.width() > 0 && placed.height() > 0) {
+      part = Rect::ltrb((visible.left - placed.left)/placed.width(), (visible.top - placed.top)/placed.height(),
+          (visible.right - placed.left)/placed.width(), (visible.bottom - placed.top)/placed.height());
       bounds = visible;
     }
+  }
+
+  std::string error;
+  Image background(0, 0);
+  if(!src.assetId.empty()) {
+    PdfImport::Renderer& renderer = pdfCache->renderer;
+    // the asset is copied out of the notebook only when it is not the PDF already open
+    if(pdfCache->assetId != src.assetId || !renderer.isOpen()) {
+      std::string asset = notebook.asset(src.assetId);
+      if(isPdfAsset(asset)) {
+        pdfCache->assetId = src.assetId;
+        if(!renderer.openMemory(std::move(asset), opts.budget))
+          error = renderer.error();
+      }
+      else if(!asset.empty()) {
+        // a photo or a scan: decoded (to crop it) only when cropped
+        Image full = Image::decodeBuffer(asset.data(), asset.size());
+        if(full.isNull())
+          error = "unreadable image";
+        else if(!part.isValid())
+          background = PdfImport::encodedOnly(full, keptEncoding(full));
+        else {
+          Rect pixels = Rect::ltrb(part.left*full.width, part.top*full.height,
+              part.right*full.width, part.bottom*full.height);
+          if(pixels.width() >= 1 && pixels.height() >= 1)
+            background = PdfImport::encodedOnly(full.cropped(pixels), keptEncoding(full));
+          else {
+            background = PdfImport::encodedOnly(full, keptEncoding(full));
+            bounds = Rect::ltwh(0, 0, width, nominalHeight);
+          }
+        }
+        if(!background.isNull() && opts.budget)
+          opts.budget->keep(background.encData.size());
+      }
+    }
+    if(pdfCache->assetId == src.assetId && renderer.isOpen()) {
+      background = renderer.render(src.assetPage, opts.dpi, opts.lossy ? Image::JPEG : Image::PNG, NULL, NULL, part);
+      if(background.isNull())
+        error = renderer.error();
+    }
+  }
+  if(background.isNull()) {
+    if(!src.assetId.empty())
+      warnings->push_back("page background " + src.assetId + ": " + (error.empty() ? "missing" : error));
+    return page;
   }
   SvgImage* image = new SvgImage(std::move(background), bounds);
   image->addClass(NOTEFUL_BACKGROUND_CLASS);
@@ -239,17 +301,31 @@ static int importParsed(Document* doc, const Noteful::Notebook& notebook, const 
     return it != layerIds.end() ? it->second : LayerList::DEFAULT_LAYER;
   };
 
-  std::map<std::string, Page*> pagesById;
+  // the outline entries of each page, in outline order - given to the page while it is made, since an
+  //  ImportSaver may have written and unloaded it by the time the loop is done
+  std::map<std::string, std::vector<const Noteful::OutlineEntry*>> outlineByPage;
+  for(const Noteful::OutlineEntry& entry : notebook.outline)
+    outlineByPage[entry.pageId].push_back(&entry);
+
+  PdfAssetCache pdfCache;
   int imported = 0;
   int numPages = int(notebook.pages.size());
   for(int pageNum = 0; pageNum < numPages; ++pageNum) {
     if(opts.onProgress && !opts.onProgress(pageNum, numPages))
       break;
     const Noteful::Page& src = notebook.pages[pageNum];
-    Page* page = createPage(notebook, src, opts, &res.warnings);
+    Page* page = createPage(notebook, src, opts, &pdfCache, &res.warnings);
     doc->insertPage(page);  // before adding content: addStroke stacks by the document's layer table
-    pagesById[src.id] = page;
     ++imported;
+
+    // one outline entry per page in Sumi; the first (in outline order) wins
+    auto outline = outlineByPage.find(src.id);
+    if(outline != outlineByPage.end()) {
+      const Noteful::OutlineEntry* first = outline->second.front();
+      page->setOutlineEntry(first->title.c_str(), std::min(first->level, int(Page::MAX_OUTLINE_LEVEL)));
+      for(size_t ii = 1; ii < outline->second.size(); ++ii)
+        res.warnings.push_back("outline entry \"" + outline->second[ii]->title + "\" dropped: its page already has one");
+    }
 
     for(const Noteful::Shape& shape : src.shapes) {
       int layer = sumiLayer(shape.layer);
@@ -261,11 +337,11 @@ static int importParsed(Document* doc, const Noteful::Notebook& notebook, const 
       auto it = images.find(item.assetId);
       if(it == images.end()) {
         std::string imageError;
-        it = images.emplace(item.assetId, decodeAsset(notebook.asset(item.assetId), 0, opts, &imageError)).first;
+        it = images.emplace(item.assetId, decodePicture(notebook.asset(item.assetId), opts, &imageError)).first;
         if(it->second.isNull())
           res.warnings.push_back("image " + item.assetId + ": " + (imageError.empty() ? "missing" : imageError));
       }
-      if(Element* element = it->second.isNull() ? NULL : imageElement(item, it->second))
+      if(Element* element = it->second.isNull() ? NULL : imageElement(item, it->second, opts.budget))
         page->addStroke(element, NULL, sumiLayer(item.layer));
     }
     // ink last, so it draws over shapes and images on the same layer
@@ -274,18 +350,10 @@ static int importParsed(Document* doc, const Noteful::Notebook& notebook, const 
         page->addStroke(strokeElement(stroke), NULL, sumiLayer(stroke.layer));
     }
     res.textBoxesSkipped += int(src.texts.size());
-  }
-
-  // one outline entry per page in Sumi; the first (in outline order) wins
-  for(const Noteful::OutlineEntry& entry : notebook.outline) {
-    auto it = pagesById.find(entry.pageId);
-    if(it == pagesById.end())
-      continue;
-    if(it->second->hasOutlineEntry()) {
-      res.warnings.push_back("outline entry \"" + entry.title + "\" dropped: its page already has one");
-      continue;
+    if(opts.saver && !opts.saver->pageDone()) {
+      if(errorOut) *errorOut = _("The imported document could not be saved.");
+      return -1;
     }
-    it->second->setOutlineEntry(entry.title.c_str(), std::min(entry.level, int(Page::MAX_OUTLINE_LEVEL)));
   }
 
   writeDocConfig(doc, {});
@@ -454,33 +522,48 @@ int NotefulImport::importArchive(const char* path, const char* libraryDir, const
     if(isZip) {
       size_t size = 0;
       void* bytes = mz_zip_reader_extract_to_heap(&zip, item.zipIndex, &size, 0);
-      loaded = bytes && Noteful::parse(std::string((const char*)bytes, size), &notebook, &error);
-      if(!bytes)
-        error = _("The notebook could not be extracted from the archive.");
+      // freed before parsing, so a big notebook is not held twice while it is imported
+      bool extracted = bytes != NULL;
+      std::string data = extracted ? std::string((const char*)bytes, size) : std::string();
       mz_free(bytes);
+      loaded = extracted && Noteful::parse(std::move(data), &notebook, &error);
+      if(!extracted)
+        error = _("The notebook could not be extracted from the archive.");
     }
     else
       loaded = loadNotebook(item.path.c_str(), &notebook, &error);
 
-    Document doc;
-    int pages = loaded ? importParsed(&doc, notebook, opts, entry.result, &error) : -1;
-    if(pages > 0) {
-      std::vector<std::string> tagPaths = entry.result.tags;
-      if(opts.folderTags && !item.folder.empty())
-        tagPaths.push_back(item.folder);
-      entry.tagPaths = tagPaths;
-      writeDocConfig(&doc, tagIdsFor(&tags, tagPaths));
+    if(loaded) {
       std::string name = notebook.title.empty() ? FSPath(item.path).baseName() : notebook.title;
       FSPath out = DocLibrary::uniquePath(library, name, "svgz");
-      // as for PDF import: savePicScaled would resample the backgrounds down to 150 DPI
-      float savedImageScale = SvgWriter::DEFAULT_SAVE_IMAGE_SCALED;
-      SvgWriter::DEFAULT_SAVE_IMAGE_SCALED = 0;
-      bool saved = doc.save(new FileStream(out.c_str(), "wb"), PdfImport::thumbnail(&doc).c_str(), Document::SAVE_FORCE);
-      SvgWriter::DEFAULT_SAVE_IMAGE_SCALED = savedImageScale;
-      if(saved)
-        entry.docPath = out.path;
-      else
-        error = _("The imported document could not be saved.");
+      // the notebook is held whole while it is imported
+      if(opts.budget)
+        opts.budget->setInput(notebook.data.size());
+      {
+        Document doc;
+        // written page by page, so a long notebook is never in memory all at once
+        PdfImport::ImportSaver saver(&doc, out.path, opts.budget);
+        Options notebookOpts = opts;
+        notebookOpts.saver = &saver;
+        if(importParsed(&doc, notebook, notebookOpts, entry.result, &error) > 0) {
+          std::vector<std::string> tagPaths = entry.result.tags;
+          if(opts.folderTags && !item.folder.empty())
+            tagPaths.push_back(item.folder);
+          entry.tagPaths = tagPaths;
+          writeDocConfig(&doc, tagIdsFor(&tags, tagPaths));
+          if(saver.finish())
+            entry.docPath = out.path;
+          else
+            error = _("The imported document could not be saved.");
+        }
+      }
+      // nothing half-written stays in the library (the document, which held the file open, is gone)
+      if(entry.docPath.empty() && out.exists())
+        removeFile(out.path);
+      if(opts.budget) {
+        opts.budget->setInput(0);
+        opts.budget->written();
+      }
     }
     entry.error = entry.docPath.empty() ? (error.empty() ? _("The notebook has no pages.") : error) : "";
     (entry.docPath.empty() ? res.failed : res.imported) += 1;

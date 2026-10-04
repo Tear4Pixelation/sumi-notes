@@ -32,6 +32,7 @@ struct UIDocStream : public MemStream
 #define ENABLE_UPDATE !PLATFORM_IOS
 
 class MainWindow;
+namespace PdfImport { struct MemoryBudget; }
 class ScribbleConfig;
 class ScribbleDoc;
 class ScribbleMode;
@@ -93,6 +94,8 @@ public:
   void importFromBrowser(int kind);
   void browserImportDone(const std::string& docPath);
   std::string importNoteful(const std::string& filename);
+  static size_t importMemoryLimit();
+  void reportReducedPages(const PdfImport::MemoryBudget& budget, const char* title);
   void insertImage();
   void pickImage();
   void insertImage(const std::string& filename);

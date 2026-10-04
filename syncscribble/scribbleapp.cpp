@@ -2784,9 +2784,11 @@ std::string ScribbleApp::importPdfToDocFile(const std::string& pdfPath, std::str
   ProgressBox progress(_("Import PDF"));
   progress.update(fstring(_("Importing %s..."), fileName.c_str()));
 
+  PdfImport::MemoryBudget budget(importMemoryLimit());
   PdfImport::Options opts;
   opts.dpi = std::max(72, cfg->Int("pdfImportDPI"));
   opts.lossy = cfg->Bool("pdfImportLossy");
+  opts.budget = &budget;
   opts.onProgress = [&](int pageNum, int numPages) {
     progress.update(fstring(_("Importing %s (page %d of %d)..."), fileName.c_str(), pageNum + 1, numPages));
     return true;
@@ -2796,28 +2798,48 @@ std::string ScribbleApp::importPdfToDocFile(const std::string& pdfPath, std::str
   int numPages = -1;
   {
     Document pdfdoc;
+    // each page is written as soon as it is rendered, so a long PDF is never in memory all at once
+    PdfImport::ImportSaver saver(&pdfdoc, outinfo.path, &budget, cfg->Int("compressLevel", 2));
+    opts.saver = &saver;
     numPages = PdfImport::importPdf(&pdfdoc, pdfPath.c_str(), opts, &err);
-    // compressing the page images takes a while too
-    if(numPages > 0)
-      progress.update(fstring(_("Saving %s..."), FSPath(outinfo).fileName().c_str()));
-    // savePicScaled would resample the page images down to one pixel per Write unit (i.e. 150 DPI),
-    // throwing away exactly the extra resolution the user asked for with pdfImportDPI
-    float savedImageScale = SvgWriter::DEFAULT_SAVE_IMAGE_SCALED;
-    SvgWriter::DEFAULT_SAVE_IMAGE_SCALED = 0;
-    bool saved = numPages > 0
-        && pdfdoc.save(new FileStream(outinfo.c_str(), "wb"), PdfImport::thumbnail(&pdfdoc).c_str(), Document::SAVE_FORCE);
-    SvgWriter::DEFAULT_SAVE_IMAGE_SCALED = savedImageScale;
-    if(numPages > 0 && !saved) {
+    if(numPages > 0 && !saver.finish()) {
       numPages = -1;
       err = _("The imported document could not be saved.");
     }
   }
   if(numPages <= 0) {
+    // nothing half-written stays behind (the document, which held the file open, is gone)
+    if(outinfo.exists())
+      removeFile(outinfo.path);
     if(errorOut) *errorOut = err;
     return std::string();
   }
   PLATFORM_LOG("Imported %d page(s) from %s to %s\n", numPages, pdfinfo.c_str(), outinfo.c_str());
+  // a command line conversion (--out) must not stop to say so
+  if(outDoc.empty()) {
+    progress.close();
+    reportReducedPages(budget, _("Import PDF"));
+  }
   return outinfo.c_str();
+}
+
+// the Import menu's "Limit memory" choice in bytes, 0 when off
+size_t ScribbleApp::importMemoryLimit()
+{
+  if(!cfg->Bool("importLimitMemory"))
+    return 0;
+  return size_t(std::max(64, cfg->Int("importMemoryLimitMB"))) << 20;
+}
+
+// Says how many pages an import rendered below the resolution asked for, to stay within the memory limit -
+//  otherwise a coarser page would be a mystery
+void ScribbleApp::reportReducedPages(const PdfImport::MemoryBudget& budget, const char* title)
+{
+  if(budget.reducedPages <= 0)
+    return;
+  messageBox(Info, title, fstring(_("To stay within the memory limit of %d MB, %d pages were imported at a lower"
+      " resolution (down to %d DPI).  A higher limit keeps the full resolution."),
+      int(budget.limit >> 20), budget.reducedPages, int(budget.lowestDpi + 0.5)));
 }
 
 // The browser's Import menu. The system picker answers later, from the event loop (on iOS and Android it
@@ -2883,6 +2905,8 @@ std::string ScribbleApp::importNoteful(const std::string& filename)
   NotefulImport::ArchiveOptions opts;
   opts.dpi = std::max(72, cfg->Int("pdfImportDPI"));
   opts.folderTags = cfg->Bool("notefulFolderTags", true);
+  PdfImport::MemoryBudget budget(importMemoryLimit());
+  opts.budget = &budget;
   ProgressBox progress(_("Import Noteful"));
   progress.update(fstring(_("Importing %s..."), FSPath(filename).fileName().c_str()));
   // "Mathe (2 of 5)", then each page of it
@@ -2918,6 +2942,8 @@ std::string ScribbleApp::importNoteful(const std::string& filename)
         fstring(_("Error importing %s: %s"), FSPath(filename).fileName().c_str(),
             failures.empty() ? err.c_str() : failures.c_str()));
   }
+  if(imported > 0)
+    reportReducedPages(budget, _("Import Noteful"));
   PLATFORM_LOG("Imported %d notebook(s) from %s to %s\n", imported, filename.c_str(), outDir.c_str());
   // one notebook opens; several stay in the browser, which now lists them
   if(imported == 1 && result.entries.size() == 1)

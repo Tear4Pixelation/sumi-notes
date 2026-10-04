@@ -1348,8 +1348,45 @@ void TagDocList::createUI()
   //  hand; added with addWidget(), not addItem(), so a toggle does not close the popup
   CheckBox* folderTagsBox = createCheckBox(_("Folders as tags"), ScribbleApp::cfg->Bool("notefulFolderTags", true));
   folderTagsBox->setMargins(6, 0);
+  // in line with the menu items above, rather than centred in a popup the combo below may widen
+  folderTagsBox->node->setAttribute("box-anchor", "left");
   folderTagsBox->onToggled = [](bool on){ ScribbleApp::cfg->set("notefulFolderTags", on); };
   importPopup->addWidget(folderTagsBox);
+  // What a PDF or Noteful import may take on top of what Sumi already uses (PdfImport::MemoryBudget), for
+  //  a device that would otherwise end the app mid-import; pages that would not fit come out at a lower
+  //  resolution instead.  128 MB is about the least that still imports a page at 300 DPI, 2 GB about the
+  //  most any iPad allows an app at all.
+  static const int limitsMB[] = {128, 256, 512, 1024, 2048};
+  std::vector<std::string> limitNames;
+  // the choice nearest the configured limit, which is then what applies - the combo must not show one
+  //  limit while another (set by hand, say) is in force
+  int configuredMB = ScribbleApp::cfg->Int("importMemoryLimitMB");
+  int limitIndex = 0;
+  for(int ii = 0; ii < int(sizeof(limitsMB)/sizeof(limitsMB[0])); ++ii) {
+    limitNames.push_back(limitsMB[ii] < 1024 ? fstring("%d MB", limitsMB[ii]) : fstring("%d GB", limitsMB[ii]/1024));
+    if(std::abs(limitsMB[ii] - configuredMB) < std::abs(limitsMB[limitIndex] - configuredMB))
+      limitIndex = ii;
+  }
+  if(limitsMB[limitIndex] != configuredMB)
+    ScribbleApp::cfg->set("importMemoryLimitMB", limitsMB[limitIndex]);
+  bool limitOn = ScribbleApp::cfg->Bool("importLimitMemory");
+  CheckBox* limitBox = createCheckBox(_("Limit memory"), limitOn);
+  limitBox->setMargins(6, 0);
+  limitBox->node->setAttribute("box-anchor", "left");
+  ComboBox* limitCombo = createComboBox(limitNames);
+  limitCombo->setIndex(limitIndex);
+  limitCombo->onChanged = [limitCombo](const char*){
+    ScribbleApp::cfg->set("importMemoryLimitMB", limitsMB[limitCombo->index()]);
+  };
+  // indented under its checkbox, and only there while the box is checked
+  Widget* limitRow = createRow({limitCombo}, "0 6 6 28", NULL, "left");
+  limitRow->setVisible(limitOn);
+  limitBox->onToggled = [limitRow](bool on){
+    ScribbleApp::cfg->set("importLimitMemory", on);
+    limitRow->setVisible(on);
+  };
+  importPopup->addWidget(limitBox);
+  importPopup->addWidget(limitRow);
   setupPopupMenu(importFab, importPopup);
   fabRow->addWidget(importFab);
   addDocFab = static_cast<Button*>(createFab("icons/ic_menu_plus.svg", 56, true));
