@@ -13,7 +13,9 @@
 static const int PREVIEW_MAX_DIM = 700;    // enough to judge a filter, small enough to feel instant
 static const int OUTPUT_MAX_DIM = 2200;    // about 200 dpi across a sheet of A4
 static const real HANDLE_RADIUS = 11;
-static const real TOUCH_RADIUS = 30;       // fingers are much bigger than the handle they are grabbing
+// a dragged corner moves this fraction of the finger's travel, so it can be placed more finely than a
+//  finger can point, and it stays visible beside the finger instead of underneath it
+static const real DRAG_RATIO = 0.4;
 static const real LOUPE_SIZE = 150;
 static const real LOUPE_ZOOM = 3;
 static const Color OUTLINE_COLOR = Color(0xFF00C0FF);
@@ -31,12 +33,13 @@ private:
   real photoScale() const;
   Point photoOrigin() const;
   Point photoToWidget(const Point& p) const { return photoOrigin() + p*photoScale(); }
-  Point widgetToPhoto(const Point& p) const { return (p - photoOrigin())/photoScale(); }
-  int hitTestCorner(const Point& local) const;
+  int nearestCorner(const Point& local) const;
   void drawLoupe(Painter* painter) const;
 
   const Image* image;
   int dragIndex = -1;
+  Point dragStartLocal;    // where the finger went down, in widget coordinates
+  Point dragStartCorner;   // where the dragged corner was then, in photo coordinates
 };
 
 ScanCornerWidget::ScanCornerWidget(const Image* photo) : image(photo)
@@ -49,16 +52,16 @@ ScanCornerWidget::ScanCornerWidget(const Image* photo) : image(photo)
   addHandler([this](SvgGui* gui, SDL_Event* event) -> bool {
     Point local = Point(event->tfinger.x, event->tfinger.y) - node->bounds().origin();
     if(event->type == SDL_FINGERDOWN && event->tfinger.fingerId == SDL_BUTTON_LMASK) {
-      int hit = hitTestCorner(local);
-      if(hit < 0)
-        return false;
-      dragIndex = hit;
+      // a touch anywhere grabs the nearest corner, so the finger never has to land on the handle
+      dragIndex = nearestCorner(local);
+      dragStartLocal = local;
+      dragStartCorner = quad[dragIndex];
       gui->setPressed(this);
       node->invalidate(true);
       return true;
     }
     if(event->type == SDL_FINGERMOTION && gui->pressedWidget == this && dragIndex >= 0) {
-      Point moved = widgetToPhoto(local);
+      Point moved = dragStartCorner + (local - dragStartLocal)*(DRAG_RATIO/photoScale());
       moved.x = std::min(real(image->width), std::max(real(0), moved.x));
       moved.y = std::min(real(image->height), std::max(real(0), moved.y));
       Point previous = quad[dragIndex];
@@ -91,13 +94,11 @@ Point ScanCornerWidget::photoOrigin() const
   return Point((mBounds.width() - image->width*scale)/2, (mBounds.height() - image->height*scale)/2);
 }
 
-int ScanCornerWidget::hitTestCorner(const Point& local) const
+int ScanCornerWidget::nearestCorner(const Point& local) const
 {
-  // whichever corner is nearest, provided it is close enough; nearest rather than first-match so that
-  //  two corners dragged on top of each other can still be told apart
-  int best = -1;
-  real bestDist = TOUCH_RADIUS;
-  for(int ii = 0; ii < 4; ++ii) {
+  int best = 0;
+  real bestDist = photoToWidget(quad[0]).dist(local);
+  for(int ii = 1; ii < 4; ++ii) {
     real dist = photoToWidget(quad[ii]).dist(local);
     if(dist < bestDist) {
       bestDist = dist;
