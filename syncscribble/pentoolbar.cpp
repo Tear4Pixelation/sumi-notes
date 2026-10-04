@@ -533,10 +533,25 @@ PenToolbar::PenToolbar(bool _compact)
   };
   penTipRow = createTitledRow(_("Pen Tip"), comboPenTip);
 
+  // Like the tip, a value on the pen rather than a pref.  0% is a pen whose width never follows pressure
+  //  (the marker's default); the default pens are 90%.  Shown in percent because the stored fraction,
+  //  wRatio, means nothing to anyone who has not read strokebuilder.cpp.
+  spinPressure = createTextSpinBox(0, 10, 0, 100, "%.0f%%", 120);
+  spinPressure->onValueChanged = [this](Dim percent) {
+    // setPen() pushing the pen's own (rounded) value into the box, which must not rewrite the pen
+    if (percent == std::round(100*pen.pressureSensitivity()))
+      return;
+    pen.setPressureSensitivity(percent/100);
+    updatePen();
+  };
+  trackEditFocus(spinPressure);
+  pressureRow = createTitledRow(_("Pressure"), spinPressure);
+  setupTooltip(pressureRow, _("How much thinner a light touch draws than a full press"));
+
   settingsBtn = createToolSettingsButton(
       "Pen Settings", {"inputSmoothing", "inputSimplify", "shapeSnapDelay", "applyPenToSel", "savePenMode"},
       compact ? std::vector<Button *>{cbSnaptoGrid, cbLineDrawing} : std::vector<Button *>{},
-      {penTipRow});
+      {penTipRow, pressureRow});
 
   Button *helpBtn = createHelpButton(
       {{"ic_menu_add_color.svg", "Add Color",
@@ -1268,6 +1283,8 @@ void PenToolbar::setPen(const ScribblePen &newpen, Mode m, int selDashStyle) {
   //  updateIndex(), so this cannot write the pen back to itself.
   comboPenTip->setIndex(pen.hasFlag(ScribblePen::TIP_FLAT) ? 0
       : (pen.hasFlag(ScribblePen::TIP_CHISEL) ? 2 : 1));
+  // rounded, so a legacy pen's 0.85 shows as 85% and is not rewritten until the user edits it
+  spinPressure->setValue(std::round(100*pen.pressureSensitivity()));
   if (rebuild)
     // refreshPalette() rather than rebuildGrids(): switching to or from the marker changes which
     //  variant the swatches show, so the color list itself has to be rebuilt, not just redrawn

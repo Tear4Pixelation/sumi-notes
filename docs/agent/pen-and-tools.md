@@ -63,6 +63,32 @@ Known gap: the toggle converts against the *current page's* ruling, so flipping 
 blank page and then drawing on a ruled one gives a width picked for the wrong line height. Leaving it on
 is the answer, which is why it is the marker's default.
 
+# Pressure sensitivity
+
+**Pen Settings → Pressure** (`PenToolbar::spinPressure`, next to Pen Tip) sets, per pen, how much
+thinner the lightest touch draws than a full press, from 0% to 100%. It is `ScribblePen::wRatio`
+shown as a percentage: `FilledStrokeBuilder::addPoint()` draws `width*(1 - wRatio*(1 - wscale))`, and
+`wscale` runs from 0 at no pressure to 1 at full pressure. The default pens are 90%. The marker is 0%
+(no `WIDTH_PR`, `wRatio` 0), so its width never follows pressure. That is deliberate, and nothing here
+changes it.
+
+- **The rules live in `ScribblePen::pressureSensitivity()`/`setPressureSensitivity()`**, not in the
+  toolbar. 0% clears `WIDTH_PR`. A pen without that flag reads as 0% whatever its `wRatio` is.
+- **0% leaves `wRatio` alone if a speed or direction variant still uses it**, since the fountain pen
+  (`WIDTH_DIR`) and the speed pen share the one ratio. The other side of sharing: raising pressure on
+  those pens also changes their direction or speed range.
+- **Turning pressure on sets `prParam` to 2 if it was 0.** `prParam` is the curve's exponent, and at 0
+  `1 - pow(1 - p, 0)` is 0 for every pressure, so the pen would draw at its thinnest everywhere.
+  `prParam` itself is not exposed; 2 is what upstream picked after trying several curves (see the
+  comment above `FilledStrokeBuilder`).
+- **The box is rounded on display and ignores its own echo.** `setPen()` pushes the rounded percentage
+  in, and `onValueChanged` returns early when the value already matches the pen. A legacy 0.85 shows
+  as 85% and is only rewritten once someone edits it.
+- The value is saved with the pen like every other field (`ScribbleMode` serializes `wRatio`, `flags`
+  and `prParam`), so it survives restarts and saved tool modes.
+
+Not covered by automated tests.
+
 # Selection color, width and line style
 
 The selection popup carries a color swatch and a width item, and the shape tool's options row has the
