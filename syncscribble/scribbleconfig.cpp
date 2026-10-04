@@ -269,9 +269,10 @@ void ScribbleConfig::init()
   // 1: append every stroke held for shape snapping, with what it was recognized as, to
   //  shape-strokes.strokes in the library - real strokes for labs/shape-recognition/fixtures
   cfg["recordShapeStrokes"] = 0;
-  // a scratch-out erases the moment the pen lifts, without the hold: 0 off, 1 careful, 2 normal
-  //  (shaperec::liftParams).  Needs shapeSnapDelay > 0, which collects the stroke's raw samples
-  cfg["scratchOutOnLift"] = 2;
+  // a scratch-out erases the moment the pen lifts, without the hold, at liftScratchOutLevel: 1 careful,
+  //  2 normal (shaperec::liftParams).  Needs shapeSnapDelay > 0, which collects the stroke's raw samples
+  cfg["liftScratchOut"] = 1;
+  cfg["liftScratchOutLevel"] = 2;
   // for continuous view
   cfgF["pageSpacing"] = 20;
   // allow slight overzoom for visual indication of zoom limits
