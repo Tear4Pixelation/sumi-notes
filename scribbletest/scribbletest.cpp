@@ -985,6 +985,39 @@ int ScribbleTest::pageTagTest()
   scribbleDoc->doCommand(ID_REDO);
   check(tagsOn(0) == 0 && tagsOn(1) == 1, "redoing the move puts it on the next page again");
 
+  // a to-do tag: ticking its box keeps it on the page but takes the tag off the page, unticking puts it back
+  scribbleDoc->newDocument();
+  area->gotoPage(0);
+  scribbleMode->setMode(MODE_STROKE);  // a tap on the box ticks it rather than drawing a dot
+  area->startTagPlacement({{"t2", "chores"}}, true);
+  Point placePos = screenAt(0, Point(300, 300));
+  ie(placePos.x, placePos.y, 0, pen, press);  ie(0, 0, 0, pen, release);
+  scribbleDoc->clearSelection();
+  auto todoTag = [&]() -> Element* {
+    for(Element* s : area->page(0)->children()) { if(s->isTodoTag()) return s; }
+    return NULL;
+  };
+  auto elementCount = [&]() { size_t count = 0; for(Element* s : area->page(0)->children()) { (void)s; ++count; } return count; };
+  auto tapTodoBox = [&]() {
+    if(!todoTag())
+      return;  // already reported
+    Point boxPos = screenAt(0, todoTag()->todoBoxRect().center());
+    ie(boxPos.x, boxPos.y, 0, pen, press);  ie(boxPos.x, boxPos.y, 0, pen, release);
+  };
+  check(todoTag() && !todoTag()->isTodoDone() && tagsOn(0) == 1, "an open to-do tag tags its page");
+  tapTodoBox();
+  check(todoTag() && todoTag()->isTodoDone(), "tapping the box ticks the to-do and leaves it on the page");
+  check(tagsOn(0) == 0, "a ticked to-do no longer tags its page");
+  check(elementCount() == 1, "tapping the box draws nothing");
+  scribbleDoc->doCommand(ID_UNDO);
+  check(todoTag() && !todoTag()->isTodoDone() && tagsOn(0) == 1, "undo unticks the to-do and tags the page again");
+  scribbleDoc->doCommand(ID_REDO);
+  check(todoTag() && todoTag()->isTodoDone() && tagsOn(0) == 0, "redo ticks it again");
+  ScribbleDoc::renamePageTagElements(scribbleDoc->document, "t2", "errands");
+  check(todoTag() && todoTag()->isTodoDone() && tagsOn(0) == 0, "renaming the tag keeps the to-do ticked");
+  tapTodoBox();
+  check(todoTag() && !todoTag()->isTodoDone() && tagsOn(0) == 1, "tapping a ticked box unticks it and tags the page");
+
   // tags still on the pointer belong to the notebook they were picked for
   area->startTagPlacement({{"t1", "homework"}});
   scribbleDoc->newDocument();

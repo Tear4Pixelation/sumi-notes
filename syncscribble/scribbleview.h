@@ -37,8 +37,8 @@ public:
   virtual void doLongPressAction(Point pos) {}
   virtual void doMotionEvent(const InputEvent& event, inputevent_t eventtype) {}
   // true while a single pointer must reach doPressEvent whatever the input mode - e.g. a finger that
-  //  would otherwise pan places page tags instead (ScribbleArea::startTagPlacement())
-  virtual bool capturesPointer() const { return false; }
+  //  would otherwise pan places page tags instead (ScribbleArea::startTagPlacement()), or ticks a to-do tag
+  virtual bool capturesPointer(const InputEvent& event) const { return false; }
   virtual void doCancelAction(bool refresh = true);
   virtual bool doTimerEvent(Timestamp t);
   virtual void doRefresh() { reqRepaint(); }

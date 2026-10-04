@@ -85,6 +85,33 @@ code. The `__pagetag` id is what counts; the text is a label (see rename below).
   falls through to `sans-serif`.
 - It is the first text inside a *document* (the app's own text is all UI). usvg rendered it without help.
 
+## To-do tags
+
+**Add it as a to-do**, under the checklist in This Page mode, gives the tags placed by that Done a checkbox
+left of the name. It starts unticked every time the list opens (a choice for these tags, not a setting).
+
+- The element is the same `write-pagetag` `<g>` with `__todo="0"` or `"1"`, plus two children: the box,
+  drawn as a ring (two rects, `fill-rule="evenodd"`), and the tick, a filled polygon of class
+  `write-todo-check` that is always there and hidden by `display="none"` while open. Neither has a color
+  of its own: the selection's recolor sets every fill and stroke a child already has, so a stroked box would
+  have been fine, but a white tick on a filled box would turn the tag color and vanish. A ticked tag also
+  dims its text (`opacity` 0.5 on the `write-pagetag-text`).
+- **Ticked means the page is no longer tagged**: `Page::refreshPageTags()` skips it, so the summary, the
+  page card and the thumbnail go, but the element stays. Unticking brings them back. `flashPageTags()`
+  skips a ticked copy too.
+- **Ticking is a tap on the box** in any tool but the eraser (and not with the pen button or the eraser
+  end), tested before the tool gets the press, like a region's "..." button. The press only remembers the
+  tag (`todoPressed`); the release ticks it if it still hits the same box, so a drag that starts on the
+  box does nothing, and a tag deleted in between (sync) is found by a fresh hit test, never through the
+  stored pointer. `capturesPointer()` now takes the press, so a finger that would pan still ticks a box.
+  A tag on a locked or hidden layer cannot be ticked (`Page::isEditable()`).
+- `ScribbleArea::toggleTodoTag()` swaps in a **clone** with the box flipped, add and delete in one action -
+  still no page-tag undo item. The clone keeps any move, scale or color the tag was given; rebuilding it
+  with `createPageTag()` would not. Rename does rebuild (`renamePageTagElements()`), and passes the
+  to-do state through.
+- `ScribbleTest::pageTagTest()` pins tick, untick, undo, redo, rename and that the tap draws nothing; the
+  counting checks were confirmed to fail with the `refreshPageTags()` skip removed.
+
 ## Moving a tag to another page is safe
 
 Audited path by path. Everything that puts an element on or takes it off a page goes through
