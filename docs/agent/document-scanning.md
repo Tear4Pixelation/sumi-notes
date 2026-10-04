@@ -31,6 +31,11 @@ Imaging lives in `ulib` (no dependency on `Painter`/nanovg, so it is unit testab
     **iterated three times** - one pass only sees pixels inside its own window and is biased toward the
     middle of the edge. This is what takes worst-corner error from 160 px to 11 px.
 
+Corner editing (`ScanCornerWidget`) is **relative, not absolute**: a touch anywhere on the photo grabs
+the nearest corner (no hit radius), and the corner then moves `DRAG_RATIO` (0.4) of the finger's travel
+from where it went down. The corner never jumps to the finger, so it is never hidden under it and can be
+placed more finely than a fingertip can point. Making it follow the finger again undoes both.
+
 Where the photo comes from is per platform (`ScribbleApp::scanDocument()`); in every case a
 `pendingScan` flag on `ScribbleApp` diverts it into `ScanDialog`:
 
