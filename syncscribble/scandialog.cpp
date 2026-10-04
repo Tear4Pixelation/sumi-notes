@@ -239,9 +239,28 @@ ScanDialog::ScanDialog(Image photo) : PopupDialog(createPopupDialogNode()), sour
   column->addWidget(filterRow);
   dialogBody->addWidget(column);
 
-  cancelBtn = addButton(_("Cancel"), [this](){ finish(CANCELLED); });
-  backBtn = addButton(_("Back"), [this](){ showStep(0); });
+  // Back and Cancel are navigation rather than outcomes, so they sit in a header around the title -
+  //  back arrow to its left, cross at the far right - and the bottom row is left with the ways forward.
+  //  The template's title text is moved into that header rather than recreated, so it keeps its styling.
+  backBtn = createToolbutton(SvgGui::useFile("icons/ic_menu_back.svg"), _("Back"));
+  backBtn->onClicked = [this](){ showStep(0); };
+  // cancelBtn is also what Dialog runs for Escape / Android back
+  cancelBtn = createToolbutton(SvgGui::useFile("icons/ic_menu_cancel.svg"), _("Cancel"));
+  cancelBtn->onClicked = [this](){ finish(CANCELLED); };
+  SvgNode* titleNode = selectFirst(".window-title")->node;
+  SvgContainerNode* layoutNode = selectFirst(".dialog-layout")->containerNode();
+  layoutNode->removeChild(titleNode);
+  Widget* header = createRow({backBtn});
+  header->containerNode()->addChild(titleNode);
+  header->addWidget(createStretch());
+  header->addWidget(cancelBtn);
+  layoutNode->addChild(header->node, dialogBody->node);
+
   nextBtn = addButton(_("Next"), [this](){ showStep(1); });
+  addMoreBtn = addButton(_("Add More"), [this](){
+    result = renderScan(OUTPUT_MAX_DIM, false);
+    finish(ADD_MORE);
+  });
   acceptBtn = addButton(_("Done"), [this](){
     result = renderScan(OUTPUT_MAX_DIM, false);
     finish(ACCEPTED);
@@ -262,6 +281,7 @@ void ScanDialog::showStep(int newStep)
   rotateBtn->setVisible(step == 1);
   backBtn->setVisible(step == 1);
   nextBtn->setVisible(step == 0);
+  addMoreBtn->setVisible(step == 1);
   acceptBtn->setVisible(step == 1);
   if(step == 1)
     updatePreview();
