@@ -125,6 +125,7 @@ relevant file before changing that area.
 - [navigation.md](docs/agent/navigation.md) - wheel/zoom/pan, sdl2-compat `preciseX/Y`, `SDL_Event = {}`, modifier tracking, testing scroll in agent-display
 - [stroke-input.md](docs/agent/stroke-input.md) - `CurveFitFilter` (measurements, failed Bezier fit), experimental Linux sub-pixel input
 - [tests.md](docs/agent/tests.md) - standalone test binaries (scan, shape, color, layer) and what each in-app `ScribbleTest` check pins
+- [ui-floating-bar.md](docs/agent/ui-floating-bar.md) - **the reference UI component**: floating action bar (rounded container of FAB-sized buttons replacing the FABs in a mode), exact padding/radii/colors, card selection marks, top inset - build new floating UI like this
 - [agent-display.md](docs/agent/agent-display.md) - two displays (Wayland pointer vs Xwayland keys) and the traps when driving the app
 - [ios-build.md](docs/agent/ios-build.md) - manual iOS workflow, ad hoc signing secrets set up from Linux, installing on the iPad
 
