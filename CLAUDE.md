@@ -18,12 +18,15 @@ English text, so a renamed `_()` string must change in `scribbleres/strings/stri
 `make res_strings.cpp` in `scribbleres/`.
 
 **Deliberately still "Write"** - each is identity or storage, and renaming it strands data or breaks upgrades:
-the config file (`~/.config/styluslabs/write.xml` and the Windows/Android equivalents), the `.write-library`
+the config file on Windows/Android/iOS (`write.xml`, `.write.xml`), the `.write-library`
 marker, every `write-*` class and `text/writeconfig` inside documents, the Android package
 `com.styluslabs.writeqt` (and its Java folder) plus the app-private fallback library `files/Write/`, the
 `"styluslabs"` salt in sync password hashing (protocol), the `write-*` SDL branches, `xcode/Write`, and the
 WiX component ids / `Software\Stylus Labs\Write` registry key. The default *new* library is `Documents/Sumi/`;
-existing installs keep theirs because `libraryPath` is saved. Still pointing at Stylus Labs and needing a
+existing installs keep theirs because `libraryPath` is saved. On Linux/macOS the config moved to
+`~/.config/sumi/sumi.xml`; the first start moves `write.xml`, `saved/` and `library/` out of
+`~/.config/styluslabs/` (only those - a Stylus Labs Write install may share that folder). Debug and
+portable builds still read `write.xml` beside the binary. Still pointing at Stylus Labs and needing a
 decision: the update check (`styluslabs.com/write/versions.xml`), Help and share URLs, the Play Store review
 link, the iOS IAP, and the Windows installer's `Manufacturer`/`UpgradeCode`.
 
