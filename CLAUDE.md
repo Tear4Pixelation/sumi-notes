@@ -111,7 +111,7 @@ relevant file before changing that area.
 - [document-library.md](docs/agent/document-library.md) - the single library folder, `.write-library` marker, import/migration, iOS library mode and `/private/var`; the system file picker (`filepicker.cpp`, every platform); browser fonts; Create Notebook dialog and covers
 - [paper.md](docs/agent/paper.md) - default page size prompt (A4/Letter), dotted paper (`dotRadius`), Add Page layouts popup
 - [ruling-regions.md](docs/agent/ruling-regions.md) - Paper Patch: per-area ruling, `rulingAt()`, tilted frames, region panel
-- [document-scanning.md](docs/agent/document-scanning.md) - homography, warp, enhance, quad detection in `ulib`; capture via the image picker
+- [document-scanning.md](docs/agent/document-scanning.md) - homography, warp, enhance, quad detection in `ulib`; capture per platform (Android camera apps, iOS camera sheet, desktop `Camera` backends + `CameraDialog`), the MJPEG Huffman-table trap
 - [shapes.md](docs/agent/shapes.md) - parametric shapes, `ShapeParams` descriptor, polyline/curve family, toggles, hold-to-snap recognition, 45 degree snap
 - [pen-and-tools.md](docs/agent/pen-and-tools.md) - marker centre-on-line, relative pen width, selection color/width/dash style, Switch Back, Select touching, reflow indent and word gap
 - [history-panel.md](docs/agent/history-panel.md) - `ButtonDragTimeline` undo/redo ruler, lanes, `--screenDPI` layout preview
