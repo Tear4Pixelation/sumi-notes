@@ -164,6 +164,14 @@ were all refused. 240 Hz sampling by itself cost nothing.
   goes first, and a fallback axis must carry 40% of the motion, or the wobble across a plain line reads
   as reversals and the line erases what it crosses. See the lab README before touching either.
 
+- **Long scratch-outs are judged more loosely.** Real ones over a line of text (25-45 reversals, loops,
+  arches, spikes) always have a short pass or a turn over the 0.2 gap limit: pass length and gap ignore
+  their worst 20%, and from 20 reversals a turn may be 0.6 wide. Don't loosen the base limit instead -
+  0.3 tripled false erases - nor start the long rule below 20 (16 fails the false-erase gate on mmm).
+- **Real strokes:** config `recordShapeStrokes` = 1 logs every held stroke to `shape-strokes.strokes` in
+  the library (lab format, plus what it was recognized as). Wrong ones, labelled, go in
+  `labs/shape-recognition/fixtures/`, where `make test` gates their class.
+
 - **The hold is a timer, not an event.** A pen held perfectly still sends no motion at all, so a callback
   timer (`SvgGui::setTimer`, its own rather than the widget's, which autoscroll and fling share) polls
   `checkShapeSnap()`. "Still" is within `SNAP_HOLD_RADIUS` (6 screen units) of where the hold started -

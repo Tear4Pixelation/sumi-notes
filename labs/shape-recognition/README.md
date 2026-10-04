@@ -125,6 +125,25 @@ rounded up to 15% of a pass, and ends landing ±15% short of or past the edge.
 
 To make it stricter, set `scribbleMinReversals = 4`; that single line switches back. Loosening the
 reversal gap to 0.3 tripled false erases. The straightness limits made no difference either way.
+
+**Long scratch-outs are judged more loosely.** Real ones recorded in the app (`fixtures/app-*`) run
+along a whole line of text with 25-45 reversals, and are nothing like the tidy synthetic zigzags: a
+sawtooth with rounded bottoms, or loops (ll, e), arches and spikes all in one stroke.
+
+- The pass-length and reversal tests ignore their worst 20% (`scribbleOutlierFrac`): a long stroke
+  always has a pass cut short or a turn just over the limit. With few reversals the worst one still
+  counts, and mmm cannot slip through - its wide arches are every other reversal.
+- From 20 reversals (`scribbleLongReversals`) a turn may be up to 0.6 of a pass wide instead of 0.2.
+  Below that, mmm and cursive are what turns wide.
+
+| relax the turn limit from | false erases, default / pencil |
+|---|---|
+| never | 0.20 / 0.16 % |
+| 12 reversals | 0.82 / 0.72 % (fails the gate) |
+| 16 reversals | 0.68 / 0.46 % (fails the gate) |
+| 20 reversals (current) | 0.34 / 0.36 % |
+
+The extra false erases are synthetic mmm of 10-12 humps; a held "minimum" stays under 20 reversals.
 A test for how widely the stroke turns at each reversal (swoops turn wide, scratching turns sharp)
 was tried and did not separate the two.
 
@@ -191,7 +210,11 @@ Each of these was measured and made no difference, or made things worse:
 
 ## Known gaps
 
-- **Tuned on synthetic strokes only;** no stylus data yet. Mouse input showed two things that
+- **Recorded strokes in `fixtures/` are class-gated:** each must come out as its label (position is
+  only reported). Set `recordShapeStrokes` to 1 in the app's config and every held stroke is appended to
+  `shape-strokes.strokes` in the library with what it was recognized as; label the ones it got wrong
+  (`label scribble`, ...) and move them here.
+- **Tuned mostly on synthetic strokes;** the only real ones are the app recordings in `fixtures/`. Mouse input showed two things that
   synthetic data did not: whole-pixel staircases (now handled) and lopsided circles near the
   straight-stretch veto (limit loosened to 0.5). The pencil set models Apple Pencil from how iOS
   delivers it (`coalescedTouchesForTouch`), not from a recording.

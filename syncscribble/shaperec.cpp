@@ -1,6 +1,7 @@
 #include "shaperec.h"
 
 #include <algorithm>
+#include <functional>
 #include <cmath>
 #include <cstdio>
 
@@ -315,8 +316,9 @@ bool fitScribble(const std::vector<Vec2>& pts, double arcLen, const Params& para
     std::sort(sortedLen.begin(), sortedLen.end());
     std::sort(sortedStraight.begin(), sortedStraight.end());
     double medianLen = sortedLen[sortedLen.size()/2];
-    if(sortedLen.front() < params.scribbleMinPassFrac*medianLen) {
-      axisWhy = format("scribble: uneven passes (%.2f of median)", sortedLen.front()/medianLen);
+    double shortestLen = sortedLen[size_t(params.scribbleOutlierFrac*sortedLen.size())];
+    if(shortestLen < params.scribbleMinPassFrac*medianLen) {
+      axisWhy = format("scribble: uneven passes (%.2f of median)", shortestLen/medianLen);
       return false;
     }
     if(sortedStraight[sortedStraight.size()/2] < params.scribbleMinPassStraightness
@@ -340,7 +342,7 @@ bool fitScribble(const std::vector<Vec2>& pts, double arcLen, const Params& para
       Vec2 pt = std::fabs(along) > 1e-6 ? line.centroid + line.dir*((tip - line.centroid.dot(axis))/along) : line.centroid;
       return pt.dot(across);
     };
-    double worstGap = 0;
+    std::vector<double> gaps;
     for(size_t k = 1; k + 1 < ends.size(); ++k) {
       if(ends[k] - ends[k-1] < 5 || ends[k+1] - ends[k] < 5)
         continue;
@@ -351,14 +353,17 @@ bool fitScribble(const std::vector<Vec2>& pts, double arcLen, const Params& para
       //  it.  Passes along the axis - the arches this test is for - are unaffected.
       double lean = 0.5*(std::fabs(before.dir.dot(axis)) + std::fabs(after.dir.dot(axis)));
       double gap = std::fabs(acrossAt(before, tip) - acrossAt(after, tip))*lean;
-      worstGap = std::max(worstGap, gap/medianLen);
+      gaps.push_back(gap/medianLen);
     }
-    if(worstGap > params.scribbleMaxReversalGap) {
+    std::sort(gaps.begin(), gaps.end(), std::greater<double>());
+    double worstGap = gaps.empty() ? 0 : gaps[size_t(params.scribbleOutlierFrac*gaps.size())];
+    double maxGap = reversals >= params.scribbleLongReversals ? params.scribbleLongMaxReversalGap : params.scribbleMaxReversalGap;
+    if(worstGap > maxGap) {
       axisWhy = format("scribble: reversal turns wide (%.2f of a pass)", worstGap);
       return false;
     }
     res.points = convexHull(samples);
-    res.reason = format("scribble: %.0f reversals, widest turn %.2f", reversals, worstGap);
+    res.reason = format("scribble: %.0f reversals, turns %.2f (bar outliers)", reversals, worstGap);
     return true;
   };
 
