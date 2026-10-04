@@ -523,7 +523,7 @@ void saveFile(const char* title, const std::string& suggestedName, const char* e
 {
 #if PLATFORM_MOBILE
   // written first, then handed to the system, which copies it wherever the user picks
-  FSPath staged(FSPath(tempDir, "export/"), suggestedName);
+  FSPath staged(tempDir, "export/" + suggestedName);
   createPath(staged.parent().c_str());
   removeFile(staged.c_str());
   int requestId = addRequest(std::move(onDone));
