@@ -2007,12 +2007,6 @@ bool ScribbleArea::doClickAction(Point pos)
   return href != NULL;
 }
 
-// a two finger tap undoes one step
-void ScribbleArea::doTwoFingerTap()
-{
-  scribbleDoc->doCommand(ID_UNDO);
-}
-
 // consolidated fn for setting properties of current selection, including hyperref and bookmark creation
 // initial motivation was to ensure only one undo item was created; also reduces code duplication
 void ScribbleArea::setSelProperties(const StrokeProperties* props, const char* target, Element* bkmktarget,
