@@ -2035,6 +2035,87 @@ void ScribbleArea::doTwoFingerTap()
   scribbleDoc->doCommand(ID_UNDO);
 }
 
+// how near (screen units) a finger tap must land to a shape's outline: a fingertip is far blunter than
+//  the pen PATHSELECT_RADIUS is sized for
+static constexpr Dim TOUCH_TAP_RADIUS = 16;
+
+// the shape or image a finger tap at pos (page coords) lands on, topmost first; handwriting is not
+//  taken - a tap is too blunt to pick one stroke out of a word, and that is the Select tool's job
+Element* ScribbleArea::touchTapTarget(Point pos) const
+{
+  Dim radius = TOUCH_TAP_RADIUS/mZoom;
+  Element* hit = NULL;  // the last hit is the topmost, as it is drawn over the others
+  for(Element* s : currPage->children()) {
+    // a locked or hidden layer is out of reach here as it is for the Select tool
+    if(!currPage->isEditable(s) || s->isRulingRegion() || s->isPageTag())
+      continue;
+    if(s->node->type() == SvgNode::IMAGE) {
+      if(s->bbox().contains(pos))
+        hit = s;
+    }
+    else if(s->isShape() && s->node->type() == SvgNode::PATH && Rect(s->bbox()).pad(radius).contains(pos)) {
+      const Path2D& path = *static_cast<SvgPath*>(s->node)->path();
+      const Transform2D tf = s->node->totalTransform();
+      Dim dist = tf.isIdentity() ? path.distToPoint(pos) : Path2D(path).transform(tf).distToPoint(pos);
+      if(dist < radius)
+        hit = s;
+    }
+  }
+  return hit;
+}
+
+// select one element as the Select tool would, with a shape's parameter handles up - without changing
+//  the active tool, which is the point: fixing a shape that snapped a little wrong should not cost a trip
+//  to the Select tool and back
+void ScribbleArea::selectTapped(Element* target)
+{
+  // an open polyline is finished (not selected) first, as any other tool switch would - after this the
+  //  shape tool must not go on adding points to it behind the selection
+  finishShape();
+  clearSelection();
+  currSelection = new Selection(currPage);
+  currSelPageNum = currPageNum;
+  currSelection->addStroke(target);
+  rectSelector = new RectSelector(currSelection, mZoom, true);
+  useShapeSelector();
+  currSelection->shrink();
+  dirtyScreen(currSelection->getBGBBox());
+  uiChanged(UIState::SelChange);
+  if(cfg->Bool("popupToolbar")) {
+    Rect r = currSelection->getBGBBox();
+    app->showSelToolbar(screenToGlobal(dimToScreen(pageDimToDim(Point(r.right, r.bottom)))));
+  }
+}
+
+// A finger tap where touch pans (i.e. a pen is in use) and no link took it: on a shape or image it selects
+//  that element and enters its edit mode, whatever the tool; anywhere else it clears the selection - the
+//  pen-free way out of shape edit mode.  A tap on the selection itself keeps it.
+bool ScribbleArea::doTouchTap(Point pos)
+{
+  if(placingTags())
+    return false;
+  Point gpos = screenToDim(pos);
+  int pagenum = dimToPageNum(gpos);
+  Element* target = NULL;
+  if(pagenum < numPages()) {
+    if(pagenum != currPageNum)
+      setPageNum(pagenum);
+    Point pagepos = dimToPageDim(gpos);
+    if(currSelection && currSelPageNum == currPageNum && selectionHit(pagepos, true))
+      return true;
+    target = touchTapTarget(pagepos);
+  }
+  if(target) {
+    selectTapped(target);
+    return true;
+  }
+  if(!currSelection)
+    return false;
+  clearSelection();
+  uiChanged(UIState::SelChange);
+  return true;
+}
+
 // consolidated fn for setting properties of current selection, including hyperref and bookmark creation
 // initial motivation was to ensure only one undo item was created; also reduces code duplication
 void ScribbleArea::setSelProperties(const StrokeProperties* props, const char* target, Element* bkmktarget,
@@ -2668,7 +2749,9 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
     // clear selection depending on mode
     switch(currMode) {
     case MODE_STROKE:
-      // ignore this stroke if it clears selection (optionally)
+    case MODE_DRAWSHAPE:
+      // ignore this stroke if it clears selection (optionally) - the shape tool too, or a shape left in
+      //  edit mode after drawing (shapeEditAfterDraw) could only be left by drawing another one
       if(cfg->Bool("clearSelOnly"))
         currMode = MODE_NONE;
     case MODE_SELECTRECT:
@@ -2676,7 +2759,6 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
     case MODE_SELECTLASSO:
     case MODE_SELECTPATH:
     case MODE_BOOKMARK:
-    case MODE_DRAWSHAPE:
     case MODE_ERASESTROKE:
     case MODE_ERASERULED:
     case MODE_ERASEFREE:

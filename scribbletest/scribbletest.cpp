@@ -1152,6 +1152,103 @@ int ScribbleTest::twoFingerTapTest()
   return nbad;
 }
 
+// Getting into and out of a shape's edit mode without visiting the Select tool (first-day report): with a
+//  pen in use, a finger tap on a shape selects it with its handles up and leaves the tool alone; a finger
+//  tap elsewhere, or the first shape-tool drag outside, only clears the selection.
+int ScribbleTest::shapeTapEditTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: shape tap edit: %s\n", what); }
+  };
+  const int touch = INPUTSOURCE_TOUCH;
+  ScribbleInput* input = scribbleArea->scribbleInput.get();
+  const inputmode_t wasSingle = input->singleTouchMode, wasMulti = input->multiTouchMode;
+  auto selectedCount = [&]() { return scribbleArea->currSelection ? scribbleArea->currSelection->count() : 0; };
+  // taps are kept more than PANLENGTH_DBLCLICK apart so none of them reads as a double tap (zoom)
+  auto fingerTap = [&](Dim x, Dim y) { ie(x, y, 1, touch, press);  ie(x, y, 0, touch, release); };
+  auto penDrag = [&](Dim x0, Dim y0, Dim x1, Dim y1) {
+    ie(x0, y0, 0.5, pen, press);  ie((x0 + x1)/2, (y0 + y1)/2, 0.5, pen);  ie(x1, y1, 0.5, pen);
+    ie(0, 0, 0, pen, release);
+  };
+
+  scribbleDoc->newDocument();
+  // the document's config, so only after newDocument() - which frees the previous one
+  ScribbleConfig* cfg = scribbleDoc->cfg;
+  const bool wasEditAfterDraw = cfg->Bool("shapeEditAfterDraw"), wasClearSelOnly = cfg->Bool("clearSelOnly");
+  cfg->set("shapeEditAfterDraw", true);
+  cfg->set("clearSelOnly", true);
+  // after newDocument() too, which reloads the input config
+  input->singleTouchMode = INPUTMODE_PAN;  // what detecting a pen sets
+  input->multiTouchMode = INPUTMODE_PAN;
+  scribbleMode->setMode(MODE_STROKE);
+  scribbleDoc->app->setPen(ScribblePen(Color::BLACK, 2, ScribblePen::TIP_ROUND));
+  scribbleMode->shapeId = SHAPE_LINE;
+  scribbleMode->shapeFlags = 0;
+  scribbleMode->setMode(MODE_DRAWSHAPE);
+  penDrag(100, 200, 300, 200);
+  check(scribbleArea->currPage->strokeCount() == 1 && selectedCount() == 1, "the drawn line is left in edit mode");
+
+  // a finger tap away from it leaves edit mode
+  fingerTap(200, 420);
+  check(selectedCount() == 0, "a finger tap outside clears the selection");
+  check(scribbleArea->currPage->strokeCount() == 1, "and draws nothing");
+
+  // a finger tap near (not exactly on) the line selects it, handles and all, and keeps the shape tool
+  fingerTap(150, 206);
+  check(selectedCount() == 1 && scribbleArea->currSelection->strokes.front()->isShape(),
+      "a finger tap on a shape selects it");
+  check(scribbleArea->shapeSelector != NULL, "with its shape handles up");
+  check(scribbleMode->getMode() == MODE_DRAWSHAPE, "without switching away from the shape tool");
+
+  // the first shape-tool drag outside only deselects, like the first pen stroke outside a selection
+  penDrag(100, 500, 300, 500);
+  check(selectedCount() == 0, "a shape drag outside the selection clears it");
+  check(scribbleArea->currPage->strokeCount() == 1, "and does not draw a second line");
+  // ... and the next one draws
+  penDrag(100, 500, 300, 500);
+  check(scribbleArea->currPage->strokeCount() == 2, "the next shape drag draws");
+  scribbleDoc->clearSelection();
+
+  // with the pen tool: handwriting is not a tap target, and the tool stays the pen
+  scribbleMode->setMode(MODE_STROKE);
+  penDrag(100, 320, 300, 330);
+  int onPage = scribbleArea->currPage->strokeCount();
+  fingerTap(200, 325);
+  check(selectedCount() == 0, "a finger tap on handwriting selects nothing");
+  fingerTap(250, 202);
+  check(selectedCount() == 1 && scribbleArea->currSelection->strokes.front()->isShape(),
+      "a finger tap on a shape selects it with the pen tool active too");
+  check(scribbleMode->getMode() == MODE_STROKE, "and the pen tool stays active");
+  check(scribbleArea->currPage->strokeCount() == onPage, "no tap draws anything");
+  // tapping the selected shape again keeps it
+  fingerTap(150, 200);
+  check(selectedCount() == 1, "a finger tap on the selection keeps it");
+
+  // the pen still selects nothing by tapping: only a finger does
+  scribbleDoc->clearSelection();
+  ie(200, 500, 0.5, pen, press);  ie(0, 0, 0, pen, release);
+  check(selectedCount() == 0, "a pen tap on a shape does not select it");
+  scribbleDoc->clearSelection();
+
+  // the two finger tap is still undo, not a pair of single taps
+  int beforeUndo = scribbleArea->currPage->strokeCount();
+  mtinput(INPUTEVENT_PRESS, 200, 200, INPUTEVENT_NONE, 0, 0);
+  mtinput(INPUTEVENT_MOVE, 201, 200, INPUTEVENT_PRESS, 260, 200);
+  mtinput(INPUTEVENT_RELEASE, 201, 201, INPUTEVENT_MOVE, 260, 201);
+  mtinput(INPUTEVENT_NONE, 0, 0, INPUTEVENT_RELEASE, 260, 201);
+  check(scribbleArea->currPage->strokeCount() == beforeUndo - 1, "a two finger tap on a shape still undoes");
+  check(selectedCount() == 0, "and selects nothing");
+
+  scribbleDoc->clearSelection();
+  scribbleMode->setMode(MODE_STROKE);
+  cfg->set("shapeEditAfterDraw", wasEditAfterDraw);
+  cfg->set("clearSelOnly", wasClearSelOnly);
+  input->singleTouchMode = wasSingle;
+  input->multiTouchMode = wasMulti;
+  return nbad;
+}
+
 int ScribbleTest::pageTagTest()
 {
   int nbad = 0;
@@ -2876,6 +2973,7 @@ void ScribbleTest::runAll(bool runsynctest)
   nUnitFailed += layerTest();
   nUnitFailed += selectTouchingTest();
   nUnitFailed += twoFingerTapTest();
+  nUnitFailed += shapeTapEditTest();
   nUnitFailed += pageTagTest();
   nUnitFailed += docStateSyncTest();
   nUnitFailed += curveFitTest();
