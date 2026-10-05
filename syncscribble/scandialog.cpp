@@ -192,7 +192,14 @@ void ScanPreviewWidget::draw(SvgPainter* svgp) const
   painter->restore();
 }
 
-ScanDialog::ScanDialog(Image photo) : PopupDialog(createPopupDialogNode()), source(std::move(photo))
+// The bottom row is laid out explicitly rather than in the platform's default order: createPopupDialogNode()
+//  reverses the button row on mobile, which put Done on the left on the iPad.  Here the way forward (Next,
+//  then Done) always sits at the bottom right and Add More at the left, the buttons are only
+//  BOTTOM_BUTTON_WIDTH wide rather than splitting the row between them, and the space between them is
+//  empty - so on a tablet, a thumb reaching for Done cannot land on Add More.
+static const real BOTTOM_BUTTON_WIDTH = 150;
+
+ScanDialog::ScanDialog(Image photo) : PopupDialog(createPopupDialogNode(false)), source(std::move(photo))
 {
   setTitle(_("Scan Document"));
   cornerWidget = new ScanCornerWidget(&source);
@@ -256,15 +263,23 @@ ScanDialog::ScanDialog(Image photo) : PopupDialog(createPopupDialogNode()), sour
   header->addWidget(cancelBtn);
   layoutNode->addChild(header->node, dialogBody->node);
 
-  nextBtn = addButton(_("Next"), [this](){ showStep(1); });
   addMoreBtn = addButton(_("Add More"), [this](){
     result = renderScan(OUTPUT_MAX_DIM, false);
     finish(ADD_MORE);
   });
+  selectFirst(".dialog-buttons")->addWidget(createStretch());
+  nextBtn = addButton(_("Next"), [this](){ showStep(1); });
   acceptBtn = addButton(_("Done"), [this](){
     result = renderScan(OUTPUT_MAX_DIM, false);
     finish(ACCEPTED);
   });
+  for(Button* button : {addMoreBtn, nextBtn, acceptBtn}) {
+    button->node->setAttribute("box-anchor", "vfill");  // not "fill", which would share out the row
+    // an invisible rect sets the width: the background rect is hfill, so its own width does not count
+    SvgRect* widthRect = new SvgRect(Rect::wh(BOTTOM_BUTTON_WIDTH, 1));
+    widthRect->setAttribute("fill", "none");
+    button->containerNode()->addChild(widthRect, button->containerNode()->firstChild());
+  }
 
   Rect parentBounds = ScribbleApp::win->winBounds();
   setWinBounds(Rect::centerwh(parentBounds.center(),
