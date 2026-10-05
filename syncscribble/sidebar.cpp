@@ -28,8 +28,13 @@ static const real sbCorner      = 12*floatUIScale;
 static const Dim sbSelectorH    = 74*floatUIScale;
 static const Dim sbSelectorIcon = 32*floatUIScale;
 static const Dim sbSearchH      = 55*floatUIScale;
-static const Dim sbActionsH     = 61*floatUIScale;
 static const Dim sbIconSize     = 24*floatUIScale;
+// The bottom row's buttons (add, pin, side, search).  On desktop each cell is just its icon, as in the
+//  design; for touch that is far too small to hit, so the cell becomes a full toolbar button and the
+//  icon the toolbar's icon size (see floatTouchUI in basics.h).
+static const Dim sbActionIcon   = floatTouchUI ? 32*floatUIScale : sbIconSize;
+static const Dim sbActionCell   = floatTouchUI ? floatBtnSize : sbIconSize;
+static const Dim sbActionsH     = std::max(Dim(61*floatUIScale), sbActionCell);
 static const Dim sbRowH         = 50*floatUIScale;   // an outline row
 static const Dim sbLayerRowH    = 88*floatUIScale;   // a layer row, which carries a preview
 static const Dim sbPreview      = 70*floatUIScale;
@@ -240,13 +245,14 @@ void Sidebar::createUI()
 
   auto addAction = [&](const char* icon, const char* title, const std::function<void()>& cb) {
     Button* btn = createToolbutton(SvgGui::useFile(icon), title);
-    static_cast<SvgUse*>(btn->selectFirst(".icon")->node)->setViewport(Rect::wh(sbIconSize, sbIconSize));
+    static_cast<SvgUse*>(btn->selectFirst(".icon")->node)->setViewport(Rect::wh(sbActionIcon, sbActionIcon));
     // the stock toolbutton background is 36x42, a full toolbar hit target - left at that size the
     //  cells are wider than their icons and space-between spaces the *cells*, so the icons inside
-    //  them do not read as evenly spread.  Square cells the size of the icon fix that at the source.
+    //  them do not read as evenly spread.  Square cells fix that at the source: the icon's size on
+    //  desktop, a full button for touch (all four cells are the same, so the spread stays even).
     Widget* bg = btn->selectFirst(".background");
     if(bg && bg->node->type() == SvgNode::RECT)
-      static_cast<SvgRect*>(bg->node)->setRect(Rect::wh(sbIconSize, sbIconSize));
+      static_cast<SvgRect*>(bg->node)->setRect(Rect::wh(sbActionCell, sbActionCell));
     btn->onClicked = cb;
     actionsRow->addWidget(btn);
     return btn;

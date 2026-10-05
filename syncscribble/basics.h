@@ -12,9 +12,20 @@ typedef double Dim;
 
 typedef int64_t Timestamp;
 
+// Bigger floating UI where it is used with a finger or a Pencil rather than a mouse.  On iOS a layout
+//  unit is one point (paintScale = 150 dpi * pxRatio / 150 = pxRatio), so desktop's 0.5 made the toolbar
+//  buttons 32 pt and the sidebar's bottom row a 12 pt target - well under Apple's 44 pt minimum.  It is a
+//  compile time switch, not a runtime one, because every floating panel derives its geometry from these
+//  constants in file-static initializers.  Build with -DSUMI_TOUCH_UI=1 to preview it on the desktop.
+#ifndef SUMI_TOUCH_UI
+#define SUMI_TOUCH_UI PLATFORM_IOS
+#endif
+static const bool floatTouchUI = SUMI_TOUCH_UI;
+
 // Single knob for the size of the floating toolbar panels (buttons, icons, padding, insets).
-//  1.0 is the original design-mockup size; 0.5 halves the whole toolbar.
-static const Dim floatUIScale = 0.5;
+//  1.0 is the original design-mockup size; 0.5 halves the whole toolbar.  The touch value makes the
+//  64-unit design button 44 pt.
+static const Dim floatUIScale = floatTouchUI ? 0.6875 : 0.5;
 
 // Where the floating panels sit relative to the window, and how tall one panel row is.  These live
 //  here rather than in mainwindow.cpp (where the rest of the toolbar geometry is file-static)
