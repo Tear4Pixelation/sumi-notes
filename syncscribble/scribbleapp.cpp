@@ -1356,6 +1356,16 @@ bool ScribbleApp::openURL(const char* url)
 void ScribbleApp::penChanged(int changed)
 {
   const ScribblePen& pen = penToolbar->pen;
+  // persist the pen and width presets soon after the last change, not only when the app is backgrounded
+  //  (which mobile may never deliver before killing it); a burst of changes (a slider drag) writes once
+  if(changed != PenToolbar::YIELD_FOCUS && !disableConfigSave) {
+    penSaveTimer = gui->setTimer(1500, win, penSaveTimer, [this]() {
+      penSaveTimer = NULL;
+      saveConfig();
+      writeConfigFile();
+      return 0;
+    });
+  }
   if(changed == PenToolbar::YIELD_FOCUS)
     gui->setFocused(activeArea()->widget);
   else if(penToolbar->mode == PenToolbar::PEN_MODE || changed == PenToolbar::PEN_CHANGED)

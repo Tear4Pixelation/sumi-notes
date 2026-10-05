@@ -312,6 +312,7 @@ private:
   TextBox* notifyText = NULL;
   Timer* notifyTimer = NULL;
   Timer* autoSaveTimer = NULL;
+  Timer* penSaveTimer = NULL;  // debounced config write after a pen or width preset change
   std::string syncSession;  // session cookie
 
   static const int volUpActions[];
