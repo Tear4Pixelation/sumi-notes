@@ -7,6 +7,7 @@
 #include "strokebuilder.h"
 #include "scribblesync.h"
 #include "scribbleapp.h"  // only for sync tests
+#include "mainwindow.h"  // arrowPopupTest
 #include "notefulimport.h"
 #include "pdfimport.h"
 #include "tagstore.h"
@@ -1060,6 +1061,58 @@ int ScribbleTest::twoFingerTapTest()
   }
   input->singleTouchMode = wasSingle;
   input->multiTouchMode = wasMulti;
+  return nbad;
+}
+
+int ScribbleTest::arrowPopupTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what, const Point& pos) {
+    if(!ok) { ++nbad; printf("FAIL: arrow popup: %s (selection popup at %.0f, %.0f)\n", what, pos.x, pos.y); }
+  };
+  ScribbleApp* app = scribbleDoc->app;
+  MainWindow* win = ScribbleApp::win;
+  SvgGui* gui = ScribbleApp::gui;
+  if(!app || !win || !gui || !win->selWidthItem) {
+    printf("arrow popup test skipped: no main window\n");
+    return 0;
+  }
+  scribbleDoc->newDocument();
+  scribbleMode->setMode(MODE_STROKE);
+  ie(120, 160, 0, pen, press);  ie(300, 180, 0, pen);  ie(0, 0, 0, pen, release);
+  scribbleMode->setMode(MODE_SELECTRECT);
+  ie(100, 140, 0, pen, press);  ie(320, 200, 0, pen);  ie(0, 0, 0, pen, release);
+  if(!scribbleArea->currSelection || scribbleArea->currSelection->count() != 1) {
+    printf("FAIL: arrow popup: could not select a stroke\n");
+    return nbad + 1;
+  }
+  Button* widthBtn = static_cast<Button*>(win->selWidthItem->selectFirst(".swatch-btn"));
+  ArrowPopup* popup = static_cast<ArrowPopup*>(win->selWidthItem->selectFirst(".arrowpopup"));
+  Rect screen = gui->getScreenRect();
+  for(Dim fy : {0.03, 0.5, 0.97}) {
+    for(Dim fx : {0.03, 0.5, 0.97}) {
+      Point pos(screen.left + fx*screen.width(), screen.top + fy*screen.height());
+      gui->closeMenus();
+      Application::layoutAndDraw();
+      app->showSelToolbar(pos);
+      Application::layoutAndDraw();
+      if(widthBtn->onClicked)
+        widthBtn->onClicked();
+      Application::layoutAndDraw();
+      Application::layoutAndDraw();  // a second pass, as the next frame would
+      check(popup->isVisible(), "the width popup opened", pos);
+      Rect content = popup->selectFirst(".child-container")->node->bounds();
+      Rect bg = popup->selectFirst(".arrowpopup-bg")->node->bounds();
+      Rect bgPadded = Rect(bg).pad(1);
+      if(!bgPadded.contains(content)) {
+        printf("  content %.1f %.1f %.1f %.1f, background %.1f %.1f %.1f %.1f\n", content.left, content.top,
+            content.right, content.bottom, bg.left, bg.top, bg.right, bg.bottom);
+      }
+      check(bgPadded.contains(content), "the content stays inside the background", pos);
+    }
+  }
+  gui->closeMenus();
+  scribbleDoc->clearSelection();
   return nbad;
 }
 
@@ -2786,6 +2839,7 @@ void ScribbleTest::runAll(bool runsynctest)
   nUnitFailed += layerTest();
   nUnitFailed += selectTouchingTest();
   nUnitFailed += twoFingerTapTest();
+  nUnitFailed += arrowPopupTest();
   nUnitFailed += pageTagTest();
   nUnitFailed += docStateSyncTest();
   nUnitFailed += curveFitTest();
