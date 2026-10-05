@@ -271,7 +271,8 @@ never bent further than before; with both limits, lines up to ~57 px (8 / tan 8 
 did, longer ones need their end within 8 px of the axis line.
 
 **Recognition stays angle based**, at `RECOGNIZED_ANGLE_SNAP_FACTOR` (0.75, so 8 -> 6 degrees) of the
-setting, via `snapRecognizedAngleAt()`: the recognized line and its end as the pen scales it (hold to
-snap). A recognized stroke is rough intent, so an angle fits; and the scaling phase must use the same
-rule as the initial snap, or a long line snapped by angle would unsnap on the first jitter.
+setting, via `snapRecognizedAngleAt()`, for the recognized line only: a recognized stroke is rough
+intent, so an angle fits. Once snapped, dragging the end with the pen still down (`scaleSnapShape`) is
+editing and snaps by distance like the handles (user decision): it starts from the already snapped end,
+so jitter stays inside `SHAPE_ANGLE_SNAP_DIST` and only a deliberate move off the axis unsnaps.
 - **Draw through a selection (`shapeDrawThrough`, default off):** the shape tool's press outside a selection only clears it when `clearSelOnly` is on, like the pen; with this on it clears and starts the shape. Pen unchanged. In Pen and Shape Settings.

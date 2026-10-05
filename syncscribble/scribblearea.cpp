@@ -1656,7 +1656,8 @@ void ScribbleArea::scaleSnapShape(Point pos)
   ShapeParams params = snapParams;
   if(params.id == SHAPE_LINE) {
     params.points.back() += pos - snapAnchor;
-    params.points.back() = snapRecognizedAngleAt(params, 1, params.points.back());
+    // by distance, like editing: the angle snap is only for the recognized shape itself
+    params.points.back() = snapShapeAngleAt(params, 1, params.points.back());
   }
   else {
     Point lo = params.points.front(), hi = lo;
