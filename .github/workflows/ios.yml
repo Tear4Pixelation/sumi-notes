@@ -65,12 +65,23 @@ jobs:
         } >> $GITHUB_ENV
     - name: Build Sumi
       working-directory: syncscribble
-      run: make IOS=1 DIST=adhoc DEBUG=0 $IOS_SIGN_ARGS -j$(sysctl -n hw.ncpu) ipa
+      run: |
+        echo "SUMI_BUILD_NUMBER=$(git rev-list --count HEAD)" >> $GITHUB_ENV
+        make IOS=1 DIST=adhoc DEBUG=0 $IOS_SIGN_ARGS -j$(sysctl -n hw.ncpu) ipa
     - name: Upload IPA
       uses: actions/upload-artifact@v4
       with:
         name: ${{ env.IOS_SIGN_ARGS != '' && 'sumi-ios-adhoc-ipa' || 'sumi-ios-unsigned-ipa' }}
         path: syncscribble/Release/Sumi.ipa
+    - name: Upload dSYM
+      # debug symbols of exactly this build, to symbolicate its crash logs (docs/agent/ios-build.md); the
+      # name carries the build number, which a crash report shows as build_version / app_version x.y.N
+      uses: actions/upload-artifact@v4
+      with:
+        name: sumi-ios-dsym-${{ env.SUMI_BUILD_NUMBER }}
+        # the wildcard keeps the Sumi.app.dSYM folder in the artifact; a plain directory path uploads only
+        # its Contents/, which symbolication tools then do not recognise as a dSYM bundle
+        path: syncscribble/Release/*.dSYM
     - name: Remove keychain
       if: always() && env.KEYCHAIN_PATH != ''
       run: security delete-keychain $KEYCHAIN_PATH

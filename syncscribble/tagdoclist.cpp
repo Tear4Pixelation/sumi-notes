@@ -943,9 +943,12 @@ void TagDocList::showDocTagsPopup(const FSPath& path, Widget* cell)
   contextMenuDocPath = path;
   docTagsSearchQuery.clear();
   docTagsSearchEdit->setText("");
-  rebuildDocTagsList();
+  // attach to the cell *before* rebuilding: rebuildDocGrid() (every reopen of the browser, every
+  // search keystroke) leaves docTagsPopup parentless with the last document's rows still inside, and
+  // rebuildDocTagsList() deleting rows of a detached popup crashed - see its comment
   docTagsPopup->removeFromParent();
   cell->addWidget(docTagsPopup);
+  rebuildDocTagsList();
   openAutoClosePopup(docTagsPopup);
 }
 
@@ -1034,8 +1037,18 @@ static const int DOC_TAGS_MAX_ROWS = 10;
 
 void TagDocList::rebuildDocTagsList()
 {
-  if(gui())
+  // SvgGui::deleteWidget() -> onHideWidget() dereferences widget->window() unconditionally, and a row
+  // of a detached docTagsPopup (rebuildDocGrid() detaches it) has no window: build 121 crashed on the
+  // iPad at null+0x78 that way, on Manage Tags after the browser had been reopened. A detached popup
+  // is closed and owns no hover/press/focus/menu state, so plain deletion is all it needs.
+  if(gui() && docTagsList->window())
     gui()->deleteContents(docTagsList);
+  else {
+    for(Widget* row : docTagsList->select("*")) {
+      row->removeFromParent();
+      delete row->node;
+    }
+  }
   if(contextMenuDocPath.isEmpty())
     return;
 
