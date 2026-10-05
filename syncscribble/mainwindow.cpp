@@ -1123,8 +1123,8 @@ ScribbleWidget* MainWindow::createScribbleAreaWidget(Widget* container, Scribble
   });
   zoomPopup->addWidget(createTitledRow(_("Zoom %"), zoomSpin));
   setupAutoClosePopup(zoomPopup);
-  // undo the statusbar's scale(0.5) hack, or the popup is half the size of every other one
-  zoomPopup->node->setTransform(Transform2D().scale(2));
+  // undo the statusbar's scale(floatUIScale) hack, or the popup is half the size of every other one
+  zoomPopup->node->setTransform(Transform2D().scale(1/floatUIScale));
   zoomBtn->addWidget(zoomPopup);
 
   // press and drag on zoom label to zoom ... not sure if I'll keep this
@@ -1178,7 +1178,12 @@ ScribbleWidget* MainWindow::createScribbleAreaWidget(Widget* container, Scribble
 
   // hack to make toolbar smaller - alternative would be to set toolbar dimensions in toolbar widget SVG
   //  instead of toolbutton SVG, then provide a separate mini-toolbar widget (or size arg for createToolbar())
-  statusbar->node->setTransform(Transform2D().scale(0.5));
+  // on the shared floating scale (bigger under SUMI_TOUCH_UI) and rounded and padded like the other
+  //  floating panels; the transform scales these values too, so they are given in the statusbar's own units
+  statusbar->node->setTransform(Transform2D().scale(floatUIScale));
+  SvgRect* statusBg = static_cast<SvgRect*>(statusbar->selectFirst(".toolbar-bg")->node);
+  statusBg->setRect(statusBg->getRect(), floatCorner/floatUIScale, floatCorner/floatUIScale);
+  statusbar->selectFirst(".child-container")->setMargins(0, floatPad/floatUIScale, 0, floatPad/floatUIScale);
   //statusbar->node->setAttr<float>("font-size", 18);  -- set by CSS
 
   statusbar->addWidget(areaWidget->prevPage);
