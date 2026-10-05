@@ -3015,6 +3015,11 @@ void ScribbleApp::captureScan()
   pickImage();
 #else
   std::vector<CameraInfo> cameras = Camera::list();
+  // SUMI_CAMERA=none skips the camera for the file picker, so a scripted run in the agent display never
+  //  opens the webcam of the machine it runs on
+  const char* cameraMode = getenv("SUMI_CAMERA");
+  if(cameraMode && strcmp(cameraMode, "none") == 0)
+    cameras.clear();
   if(cameras.empty()) {
     pickImage();
     return;

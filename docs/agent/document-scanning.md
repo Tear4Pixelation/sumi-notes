@@ -64,6 +64,13 @@ template's `.window-title` node is moved into that row rather than recreated, so
 styling. The bottom row holds only the ways forward: Next on the corner step, **Add More** and Done on the
 filter step. `cancelBtn` is still the dialog's cancel button, so Escape / Android back keep working.
 
+The bottom row's order is fixed on every platform: Add More at the left, Next / Done at the right, each
+`BOTTOM_BUTTON_WIDTH` (150) wide with empty space between. The dialog passes `createPopupDialogNode(false)`
+on purpose - the default reverses the button row on mobile, which put Done on the *left* on the iPad
+(reported as "flipped"), and the full-width halves put the two right next to each other under the thumb.
+Width comes from an invisible rect added to each button: the button background is `hfill`, so setting its
+own width (`setMinWidth()`) does nothing.
+
 **Add More** finishes with `ScanDialog::ADD_MORE`; `finishScan()` inserts that scan as usual and then calls
 `captureScan()` again (the photo half of `scanDocument()`, split out so it does not reset the run). Each
 follow-up goes right after the previous one: as a page at `lastScanPage + 1`, as an element stacked
@@ -86,7 +93,9 @@ Where the photo comes from is per platform (`ScribbleApp::scanDocument()`); in e
   iOS plists, or iOS kills the app when the camera opens.
 - **Desktop** - `Camera::list()` (`camera.h`); if it finds anything, `CameraDialog` shows a live preview
   with Capture, a camera combo when there are several, and Choose File... to fall back to the picker.
-  No camera means the file picker, exactly as before. Backends, all with the largest frame size the
+  No camera means the file picker, exactly as before. `SUMI_CAMERA=none` skips the camera; with
+  `SUMI_FILE_PICKER=fixed:/path/photo.jpg` that drives the whole dialog in the agent display without
+  opening the host's webcam. Backends, all with the largest frame size the
   camera offers, since a scan wants pixels:
   - Linux `linux/camera_v4l2.cpp` - raw V4L2 mmap streaming, MJPEG preferred over YUYV (bandwidth limited
     to a few fps at full size). Filters on `device_caps`, because a UVC camera exposes a second
