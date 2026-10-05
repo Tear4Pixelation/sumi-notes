@@ -4,6 +4,7 @@
 #include "basics.h"
 #include "scribbleconfig.h"
 #include "scribblepen.h"
+#include "widthpresets.h"
 #include <memory>
 
 
@@ -84,6 +85,7 @@ public:
   Widget* createSingleWidth(std::function<void()> onWidthChanged = nullptr);
 
 private:
+  friend class ScribbleTest;  // penWidthPresetTest() drives the preset row directly
   void fillColorGrid(Widget* grid, const std::function<void(Color)>& onPick,
       const std::function<void()>& onCustom);
   struct SingleSwatch {
@@ -138,10 +140,17 @@ private:
   void updateWidthPopup();
   // ScribbleMode::DRAWTOOL_* whose presets belong on the row for the given toolbar mode
   int drawToolForMode(Mode m) const;
+  WidthPresets& activePresets();
+  const WidthPresets& activePresets() const;
+  // the raw numbers of the active list, in *its* unit (activePresets().unit) - which is the pen's in
+  //  PEN_MODE, but not for a selection while the pen is relative; use presetWidth() to compare or apply
   std::vector<Dim>& activeWidths();
   const std::vector<Dim>& activeWidths() const;
-  // fills the active preset list if it is empty, in the active pen's unit; true if it did
-  bool seedWidths();
+  // preset idx in the unit of `pen` (absolute for a selection, whatever the draw tool's list is in)
+  Dim presetWidth(size_t idx) const;
+  // makes the active list usable: resolves a legacy list's unit, converts it to the pen's unit in
+  //  PEN_MODE, seeds an empty one and keeps it at WidthPresets::COUNT in-range presets; true if changed
+  bool prepareWidths();
   // line height of the page being drawn on; the unit relative widths are measured in
   Page* currentPage() const;
   Dim lineHeight() const;
@@ -189,9 +198,7 @@ private:
   Button* overflowBtn;
   Button* selOverflowBtn;
   Menu* colorCtxMenu;
-  Menu* widthCtxMenu;
   Button* colorMenuDelete;
-  Button* widthMenuDelete;
   Dim preScale;
 
   int changesSinceFocused = -1;
@@ -201,9 +208,10 @@ private:
   //  line height while that tool's relative size toggle is on (see setRelativeWidth).  They cannot
   //  share a list: two tools can be in different units at the same time, and one list would then be
   //  read as the wrong one by whichever tool is not holding it.
-  std::vector<Dim> savedWidths;           // DRAWTOOL_PEN, and every non-pen toolbar mode
-  std::vector<Dim> savedMarkerWidths;     // DRAWTOOL_HIGHLIGHT
-  std::vector<Dim> savedEphemeralWidths;  // DRAWTOOL_EPHEMERAL
+  //  Each list also carries its unit, since a selection shows the pen's list while being absolute.
+  WidthPresets savedWidths;           // DRAWTOOL_PEN, and every non-pen toolbar mode
+  WidthPresets savedMarkerWidths;     // DRAWTOOL_HIGHLIGHT
+  WidthPresets savedEphemeralWidths;  // DRAWTOOL_EPHEMERAL
   // which of those lists is currently on the row
   int widthsTool = 0;
   static std::unique_ptr<SvgNode> widthBtnNode;

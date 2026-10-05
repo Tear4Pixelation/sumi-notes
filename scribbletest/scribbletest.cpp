@@ -21,6 +21,8 @@
 #include "librarytest.cpp"
 #include "notefultest.cpp"
 #include "pagetagtest.cpp"
+#include "widthpresettest.cpp"
+#include "pentoolbar.h"
 
 // Ideally, these tests should be run under valgrind to help check for memory leaks
 // renaming out files to refs (Linux):  for i in {0..13}; do mv "test${i}_out.html" "test${i}_ref.html"; done;
@@ -754,6 +756,93 @@ int ScribbleTest::pdfImportTest()
 
   removeFile(pdfPath);
   removeFile(savedPath);
+  return nbad;
+}
+
+// The pen's thickness presets with the relative size toggle on, seen from a selection.  A selection's
+//  pen is absolute, but its row shows the draw pen's list: before the list carried its unit, the
+//  presets were applied to the selection raw (three hairlines - line-height fractions read as units),
+//  and a width edited in the selection's preset editor was stored raw into the line-height list, which
+//  the pen then read as that many line heights - the 3.2 unit stroke that became a 144 unit pen.
+// Uses only toolbar API that predates WidthPresets, so it can be run against the old toolbar.
+int ScribbleTest::penWidthPresetTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: pen width presets: %s\n", what); }
+  };
+  auto near = [](Dim a, Dim b) { return std::abs(a - b) < 1E-3*std::max(Dim(1), std::abs(b)); };
+  ScribbleApp* app = scribbleDoc->app;
+  PenToolbar* toolbar = app ? app->penToolbar : NULL;
+  if(!toolbar) {
+    check(false, "no pen toolbar");
+    return nbad;
+  }
+  scribbleDoc->newDocument();
+  scribbleMode->setMode(MODE_STROKE);
+  int oldDrawTool = scribbleMode->drawTool;
+  ScribblePen oldPen = *app->getPen();
+  scribbleMode->drawTool = ScribbleMode::DRAWTOOL_PEN;
+  std::vector<Dim> oldWidths;
+
+  // an absolute pen first, so the list is in units, then a known set of presets and the toggle on
+  ScribblePen absPen(Color::BLACK, 1.5, ScribblePen::TIP_FLAT);
+  toolbar->setPen(ScribblePen(Color::BLACK, 1.4, ScribblePen::TIP_ROUND), PenToolbar::PEN_MODE);
+  toolbar->setPen(absPen, PenToolbar::PEN_MODE);
+  oldWidths = toolbar->activeWidths();
+  toolbar->activeWidths() = {1.4, 3.0, 6.0};
+  toolbar->rebuildGrids();
+  Dim lineHeight = toolbar->lineHeight();
+  toolbar->setRelativeWidth(true);
+  check(toolbar->activeWidths().size() == 3 && near(toolbar->activeWidths()[1], 3.0/lineHeight),
+      "the toggle converts the presets to line heights");
+  ScribblePen relPen = toolbar->pen;
+  check(relPen.hasFlag(ScribblePen::WIDTH_RELATIVE), "the toggle makes the pen relative");
+
+  // a selected 3.2 unit stroke: tapping the thinnest preset must give it 1.4 units, not 1.4 line heights'
+  //  worth of number (0.03)
+  toolbar->setPen(ScribblePen(Color::BLACK, 3.2), PenToolbar::SELECTION_MODE);
+  toolbar->selectWidth(0);
+  check(near(toolbar->pen.width, 1.4), "a relative pen's preset applied to a selection is in document units");
+
+  // edit the middle preset from the selection: tap it, tap it again to open its editor, type 3.2
+  toolbar->selectWidth(1);
+  check(near(toolbar->pen.width, 3.0), "the middle preset gives the selection 3 units");
+  toolbar->selectWidth(1);
+  check(toolbar->widthPopup->isVisible(), "tapping the selected preset opens its editor");
+  if(toolbar->widthPopup->isVisible()) {
+    toolbar->spinWidth->setValue(3.2);
+    toolbar->updateWidth();
+    toolbar->widthPopup->setVisible(false);
+  }
+  // back on the pen, still relative: the edited preset must read as 3.2 units, i.e. 3.2/lineHeight
+  toolbar->setPen(relPen, PenToolbar::PEN_MODE);
+  const std::vector<Dim>& widths = toolbar->activeWidths();
+  check(widths.size() == 3, "the pen still has three presets");
+  if(widths.size() == 3) {
+    check(near(widths[1], 3.2/lineHeight), "a width edited on a selection lands in the pen's list in line heights");
+    check(widths[1] <= 4, "no preset is past the relative spinbox limit, so every one stays editable");
+  }
+
+  // a pen saved past the spinbox limit for its unit (here 144 line heights) is clamped on load, so the
+  //  spinbox can show it and it stays editable
+  {
+    ScribbleConfig loadCfg;
+    ScribbleMode loadedModes(&loadCfg);
+    loadedModes.loadModes("0 0 0 0 0 0  4278190080 4096 144 0 0 0 0 0 0");
+    check(loadedModes.drawPen.hasFlag(ScribblePen::WIDTH_RELATIVE), "the loaded pen is relative");
+    check(loadedModes.drawPen.width <= 4, "a relative pen width past the spinbox limit is clamped on load");
+  }
+
+  // restore: the pen toolbar and the app's pen are app-wide state other tests rely on
+  toolbar->setPen(absPen, PenToolbar::PEN_MODE);
+  toolbar->setRelativeWidth(false);
+  toolbar->activeWidths() = oldWidths;
+  toolbar->rebuildGrids();
+  scribbleMode->drawTool = oldDrawTool;
+  app->setPen(oldPen);
+  app->updatePenToolbar();
+  scribbleDoc->newDocument();
   return nbad;
 }
 
@@ -2625,7 +2714,7 @@ void ScribbleTest::runAll(bool runsynctest)
   nFailed = 0;
   int nThumbsFailed = 0;
   int nUnitFailed = runScanTests() + runShapeTests() + runColorTests() + runLayerTests() + runLibraryTests()
-      + runRegionTests() + runNotefulTests() + runPageTagTests();
+      + runRegionTests() + runNotefulTests() + runPageTagTests() + runWidthPresetTests();
   std::vector<std::string> slFailed;
   void (ScribbleTest::*tests[])() = {
     &ScribbleTest::test0,
@@ -2778,6 +2867,7 @@ void ScribbleTest::runAll(bool runsynctest)
   nUnitFailed += themeRoundTripTest();
   nUnitFailed += restyleTest();
   nUnitFailed += dashStyleTest();
+  nUnitFailed += penWidthPresetTest();
   nUnitFailed += outlineTest();
   nUnitFailed += outlineNestTest();
   nUnitFailed += notefulImportTest();

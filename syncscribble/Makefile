@@ -53,6 +53,7 @@ SOURCES = \
   configdialog.cpp \
   linkdialog.cpp \
   pentoolbar.cpp \
+  widthpresets.cpp \
   syncdialog.cpp \
   touchwidgets.cpp \
   mainwindow.cpp \

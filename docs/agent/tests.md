@@ -29,6 +29,18 @@ gamut, determinism, snap idempotence, `matchReference` injectivity, unknown-gene
 OKLCh measurements `COLORS_SPEC.md` argues from (the Schuler palette, and yellow being 1.1:1 at its
 cusp) - so if the spec and the code ever diverge, the tests say so.
 
+The thickness preset lists ([pen-and-tools.md](pen-and-tools.md#relative-pen-width)) are tested in
+`scribbletest/widthpresettest.cpp` (`runWidthPresetTests()`), standalone-buildable - see the command in its
+header. Its checks are the `rel:`/`abs:` round trip (and a legacy list reading as unit-unknown), a relative
+preset read and written in document units for a selection, conversion both ways, and `normalize()`:
+clamping into the spinbox limits, refilling two presets to three, dropping a fourth, replacing NaN.
+Mutation-checked: storing a selection's width raw, returning presets raw, no clamp, no refill, no
+truncation, the old `%.3f` format and dropping the prefix each fail it. `ScribbleTest::penWidthPresetTest()`
+drives the real `PenToolbar`: a relative pen's preset applied to a selected 3.2 unit stroke, a width
+edited in the selection's preset editor landing back in line heights, and a 144 line height pen clamped by
+`loadModes()`. Its toolbar checks fail three ways against the pre-fix toolbar, and the load check fails
+with the clamp removed.
+
 The page tag summary and the tag index's document cache are tested in `scribbletest/pagetagtest.cpp`
 (`runPageTagTests()`), standalone-buildable - see the command in its header. Its checks are the
 `pagetags` round trip (a title holding every separator and XML character), that the stored form needs no
