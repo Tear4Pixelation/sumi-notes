@@ -1064,6 +1064,77 @@ int ScribbleTest::twoFingerTapTest()
   return nbad;
 }
 
+int ScribbleTest::zoomSnapTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: zoom snap: %s\n", what); }
+  };
+  ScribbleArea* area = scribbleArea;
+  // a landscape tablet-sized view, where fit width and fit height are far enough apart to snap separately
+  const Rect wasScreenRect = area->screenRect;
+  area->screenRect = Rect::ltwh(0, 0, 1180, 760);
+  const bool wasContinuous = ScribbleApp::cfg->Bool("continuousZoom");
+  ScribbleApp::cfg->set("continuousZoom", false);
+  scribbleDoc->newDocument();
+  scribbleDoc->newPage();
+  scribbleDoc->newPage();
+  area->gotoPage(1);
+  Dim xborder = ScribbleApp::cfg->Float("horzBorder");
+  Page* page = area->page(1);
+  Dim wzoom = (area->getViewWidth() - 2*xborder)/page->width()/area->preScale;
+  Dim hzoom = area->getViewHeight()/page->height()/area->preScale;
+  Point center(area->getViewWidth()/2, area->getViewHeight()/2);
+  // the document point under the view's center, which a snap that only zooms about the center keeps there
+  auto dimAtCenter = [&]() { return area->screenToDim(center); };
+
+  // at fit height, scrolled part way down the page: a two finger pan whose zoom wobbled by 1%
+  area->zoomTo(hzoom, center.x, center.y);
+  area->doPan(37, -area->getViewHeight()/3);
+  area->zoomTo(hzoom*1.01, center.x, center.y);
+  Point before = dimAtCenter();
+  area->roundZoom(center.x, center.y);
+  Point after = dimAtCenter();
+  check(std::abs(area->mZoom - hzoom) < 1e-9, "a 1% wobble at fit height snaps back to fit height");
+  check(before.dist(after) < 0.5, "a 1% wobble at fit height does not move the view");
+
+  // the same at fit width, panned sideways
+  area->zoomTo(wzoom, center.x, center.y);
+  area->doPan(23, -40);
+  area->zoomTo(wzoom*0.99, center.x, center.y);
+  before = dimAtCenter();
+  area->roundZoom(center.x, center.y);
+  after = dimAtCenter();
+  check(std::abs(area->mZoom - wzoom) < 1e-9, "a 1% wobble at fit width snaps back to fit width");
+  check(before.dist(after) < 0.5, "a 1% wobble at fit width does not move the view");
+
+  if(area->viewMode == ScribbleArea::VIEWMODE_VERT) {
+    // a real snap to fit height must not jump along the scroll direction (it used to center the page)
+    area->zoomTo(hzoom*1.07, center.x, center.y);
+    area->doPan(0, -area->getViewHeight()/4);
+    before = dimAtCenter();
+    area->roundZoom(center.x, center.y);
+    after = dimAtCenter();
+    check(std::abs(area->mZoom - hzoom) < 1e-9, "7% off fit height snaps to fit height");
+    check(std::abs(before.y - after.y) < 0.5, "a snap to fit height does not scroll");
+
+    // a real snap to fit width lines the page up with the border, and does not scroll either
+    area->zoomTo(wzoom*1.07, center.x, center.y);
+    area->doPan(15, -area->getViewHeight()/4);
+    before = dimAtCenter();
+    area->roundZoom(center.x, center.y);
+    after = dimAtCenter();
+    check(std::abs(area->mZoom - wzoom) < 1e-9, "7% off fit width snaps to fit width");
+    check(std::abs(before.y - after.y) < 0.5, "a snap to fit width does not scroll");
+    Point pageLeft = area->dimToScreen(area->pageDimToDim(Point(0, 0)));
+    check(std::abs(pageLeft.x - xborder) < 1.5, "a snap to fit width lines the page up with the border");
+  }
+  ScribbleApp::cfg->set("continuousZoom", wasContinuous);
+  area->screenRect = wasScreenRect;
+  area->resetZoom();
+  return nbad;
+}
+
 int ScribbleTest::arrowPopupTest()
 {
   int nbad = 0;
@@ -2839,6 +2910,7 @@ void ScribbleTest::runAll(bool runsynctest)
   nUnitFailed += layerTest();
   nUnitFailed += selectTouchingTest();
   nUnitFailed += twoFingerTapTest();
+  nUnitFailed += zoomSnapTest();
   nUnitFailed += arrowPopupTest();
   nUnitFailed += pageTagTest();
   nUnitFailed += docStateSyncTest();

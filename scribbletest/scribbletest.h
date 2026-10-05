@@ -42,6 +42,9 @@ public:
   //  its points inside; off, only what lies entirely inside
   int selectTouchingTest();
   int twoFingerTapTest();
+  // a fit width/height zoom snap aligns the page only across the scroll direction, and a two finger pan
+  //  that barely changes the zoom does not move the view at all
+  int zoomSnapTest();
   // an arrow popup opened from the selection popup keeps its content inside its background wherever the
   //  selection popup sits, including where either one has to be moved to stay on screen
   int arrowPopupTest();
