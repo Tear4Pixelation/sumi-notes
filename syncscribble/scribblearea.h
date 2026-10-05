@@ -112,6 +112,7 @@ protected:
   void doReleaseEvent(const InputEvent& event) override;
   bool doClickAction(Point pos) override;
   void doDblClickAction(Point pos) override;
+  void doTwoFingerTap() override;
   void doMotionEvent(const InputEvent& event, inputevent_t eventtype) override;
   void doCancelAction(bool refresh = true) override;
 

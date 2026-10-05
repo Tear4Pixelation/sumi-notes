@@ -41,6 +41,7 @@ public:
   // Select Touching: rect and lasso select take what they touch, including a stroke crossed with none of
   //  its points inside; off, only what lies entirely inside
   int selectTouchingTest();
+  int twoFingerTapTest();
   // page tags: placing never leaves one off a page (gap, beside, below the last page), a pen placement is
   //  selected, a tag dragged to another page moves its count there and undoes, and opening another document
   //  drops tags still on the pointer

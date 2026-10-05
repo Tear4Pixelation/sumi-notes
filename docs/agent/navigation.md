@@ -61,6 +61,17 @@ record of why they did not work.
   and persists it via `penType`. Both are also exposed in the Input prefs.
 - Space+drag, Ctrl+Shift+drag and pan-from-edge remain as they were.
 
+## Two finger tap = undo
+
+`ScribbleInput::doInputEvent` recognises it: exactly two touch points (`twoFingerTap`, set when the second
+lands and cleared by a third), under `PANLENGTH_CLICK` of centroid travel and `MAX_CLICK_TIME` from the
+second finger down to the gesture finishing. The pan the fingers started is **cancelled, not finished** -
+`panZoomFinish` would treat it as a click (following a link under the centroid) or start a fling. With
+`singleTouchMode == PAN` the gesture only finishes when the last finger lifts, so the first lift resets
+`prevPointerCOM` to the remaining finger, or the centroid jump alone would exceed the click distance.
+`ScribbleView::doTwoFingerTap()` is the hook; only `ScribbleArea` acts on it (one `ID_UNDO`).
+Pinned by `twoFingerTapTest`.
+
 ## Testing this (agent-display)
 
 Three gaps in `tools/agent-display.sh` had to be closed before any of the above could be checked, and

@@ -62,6 +62,8 @@ public:
   Timestamp initPointerTime = 0;
   Point lastClickPos;
   Timestamp lastClickTime = 0;
+  // exactly two touch points are down, or were since the second one landed: a tap, if they barely move
+  bool twoFingerTap = false;
 
   //Dim pressureScale = 1;
   Dim palmThreshold = 0;

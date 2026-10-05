@@ -1026,6 +1026,43 @@ int ScribbleTest::selectTouchingTest()
   return nbad;
 }
 
+// two fingers tapped without moving undo exactly one step; two fingers that move only pan
+int ScribbleTest::twoFingerTapTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: two finger tap: %s\n", what); }
+  };
+  ScribbleInput* input = scribbleArea->scribbleInput.get();
+  const inputmode_t wasSingle = input->singleTouchMode, wasMulti = input->multiTouchMode;
+  input->multiTouchMode = INPUTMODE_PAN;
+  for(inputmode_t singleMode : {INPUTMODE_DRAW, INPUTMODE_PAN}) {
+    input->singleTouchMode = singleMode;
+    const char* modeName = singleMode == INPUTMODE_DRAW ? "touch draws" : "touch pans";
+    scribbleDoc->newDocument();
+    scribbleMode->setMode(MODE_STROKE);
+    ie(120, 160, 0, pen, press);  ie(300, 160, 0, pen);  ie(0, 0, 0, pen, release);
+    ie(120, 260, 0, pen, press);  ie(300, 260, 0, pen);  ie(0, 0, 0, pen, release);
+    // still tap: second finger lands, first lifts, then the second
+    mtinput(INPUTEVENT_PRESS, 200, 200, INPUTEVENT_NONE, 0, 0);
+    mtinput(INPUTEVENT_MOVE, 201, 200, INPUTEVENT_PRESS, 260, 200);
+    mtinput(INPUTEVENT_RELEASE, 201, 201, INPUTEVENT_MOVE, 260, 201);
+    mtinput(INPUTEVENT_NONE, 0, 0, INPUTEVENT_RELEASE, 260, 201);
+    check(scribbleArea->currPage->strokeCount() == 1, modeName);
+    // the same fingers dragged 60px pan instead
+    mtinput(INPUTEVENT_PRESS, 200, 200, INPUTEVENT_NONE, 0, 0);
+    mtinput(INPUTEVENT_MOVE, 200, 200, INPUTEVENT_PRESS, 260, 200);
+    mtinput(INPUTEVENT_MOVE, 200, 230, INPUTEVENT_MOVE, 260, 230);
+    mtinput(INPUTEVENT_MOVE, 200, 260, INPUTEVENT_MOVE, 260, 260);
+    mtinput(INPUTEVENT_RELEASE, 200, 260, INPUTEVENT_MOVE, 260, 260);
+    mtinput(INPUTEVENT_NONE, 0, 0, INPUTEVENT_RELEASE, 260, 260);
+    check(scribbleArea->currPage->strokeCount() == 1, "a two finger drag does not undo");
+  }
+  input->singleTouchMode = wasSingle;
+  input->multiTouchMode = wasMulti;
+  return nbad;
+}
+
 int ScribbleTest::pageTagTest()
 {
   int nbad = 0;
@@ -2748,6 +2785,7 @@ void ScribbleTest::runAll(bool runsynctest)
   nUnitFailed += pdfImportTest();
   nUnitFailed += layerTest();
   nUnitFailed += selectTouchingTest();
+  nUnitFailed += twoFingerTapTest();
   nUnitFailed += pageTagTest();
   nUnitFailed += docStateSyncTest();
   nUnitFailed += curveFitTest();

@@ -278,6 +278,7 @@ void ScribbleInput::doInputEvent(InputEvent& event)
         parent->doPressEvent(event);
       }
       currInputSource = event.source;
+      twoFingerTap = event.source == INPUTSOURCE_TOUCH && npoints == 2;
       pointerPathLen = 0;
       prevPointerCOM = event.com;
       initPointerTime = event.t;
@@ -301,12 +302,16 @@ void ScribbleInput::doInputEvent(InputEvent& event)
       eventtype = INPUTEVENT_PRESS;
 
       // TODO: need to figure out this case
+      twoFingerTap = event.source == INPUTSOURCE_TOUCH && npoints == 2;
       pointerPathLen = 0;
       prevPointerCOM = event.com;
       initPointerTime = event.t;
     }
     else if(nextpoints < npoints) {
       eventtype = INPUTEVENT_RELEASE;
+      // measure the remaining finger from where it is, not from the two finger centroid
+      if(twoFingerTap && !finishing)
+        prevPointerCOM = event.com;
       // click?
       if(finishing && pointerPathLen < PANLENGTH_CLICK && event.t - initPointerTime < MAX_CLICK_TIME) {
         event.modemod |= MODEMOD_CLICK;
@@ -330,7 +335,15 @@ void ScribbleInput::doInputEvent(InputEvent& event)
     }
 
     if(scribbling == SCRIBBLING_PAN) {
-      if(finishing) {
+      if(finishing && twoFingerTap && pointerPathLen < PANLENGTH_CLICK && event.t - initPointerTime < MAX_CLICK_TIME) {
+        // cancel rather than finish the pan: no click on a link under the fingers, no fling
+        parent->panZoomCancel();
+        scribbling = NOT_SCRIBBLING;
+        twoFingerTap = false;
+        lastClickTime = 0;  // not half of a double click
+        parent->doTwoFingerTap();
+      }
+      else if(finishing) {
         parent->panZoomFinish(event);
         scribbling = NOT_SCRIBBLING;
       }

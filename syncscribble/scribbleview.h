@@ -35,6 +35,8 @@ public:
   virtual bool doClickAction(Point pos) { return true; }
   virtual void doDblClickAction(Point pos) {}
   virtual void doLongPressAction(Point pos) {}
+  // two fingers tapped together without moving; the pan they started has already been cancelled
+  virtual void doTwoFingerTap() {}
   virtual void doMotionEvent(const InputEvent& event, inputevent_t eventtype) {}
   // true while a single pointer must reach doPressEvent whatever the input mode - e.g. a finger that
   //  would otherwise pan places page tags instead (ScribbleArea::startTagPlacement()), or ticks a to-do tag
