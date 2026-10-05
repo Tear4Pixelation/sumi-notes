@@ -530,16 +530,20 @@ static int workingLine(Element* s, const RulingFrame& f)
 }
 
 // Writing on every second line (the Skip Lines toggle): the line pressed on is a text line, and so is every
-//  second line from it.  The returned frame makes each text line plus half the blank line either side one
-//  "line" - pitch doubled, origin half a line above the pressed line - so reflow wraps to the next text line
-//  rather than the blank one, insert space steps two lines, and an underline in a blank line still belongs to
-//  the text above it.  Nothing downstream needs to know.  It is a toggle rather than detected from the ink:
-//  a guess that can misfire moves text onto the wrong line with no visible reason.
+//  second line from it.  The returned frame makes each text line plus the blank line below it one "line" -
+//  pitch doubled, origin on the top of the pressed line - so reflow wraps to the next text line rather than
+//  the blank one, insert space steps two lines, and an underline in a blank line still belongs to the text
+//  above it.  Nothing downstream needs to know.  It is a toggle rather than detected from the ink: a guess
+//  that can misfire moves text onto the wrong line with no visible reason.
+// The origin is the pressed line's top, never above it.  It used to be half a line above, which is fine for
+//  a press on a text line but not for one on the blank line between two (where the pen goes to push the
+//  text below down): that half line is the lower half of the text line above, where handwriting sitting on
+//  the rule has its centre, so the letters of the line above the press moved too.
 RulingFrame skippedLineFrame(const RulingFrame& frame, Point pos)
 {
   const Dim yr = frame.yrulingOr(Page::BLANK_Y_RULING);
   RulingFrame skipped = frame;
-  skipped.origin = frame.toPage(Point(0, frame.line(pos, yr)*yr - yr/2));
+  skipped.origin = frame.toPage(Point(0, frame.line(pos, yr)*yr));
   skipped.yRuling = 2*yr;
   return skipped;
 }

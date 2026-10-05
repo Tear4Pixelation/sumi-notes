@@ -2343,10 +2343,38 @@ int ScribbleTest::skippedLinesTest()
   for(Element* s : scribbleArea->currPage->children()) if(lineOf(s) == 5) line5.push_back(s);
   scribbleMode->setMode(MODE_INSSPACERULED);
   at(Point(50, 5*pitch + 0.5*pitch), press);
+  //  (a step happens when the pen reaches the next text line, as one does on a line without Skip Lines)
   at(Point(50, 5*pitch + 1.0*pitch), INPUTEVENT_MOVE);
-  at(Point(50, 5*pitch + 1.6*pitch), INPUTEVENT_MOVE);
-  at(Point(50, 5*pitch + 1.6*pitch), release);
+  at(Point(50, 5*pitch + 2.5*pitch), INPUTEVENT_MOVE);
+  at(Point(50, 5*pitch + 2.5*pitch), release);
   check(!line5.empty() && allOn(line5, 7), "double spaced: vertical insert space steps two lines");
+
+  // pressed on the blank line between two text lines (where you would put the pen to push the text below
+  //  down), nothing of the text line above the press moves: the frame used to start half a line above the
+  //  pressed line, which on a blank line runs through the middle of the text above and took its letters
+  //  (x-height letters sitting on the rule, as handwriting does, so their centre is in the lower half)
+  setup({5, 7, 9});
+  scribbleMode->setMode(MODE_STROKE);
+  for(int ii = 0; ii < 4; ++ii) {
+    Dim lx = 600 + ii*14, top = 3*pitch;
+    at(Point(lx, top + 0.6*pitch), press);
+    at(Point(lx + 4, top + 0.95*pitch), INPUTEVENT_MOVE);
+    at(Point(lx + 8, top + 0.6*pitch), INPUTEVENT_MOVE);
+    at(Point(lx + 11, top + 0.95*pitch), INPUTEVENT_MOVE);
+    at(Point(lx + 11, top + 0.95*pitch), release);
+  }
+  std::vector<Element*> line3, line5b;
+  for(Element* s : scribbleArea->currPage->children()) {
+    if(lineOf(s) == 3) line3.push_back(s);
+    if(lineOf(s) == 5) line5b.push_back(s);
+  }
+  scribbleMode->setMode(MODE_INSSPACERULED);
+  at(Point(50, 4*pitch + 0.5*pitch), press);
+  at(Point(50, 4*pitch + 1.0*pitch), INPUTEVENT_MOVE);
+  at(Point(50, 4*pitch + 2.6*pitch), INPUTEVENT_MOVE);
+  at(Point(50, 4*pitch + 2.6*pitch), release);
+  check(!line3.empty() && allOn(line3, 3), "double spaced, pressed on a blank line: the text line above stays put");
+  check(!line5b.empty() && allOn(line5b, 7), "double spaced, pressed on a blank line: the text below moves two lines");
 
   // off: the same double spaced text wraps onto the blank line, as ruled insert space always has
   scribbleMode->insSpaceSkipLines = false;

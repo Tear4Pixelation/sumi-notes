@@ -178,9 +178,22 @@ leave strokes out of a ruled selection and make reflow see text on an "empty" ne
 the end of `toolModes`; icon `ic_menu_toggle_skip_lines.svg`, the ruled icon with writing on the first and
 third lines). For text written on every second line: the line pressed on is a text line, and so is every
 second line from it. `skippedLineFrame()` (`selection.cpp`) gives the gesture a frame with the pitch doubled
-and its origin half a line above the pressed line, so each "line" is a text line plus half the blank line
-either side. Nothing downstream changed: reflow wraps to the next text line, vertical steps are two lines,
-stops and the indent's "line above" follow, and an underline in a blank line stays with the text above it.
+and its origin on the top of the pressed line, so each "line" is a text line plus the blank line below it.
+Nothing downstream changed: reflow wraps to the next text line, vertical steps are two lines (a step happens
+when the pen reaches the next text line), stops and the indent's "line above" follow, and an underline in a
+blank line stays with the text above it.
+
+**The origin must not be above the pressed line.** It used to be half a line above (each "line" = text line
+plus half the blank line either side). That is fine for a press on a text line, but the natural place to put
+the pen to push text down is the blank line *between* two text lines, and then that half line is the lower
+half of the text line above - where handwriting sitting on the rule has its centre (`calcCom`), so the line
+above the press moved too (first-day report: "selects stuff in the line above as well"). With the origin on
+the pressed line's top, nothing above the line you press on ever moves, wherever you press; a press on the
+blank line pairs it with the text line below, which is the text you meant to move. Cost: a tall ascender
+whose centre lies in the blank line above a pressed text line stays behind - press on the blank line above
+instead. Pinned by the "pressed on a blank line" checks in `skippedLinesTest()` (fails against the old
+origin; letters there sit on the rule, the zigzag letters of the other checks are centred high enough to
+pass either way).
 Only ruled insert space uses it (the toggle is disabled for vertical insert space); ruled select, ruled
 erase and ruled move still step single lines.
 
