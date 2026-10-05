@@ -315,12 +315,10 @@ void ScribbleConfig::init()
   // for pen toobar
   // three of each, matching the design mockup's draw options row
   cfgS["savedColors"] = "black,red,blue";
-  cfgS["savedWidths"] = "1.4, 3.0, 6.0";
-  // the text marker gets its own presets: a marker has to cover text, so the pen's are far too thin.
-  //  They are in whatever unit the marker's relative size toggle is currently in - fractions of the
-  //  page's line height by default (see PenToolbar::setRelativeWidth, which converts both).
-  // one thickness preset list per draw tool, each in that tool's own unit; seeded on first use, so
-  //  that the numbers cannot be read in the wrong unit - see PenToolbar::seedWidths
+  // one thickness preset list per draw tool (the marker's are far thicker: it has to cover text), each
+  //  stored with its unit as "rel:..." or "abs:..." and seeded on first use, once the tool's unit is
+  //  known - see WidthPresets and PenToolbar::prepareWidths
+  cfgS["savedWidths"] = "";
   cfgS["savedMarkerWidths"] = "";
   cfgS["savedEphemeralWidths"] = "";
   // for the eraser options row: index into MainWindow's eraser radii

@@ -24,6 +24,9 @@ public:
   // solid/dashed/dotted on a selection: sized per element, filled strokes converted, scales with width,
   //  one undo step that restores exactly
   int dashStyleTest();
+  // a selection shows a relative pen's thickness presets in document units, and a width edited there
+  //  goes back into the pen's list in line heights (docs/agent/pen-and-tools.md, relative pen width)
+  int penWidthPresetTest();
   int outlineTest();
   int outlineNestTest();
   // a Noteful notebook becomes pages with their ruling, ink on the right layers, the outline and an

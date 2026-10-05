@@ -1414,8 +1414,13 @@ void ScribbleApp::penSelected(int penindex)
     currPenIndex = penindex;
     setPen(*pen);
     setMode(MODE_STROKE);
-    if(cfg->Bool("applyPenToSel"))
-      activeArea()->setStrokeProperties(StrokeProperties(pen->color, pen->width));  // no-op if no sel
+    if(cfg->Bool("applyPenToSel")) {
+      // a relative pen's width is in line heights, the selection's in document units
+      Page* page = activeArea()->getCurrPage();
+      Dim width = pen->hasFlag(ScribblePen::WIDTH_RELATIVE)
+          ? pen->width*(page ? page->yruling(true) : Page::BLANK_Y_RULING) : pen->width;
+      activeArea()->setStrokeProperties(StrokeProperties(pen->color, width));  // no-op if no sel
+    }
   }
 }
 

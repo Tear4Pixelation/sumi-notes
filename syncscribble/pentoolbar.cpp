@@ -261,15 +261,12 @@ PenToolbar::PenToolbar(bool _compact)
   // I think we may want to increase size of circles or use a short stroke
   // instead of circle
   preScale = ScribbleApp::getPreScale();
-  StringRef widthStr(
-      ScribbleApp::cfg->String("savedWidths", "1.6,2.4,3.0,4.0"));
-  parseNumbersList(widthStr, savedWidths);
-  // may be empty - on a fresh config, and on one written before these lists existed, they are seeded
-  //  on first use, in the unit that tool's width is in (see seedWidths)
-  StringRef markerWidthStr(ScribbleApp::cfg->String("savedMarkerWidths", ""));
-  parseNumbersList(markerWidthStr, savedMarkerWidths);
-  StringRef ephWidthStr(ScribbleApp::cfg->String("savedEphemeralWidths", ""));
-  parseNumbersList(ephWidthStr, savedEphemeralWidths);
+  // each list is stored with its unit ("rel:" / "abs:"), in the same config value as the numbers, so
+  //  the two cannot be saved or loaded apart.  A list from an older config has no unit and gets that
+  //  tool's pen's on first use; an empty one is seeded then (see prepareWidths)
+  savedWidths.parse(ScribbleApp::cfg->String("savedWidths", ""));
+  savedMarkerWidths.parse(ScribbleApp::cfg->String("savedMarkerWidths", ""));
+  savedEphemeralWidths.parse(ScribbleApp::cfg->String("savedEphemeralWidths", ""));
 
   colorPalette = createPaletteWidget();
   widthPalette = createPaletteWidget();
@@ -291,18 +288,9 @@ PenToolbar::PenToolbar(bool _compact)
     rebuildGrids();
   });
 
-  widthCtxMenu = createMenu(Menu::FLOATING, false);
-  widthCtxMenu->addItem(_("Insert Current"), [this]() {
-    std::vector<Dim>& widths = activeWidths();
-    widths.erase(std::remove(widths.begin(), widths.end(), pen.width), widths.end());
-    int pos = std::min(contextMenuIdx + 1, int(widths.size()));
-    widths.insert(widths.begin() + pos, pen.width);
-    rebuildGrids();
-  });
-  widthMenuDelete = widthCtxMenu->addItem(_("Delete"), [this]() {
-    activeWidths().erase(activeWidths().begin() + contextMenuIdx);
-    rebuildGrids();
-  });
+  // The thickness presets have no "insert current" or "delete": there are always exactly
+  //  WidthPresets::COUNT of them, each edited in place (tap the selected one).  Deleting was the only
+  //  way out of a preset that could not be edited, and it lost the slot for good.
 
   colorPicker = createColorEditBox();
   colorPicker->onColorChanged = [this](Color) { updateColor(); };
@@ -649,7 +637,6 @@ PenToolbar::PenToolbar(bool _compact)
     settingsBtn->node->addClass("float-small-btn");
   }
   addWidget(colorCtxMenu);
-  addWidget(widthCtxMenu);
 
   addHandler([this](SvgGui *gui, SDL_Event *event) {
     // Return focus to ScribbleArea if Enter or Esc pressed (these keys are
@@ -1046,7 +1033,8 @@ void PenToolbar::openSingleWidth(SingleWidth *sw) {
     gui->deleteContents(sw->presetRow);
   sw->presets.clear();
   bool relwidths = relativeWidths();
-  for (Dim width : activeWidths()) {
+  for (size_t ii = 0; ii < activeWidths().size(); ++ii) {
+    Dim width = presetWidth(ii);  // a selection's presets are absolute even while the pen's are not
     Button *btn = new Button(compactWidthBtnNode->clone());
     btn->containerNode()->selectFirst(".width-line")->setAttr("stroke-width", widthPreview(width));
     btn->setMargins(0);
@@ -1088,7 +1076,7 @@ void PenToolbar::updateSingles() {
     if (pen.width > 0 && sw->spin->value() != pen.width)
       sw->spin->setValue(pen.width);
     for (size_t ii = 0; ii < sw->presets.size() && ii < widths.size(); ++ii)
-      sw->presets[ii]->setChecked(widths[ii] == pen.width);
+      sw->presets[ii]->setChecked(WidthPresets::sameWidth(presetWidth(ii), pen.width));
     for (int style = ScribblePen::DASH_SOLID; style <= ScribblePen::DASH_DOTTED; ++style)
       sw->dashBtns[style]->setChecked(style == dashStyle);
   }
@@ -1148,7 +1136,7 @@ void PenToolbar::rebuildGrids() {
   const std::vector<Dim> &widths = activeWidths();
   bool relwidths = relativeWidths();
   for (size_t ii = 0; ii < widths.size(); ++ii) {
-    Dim width = widths[ii];
+    Dim width = presetWidth(ii);
     Button *btn =
         new Button((compact ? compactWidthBtnNode : widthBtnNode)->clone());
     // btn->containerNode()->selectFirst(".width-circle")->setTransform(Transform2D::scaling(sc));
@@ -1156,11 +1144,6 @@ void PenToolbar::rebuildGrids() {
         ->selectFirst(".width-line")
         ->setAttr("stroke-width", widthPreview(width));
     btn->onClicked = [this, ii]() { selectWidth(int(ii)); };
-
-    SvgGui::setupRightClick(btn, [this, ii](SvgGui *gui, Widget *w, Point p) {
-      contextMenuIdx = ii;
-      gui->showContextMenu(widthCtxMenu, p, w);
-    });
     setupTooltip(btn, altTooltip(
         relwidths ? fstring(_("Pen width: %.2g line heights"), width).c_str()
                   : fstring(_("Pen width: %.1f"), width).c_str(), _("Edit")));
@@ -1168,13 +1151,12 @@ void PenToolbar::rebuildGrids() {
     if (compact)
       btn->setMargins(0);
   }
-  widthMenuDelete->setEnabled(widths.size() > 1);
   updateSelected();
 }
 
 // tapping the already selected preset opens the detail editor for it
 void PenToolbar::selectWidth(int idx) {
-  if (activeWidths()[idx] == pen.width) {
+  if (WidthPresets::sameWidth(presetWidth(idx), pen.width)) {
     widthPopupIdx = idx;
     if (widthPopup->isVisible())
       closeAutoClosePopup(widthPopup);
@@ -1184,7 +1166,7 @@ void PenToolbar::selectWidth(int idx) {
   }
   closeAutoClosePopup(widthPopup);
   widthPopupIdx = idx;
-  spinWidth->setValue(activeWidths()[idx]);
+  spinWidth->setValue(presetWidth(idx));
   updateWidth();
 }
 
@@ -1219,7 +1201,7 @@ void PenToolbar::updateSelected() {
   }
   const std::vector<Dim> &widths = activeWidths();
   for (size_t ii = 0; ii < widthPalette->items.size() && ii < widths.size(); ++ii)
-    widthPalette->items[ii]->setChecked(widths[ii] == pen.width);
+    widthPalette->items[ii]->setChecked(WidthPresets::sameWidth(presetWidth(ii), pen.width));
   updateSingles();
 }
 
@@ -1233,20 +1215,12 @@ void PenToolbar::saveConfig(ScribbleConfig *cfg) const {
         fstring("#%02X%02X%02X%02X", c.alpha(), c.red(), c.green(), c.blue()));
   cfg->set("savedColors", joinStr(colorStrs, ",").c_str());
 
-  std::vector<std::string> widthStrs;
-  for (Dim w : savedWidths)
-    widthStrs.push_back(fstring("%.3f", w));
-  cfg->set("savedWidths", joinStr(widthStrs, ",").c_str());
-
-  std::vector<std::string> markerWidthStrs;
-  for (Dim w : savedMarkerWidths)
-    markerWidthStrs.push_back(fstring("%.3f", w));
-  cfg->set("savedMarkerWidths", joinStr(markerWidthStrs, ",").c_str());
-
-  std::vector<std::string> ephWidthStrs;
-  for (Dim w : savedEphemeralWidths)
-    ephWidthStrs.push_back(fstring("%.3f", w));
-  cfg->set("savedEphemeralWidths", joinStr(ephWidthStrs, ",").c_str());
+  // the unit goes into the same string as the numbers, so no save or load can pair them wrongly.  Not
+  //  "%.3f" as before: a pen width in line heights is around 0.04, and three decimals of that would
+  //  move a preset off the width it was set to, unselecting it after a restart
+  cfg->set("savedWidths", savedWidths.serialize().c_str());
+  cfg->set("savedMarkerWidths", savedMarkerWidths.serialize().c_str());
+  cfg->set("savedEphemeralWidths", savedEphemeralWidths.serialize().c_str());
 }
 
 void PenToolbar::setPen(const ScribblePen &newpen, Mode m, int selDashStyle) {
@@ -1271,7 +1245,7 @@ void PenToolbar::setPen(const ScribblePen &newpen, Mode m, int selDashStyle) {
       || relativeWidths() != newpen.hasFlag(ScribblePen::WIDTH_RELATIVE);
   widthsTool = tool;
   pen = newpen;
-  rebuild = seedWidths() || rebuild;
+  rebuild = prepareWidths() || rebuild;
   closeAutoClosePopup(widthPopup);
   closeAutoClosePopup(colorPopup);
   colorPicker->setColor(pen.color);
@@ -1337,7 +1311,9 @@ void PenToolbar::updateWidth() {
   // editing the width while the detail popup is open redefines that preset
   if (widthPopup->isVisible() && widthPopupIdx >= 0 &&
       widthPopupIdx < int(activeWidths().size())) {
-    activeWidths()[widthPopupIdx] = pen.width;
+    // in the list's own unit: a selection's width is absolute while the pen's list may be relative,
+    //  and storing it raw is what turned a 3.2 unit stroke into a 3.2 line height (144 unit) preset
+    activePresets().setFrom(widthPopupIdx, pen.width, relativeWidths(), lineHeight());
     widthPalette->items[widthPopupIdx]
         ->containerNode()
         ->selectFirst(".width-line")
@@ -1369,32 +1345,48 @@ int PenToolbar::drawToolForMode(Mode m) const {
                                        : int(ScribbleMode::DRAWTOOL_PEN);
 }
 
-std::vector<Dim>& PenToolbar::activeWidths() {
+WidthPresets& PenToolbar::activePresets() {
   return widthsTool == ScribbleMode::DRAWTOOL_HIGHLIGHT ? savedMarkerWidths
       : (widthsTool == ScribbleMode::DRAWTOOL_EPHEMERAL ? savedEphemeralWidths : savedWidths);
 }
 
-const std::vector<Dim>& PenToolbar::activeWidths() const {
-  return const_cast<PenToolbar*>(this)->activeWidths();
+const WidthPresets& PenToolbar::activePresets() const {
+  return const_cast<PenToolbar*>(this)->activePresets();
 }
 
-// A preset list carries no unit of its own - the numbers mean whatever that tool's relative size
-//  toggle currently means - so it cannot have a fixed default in the config: a config written before
-//  this existed has absolute widths, and line-height fractions would load there as hairlines.  The
-//  lists start empty and are filled here, once the tool is actually in hand and its unit is known.
-bool PenToolbar::seedWidths() {
-  if (!activeWidths().empty())
-    return false;
+std::vector<Dim>& PenToolbar::activeWidths() { return activePresets().widths; }
+
+const std::vector<Dim>& PenToolbar::activeWidths() const { return activePresets().widths; }
+
+Dim PenToolbar::presetWidth(size_t idx) const {
+  return activePresets().inUnit(idx, relativeWidths(), lineHeight());
+}
+
+// A preset list's numbers mean nothing without its unit, so the list carries one (WidthPresets).  Lists
+//  start empty and are seeded here, once the tool is in hand and its unit is known: a fixed default in
+//  the config could only be in one unit.  In PEN_MODE the list is kept in the pen's unit, converted
+//  (never reinterpreted) when they differ - a saved pen recalled with the other relative setting, say.
+//  A selection or a bookmark leaves the list alone and reads it through presetWidth() instead, since
+//  its pen is absolute whatever the draw pen is.
+bool PenToolbar::prepareWidths() {
+  WidthPresets &presets = activePresets();
   Dim lh = lineHeight();
-  if (widthsTool == ScribbleMode::DRAWTOOL_HIGHLIGHT) {
-    for (Dim w : MARKER_WIDTHS)  // these are line heights
-      activeWidths().push_back(relativeWidths() ? w : w*lh);
+  bool changed = false;
+  if (presets.unit == WidthPresets::UNIT_UNKNOWN) {
+    // a list saved before the unit was: the pairing the old code assumed, with that tool's own pen
+    ScribbleMode *scribbleMode = ScribbleApp::app ? ScribbleApp::app->scribbleMode : NULL;
+    bool toolRelative = mode == PEN_MODE ? relativeWidths()
+        : (scribbleMode && scribbleMode->penForDrawTool(widthsTool).hasFlag(ScribblePen::WIDTH_RELATIVE));
+    presets.convertTo(toolRelative, lh);
+    changed = true;
   }
-  else {
-    for (Dim w : DEFAULT_WIDTHS)  // these are document units
-      activeWidths().push_back(relativeWidths() ? w/lh : w);
+  if (mode == PEN_MODE && presets.isRelative() != relativeWidths()) {
+    presets.convertTo(relativeWidths(), lh);
+    changed = true;
   }
-  return true;
+  bool marker = widthsTool == ScribbleMode::DRAWTOOL_HIGHLIGHT;
+  // MARKER_WIDTHS are line heights, DEFAULT_WIDTHS document units
+  return presets.normalize(marker ? MARKER_WIDTHS : DEFAULT_WIDTHS, marker, lh) || changed;
 }
 
 // A marker stroke is its family at another alpha (Palette::indexOf ignores alpha), so this maps a
@@ -1438,8 +1430,8 @@ Dim PenToolbar::lineHeight() const {
 Dim PenToolbar::widthPreview(Dim w) const {
   Dim unit = relativeWidths() ? lineHeight() : 1;
   Dim maxw = 0;
-  for (Dim preset : activeWidths())
-    maxw = std::max(maxw, preset*unit);
+  for (size_t ii = 0; ii < activeWidths().size(); ++ii)
+    maxw = std::max(maxw, presetWidth(ii)*unit);
   Dim sc = w*unit;
   // every marker preset is well past the cell's cap, so clamping them would draw three identical
   //  bars; once anything in the set exceeds the cap the whole set is scaled down to it instead,
@@ -1459,8 +1451,7 @@ void PenToolbar::setRelativeWidth(bool relative) {
   if (relative == pen.hasFlag(ScribblePen::WIDTH_RELATIVE))
     return;
   Dim lh = lineHeight();
-  for (Dim &w : activeWidths())
-    w = relative ? w/lh : w*lh;
+  activePresets().convertTo(relative, lh);
   pen.setFlag(ScribblePen::WIDTH_RELATIVE, relative);
   pen.width = relative ? pen.width/lh : pen.width*lh;
   pen.setDashStyle(dashStyle);  // the pattern is in the width's unit
@@ -1478,11 +1469,11 @@ void PenToolbar::updateWidthPopup() {
   cbRelWidth->setChecked(pen.hasFlag(ScribblePen::WIDTH_RELATIVE));
   bool rel = relativeWidths();
   // in line heights, 4 is already absurdly thick and 200 would be nonsense
-  spinWidth->setLimits(0.01, rel ? 4 : 200);
+  spinWidth->setLimits(WidthPresets::MIN_WIDTH, WidthPresets::maxWidth(rel));
   widthSpinRow->selectFirst(".row-text")
       ->setText(rel ? _("Line heights") : _("Width"));
   for (auto &sw : singleWidths) {
-    sw->spin->setLimits(0.01, rel ? 4 : 200);
+    sw->spin->setLimits(WidthPresets::MIN_WIDTH, WidthPresets::maxWidth(rel));
     sw->spinRow->selectFirst(".row-text")->setText(rel ? _("Line heights") : _("Width"));
   }
   // the display is always up, so an absolute width is shown against the ruling too - it is drawn from

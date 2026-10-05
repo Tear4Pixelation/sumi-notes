@@ -3,6 +3,9 @@
 #include "page.h"
 #include "scribbleconfig.h"
 #include <sstream>
+#include <cstring>
+#include <cmath>
+#include "widthpresets.h"
 
 
 // if we get rid of ruled mode, how do we determine what to do for move sel?  use insert space setting?
@@ -96,6 +99,19 @@ static void readPen(std::istream& ss, ScribblePen& pen, unsigned int reqflags)
     return;
   loaded.color = Color(argb);
   loaded.flags = flags | reqflags;
+  // a width that is not a width keeps the default pen; one past the width spinbox's limit for its unit
+  //  is clamped into it, since the spinbox can never show it and so it could never be edited (a 144 line
+  //  height pen).  The dash pattern is in the width's unit, so it is rescaled with it.
+  if(!std::isfinite(loaded.width) || loaded.width <= 0)
+    return;
+  Dim maxwidth = WidthPresets::maxWidth(loaded.hasFlag(ScribblePen::WIDTH_RELATIVE));
+  if(loaded.width > maxwidth) {
+    int dashstyle = loaded.dashStyle();
+    loaded.width = maxwidth;
+    loaded.setDashStyle(dashstyle);
+  }
+  else if(loaded.width < WidthPresets::MIN_WIDTH)
+    loaded.width = WidthPresets::MIN_WIDTH;
   pen = loaded;
 }
 
@@ -170,13 +186,16 @@ void ScribbleMode::loadModes(const char* modestr)
   //  so it is converted here rather than reinterpreted: 30 units would otherwise load as 30 line
   //  heights.  The page being drawn on is not known yet, so the blank-page ruling is the unit; it is
   //  the same fallback PenToolbar::lineHeight() uses when a page has none.
-  // The marker's preset list is in whatever unit the pen was in, and there is no per-preset flag to
-  //  convert it by, so it is cleared and reseeded (in line heights) by PenToolbar::seedWidths().  This
-  //  runs before the toolbar is built, which is what makes clearing the config value enough.
+  // A marker preset list saved with its unit ("rel:"/"abs:", see WidthPresets) is converted along with
+  //  the pen by PenToolbar::prepareWidths().  An older one has no unit to convert by, so it is cleared
+  //  and reseeded (in line heights) there.  This runs before the toolbar is built, which is what makes
+  //  clearing the config value enough.
   if(!highlightPen.hasFlag(ScribblePen::WIDTH_RELATIVE)) {
     highlightPen.width = highlightPen.width/Page::BLANK_Y_RULING;
     highlightPen.setFlag(ScribblePen::WIDTH_RELATIVE, true);
-    cfg->set("savedMarkerWidths", "");
+    const char* markerWidths = cfg->String("savedMarkerWidths", "");
+    if(strncmp(markerWidths, "rel:", 4) != 0 && strncmp(markerWidths, "abs:", 4) != 0)
+      cfg->set("savedMarkerWidths", "");
   }
   readPen(ss, ephemeralPen, ScribblePen::EPHEMERAL);
   std::string shapestr;
