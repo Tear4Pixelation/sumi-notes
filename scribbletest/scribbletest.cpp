@@ -1247,6 +1247,9 @@ int ScribbleTest::shapeTapEditTest()
   cfg->set("clearSelOnly", wasClearSelOnly);
   input->singleTouchMode = wasSingle;
   input->multiTouchMode = wasMulti;
+  return nbad;
+}
+
 int ScribbleTest::zoomSnapTest()
 {
   int nbad = 0;
