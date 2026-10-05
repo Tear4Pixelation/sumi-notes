@@ -333,8 +333,13 @@ protected:
   Element* createShapeElement(const ShapeParams& params);
   void cancelShape();
   Point snapShapePoint(Point pos) const;
-  // soft 45 degree snap of point index of a line or polyline (shapeAngleSnap); see snapShapeAngle()
-  Point snapShapeAngleAt(const ShapeParams& params, int index, Point pos) const;
+  // soft 45 degree snap of point index of a line or polyline (shapeAngleSnap); see snapShapeAngle().
+  //  Drawing with the shape tool and dragging a handle snap by distance from the axis line
+  //  (SHAPE_ANGLE_SNAP_DIST screen units, so it follows zoom), capped at shapeAngleSnap degrees;
+  //  localPerPage converts page units to the params' units (a transformed shape's node-local ones).
+  //  A recognized (hold-to-snap) line snaps by angle alone, at a fraction of shapeAngleSnap.
+  Point snapShapeAngleAt(const ShapeParams& params, int index, Point pos, Dim localPerPage = 1) const;
+  Point snapRecognizedAngleAt(const ShapeParams& params, int index, Point pos) const;
   // swap in a ShapeSelector when the settled selection is exactly one shape (spec 5)
   bool useShapeSelector();
 

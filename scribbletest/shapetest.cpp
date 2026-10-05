@@ -594,6 +594,24 @@ static void testAngleSnap()
   //  - horizontal from (97, 6) and diagonal from (100, 100) cross at (6, 6)
   snapped = snapShapeAngle(poly, 0, Point(4, 3), tolerance);
   shapeCheckPointNear(snapped, Point(6, 6), 1e-9, "a closed polyline's first point snaps against the last too");
+
+  // editing snaps by distance from the axis line, capped by the angle: the same 3 degrees off horizontal
+  //  snaps on a short line but not on a long one, whose end is far from the horizontal
+  const Dim maxDist = 8;
+  Dim offAngle = 3*M_PI/180;
+  ShapeParams shortLine = makeShape(SHAPE_LINE, Point(0, 0), Point(100*std::cos(offAngle), 100*std::sin(offAngle)));
+  snapped = snapShapeAngle(shortLine, 1, shortLine.points[1], tolerance, maxDist);
+  shapeCheckNear(snapped.y, 0, 1e-9, "a 100 long line 3 degrees off (5.2 from the axis) snaps by distance");
+  ShapeParams longLine = makeShape(SHAPE_LINE, Point(0, 0), Point(1000*std::cos(offAngle), 1000*std::sin(offAngle)));
+  snapped = snapShapeAngle(longLine, 1, longLine.points[1], tolerance, maxDist);
+  shapeCheckPointNear(snapped, longLine.points[1], 0,
+      "a 1000 long line 3 degrees off (52 from the axis) stays slightly diagonal");
+  // the angle still caps it: a short line well off the axis but close to it in distance is left alone
+  snapped = snapShapeAngle(line, 1, Point(20, 7), tolerance, maxDist);
+  shapeCheckPointNear(snapped, Point(20, 7), 0, "a short line 19 degrees off is not snapped by distance alone");
+  // a long line whose end is within the distance does snap
+  snapped = snapShapeAngle(longLine, 1, Point(1000, 6), tolerance, maxDist);
+  shapeCheckPointNear(snapped, Point(1000, 0), 1e-9, "a long line with its end 6 from the axis snaps");
 }
 
 static void testEllipse()

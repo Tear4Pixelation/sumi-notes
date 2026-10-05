@@ -100,7 +100,11 @@ void dragShapeHandle(ShapeParams& params, const ShapeHandle& handle, Point newpo
 //  lies within `tolerance` radians of a multiple of 45 degrees, pos is moved onto that direction.  With
 //  both neighbours in range (an interior point) pos goes to where the two snapped directions cross, so a
 //  corner can lock to a right angle.  Any other shape, or tolerance <= 0, returns pos unchanged.
-Point snapShapeAngle(const ShapeParams& params, int index, Point pos, Dim tolerance);
+// maxDist > 0 additionally requires pos to be within maxDist (same units as the points) of the snapped
+//  line through the neighbour, measured perpendicular to it.  That is the editing rule: by angle alone a
+//  long line can never sit slightly off diagonal, since its end is snapped from far away; by distance a
+//  long line snaps only when its end is already close to the axis line, a short one as before.
+Point snapShapeAngle(const ShapeParams& params, int index, Point pos, Dim tolerance, Dim maxDist = 0);
 
 std::string serializeShapePoints(const std::vector<Point>& points);
 void parseShapePoints(const char* str, std::vector<Point>& points);

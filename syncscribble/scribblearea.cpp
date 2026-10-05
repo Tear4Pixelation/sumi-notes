@@ -1299,12 +1299,34 @@ Point ScribbleArea::snapShapePoint(Point pos) const
   return gridFrame.snapToGrid(pos, Page::BLANK_Y_RULING);
 }
 
-Point ScribbleArea::snapShapeAngleAt(const ShapeParams& params, int index, Point pos) const
+// Editing snaps by how far the point is from the 0/45/90 degree line, not by the angle: by angle a long
+//  line's end gets pulled across a long way, so it can never sit slightly off diagonal, while a short one
+//  barely moves.  The angle cap (shapeAngleSnap) still applies, so 0 turns it off and a very short line
+//  is not bent further than before.  In screen units, so zooming in gives finer control.
+static constexpr Dim SHAPE_ANGLE_SNAP_DIST = 8;
+// A recognized line is the pen's rough intent and is snapped by angle, a little less eagerly than the
+//  setting allows (8 degrees -> 6).
+static constexpr Dim RECOGNIZED_ANGLE_SNAP_FACTOR = 0.75;
+
+static Dim angleSnapTolerance(Dim degrees)
+{
+  return std::min(Dim(22.5), degrees)*M_PI/180;
+}
+
+Point ScribbleArea::snapShapeAngleAt(const ShapeParams& params, int index, Point pos, Dim localPerPage) const
 {
   // a grid-snapped pen already lands on grid points; bending those to 45 degrees would pull them off it
   if(currPen()->hasFlag(ScribblePen::SNAP_TO_GRID))
     return pos;
-  Dim tolerance = std::min(Dim(22.5), Dim(cfg->Float("shapeAngleSnap")))*M_PI/180;
+  Dim tolerance = angleSnapTolerance(cfg->Float("shapeAngleSnap"));
+  return snapShapeAngle(params, index, pos, tolerance, SHAPE_ANGLE_SNAP_DIST/mScale*localPerPage);
+}
+
+Point ScribbleArea::snapRecognizedAngleAt(const ShapeParams& params, int index, Point pos) const
+{
+  if(currPen()->hasFlag(ScribblePen::SNAP_TO_GRID))
+    return pos;
+  Dim tolerance = angleSnapTolerance(cfg->Float("shapeAngleSnap"))*RECOGNIZED_ANGLE_SNAP_FACTOR;
   return snapShapeAngle(params, index, pos, tolerance);
 }
 
@@ -1548,7 +1570,7 @@ bool ScribbleArea::snapStroke()
       return false;
     params.id = SHAPE_LINE;
     params.points = {toPage(result.points[0]), toPage(result.points[1])};
-    params.points[1] = snapShapeAngleAt(params, 1, params.points[1]);
+    params.points[1] = snapRecognizedAngleAt(params, 1, params.points[1]);
     break;
   case shaperec::Kind::Quad:
   {
@@ -1619,7 +1641,7 @@ void ScribbleArea::scaleSnapShape(Point pos)
   ShapeParams params = snapParams;
   if(params.id == SHAPE_LINE) {
     params.points.back() += pos - snapAnchor;
-    params.points.back() = snapShapeAngleAt(params, 1, params.points.back());
+    params.points.back() = snapRecognizedAngleAt(params, 1, params.points.back());
   }
   else {
     Point lo = params.points.front(), hi = lo;
@@ -3200,8 +3222,11 @@ void ScribbleArea::doMoveEvent(const InputEvent& event)
     ShapeParams params = shape->shapeParams();
     const ShapeHandle& handle = shapeSelector->handles()[shapeHandleIdx];
     Point local = shapeSelector->toLocal(snapShapePoint(pos));
-    if(handle.type == ShapeHandle::POINT)
-      local = snapShapeAngleAt(params, handle.index, local);
+    if(handle.type == ShapeHandle::POINT) {
+      // the points are node-local, so a scaled shape needs the screen distance in its own units
+      Dim localPerPage = shapeSelector->toLocal(pos + Point(1, 0)).dist(shapeSelector->toLocal(pos));
+      local = snapShapeAngleAt(params, handle.index, local, localPerPage > 0 ? localPerPage : 1);
+    }
     dragShapeHandle(params, handle, local);
     shape->setShapeParams(params);
     currSelection->invalidateBBox();
