@@ -2646,7 +2646,9 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
     // clear selection depending on mode
     switch(currMode) {
     case MODE_STROKE:
-      // ignore this stroke if it clears selection (optionally)
+    case MODE_DRAWSHAPE:
+      // ignore this stroke if it clears selection (optionally) - the shape tool too, or a shape left in
+      //  edit mode after drawing (shapeEditAfterDraw) could only be left by drawing another one
       if(cfg->Bool("clearSelOnly"))
         currMode = MODE_NONE;
     case MODE_SELECTRECT:
@@ -2654,7 +2656,6 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
     case MODE_SELECTLASSO:
     case MODE_SELECTPATH:
     case MODE_BOOKMARK:
-    case MODE_DRAWSHAPE:
     case MODE_ERASESTROKE:
     case MODE_ERASERULED:
     case MODE_ERASEFREE:
