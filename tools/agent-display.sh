@@ -31,13 +31,17 @@
 #   agent-display.sh record start|stop [out.mp4]
 #   agent-display.sh status
 #   agent-display.sh stop
+#
+# Set AGENT_DISPLAY_NAME=<name> to run a separate, concurrent session.
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_DIR="$REPO_ROOT/syncscribble"
 POINTER="$REPO_ROOT/tools/agent-pointer/agent-pointer"
-RUNDIR="${XDG_RUNTIME_DIR:-/tmp}/write-agent-display"
+# AGENT_DISPLAY_NAME gives each concurrent agent (one per worktree) its own
+# session; cage and Xwayland pick free socket numbers on their own.
+RUNDIR="${XDG_RUNTIME_DIR:-/tmp}/write-agent-display${AGENT_DISPLAY_NAME:+-$AGENT_DISPLAY_NAME}"
 DISPLAY_FILE="$RUNDIR/wayland-display"
 XDISPLAY_FILE="$RUNDIR/x-display"
 PID_FILE="$RUNDIR/compositor.pid"
