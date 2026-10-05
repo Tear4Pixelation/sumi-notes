@@ -163,6 +163,24 @@ Select None, Delete and Done (X). Escape also leaves it; every `setup()` starts 
   unclear. A notebook in both grid groups has two cells; `docCells` is a multimap for that.
 - Delete is permanent, like the context menu's `deleteDoc()`: one confirmation for the lot.
 
+# Context popups are reparented, and can be parentless
+
+`docContextPopup`, `docTagsPopup` and `tagContextPopup` are each one widget, moved onto whichever cell
+or row opened them. `rebuildDocGrid()` / `rebuildTagTree()` detach them first (else `deleteContents()`
+would destroy them along with their host), so between a rebuild and the next show they are
+**parentless, with their old contents still inside**. Every reopen of the browser runs `refresh()`, and
+every keystroke in the document search runs `rebuildDocGrid()`.
+
+Anything that deletes widgets inside a parentless popup must not use `SvgGui::deleteWidget()` /
+`deleteContents()`: `onHideWidget()` dereferences `widget->window()`, which is NULL there. Build 121
+crashed on the iPad exactly so (EXC_BAD_ACCESS at 0x78, `SvgNode::ext()` on a NULL root document; the
+optimizer drops `window()`'s own NULL check because the caller dereferences the result anyway): Manage
+Tags on a document, leave and reopen the browser, Manage Tags again. `showDocTagsPopup()` now
+reattaches the popup to the cell *before* `rebuildDocTagsList()`, and `rebuildDocTagsList()` deletes
+the rows plainly if it is ever called while detached. Repro in agent-display (right-click = long-press):
+open the browser, right-click a card > Manage Tags > Done, back, reopen the browser, right-click >
+Manage Tags.
+
 # Top inset (iOS status bar)
 
 The editor used to paint `#ios-statusbar-bg`, a full-width toolbar-colored strip that pushed the whole
