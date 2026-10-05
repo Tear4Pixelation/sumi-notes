@@ -30,6 +30,10 @@ AR = $(XCODE)/Toolchains/XcodeDefault.xctoolchain/usr/bin/libtool -static -arch_
 ARFLAGS =
 # strip (removes debug symbols from exe) - what Xcode uses and smaller result than '-Xlinker -S' (or -s)
 STRIP = $(XCODE)/Toolchains/XcodeDefault.xctoolchain/usr/bin/strip
+# dsymutil gathers the DWARF from the .o files (-g) into a .dSYM before strip, so crash logs symbolicate;
+# it sits beside Payload/, outside the IPA, and carries the binary's UUID (dwarfdump --uuid)
+DSYMUTIL = $(XCODE)/Toolchains/XcodeDefault.xctoolchain/usr/bin/dsymutil
+DSYM = $(BUILDDIR)/$(TARGET).app.dSYM
 
 CFLAGS = -MMD -Wall -Wshadow
 CXX = $(CLANG)
@@ -126,7 +130,7 @@ $(OBJDIR)/%.nib: %.xib
 # note that you can use, e.g., ifeq($DEBUG),0) *unindented* instead of bash test
 $(TGT): $(OBJ) $(IOSRES) $(NIB)
 	$(LD) -o $@ $(OBJ) $(LDFLAGS) $(LIBS)
-	test $(DEBUG) -ne 0 || $(STRIP) $@
+	test $(DEBUG) -ne 0 || { rm -rf $(DSYM) && $(DSYMUTIL) $@ -o $(DSYM) && $(STRIP) $@; }
 	cp -R $(IOSRES) $(TGTDIR)
 	$(PLISTENV) perl -pe 's{\$$\((\w+)\)}{$$ENV{$$1} // $$&}ge' < $(INFOPLIST) > $(TGTDIR)/Info.plist
 	test -z "$(XCASSETS)" || $(ACTOOL) --export-dependency-info $(OBJDIR)/assetcatalog_dependencies --output-partial-info-plist $(OBJDIR)/assetcatalog_info.plist --compile $(TGTDIR) $(XCASSETS)

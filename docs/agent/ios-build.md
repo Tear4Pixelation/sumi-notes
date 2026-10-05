@@ -52,6 +52,32 @@ ideviceinstaller install Sumi.ipa                   # older ideviceinstaller: -i
 
 The build log prints which app id it signed and when the profile expires.
 
+## Crash logs and symbols
+
+The IPA's binary is stripped. `Makefile.ios` runs `dsymutil` before `strip` (release builds only) and
+the workflow uploads `Release/Sumi.app.dSYM` as `sumi-ios-dsym-<build>`. The build number is
+`git rev-list --count HEAD`; a crash report shows it as `build_version` and as the last part of
+`app_version` (3.1.121 = build 121 = the commit with 121 commits).
+
+Pull reports from the iPad with `idevicecrashreport -e <dir>` (`Sumi-*.ips` crashes, `Sumi.cpu_resource-*`,
+`JetsamEvent-*` for memory kills). Symbolicate on Linux without Xcode: the `.ips` gives the `Sumi`
+image's base and each frame's `imageOffset`; the binary's `__TEXT` starts at vmaddr 0x100000000, so
+
+```
+llvm-dwarfdump --uuid Sumi.app.dSYM/Contents/Resources/DWARF/Sumi     # must match the report's slice_uuid
+echo 0x100157c34 | llvm-symbolizer --obj=Sumi.app.dSYM/Contents/Resources/DWARF/Sumi --inlining
+```
+
+(subtract 4 from every frame but the top one to get the call line, not the line after it).
+
+**Builds are not reproducible**: two CI runs of the same commit gave different UUIDs, so a dSYM only
+matches the exact run that made the installed IPA - keep the artifact of every build you install.
+For a build without a dSYM (anything before this change), rebuild its commit plus only the dSYM change
+on a branch (as `crash-symbols-121` did), then compare `__TEXT,__text` of the old and new IPA's binary
+(`llvm-objcopy --dump-section=__TEXT,__text=out.bin`): if the bytes are identical the offsets are exact
+even though the UUID differs; the extra commit only changes the embedded short hash
+(`SCRIBBLE_REV_NUMBER`) and the build number in the Info.plist, both the same length.
+
 ## Gaps
 
 - No TestFlight / App Store upload: that needs an App Store profile and an upload step with an App Store
