@@ -413,7 +413,8 @@ void ScribbleView::panZoomFinish(const InputEvent& event)
     setCornerPos(initPanOrigin);
     if(event.modemod & MODEMOD_DBLCLICK)
       doDblClickAction(prevPointerCOM);
-    else if(doClickAction(prevPointerCOM)) {
+    else if(doClickAction(prevPointerCOM)
+        || (event.source == INPUTSOURCE_TOUCH && doTouchTap(prevPointerCOM))) {
       // if click was accepted, don't use for potential double click
       //lastClickPos = Point();
       scribbleInput->lastClickTime = 0;  // bit of a hack now that click handling lives in ScribbleInput

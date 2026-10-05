@@ -113,6 +113,7 @@ protected:
   bool doClickAction(Point pos) override;
   void doDblClickAction(Point pos) override;
   void doTwoFingerTap() override;
+  bool doTouchTap(Point pos) override;
   void doMotionEvent(const InputEvent& event, inputevent_t eventtype) override;
   void doCancelAction(bool refresh = true) override;
 
@@ -330,6 +331,8 @@ protected:
   void refreshRegionSelection();
   ShapeParams newShapeParams(int shapeid, Point pos) const;
   void editShapeAfterDraw(Element* shape);
+  Element* touchTapTarget(Point pos) const;
+  void selectTapped(Element* target);
   Element* createShapeElement(const ShapeParams& params);
   void cancelShape();
   Point snapShapePoint(Point pos) const;

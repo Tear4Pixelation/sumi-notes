@@ -20,6 +20,10 @@ unit-check count, so neither needs a reference file:
   belongs to nothing, so it cannot be selected, erased or deleted. It also pins the *positive* half:
   a shape the user deliberately finished must come back selected with handles, since the fix for the
   orphan bug made `finishShape()` default to not selecting and could otherwise silence those paths too.
+- `ScribbleTest::shapeTapEditTest()` - with touch panning (a pen in use), a finger tap on a shape selects
+  it with handles and keeps the tool, a tap on handwriting or empty page selects nothing / clears, the
+  first shape-tool drag outside a selection only deselects, a pen tap selects nothing, and the two finger
+  tap still undoes. See shapes.md, "Into and out of edit mode".
 
 The palette math is tested the same way again in `scribbletest/colortest.cpp` (`runColorTests()`), also
 standalone-buildable - see the command in its header. `./colortest --dump` prints the golden table in the

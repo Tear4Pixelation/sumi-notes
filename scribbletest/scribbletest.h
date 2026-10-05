@@ -42,6 +42,9 @@ public:
   //  its points inside; off, only what lies entirely inside
   int selectTouchingTest();
   int twoFingerTapTest();
+  // shape edit mode without the Select tool: a finger tap on a shape selects it, a tap elsewhere and the
+  //  first shape-tool drag outside only deselect
+  int shapeTapEditTest();
   // page tags: placing never leaves one off a page (gap, beside, below the last page), a pen placement is
   //  selected, a tag dragged to another page moves its count there and undoes, and opening another document
   //  drops tags still on the pointer

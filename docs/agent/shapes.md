@@ -114,6 +114,39 @@ committed shape selected with its `ShapeSelector` handles up, so the parameters 
 the shape is still the thing being thought about. It falls back to a `RectSelector` if the shape was
 demoted on the way in.
 
+### Into and out of edit mode without the Select tool
+
+From the first day of real iPad use: a shape that snapped a little wrong should not cost a trip to the
+Select tool and back, and edit mode should not be leavable only by drawing the next shape.
+
+- **A finger tap on a shape or image selects it** (`ScribbleArea::doTouchTap()`), with the shape's
+  parameter handles up (or the scale/rotate/crop handles for an image) and the selection popup, and the
+  tool is left alone. It hooks into `ScribbleView::panZoomFinish()`'s click branch, so it only exists where
+  a single finger *pans* - i.e. once a pen has been detected (`singleTouchMode` PAN), which is every iPad
+  with a Pencil. Where touch draws, a finger is a pen and taps nothing. Links still win (`doClickAction()`
+  runs first), a double tap is still zoom, and the two finger tap is still undo: it is handled by
+  `ScribbleInput` before any single tap could be seen.
+- **Only shapes and images are tap targets** (`touchTapTarget()`), topmost first; handwriting, page tags
+  and ruling regions are not. A fingertip cannot pick one stroke out of a word, and a stroke tapped by
+  accident while panning would lose the next pen stroke to `clearSelOnly`. A shape is hit within
+  `TOUCH_TAP_RADIUS` (16 screen units) of its outline - not its inside, so writing inside a box and
+  tapping there does not grab the box. An image is hit anywhere inside. Locked/hidden layers are skipped.
+- **A finger tap anywhere else clears the selection** (any selection, not only a shape's); a tap on the
+  selection or one of its handles keeps it.
+- **The first shape-tool press outside a selection only deselects**, under the same `clearSelOnly` pref
+  (default on) that already made the first pen stroke do so. Before, `MODE_DRAWSHAPE` cleared the
+  selection *and* drew, so after `shapeEditAfterDraw` the only exit was another shape. Cost: drawing
+  several shapes in a row takes an extra press (or a finger tap) between them; turning `clearSelOnly` off
+  restores draw-through for both tools.
+- `selectTapped()` calls `finishShape()` first, so an open polyline is committed (not selected) rather than
+  left accepting points behind a selection.
+
+`ScribbleTest::shapeTapEditTest()` drives this through `ScribbleInput` with touch events and
+`singleTouchMode` PAN; it fails 5 checks with `doTouchTap()` stubbed out and `MODE_DRAWSHAPE` back on the
+plain clear-and-draw path. It must set the input modes and config *after* `newDocument()`, which reloads
+both (and frees the document's `cfg`). The agent display has no touch device, so only the shape-tool half
+was checked live.
+
 **Only the paths where the *user* finished the shape may select it.** `finishShape(select)` defaults to
 `false`; only the two deliberate multi-point finishes (tapping the last point, tapping the first to
 close) pass `true`. Every other caller - `doPressEvent`'s guard when another gesture starts, a tool
