@@ -234,6 +234,10 @@ void ScribbleArea::zoomCenter(Dim newZoom, bool snap)
   doRefresh();
 }
 
+// a fit width/height snap that changes the zoom by less than this is jitter from a two finger pan, not a
+//  snap the user can see, so it must not move the view (see roundZoom())
+static constexpr Dim ZOOM_SNAP_ALIGN_MIN = 0.02;
+
 void ScribbleArea::roundZoom(Dim px, Dim py)
 {
   // should we still snap to width, height if continuous zoom enabled? use continuousZoom > 1?
@@ -247,21 +251,32 @@ void ScribbleArea::roundZoom(Dim px, Dim py)
   Dim zoom = mZoom;
   ScribbleView::roundZoom(px, py);
   // zoom = 100% always has priority
-  if(mZoom == 1) {}
-  else if(wzoom < 1.1*zoom && zoom < 1.1*wzoom && (wzoom > 1.05 || wzoom < 0.95)) {
-    setPageNum(pagenum);
-    Point currCorner = screenToDim(Point(0, 0));
-    Point pageCorner = pageDimToDim(Point(0, 0));
-    setZoom(wzoom);  //zoomTo(wzoom, px, py);
-    setCornerPos(Point(pageCorner.x - xborder/mScale, currCorner.y));
-  }
-  else if(hzoom < 1.1*zoom && zoom < 1.1*hzoom && (hzoom > 1.05 || hzoom < 0.95)) {
-    // ensure that page under center of gesture is active
-    setPageNum(pagenum);
-    Point pageCenter = pageDimToDim(Point(currPage->width()/2, currPage->height()/2));
-    setZoom(hzoom);
-    setCenterPos(pageCenter);
-  }
+  if(mZoom == 1)
+    return;
+  bool fitWidth = wzoom < 1.1*zoom && zoom < 1.1*wzoom && (wzoom > 1.05 || wzoom < 0.95);
+  bool fitHeight = !fitWidth && hzoom < 1.1*zoom && zoom < 1.1*hzoom && (hzoom > 1.05 || hzoom < 0.95);
+  if(!fitWidth && !fitHeight)
+    return;
+  Dim fitZoom = fitWidth ? wzoom : hzoom;
+  // like a zoom step, the fit zoom is taken about the gesture point, so the content under the fingers stays
+  //  put. Aligning the page to the view is then done only across the scroll direction (horizontally in the
+  //  usual vertical layout), and only when the zoom really changed: a two finger pan at fit zoom always
+  //  changes the zoom by a hair, and fit height used to center the whole page, so the view jumped along
+  //  the page with no visible zoom snap (see docs/agent/navigation.md)
+  zoomTo(fitZoom, px, py);
+  if(std::abs(fitZoom/zoom - 1) < ZOOM_SNAP_ALIGN_MIN)
+    return;
+  // ensure that page under center of gesture is active
+  setPageNum(pagenum);
+  Rect pageRect = pageDimToDim(currPage->rect());
+  Point screenCenter = screenToDim(Point(getViewWidth()/2, getViewHeight()/2));
+  Point shift(0, 0);  // in dim units, the amount the page moves on screen
+  if(viewMode != VIEWMODE_HORZ)
+    shift.x = fitWidth ? (screenToDim(Point(xborder, 0)).x - pageRect.left) : (screenCenter.x - pageRect.center().x);
+  if(viewMode != VIEWMODE_VERT && fitHeight)
+    shift.y = screenCenter.y - pageRect.center().y;
+  if(shift.x != 0 || shift.y != 0)
+    doPan(shift.x*mScale, shift.y*mScale);
 }
 
 void ScribbleArea::doPan(Dim dx, Dim dy)

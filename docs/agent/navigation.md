@@ -72,6 +72,21 @@ second finger down to the gesture finishing. The pan the fingers started is **ca
 `ScribbleView::doTwoFingerTap()` is the hook; only `ScribbleArea` acts on it (one `ID_UNDO`).
 Pinned by `twoFingerTapTest`.
 
+## Zoom snapping (`ScribbleArea::roundZoom`)
+
+At the end of a pinch (and after a zoom step) the zoom is rounded: to the nearest zoom step, then to fit
+width or fit height when within 10% of either. The fit snaps used to *also* move the view: fit width put
+the page's left edge at the border, fit height **centered the whole page**, and both ran whenever the
+zoom ended near a fit value - including a two finger pan at fit zoom, whose zoom always wobbles by a
+hair. The result was a view that jumped along the page with no zoom change anyone could see.
+
+Now a fit snap zooms about the gesture point, like a step snap, and only then aligns the page, and only:
+- when the zoom really changed (`ZOOM_SNAP_ALIGN_MIN`, 2%) - below that it is pan jitter, not a snap;
+- **across** the scroll direction (horizontally in the vertical layout, vertically in the horizontal one,
+  both in single-page view) - never along it, so the reading position never jumps.
+
+Pinned by `zoomSnapTest` (a 1180x760 view, since the test area is otherwise 1x1 and neither fit applies).
+
 ## Testing this (agent-display)
 
 Three gaps in `tools/agent-display.sh` had to be closed before any of the above could be checked, and
