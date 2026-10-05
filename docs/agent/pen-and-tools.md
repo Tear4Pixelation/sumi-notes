@@ -20,7 +20,8 @@ mechanism is the same for all three draw tools, and only the default differs.
 
 - **The marker is relative, always.** The flag is the constructor's default *and* `loadModes()`
   converts a marker pen read without it (width divided by `Page::BLANK_Y_RULING`, since the page being
-  drawn on is not known yet) and clears `savedMarkerWidths` so the presets reseed in the new unit -
+  drawn on is not known yet) and, for a list saved without its unit, clears `savedMarkerWidths` so the
+  presets reseed in the new unit (a list with a `rel:`/`abs:` prefix is converted by `prepareWidths()`) -
   that runs before the toolbar is built, which is what makes clearing the config value enough. The
   numbers are converted, never reinterpreted: 30 units would otherwise load as 30 line heights.
 - **`ScribbleArea::resolvedPen()` is the only place the multiplication happens**, and every consumer of
@@ -30,14 +31,44 @@ mechanism is the same for all three draw tools, and only the default differs.
 - **The toggle converts, it does not reinterpret.** Flipping it multiplies or divides the pen's width
   *and its presets* by the current line height, so nothing changes thickness on screen: 0.75 of a 40 unit
   ruling becomes 30, and back. Without that, turning it off would leave a 0.75 unit hairline.
-- **One preset list per draw tool** (`savedWidths`, `savedMarkerWidths`, `savedEphemeralWidths`), each
-  held in that tool's current unit. They cannot share a list: two tools can be in different units at the
-  same time, and the shared list would then be read in the wrong one by whichever tool is not holding
-  it - three identical-looking hairlines, or three identical-looking slabs. For the same reason a list
-  cannot have a fixed default in the config (a config written before this has *absolute* widths, and
-  line-height fractions would load there as hairlines), so the marker's and the ephemeral pen's lists
-  start empty and `seedWidths()` fills them on first use, once the unit is known. The marker seeds from
-  `MARKER_WIDTHS` (line heights), everything else from `DEFAULT_WIDTHS` (document units).
+- **One preset list per draw tool** (`savedWidths`, `savedMarkerWidths`, `savedEphemeralWidths`). They
+  cannot share a list: two tools can be in different units at the same time, and the shared list would
+  then be read in the wrong one by whichever tool is not holding it - three identical-looking hairlines,
+  or three identical-looking slabs. Every list starts empty in the config and `prepareWidths()` seeds it
+  on first use, once the unit is known: the marker from `MARKER_WIDTHS` (line heights), everything else
+  from `DEFAULT_WIDTHS` (document units).
+- **Each list carries its own unit** (`WidthPresets` in `widthpresets.h`), and it is saved in the *same*
+  config string as the numbers: `rel:0.0311,0.0667,0.133` or `abs:1.4,3,6`. This is the fix for the
+  first-day report of pens coming back 144 wide (3.2 units read as 3.2 line heights) or 0.6 wide. The
+  save itself was never the problem - `ScribbleApp::saveConfig()` sets `toolModes` (which holds the pen
+  and its flag) and the lists together, and the file is written whole on `SDL_APP_WILLENTERBACKGROUND`,
+  so an iOS kill in the background loses nothing and one in the foreground falls back to the last
+  consistent pair. The problem was that the unit was *implied* by the pen's flag, and several paths
+  paired a list with a pen in the other unit:
+  - **A selection shows the pen's list** (`drawToolForMode()` maps every non-pen mode to
+    `DRAWTOOL_PEN`), but a selection's pen is always absolute. Tapping a preset gave the stroke 0.03
+    units; editing one in the selection's preset editor (tap the checked preset, type) stored the
+    selection's 3.2 *units* raw into the line-height list, and the pen then drew 3.2 line heights.
+    Now a selection reads presets through `presetWidth()` (`WidthPresets::inUnit()`, resolved against
+    the current page's line height) and writes them back through `WidthPresets::setFrom()`.
+  - A saved pen recalled with the other relative setting (`penSelected()`, keys 1-9) kept the list in
+    the old unit. In `PEN_MODE` `prepareWidths()` now converts the list to the pen's unit whenever they
+    differ, exactly as the toggle does.
+  - A list from an older config has no prefix (`UNIT_UNKNOWN`); it takes that tool's pen's unit once,
+    which is the pairing the old code assumed, and is written with a prefix from then on.
+  `penSelected()` with **applyPenToSel** also resolved nothing, giving a selection a relative pen's
+  line-height fraction as its width; it multiplies by the line height now.
+- **Always three presets, always editable.** The width row's right-click "Insert Current"/"Delete" menu
+  is gone; `WidthPresets::normalize()` (run by `prepareWidths()` on every `setPen()`) keeps exactly
+  `WidthPresets::COUNT` (3), refilling a short list from that slot's default and sorting, dropping extra
+  ones, and replacing non-finite ones. It also **clamps every preset into the spinbox's limits** for its
+  unit (0.01-4 line heights, 0.01-200 units), and `readPen()` in `scribblemode.cpp` does the same for a
+  loaded pen. An out-of-range preset was not merely ugly: `selectWidth()` sets the spinbox to the preset,
+  the spinbox clamps, so the pen never equals the preset, so the second tap never opens the editor - the
+  preset can never be selected or edited, and Delete was the only way out. Presets are compared with
+  `WidthPresets::sameWidth()` (relative tolerance), not `==`, since a converted width is not bit-identical.
+  The lists are written with `%.6g`, not the old `%.3f`, which rounded 1.6 units in line heights (0.0356)
+  far enough to unselect the preset after a restart.
 - `PenToolbar::widthPreview()` **scales the whole preset set down** once any of them exceeds the swatch
   cap (`penWidthPreviewMax`), instead of clamping each. Every marker preset is past the cap, so clamping
   drew three identical bars. A pen's presets are all below it, so pen swatches are unchanged.
