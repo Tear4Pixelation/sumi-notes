@@ -54,6 +54,8 @@ int ScribbleMode::getModeType(int mode)
     return MODE_MOVESEL;
   case MODE_INSSPACE:
   case MODE_INSSPACERULED:
+  case MODE_INSSPACEDOWN:
+  case MODE_INSSPACERIGHT:
   case MODE_INSSPACEVERT:
   case MODE_INSSPACEHORZ:
     return MODE_INSSPACE;
@@ -68,7 +70,7 @@ void ScribbleMode::setRuled(bool ruled)
 {
   eraserMode = ruled ? MODE_ERASERULED : MODE_ERASESTROKE;
   selectMode = ruled ? MODE_SELECTRULED : MODE_SELECTRECT;
-  insSpaceMode = ruled ? MODE_INSSPACERULED : MODE_INSSPACEVERT;
+  insSpaceMode = ruled ? MODE_INSSPACEDOWN : MODE_INSSPACEVERT;
   moveSelMode = ruled ? MODE_MOVESELRULED : MODE_MOVESELFREE;
 }
 
@@ -124,7 +126,7 @@ void ScribbleMode::loadModes(const char* modestr)
   // defaults
   eraserMode = MODE_ERASERULED;
   selectMode = MODE_SELECTRECT;  // MODE_SELECTRULED
-  insSpaceMode = MODE_INSSPACERULED;
+  insSpaceMode = MODE_INSSPACEDOWN;
   moveSelMode = MODE_MOVESELFREE;  // tough call between ruled and free for initial
   drawTool = DRAWTOOL_PEN;
   shapeId = SHAPE_BOX;
@@ -149,8 +151,9 @@ void ScribbleMode::loadModes(const char* modestr)
     eraserMode = mode;
   if(ss >> mode && getModeType(mode) == MODE_SELECT && mode != MODE_SELECT)
     selectMode = mode;
+  // the combined ruled insert space is no longer offered: a config saved with it gets Down, the lines half
   if(ss >> mode && getModeType(mode) == MODE_INSSPACE && mode != MODE_INSSPACE)
-    insSpaceMode = mode;
+    insSpaceMode = mode == MODE_INSSPACERULED ? MODE_INSSPACEDOWN : mode;
   if(ss >> mode && getModeType(mode) == MODE_MOVESEL && mode != MODE_MOVESEL)
     moveSelMode = mode;
   //moveSelMode = (insSpaceMode == MODE_INSSPACERULED) ? MODE_MOVESELRULED : MODE_MOVESELFREE;
@@ -227,6 +230,8 @@ void ScribbleMode::setMode(int mode, bool once)
     newmode = MODE_MOVESEL;
     break;
   case MODE_INSSPACERULED:
+  case MODE_INSSPACEDOWN:
+  case MODE_INSSPACERIGHT:
     //moveSelMode = MODE_MOVESELRULED;
     insSpaceMode = mode;
     newmode = MODE_INSSPACE;
@@ -323,5 +328,5 @@ bool ScribbleMode::isUndoable(int mode)
 // returns true for a mode which can benefit from faster, lower quality drawing
 bool ScribbleMode::isSlow(int mode)
 {
-  return (mode >= MODE_SELECT && mode <= MODE_INSSPACERULED);
+  return (mode >= MODE_SELECT && mode <= MODE_INSSPACERULED) || mode == MODE_INSSPACEDOWN || mode == MODE_INSSPACERIGHT;
 }

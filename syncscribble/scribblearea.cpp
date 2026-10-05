@@ -2618,6 +2618,13 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
     modemod |= selectionHit(pos, event.source == INPUTSOURCE_TOUCH);
   // get the mode!
   currMode = scribbleDoc->getScribbleMode(modemod);
+  // Down and Right are ruled insert space held to one axis: everything about the gesture - selection, Skip
+  //  Lines, region slop, erase, page growth - is ruled insert space's, only the drag is cut to one direction
+  insSpaceAxis = MODE_INSSPACERULED;
+  if(currMode == MODE_INSSPACEDOWN || currMode == MODE_INSSPACERIGHT) {
+    insSpaceAxis = currMode;
+    currMode = MODE_INSSPACERULED;
+  }
   // do pan-from-edge through ScribbleInput to avoid inappropriately reverting to sticky tool after panning
   if(currMode == MODE_PAN && modemod & MODEMOD_EDGEMASK) {
     currMode = MODE_NONE;
@@ -2977,8 +2984,15 @@ void ScribbleArea::doMoveEvent(const InputEvent& event)
   Dim dy = pos.y - prevPos.y;
   // ruled modes work in the ruling the gesture started in (see gestureFrame)
   int line = gestureFrame.line(pos, Page::BLANK_Y_RULING);
-  const Dim lx = gestureFrame.toLocal(pos).x;
-  const Dim ldx = lx - gestureFrame.toLocal(prevPos).x;
+  Dim lx = gestureFrame.toLocal(pos).x;
+  Dim ldx = lx - gestureFrame.toLocal(prevPos).x;
+  // ruled insert space held to one axis: Right never leaves the pressed line, Down never moves along it
+  if(currMode == MODE_INSSPACERULED && insSpaceAxis == MODE_INSSPACERIGHT)
+    line = initialLine;
+  else if(currMode == MODE_INSSPACERULED && insSpaceAxis == MODE_INSSPACEDOWN) {
+    lx = gestureFrame.toLocal(initialPos).x;
+    ldx = 0;
+  }
   const Dim marginLeft = gestureFrame.region ? MIN_DIM : currPage->marginLeft();
   switch(currMode) {
   case MODE_PAN:

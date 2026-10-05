@@ -562,6 +562,22 @@ static const char* icons__ic_menu_import_svg = R"~~~~(<?xml version="1.0" encodi
 </svg>
 )~~~~";
 
+static const char* icons__ic_menu_insert_space_ruled_right_svg = R"~~~~(<?xml version="1.0" encoding="utf-8"?>
+<svg version="1.2" baseProfile="tiny" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+  x="0px" y="0px" viewBox="0 0 35 35" xml:space="preserve">
+<g class="icon">
+  <!-- Insert Space in Line: the ruled insert space icon turned to push along the line instead of down -->
+  <path d="M1.51,1.5L1.51,33.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+  <path d="M33.49,1.5L33.49,33.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+  <path d="M5.91,7.08L29.91,7.08" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round"/>
+  <path d="M5.91,17.75L29.91,17.75" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round"/>
+  <path d="M5.91,28.41L29.91,28.41" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round"/>
+  <path d="M7.5,12.42L27.44,12.42" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+  <path d="M20.45,4.95L27.64,12.42L20.45,19.89" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+</g>
+</svg>
+)~~~~";
+
 static const char* icons__ic_menu_insert_space_ruled_svg = R"~~~~(<?xml version="1.0" encoding="utf-8"?>
 <svg version="1.2" baseProfile="tiny" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
   x="0px" y="0px" viewBox="733 285.38 35 35" xml:space="preserve">
@@ -1355,6 +1371,7 @@ static void LOAD_RES_FN() { addStringResources({
   {"icons/ic_menu_highlight.svg", icons__ic_menu_highlight_svg},
   {"icons/ic_menu_history.svg", icons__ic_menu_history_svg},
   {"icons/ic_menu_import.svg", icons__ic_menu_import_svg},
+  {"icons/ic_menu_insert_space_ruled_right.svg", icons__ic_menu_insert_space_ruled_right_svg},
   {"icons/ic_menu_insert_space_ruled.svg", icons__ic_menu_insert_space_ruled_svg},
   {"icons/ic_menu_insert_space.svg", icons__ic_menu_insert_space_svg},
   {"icons/ic_menu_link.svg", icons__ic_menu_link_svg},
