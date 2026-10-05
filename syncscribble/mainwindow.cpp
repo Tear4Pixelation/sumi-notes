@@ -1800,7 +1800,7 @@ void MainWindow::createToolBars()
     {"ic_menu_shape_rounded.svg", "Rounded Corners", "Rounds the corners of a box or polyline; drag the red handle to set the radius."} })));
   shapeRow->addWidget(createStretch());
   shapeRow->addWidget(smallFloatBtn(createToolSettingsButton("Shape Settings",
-      {"shapeCornerRadius", "shapeCurveTightness", "shapeEditAfterDraw", "shapeSnapDelay", "liftScratchOut", "liftScratchOutLevel", "shapeAngleSnap"})));
+      {"shapeCornerRadius", "shapeCurveTightness", "shapeEditAfterDraw", "shapeDrawThrough", "shapeSnapDelay", "liftScratchOut", "liftScratchOutLevel", "shapeAngleSnap"})));
   floatRow(shapeRow);
 
   Toolbar* insSpaceRow = createToolbar();

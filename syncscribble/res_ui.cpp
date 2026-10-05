@@ -202,6 +202,10 @@ const char* prefInfoXML = R"#(
       title="Edit shape after drawing"
       description="Leave a new shape selected with its handles shown" />
 
+  <pref name="shapeDrawThrough" type="bool" group="Shapes"
+      title="Draw shape through selection"
+      description="A press outside the selection with the shape tool deselects and starts drawing the shape at once. Off: it only deselects" />
+
   <pref name="sRGB" type="bool" group="Advanced"
       title="Linear color interpolation (reopen)" description="sRGB-correct rendering" />
   <pref name="glRender" type="bool" group="Advanced"

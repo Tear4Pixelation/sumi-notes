@@ -2770,6 +2770,12 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
   if(currSelection) {
     // clear selection depending on mode
     switch(currMode) {
+    case MODE_DRAWSHAPE:
+      // the shape tool can draw straight through the press that clears the selection (shapeDrawThrough)
+      if(cfg->Bool("clearSelOnly") && !cfg->Bool("shapeDrawThrough"))
+        currMode = MODE_NONE;
+      clearSelection();
+      break;
     case MODE_STROKE:
     case MODE_DRAWSHAPE:
       // ignore this stroke if it clears selection (optionally) - the shape tool too, or a shape left in
