@@ -4,7 +4,11 @@ The document-scan math is tested in `scribbletest/scantest.cpp`. Unlike the rest
 needs neither GL nor a document, so it also builds and runs standalone - see the command in that file's
 header (it needs `-DNDEBUG`, or `geom.cpp`'s `ASSERT` pulls in `platform_assert` from the application).
 `ScribbleTest::runAll()` calls `runScanTests()` and counts its failures in the result string and exit
-code. The dialog itself has no automated coverage.
+code. The dialog itself has no automated coverage. Quad detection is checked twice: on plain bright-quad
+images (`testQuadDetect()`) and on procedurally drawn realistic photos (`testQuadDetectRealistic()` -
+clutter, shadows, low-contrast desks, noise, JPEG), the latter added because the plain images passed
+while detection failed on real iPad photos. The old outermost-line detector fails 5 of the realistic
+checks; see [document-scanning.md](document-scanning.md) for the tuning env vars.
 
 The shape math is tested the same way in `scribbletest/shapetest.cpp` (`runShapeTests()`), which likewise
 builds and runs standalone - see the command in that file's header. On top of it,

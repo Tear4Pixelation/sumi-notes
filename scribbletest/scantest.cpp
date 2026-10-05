@@ -901,6 +901,11 @@ static void testQuadDetectRealistic()
   }
 
   for(const NamedScene& named : scenes) {
+#ifdef SCANTEST_MAIN
+    // SCANTEST_ONLY=name runs just that scene, for tuning
+    if(getenv("SCANTEST_ONLY") && strcmp(getenv("SCANTEST_ONLY"), named.name) != 0)
+      continue;
+#endif
     std::vector<unsigned int> photo = makeScenePhoto(width, height, named.scene);
     Point found[4];
     bool detected = detectDocumentQuad(photo.data(), width, height, found);

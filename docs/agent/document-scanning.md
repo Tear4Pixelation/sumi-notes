@@ -20,16 +20,39 @@ Imaging lives in `ulib` (no dependency on `Painter`/nanovg, so it is unit testab
   core step divides the image by a heavily blurred copy of itself (the blurred copy *is* the
   illumination). A summed-area table makes the blur radius free - 183 px costs the same as 5 px. Then a
   percentile level stretch, and for `SCAN_MONO` a local threshold. 72-119 ms at 2200x1509, unthreaded.
-- `quaddetect.h`/`.cpp` - finds the page outline: downscale, Sobel, gradient-directed Hough, take the
-  *outermost* line of each near-horizontal/near-vertical pair, intersect. 19 ms and ~11 px accuracy on a
-  4000x3000 photo. Two non-obvious parts, both load bearing:
-  - The edge threshold needs a **floor as well as a percentile**. A page outline is only ~1% of the
-    pixels, so "keep the top 8%" reaches into the flat interior, and flat pixels have gradient (0,0)
-    whose `atan2` is 0 - sending the whole background to one orientation bin and burying the real edges.
+- `quaddetect.h`/`.cpp` - finds the page outline: downscale to ~480 px, Sobel with non-maximum
+  suppression, gradient-directed Hough, then **score every left/top/right/bottom combination** of the
+  strongest candidate lines and refit the winner. ~35 ms on a 4032x3024 photo. What is load bearing:
+  - **No "outermost line" rule.** The first version took the outermost line of each orientation. That is
+    right on a flat dark background and wrong on nearly every real photo - a table edge, plank seam,
+    laptop, tablecloth or second sheet is always further out than the page - and it is why the user found
+    detection "does not work at all" on the iPad. A candidate quad is scored instead by how much of each
+    *side* (the segment between its corners, not the infinite line) is a page edge, minus a penalty if the
+    edge runs on past the corners: page edges end at the page's corners, clutter lines do not.
+  - **Polarity.** The accumulator covers 360 degrees, so a line's normal points to its brighter side, and a
+    side only counts where its normal points into the quad. With 180 degrees the page edge and the outer
+    edge of its own drop shadow, 2-3 px apart with opposite gradients, merged into one peak that sat on
+    the shadow, and the side then found no support.
+  - **Two tests per side sample**: an edge pixel within 2 px whose gradient points inward, *and* the pixel
+    4 px inside brighter than the one 4 px outside. The second rejects ruled lines, text and pencil marks,
+    which have edges of both polarities but the same paper on either side.
+  - **Absolute edge threshold with a noise floor** (16, or 1.5x the median gradient), after thinning. The
+    old percentile cut ("top 8%, never below 10% of the strongest") was set by handwriting or wood grain,
+    and on a white or light desk it dropped the faint page outline entirely - those photos never
+    detected at all.
   - The Hough angle alone is not accurate enough: half a degree across a 3500 px edge is ~160 px of
-    corner error. Each of the four lines is refit by total least squares over its supporting pixels,
-    **iterated three times** - one pass only sees pixels inside its own window and is biased toward the
-    middle of the edge. This is what takes worst-corner error from 160 px to 11 px.
+    corner error. Each side is refit by total least squares over the edge pixels **between its corners**
+    (so a collinear table edge cannot pull it), **iterated three times** - one pass only sees pixels inside
+    its own window and is biased toward the middle of the edge.
+
+  `scribbletest/scantest.cpp` draws realistic photos procedurally (`makeScenePhoto()`: wood with seams,
+  gingham, light and white desks, dark fabric; table edge, laptop, pen, second sheet, hand shadow, drop
+  shadow, uneven light, noise, JPEG round trip). The old detector failed 5 of those checks. For tuning,
+  the standalone build takes `SCANTEST_DUMP=dir` (writes each scene with expected/found corners) and
+  `SCANTEST_ONLY=name`. On a randomized sweep of 100 such photos the old detector got 27 right, 35 wrong
+  and 38 missed (every light/white desk missed); this one 97 right, 3 wrong (gingham stripes almost
+  parallel to a page edge that borders a white square, and a pen touching a corner). Synthetic photos are
+  not real ones: if real iPad photos still fail, save one and add it as a fixture.
 
 Corner editing (`ScanCornerWidget`) is **relative, not absolute**: a touch anywhere on the photo grabs
 the nearest corner (no hit radius), and the corner then moves `DRAG_RATIO` (0.4) of the finger's travel
