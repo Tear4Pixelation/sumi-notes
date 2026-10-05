@@ -6,6 +6,7 @@
 #include "strokebuilder.h"
 #include "scribbleapp.h"
 #include "tagstore.h"
+#include "cover.h"
 
 
 ScribbleDoc::ScribbleDoc(ScribbleApp* parent, ScribbleConfig* _cfg, ScribbleMode* _mode)
@@ -695,7 +696,8 @@ bool ScribbleDoc::saveDocument(IOStream* strm, Document::saveflags_t flags)
         iosthumb.bytes(), iosthumb.width, iosthumb.height);
     }
 #endif
-    Image thumbnail(240, 400, Image::PNG);
+    // the frame the document list draws it in (cover.h)
+    Image thumbnail(240, int(std::round(240*Cover::PREVIEW_ASPECT)), Image::PNG);
     activeArea->drawThumbnail(&thumbnail);
     auto buff = base64_encode(thumbnail.encode(Image::PNG));
     ok = document->save(strm, (char*)buff.data(), flags);

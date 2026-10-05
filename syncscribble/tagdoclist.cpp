@@ -11,6 +11,25 @@
 #include <codecvt>
 #include <locale>
 
+// A thumbnail in the frame every preview shares (cover.h): corners rounded off and the outline on top,
+//  as one group the size of frame.  cropToFrame cuts a notebook's thumbnail to the frame's proportions
+//  from its top left - those saved before the frame (240 x 400, the view rather than the page) lose their
+//  bottom, which is better than a frame taller than every other notebook's.
+static SvgNode* createFramedThumbnail(Image thumbnail, const Rect& frame, bool cropToFrame)
+{
+  if(cropToFrame) {
+    real cropWidth = std::min(real(thumbnail.width), thumbnail.height/Cover::PREVIEW_ASPECT);
+    real cropHeight = std::min(real(thumbnail.height), thumbnail.width*Cover::PREVIEW_ASPECT);
+    if(int(cropWidth) < thumbnail.width || int(cropHeight) < thumbnail.height)
+      thumbnail = thumbnail.cropped(Rect::wh(cropWidth, cropHeight));
+  }
+  Cover::roundCorners(&thumbnail, Cover::previewRadius(frame.width())*thumbnail.width/frame.width());
+  SvgG* group = new SvgG();
+  group->addChild(new SvgImage(std::move(thumbnail), frame.toSize()));
+  group->addChild(loadSVGFragment(Cover::outlineSVG(frame.width(), frame.height()).c_str()));
+  return group;
+}
+
 TagNameDialog::TagNameDialog(const char* title, const char* initialName) : PopupDialog(createPopupDialogNode())
 {
   nameEdit = createTextEdit();
@@ -419,7 +438,8 @@ void TagDocList::rebuildDocGrid()
   docCells.clear();
   shownDocs.clear();
 
-  Rect iconSize = Rect::wh(iconWidth, (5*iconWidth)/3);
+  // the frame every notebook's preview is drawn in (cover.h) - the cell is exactly that tall
+  Rect iconSize = Rect::wh(iconWidth, std::round(iconWidth*Cover::PREVIEW_ASPECT));
   Rect symbolSize = Rect::wh(iconSize.width()/2, iconSize.height()/2);
   fileUseNode->setViewport(symbolSize);
 
@@ -503,28 +523,19 @@ void TagDocList::rebuildDocGrid()
         ? atoi(ScribbleDoc::extractDocConfigValue(doc.path.c_str(), "coverColor").c_str()) : 0;
     Image thumbnail = !coverArgb && isNativeFormat && ScribbleApp::cfg->Bool("showThumbnail")
         ? ScribbleDoc::extractThumbnail(doc.path.c_str()) : Image(0, 0);
-    if(coverArgb) {
-      // notebook-shaped, standing on the title like a thumbnail does, in the same slot
-      SvgRect* spacer = new SvgRect(iconSize);
-      spacer->setAttribute("fill", "none");
-      container->addChild(spacer);
-      SvgNode* cover = loadSVGFragment(Cover::coverSVG(Color::fromArgb(coverArgb),
-          iconSize.width(), std::min(iconSize.height(), iconSize.width()*real(1.3))).c_str());
-      cover->setAttribute("box-anchor", "bottom");
-      container->addChild(cover);
-    }
-    else if(!thumbnail.isNull()) {
-      container->addChild(new SvgImage(std::move(thumbnail), iconSize));
-      itemWidth = iconSize.width();
-    }
-    else {
-      // spacer is the full preview size (not the smaller icon size) so an icon-only cell takes up
-      // exactly as much room as a thumbnail cell would - the glyph itself stays small and centered
-      SvgRect* spacer = new SvgRect(iconSize);
-      spacer->setAttribute("fill", "none");
-      container->addChild(spacer);
+    // spacer is the full preview size (not the smaller icon size) so an icon-only cell takes up
+    // exactly as much room as a thumbnail cell would - the glyph itself stays small and centered
+    SvgRect* spacer = new SvgRect(iconSize);
+    spacer->setAttribute("fill", "none");
+    container->addChild(spacer);
+    // a cover and a thumbnail fill the same frame, so a notebook with a cover is not a different shape
+    if(coverArgb)
+      container->addChild(loadSVGFragment(Cover::coverSVG(Color::fromArgb(coverArgb),
+          iconSize.width(), iconSize.height()).c_str()));
+    else if(!thumbnail.isNull())
+      container->addChild(createFramedThumbnail(std::move(thumbnail), iconSize, true));
+    else
       container->addChild(fileUseNode->clone());
-    }
     if(selectMode) {
       // a ring around the preview and a check badge in its corner; the badge is an empty circle until
       //  the cell is checked, so every selectable cell shows it can be picked (theme.cpp)
@@ -582,7 +593,8 @@ void TagDocList::rebuildDocGrid()
       SvgRect* spacer = new SvgRect(iconSize);
       spacer->setAttribute("fill", "none");
       container->addChild(spacer);
-      SvgImage* image = new SvgImage(std::move(thumbnail), imageRect);
+      // the frame's corners and outline, at the page's own shape
+      SvgNode* image = createFramedThumbnail(std::move(thumbnail), imageRect, false);
       image->setAttribute("box-anchor", "bottom");
       container->addChild(image);
     }
@@ -928,8 +940,8 @@ void TagDocList::newDoc()
   finish(NEW_DOC);
 }
 
-// Document long-press menu: Manage Tags / Rename / Delete - see showTagMenu()'s comment for why this
-// is an ArrowPopup reparented onto the cell rather than a Menu shown at a point.
+// Document long-press menu: Manage Tags / Change Cover / Rename / Delete - see showTagMenu()'s comment
+// for why this is an ArrowPopup reparented onto the cell rather than a Menu shown at a point.
 void TagDocList::showDocMenu(const FSPath& path, Widget* cell)
 {
   contextMenuDocPath = path;
@@ -1158,6 +1170,24 @@ bool TagDocList::rewriteDocument(const FSPath& path, const std::function<void(Do
       TagStore::parseTagList(cfg.String("tags", "")), cfg.String("pagetags", ""));
   tagStore.save();
   return true;
+}
+
+// The cover is the document's own config, like its tags, so changing it is the same load and save
+void TagDocList::changeCover(const FSPath& path)
+{
+  closeAllContextPopups();
+  int coverArgb = atoi(ScribbleDoc::extractDocConfigValue(path.c_str(), "coverColor").c_str());
+  ChangeCoverDialog dialog(Color::fromArgb(coverArgb));
+  if(Application::execDialog(&dialog) != Dialog::ACCEPTED)
+    return;
+  int chosenArgb = int(dialog.coverColor().argb());
+  if(chosenArgb == coverArgb)
+    return;
+  if(!rewriteDocument(path, [&](Document&, ScribbleConfig& cfg){ cfg.set("coverColor", chosenArgb); })) {
+    ScribbleApp::messageBox(ScribbleApp::Error, _("Change Cover"), _("The document could not be saved."));
+    return;
+  }
+  rebuildDocGrid();
 }
 
 void TagDocList::renameDoc(const FSPath& path)
@@ -1655,7 +1685,7 @@ void TagDocList::createUI()
   });
   setupAutoClosePopup(tagContextPopup);
 
-  // Document long-press menu: Manage Tags (opens docTagsPopup below), Rename, Delete.
+  // Document long-press menu: Manage Tags (opens docTagsPopup below), Change Cover, Rename, Delete.
   docContextPopup = createArrowPopup(Menu::VERT_RIGHT);
   docContextPopup->addItem(_("Manage Tags..."), NULL, [this](){
     // showDocTagsPopup() reparents docTagsPopup onto the same cell docContextPopup is currently
@@ -1666,6 +1696,7 @@ void TagDocList::createUI()
     if(cell)
       showDocTagsPopup(contextMenuDocPath, cell);
   });
+  docContextPopup->addItem(_("Change Cover..."), NULL, [this](){ changeCover(contextMenuDocPath); });
   docContextPopup->addItem(_("Rename"), NULL, [this](){ renameDoc(contextMenuDocPath); });
   docContextPopup->addItem(_("Delete"), NULL, [this](){ deleteDoc(contextMenuDocPath); });
   setupAutoClosePopup(docContextPopup);

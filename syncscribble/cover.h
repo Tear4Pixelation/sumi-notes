@@ -4,6 +4,8 @@
 #include <vector>
 #include "ulib/color.h"
 
+class Image;
+
 // A notebook cover: one color the user picks (the seed), and a band across it generated from that
 //  color.  The band is the seed moved in OKLab lightness towards the middle - darker on a light cover,
 //  lighter on a dark one - keeping the hue and as much of the chroma as the new lightness can hold,
@@ -11,9 +13,25 @@
 //  gray band, white a light gray one.
 //
 // Stored per document as the config value "coverColor" (ARGB; 0 means the document has no cover, and
-//  the document list shows its first page instead).  Only the seed is stored - the band is derived,
+//  the document list shows its thumbnail instead).  Only the seed is stored - the band is derived,
 //  so a document never carries a cover that disagrees with itself.
 namespace Cover {
+
+// Every preview in the document list - a cover, a notebook's thumbnail, a tagged page's card - is drawn
+//  in the same frame: rounded corners and a faint outline (class preview-outline, --preview-outline in
+//  theme.cpp).  A notebook's frame is always PREVIEW_ASPECT tall, so the grid lines up whatever its pages
+//  are; a page card keeps its page's own shape inside that box.
+static constexpr real PREVIEW_ASPECT = real(1.41421356);  // height / width - A-series paper
+
+// corner radius of a w-wide preview: a full-size cell gets PREVIEW_RADIUS, a small swatch proportionally less
+real previewRadius(real w);
+
+// the frame's outline as an SVG fragment, w x h at the origin - drawn over the preview
+std::string outlineSVG(real w, real h);
+
+// makes the corners outside a radius-px rounded rectangle transparent (antialiased), so a thumbnail
+//  bitmap has the frame's shape; usvg can only clip to rectangles
+void roundCorners(Image* image, real radius);
 
 Color bandColor(Color seed);
 

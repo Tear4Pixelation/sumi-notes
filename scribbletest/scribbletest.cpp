@@ -3175,9 +3175,13 @@ void ScribbleTest::runAll(bool runsynctest)
         std::ofstream outstrm((basefile + "_out.png").c_str(), std::ios::binary);
         auto outenc = outthumb.encodePNG();
         outstrm.write((char*)outenc.data(), outenc.size());
-        std::ofstream diffstrm((basefile + "_diff.png").c_str(), std::ios::binary);
-        auto diffenc = outthumb.subtract(refthumb, 10, 0).encodePNG();
-        diffstrm.write((char*)diffenc.data(), diffenc.size());
+        // subtract() walks both images as one size; the references predate page-shaped thumbnails
+        //  (240 x 400 then, PREVIEW_ASPECT now), and a diff of two sizes reads past the smaller one
+        if(outthumb.width == refthumb.width && outthumb.height == refthumb.height) {
+          std::ofstream diffstrm((basefile + "_diff.png").c_str(), std::ios::binary);
+          auto diffenc = outthumb.subtract(refthumb, 10, 0).encodePNG();
+          diffstrm.write((char*)diffenc.data(), diffenc.size());
+        }
       }
     }
     else {

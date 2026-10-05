@@ -9,6 +9,9 @@
 class TagStore;
 class ColorEditBox;
 
+// a cover at the size the dialogs preview it; Color(0) draws "No cover"
+SvgNode* createCoverPreviewNode(Color seed);
+
 // what the dialog chose, carried from the document browser to ScribbleApp::applyNewDocChoices()
 struct NewDocChoices {
   Color coverColor = Color(0);  // no cover when 0
@@ -68,4 +71,21 @@ private:
   ArrowPopup* tagsPopup;
   TextEdit* tagSearchEdit;
   Widget* tagList;
+};
+
+// "Change Cover", from a document's menu in the browser: the same covers Create Notebook offers, plus
+//  none.  Like that dialog it touches no file - TagDocList::changeCover() writes the choice.
+class ChangeCoverDialog : public PopupDialog
+{
+public:
+  ChangeCoverDialog(Color current);  // Color(0): the document has no cover
+  Color coverColor() const { return cover; }  // Color(0) for none
+
+private:
+  void setCover(Color seed);
+  void updatePreview();
+
+  Color cover;
+  Widget* previewHolder;
+  ColorEditBox* customColorEdit;
 };

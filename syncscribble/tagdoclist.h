@@ -77,6 +77,7 @@ protected:
   void showDocTagsPopup(const FSPath& path, Widget* cell);
   void rebuildDocTagsList();
   Widget* createDocTagRow(const std::string& tagId, int depth, const std::vector<std::string>& currentTags);
+  void changeCover(const FSPath& path);
   void renameDoc(const FSPath& path);
   void deleteDoc(const FSPath& path);
   // select mode: tapping a document toggles it instead of opening it, and selectBar's actions replace

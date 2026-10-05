@@ -9,10 +9,10 @@
 // The two tiles are the size of a small notebook, not of a swatch: the cover is the thing the document
 //  list will show for this notebook from now on, so it is previewed at close to that size.
 static const Dim TILE_PREVIEW_W = 110;
-static const Dim TILE_PREVIEW_H = 142;
+static const Dim TILE_PREVIEW_H = 156;  // TILE_PREVIEW_W*Cover::PREVIEW_ASPECT: the frame the list draws
 static const Dim TILE_PAD = 5;
 static const Dim SWATCH_W = 30;
-static const Dim SWATCH_H = 40;
+static const Dim SWATCH_H = 42;
 static const int SWATCH_COLS = 6;
 static const Color DEFAULT_COVER = Color(0x2E, 0x4C, 0x6D);
 
@@ -21,6 +21,28 @@ static void closePopups(Widget* widget)
   SvgGui* gui = widget->window() ? widget->window()->gui() : NULL;
   if(gui)
     gui->closeMenus();
+}
+
+// A grid of the preset seeds, each drawn as the cover it makes
+static Widget* createCoverSwatchGrid(const std::function<void(Color)>& onPick)
+{
+  Widget* swatchGrid = createRow({}, "0 0", "left");
+  swatchGrid->node->setAttribute("flex-wrap", "wrap");
+  swatchGrid->node->setAttribute("margin", "6 6 2 6");
+  const std::vector<Color>& seeds = Cover::presetSeeds();
+  for(size_t ii = 0; ii < seeds.size(); ++ii) {
+    Color seed = seeds[ii];
+    Button* swatch = new Button(loadSVGFragment(fstring(
+        "<g class='toolbutton cover-swatch' margin='2 2'>"
+          "<rect class='background' width='%g' height='%g' rx='3' ry='3'/>"
+          "<g transform='translate(%g %g)'>%s</g>"
+        "</g>", SWATCH_W + 6, SWATCH_H + 6, 3.0, 3.0, Cover::coverSVG(seed, SWATCH_W, SWATCH_H).c_str()).c_str()));
+    if(ii > 0 && ii % SWATCH_COLS == 0)
+      swatch->node->setAttribute("flex-break", "before");
+    swatch->onClicked = [onPick, seed](){ onPick(seed); };
+    swatchGrid->addWidget(swatch);
+  }
+  return swatchGrid;
 }
 
 CreateNotebookDialog::CreateNotebookDialog(const char* initialName, TagStore* store, const std::vector<std::string>& initialTags)
@@ -39,23 +61,10 @@ CreateNotebookDialog::CreateNotebookDialog(const char* initialName, TagStore* st
   // cover tile and its popup: a grid of seeds, each drawn as the cover it makes, then a custom color
   coverTile = createTile(_("Cover"));
   ArrowPopup* coverPopup = createArrowPopup(Menu::VERT_LEFT);
-  Widget* swatchGrid = createRow({}, "0 0", "left");
-  swatchGrid->node->setAttribute("flex-wrap", "wrap");
-  swatchGrid->node->setAttribute("margin", "6 6 2 6");
-  const std::vector<Color>& seeds = Cover::presetSeeds();
-  for(size_t ii = 0; ii < seeds.size(); ++ii) {
-    Color seed = seeds[ii];
-    Button* swatch = new Button(loadSVGFragment(fstring(
-        "<g class='toolbutton cover-swatch' margin='2 2'>"
-          "<rect class='background' width='%g' height='%g' rx='3' ry='3'/>"
-          "<g transform='translate(%g %g)'>%s</g>"
-        "</g>", SWATCH_W + 6, SWATCH_H + 6, 3.0, 3.0,
-        Cover::coverSVG(seed, SWATCH_W, SWATCH_H).c_str()).c_str()));
-    if(ii > 0 && ii % SWATCH_COLS == 0)
-      swatch->node->setAttribute("flex-break", "before");
-    swatch->onClicked = [this, seed](){ setCoverSeed(seed); closePopups(coverTile); };
-    swatchGrid->addWidget(swatch);
-  }
+  Widget* swatchGrid = createCoverSwatchGrid([this](Color seed){
+    setCoverSeed(seed);
+    closePopups(coverTile);
+  });
   coverPopup->addWidget(swatchGrid);
   // any other color: the band is generated from it the same way, so a custom cover is still one color
   // not given the seed until the popup opens: its sliders' gradients are resolved by reference, which
@@ -190,12 +199,7 @@ void CreateNotebookDialog::updateCoverTile()
 {
   // with the cover off the tile stays, as an outline: the choice is kept, and turning the cover back on
   //  brings it back
-  std::string svg = coverOn ? Cover::coverSVG(coverSeed, TILE_PREVIEW_W, TILE_PREVIEW_H)
-      : fstring("<g><rect width='%g' height='%g' rx='3' ry='3' fill='none' stroke='#808080'"
-          " stroke-width='1' stroke-dasharray='4 3'/>"
-          "<text x='%g' y='%g' text-anchor='middle' font-size='12' fill='#808080'>%s</text></g>",
-          TILE_PREVIEW_W, TILE_PREVIEW_H, TILE_PREVIEW_W/2, TILE_PREVIEW_H/2 + 4, _("No cover"));
-  setTilePreview(coverTile, loadSVGFragment(svg.c_str()));
+  setTilePreview(coverTile, createCoverPreviewNode(coverOn ? coverSeed : Color(0)));
   coverTile->setEnabled(coverOn);
 }
 
@@ -342,4 +346,71 @@ void CreateNotebookDialog::saveChoices()
   cfg->set("newDocCover", coverOn);
   cfg->set("newDocCoverColor", int(coverSeed.argb()));
   cfg->set("newDocLayout", AddPageMenu::layoutToString(layout).c_str());
+}
+
+// the cover as the list will draw it, at tile size; Color(0) is no cover - a dashed outline saying so
+SvgNode* createCoverPreviewNode(Color seed)
+{
+  real radius = Cover::previewRadius(TILE_PREVIEW_W);
+  std::string svg = seed.argb() ? Cover::coverSVG(seed, TILE_PREVIEW_W, TILE_PREVIEW_H)
+      : fstring("<g><rect width='%g' height='%g' rx='%g' ry='%g' fill='none' stroke='#808080'"
+          " stroke-width='1' stroke-dasharray='4 3'/>"
+          "<text x='%g' y='%g' text-anchor='middle' font-size='12' fill='#808080'>%s</text></g>",
+          TILE_PREVIEW_W, TILE_PREVIEW_H, radius, radius, TILE_PREVIEW_W/2, TILE_PREVIEW_H/2 + 4, _("No cover"));
+  return loadSVGFragment(svg.c_str());
+}
+
+ChangeCoverDialog::ChangeCoverDialog(Color current) : PopupDialog(createPopupDialogNode()), cover(current)
+{
+  Widget* dialogBody = selectFirst(".body-container");
+  dialogBody->setMargins(4, 8);
+
+  previewHolder = new Widget(loadSVGFragment(fstring(
+      "<g class='tile-holder' layout='box' margin='0 6 0 0'>"
+        "<rect fill='none' width='%g' height='%g'/>"
+      "</g>", TILE_PREVIEW_W + 2*TILE_PAD, TILE_PREVIEW_H + 2*TILE_PAD).c_str()));
+  previewHolder->node->setAttribute("box-anchor", "top");
+
+  Widget* swatchGrid = createCoverSwatchGrid([this](Color seed){ setCover(seed); });
+  // the list then shows the notebook's first page, as Create Notebook's Cover toggle does
+  Button* noCoverBtn = createPushbutton(_("No cover"));
+  noCoverBtn->onClicked = [this](){ setCover(Color(0)); };
+  // any other color, in a popup for the same reason as Create Notebook's: the editor cannot be given a
+  //  color before it is in a document, so it gets one when the popup opens
+  Button* customBtn = createPushbutton(_("Custom color..."));
+  ArrowPopup* customPopup = createArrowPopup(Menu::VERT_LEFT);
+  customColorEdit = createColorEditBox(false);
+  customColorEdit->onColorChanged = [this](Color color){ setCover(color.opaque()); };
+  customColorEdit->setMargins(6, 6);
+  customPopup->addWidget(customColorEdit);
+  setupPopupMenu(customBtn, customPopup);
+  customBtn->onPressed = [this](){ customColorEdit->setColor(cover.argb() ? cover : DEFAULT_COVER); };
+
+  noCoverBtn->setMargins(0, 8, 0, 0);
+  Widget* buttonRow = createRow({noCoverBtn, customBtn}, "", "left", "left");
+  buttonRow->setMargins(6, 8);
+  Widget* choices = createColumn({swatchGrid, buttonRow}, "", "", "left");
+  choices->node->setAttribute("box-anchor", "top");
+  dialogBody->addWidget(createRow({previewHolder, choices}, "0 0", "left"));
+  updatePreview();
+
+  setTitle(_("Change Cover"));
+  acceptBtn = addButton(_("Apply"), [this](){ finish(ACCEPTED); });
+  cancelBtn = addButton(_("Cancel"), [this](){ finish(CANCELLED); });
+}
+
+void ChangeCoverDialog::setCover(Color seed)
+{
+  cover = seed;
+  updatePreview();
+}
+
+void ChangeCoverDialog::updatePreview()
+{
+  SvgGui* gui = window() ? window()->gui() : NULL;
+  if(gui)
+    gui->deleteContents(previewHolder, ".tile-preview");
+  Widget* previewWidget = new Widget(createCoverPreviewNode(cover));
+  previewWidget->node->addClass("tile-preview");
+  previewHolder->addWidget(previewWidget);
 }

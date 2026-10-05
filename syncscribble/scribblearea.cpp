@@ -166,21 +166,16 @@ void ScribbleArea::drawThumbnail(Image* dest)
   thumbpaint.setAntiAlias(true);
   // thumbPaint.reset();  -- should make thumbPaint a member of ScribbleArea
   Rect dirty = thumbpaint.deviceRect;
-  // for narrow pages, set zoom so that page width fills preview
-  Dim minscale = thumbtest ? 0.32 : 0.25;  // ... for tests
-  Dim scale = std::max(minscale, dirty.width()/currPage->width());
+  // the whole page, not the view: the document list draws every preview in a page-shaped frame
+  //  (cover.h), so the page is scaled to fill dest and what does not fit is cut off at the right or
+  //  bottom - a page of dest's proportions loses nothing, and there is never gray space around it.  The
+  //  page is the one being viewed, or the first with thumbFirstPage.
+  int pagenum = cfg->Bool("thumbFirstPage") ? 0 : currPageNum;
+  Page* thumbPage = viewMode == VIEWMODE_SINGLE ? currPage : page(pagenum);
+  Dim scale = std::max(dirty.width()/thumbPage->width(), dirty.height()/thumbPage->height());
   dirty.right /= scale;
   dirty.bottom /= scale;
-  Point dimpos(0,0);
-  if(!cfg->Bool("thumbFirstPage")) {
-    dimpos = screenToDim(Point(0,0));
-    // avoid useless grey space at bottom of thumbnail, if possible
-    if(currPageNum == numPages() - 1)
-      dimpos.y = std::min(dimpos.y, currPageYOrigin + currPage->height() - dirty.bottom);
-    // no grey space on top or left (and none at right if possible)
-    dimpos.x = std::max(Dim(0), std::min(dimpos.x, currPageXOrigin + currPage->width() - dirty.right));
-    dimpos.y = std::max(Dim(0), dimpos.y);
-  }
+  Point dimpos = getPageOrigin(viewMode == VIEWMODE_SINGLE ? currPageNum : pagenum);
   dirty.translate(dimpos.x, dimpos.y);
   // this doesn't handle split view case in general!
   Element::FORCE_NORMAL_DRAW = true;  // suppress STROKEDRAW_SEL

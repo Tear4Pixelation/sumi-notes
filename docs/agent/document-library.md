@@ -128,6 +128,26 @@ Designed in the Penpot page "Create page" as a proposition, not followed to the 
   gets a gray band. Nothing derived is stored, so a cover cannot disagree with itself.
 - **The grid draws the cover instead of the page thumbnail** when `coverColor` is set, read with
   `ScribbleDoc::extractDocConfigValue()` - `extractDocTags()` generalized to any config value.
+- **Every preview shares one frame** (`cover.h`): `PREVIEW_ASPECT` (1:sqrt 2, A-series) tall, corners of
+  `previewRadius()`, and `outlineSVG()` on top (`.preview-outline`, `--preview-outline` in `theme.cpp`). A
+  cover, a notebook thumbnail and the cell itself are all that size, so a notebook with a cover is not a
+  different shape from one without; a page card keeps its page's own shape inside the box. usvg clips only
+  to rectangles, so `Cover::roundCorners()` makes the bitmap's corners transparent instead
+  (`createFramedThumbnail()` in `tagdoclist.cpp`). The cover stays *outside* the document (config, not
+  page 1, which is how Noteful does it) - a page would shift numbering, land in PDF exports, and turn
+  changing a cover into editing a page.
+- **Thumbnails are the whole page, not the view** (`ScribbleArea::drawThumbnail()`): 240 x 339, the page
+  scaled to fill it, cut at the right/bottom if its proportions differ - never the gray around a page.
+  Thumbnails saved before this (240 x 400 crops of the view) are cut to the frame from their top left when
+  shown, and are replaced the next time the document is saved. The `testN_ref.html` thumbnails are the old
+  size, so ScribbleTest skips writing a `_diff.png` when the sizes differ (`Image::subtract()` reads past the
+  smaller image otherwise); they were failing on pixels across GPUs already.
+- **Change Cover** (document menu in the browser): `ChangeCoverDialog` (`newdocdialog.cpp`) - the same
+  swatch grid as Create Notebook (`createCoverSwatchGrid()`), a custom color in a popup (the
+  `ColorEditBox` trap below), and No cover. `TagDocList::changeCover()` writes it through
+  `rewriteDocument()`, the load-everything-and-save path tags use: slow on a big notebook (about 25 s for
+  9 MB in an ASan debug build, no busy indicator) and it re-encodes the file (a 9.2 MB import came out
+  at 11.8 MB).
 - **Pages reuses the Add Page grid**: `AddPageMenu::createLayoutGrid()` is the same builder with a tile
   action passed in. The pick becomes the document default as well as the first page's ruling.
 - **Tags**: the browser's own `TagStore` is passed in; tags made in the dialog are saved at once (so they
