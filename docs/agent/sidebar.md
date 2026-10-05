@@ -55,10 +55,10 @@ the summary. `syncscribble/sidebar.cpp`.
   rather than assumed: the tool buttons render the design's 64-unit button at 24.2 screen px, and the
   design's 372-wide sidebar comes out at 141 px, which is what it produces. Insets are derived from
   the toolbar's own geometry (`15 + 64 + 12`) rather than written as the literal 91.
-- **Touch sizing (iOS): `floatTouchUI` in `basics.h`.** On iOS a layout unit is one point (paintScale is
+- **Touch sizing (iOS, Android): `floatTouchUI` in `basics.h`.** On iOS a layout unit is one point (paintScale is
   the pixel ratio), so desktop's `floatUIScale = 0.5` made toolbar buttons 32 pt and the sidebar's bottom
   row (add, pin, side, search) a 12 pt icon that was also its whole hit target. With `SUMI_TOUCH_UI`
-  (defaults to `PLATFORM_IOS`) the scale is 0.6875, so the 64-unit design button is Apple's 44 pt minimum,
+  (defaults to iOS and Android, all sizes: the panels size themselves in file-static initializers, so a tablet-only runtime check is not possible) the scale is 0.625, so the 64-unit design button is 40 pt,
   and the bottom row's cells become full toolbar buttons with toolbar-sized icons. Desktop values are
   unchanged by construction. It is compile time because every panel derives its geometry from these
   constants in file-static initializers. Preview it on Linux by building with
