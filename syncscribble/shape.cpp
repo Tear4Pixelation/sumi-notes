@@ -506,8 +506,9 @@ void applyShapeConstraint(ShapeParams& params)
 }
 
 // the multiple of 45 degrees the direction anchor -> pos is within tolerance of, as a unit vector; false
-//  if there is none (or pos is on the anchor, where there is no direction)
-static bool snappedDirection(Point anchor, Point pos, Dim tolerance, Point& dir)
+//  if there is none (or pos is on the anchor, where there is no direction).  maxDist > 0 also requires pos
+//  to lie within maxDist of the line through anchor along that direction.
+static bool snappedDirection(Point anchor, Point pos, Dim tolerance, Dim maxDist, Point& dir)
 {
   Point dr = pos - anchor;
   if(dr.dist() <= 0)
@@ -517,10 +518,13 @@ static bool snappedDirection(Point anchor, Point pos, Dim tolerance, Point& dir)
   if(std::abs(angle - snapped) > tolerance)
     return false;
   dir = Point(std::cos(snapped), std::sin(snapped));
+  // perpendicular distance from the snapped line = |dr x dir|
+  if(maxDist > 0 && std::abs(dr.x*dir.y - dr.y*dir.x) > maxDist)
+    return false;
   return true;
 }
 
-Point snapShapeAngle(const ShapeParams& params, int index, Point pos, Dim tolerance)
+Point snapShapeAngle(const ShapeParams& params, int index, Point pos, Dim tolerance, Dim maxDist)
 {
   int npts = int(params.points.size());
   if(tolerance <= 0 || index < 0 || index >= npts || npts < 2)
@@ -540,7 +544,7 @@ Point snapShapeAngle(const ShapeParams& params, int index, Point pos, Dim tolera
     if(neighbour < 0)
       continue;
     Point anchor = params.points[neighbour];
-    if(snappedDirection(anchor, pos, tolerance, dirs[nsnapped])) {
+    if(snappedDirection(anchor, pos, tolerance, maxDist, dirs[nsnapped])) {
       anchors[nsnapped] = anchor;
       ++nsnapped;
     }
