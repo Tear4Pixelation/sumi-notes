@@ -16,6 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <vector>
+#include <chrono>
 
 // stb is compiled into the app already (application.cpp, ulib/image.cpp); the standalone build brings its own
 #ifdef SCANTEST_MAIN
@@ -908,8 +909,20 @@ static void testQuadDetectRealistic()
 #endif
     std::vector<unsigned int> photo = makeScenePhoto(width, height, named.scene);
     Point found[4];
+    auto start = std::chrono::steady_clock::now();
     bool detected = detectDocumentQuad(photo.data(), width, height, found);
+    double elapsedMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
     dumpScene(named.name, photo, width, height, named.scene.page, found, detected);
+#ifdef SCANTEST_MAIN
+    // per scene: detection time and worst corner error as a fraction of the long image side
+    real worstError = 0;
+    for(int ii = 0; ii < 4 && detected; ++ii)
+      worstError = std::max(worstError, (found[ii] - named.scene.page[ii]).dist());
+    printf("   %-10s %s in %.1f ms, worst corner off by %.1f%% of the image\n", named.name,
+        detected ? "found" : "MISSED", elapsedMs, double(100*worstError/std::max(width, height)));
+#else
+    (void)elapsedMs;
+#endif
     char what[128];
     snprintf(what, sizeof(what), "should detect the page in a realistic photo (%s)", named.name);
     checkTrue(detected, what);
