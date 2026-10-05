@@ -223,6 +223,21 @@ neighbour is within `shapeAngleSnap` degrees (default 8, 0 off, Preferences > Sh
 45 degrees is projected onto that direction; an interior point in range of both neighbours goes to where
 the two snapped directions cross, so a corner locks to a right angle. Soft rather than the pen button's
 hard `applyShapeConstraint()`, so a line deliberately drawn at 30 degrees stays there.
-`ScribbleArea::snapShapeAngleAt()` applies it at four sites: the recognized line and its end as the pen
-scales it (hold to snap), the shape tool's drag and each placed polyline point, and `POINT` handle drags.
 Skipped for snap-to-grid pens, which would be pulled off the grid. Tested in `shapetest.cpp`.
+
+**Editing snaps by distance, not angle.** An angle-only rule pulls a long line's end across a long way
+(8 degrees at 800 px is 112 px), so a long line could never sit slightly off diagonal - the first-day
+report's complaint - while a short one barely moves. So `snapShapeAngle()` takes an optional `maxDist`:
+pos must also lie within that perpendicular distance of the snapped line through the neighbour.
+`ScribbleArea::snapShapeAngleAt()` passes `SHAPE_ANGLE_SNAP_DIST` (8 screen units) / `mScale`, so it
+follows zoom - zoom in for finer control - and is used for the shape tool's drag, each placed polyline
+point and `POINT` handle drags. Handle drags work in node-local units (`ShapeSelector::toLocal`), so the
+distance is converted through that transform (`localPerPage`), else a scaled shape would snap at the
+wrong distance. The angle stays a cap, so `shapeAngleSnap` 0 still turns it off and a short line is
+never bent further than before; with both limits, lines up to ~57 px (8 / tan 8 degrees) behave as they
+did, longer ones need their end within 8 px of the axis line.
+
+**Recognition stays angle based**, at `RECOGNIZED_ANGLE_SNAP_FACTOR` (0.75, so 8 -> 6 degrees) of the
+setting, via `snapRecognizedAngleAt()`: the recognized line and its end as the pen scales it (hold to
+snap). A recognized stroke is rough intent, so an angle fits; and the scaling phase must use the same
+rule as the initial snap, or a long line snapped by angle would unsnap on the first jitter.

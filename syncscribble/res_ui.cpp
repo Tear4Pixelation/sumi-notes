@@ -197,7 +197,7 @@ const char* prefInfoXML = R"#(
       description="When scratching out without holding: Careful needs a longer scratch-out and leaves more of your writing alone. Holding at the end is always more eager" />
   <pref name="shapeAngleSnap" type="float" min="0" max="22" step="1" group="Shapes"
       title="Snap lines to 45 degrees"
-      description="Lines within this many degrees of horizontal, vertical or diagonal snap onto it, when drawing a shape, editing its handles or scaling a snapped shape. 0 turns this off" />
+      description="The most a line can be off horizontal, vertical or diagonal and still snap onto it. When drawing with the shape tool or dragging a handle, the end must also be close to that line on screen, so long lines can stay slightly diagonal. A line recognized by holding the pen snaps a little less eagerly. 0 turns this off" />
   <pref name="shapeEditAfterDraw" type="bool" group="Shapes"
       title="Edit shape after drawing"
       description="Leave a new shape selected with its handles shown" />
