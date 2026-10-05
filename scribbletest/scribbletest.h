@@ -64,6 +64,7 @@ public:
   int rulingRegionTest();
   int reflowIndentTest();
   int skippedLinesTest();
+  int insSpaceAxisTest();
   void performanceTest();
   void inputTest();
   void syncSlaveMsg(std::string msg, int level);

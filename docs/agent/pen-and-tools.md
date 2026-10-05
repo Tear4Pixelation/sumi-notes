@@ -189,6 +189,23 @@ lasso only changes inside the triangle it tests. Tested by `ScribbleTest::select
 
 # Reflow (ruled insert space)
 
+**Ruled insert space is two tools, one per direction** (first-day report: "split it into moving down and
+moving to the side"). The options row offers **Insert Lines** (`MODE_INSSPACEDOWN`, the existing ruled icon,
+action `actionRuled_Insert_Space`) and **Insert Space in Line** (`MODE_INSSPACERIGHT`,
+`ic_menu_insert_space_ruled_right.svg`, `actionRuled_Insert_Space_Right`). The combined tool moved the text
+down a line whenever the pen drifted while pushing it right, and pushed it sideways while dragging it down;
+nothing it did needs both at once, so it is no longer offered. Both new modes run as the old
+`MODE_INSSPACERULED` gesture - `doPressEvent()` records the tool in `ScribbleArea::insSpaceAxis` and swaps
+`currMode` before anything else looks at it, so selection, Skip Lines, region slop, the negative-space erase
+and page growth are unchanged - and `doMoveEvent()` only cuts the drag to one axis: Right pins `line` to
+`initialLine`, Down pins `lx` to the press and `ldx` to 0 (so with reflow on it is `reflowStrokes(0, dline)`,
+exactly what a straight-down drag of the old tool did). Down pressed inside a line moves the rest of it to a
+new line (a line break); Right pressed in the margin or on an empty line does nothing. `MODE_INSSPACERULED`
+still exists for the tests and as the internal mode; a config that saved it as the insert space mode loads
+as Down. Tested by `ScribbleTest::insSpaceAxisTest()` (the same diagonal drag with each tool), mutation-
+checked: running both as the combined tool fails three of its checks. The new strings are untranslated, and
+the Right icon is hand-made in the style of the ruled one (not from the reicon set).
+
 Where wrapped words go and how far apart they sit are measured from the writing, not the page
 (`Selection::measureReflowInk()`, once per gesture, from the ink before it moved):
 
@@ -209,10 +226,23 @@ leave strokes out of a ruled selection and make reflow see text on an "empty" ne
 the end of `toolModes`; icon `ic_menu_toggle_skip_lines.svg`, the ruled icon with writing on the first and
 third lines). For text written on every second line: the line pressed on is a text line, and so is every
 second line from it. `skippedLineFrame()` (`selection.cpp`) gives the gesture a frame with the pitch doubled
-and its origin half a line above the pressed line, so each "line" is a text line plus half the blank line
-either side. Nothing downstream changed: reflow wraps to the next text line, vertical steps are two lines,
-stops and the indent's "line above" follow, and an underline in a blank line stays with the text above it.
-Only ruled insert space uses it (the toggle is disabled for vertical insert space); ruled select, ruled
+and its origin on the top of the pressed line, so each "line" is a text line plus the blank line below it.
+Nothing downstream changed: reflow wraps to the next text line, vertical steps are two lines (a step happens
+when the pen reaches the next text line), stops and the indent's "line above" follow, and an underline in a
+blank line stays with the text above it.
+
+**The origin must not be above the pressed line.** It used to be half a line above (each "line" = text line
+plus half the blank line either side). That is fine for a press on a text line, but the natural place to put
+the pen to push text down is the blank line *between* two text lines, and then that half line is the lower
+half of the text line above - where handwriting sitting on the rule has its centre (`calcCom`), so the line
+above the press moved too (first-day report: "selects stuff in the line above as well"). With the origin on
+the pressed line's top, nothing above the line you press on ever moves, wherever you press; a press on the
+blank line pairs it with the text line below, which is the text you meant to move. Cost: a tall ascender
+whose centre lies in the blank line above a pressed text line stays behind - press on the blank line above
+instead. Pinned by the "pressed on a blank line" checks in `skippedLinesTest()` (fails against the old
+origin; letters there sit on the rule, the zigzag letters of the other checks are centred high enough to
+pass either way).
+Only ruled insert space (Insert Lines, Insert Space in Line) uses it (the toggle is disabled for vertical insert space); ruled select, ruled
 erase and ruled move still step single lines.
 
 **It is a toggle, not detected, on purpose.** Detection by counting strokes per line parity was built and

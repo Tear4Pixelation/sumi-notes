@@ -232,6 +232,9 @@ protected:
   Dim eraseXmin;
   // for insert space
   bool insertSpaceX;
+  // which ruled insert space tool started the gesture: MODE_INSSPACEDOWN (lines only), MODE_INSSPACERIGHT
+  //  (along the line only) or MODE_INSSPACERULED (both); the gesture itself runs as MODE_INSSPACERULED
+  int insSpaceAxis = MODE_INSSPACERULED;
   // for resize selection
   Point scaleOrigin;
   Dim bookmarkSnapX;

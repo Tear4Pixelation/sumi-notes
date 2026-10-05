@@ -104,7 +104,8 @@ public:
   Action* actionRect_Select;
   Action* actionRuled_Select;
   Action* actionInsert_Space_Vert;
-  Action* actionRuled_Insert_Space;
+  Action* actionRuled_Insert_Space;  // Down: whole lines
+  Action* actionRuled_Insert_Space_Right;
   Action* actionCustom_Pen;
   Action* actionAdd_Bookmark;
   Action* actionDraw;

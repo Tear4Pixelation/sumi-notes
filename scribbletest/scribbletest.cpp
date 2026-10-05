@@ -2529,10 +2529,38 @@ int ScribbleTest::skippedLinesTest()
   for(Element* s : scribbleArea->currPage->children()) if(lineOf(s) == 5) line5.push_back(s);
   scribbleMode->setMode(MODE_INSSPACERULED);
   at(Point(50, 5*pitch + 0.5*pitch), press);
+  //  (a step happens when the pen reaches the next text line, as one does on a line without Skip Lines)
   at(Point(50, 5*pitch + 1.0*pitch), INPUTEVENT_MOVE);
-  at(Point(50, 5*pitch + 1.6*pitch), INPUTEVENT_MOVE);
-  at(Point(50, 5*pitch + 1.6*pitch), release);
+  at(Point(50, 5*pitch + 2.5*pitch), INPUTEVENT_MOVE);
+  at(Point(50, 5*pitch + 2.5*pitch), release);
   check(!line5.empty() && allOn(line5, 7), "double spaced: vertical insert space steps two lines");
+
+  // pressed on the blank line between two text lines (where you would put the pen to push the text below
+  //  down), nothing of the text line above the press moves: the frame used to start half a line above the
+  //  pressed line, which on a blank line runs through the middle of the text above and took its letters
+  //  (x-height letters sitting on the rule, as handwriting does, so their centre is in the lower half)
+  setup({5, 7, 9});
+  scribbleMode->setMode(MODE_STROKE);
+  for(int ii = 0; ii < 4; ++ii) {
+    Dim lx = 600 + ii*14, top = 3*pitch;
+    at(Point(lx, top + 0.6*pitch), press);
+    at(Point(lx + 4, top + 0.95*pitch), INPUTEVENT_MOVE);
+    at(Point(lx + 8, top + 0.6*pitch), INPUTEVENT_MOVE);
+    at(Point(lx + 11, top + 0.95*pitch), INPUTEVENT_MOVE);
+    at(Point(lx + 11, top + 0.95*pitch), release);
+  }
+  std::vector<Element*> line3, line5b;
+  for(Element* s : scribbleArea->currPage->children()) {
+    if(lineOf(s) == 3) line3.push_back(s);
+    if(lineOf(s) == 5) line5b.push_back(s);
+  }
+  scribbleMode->setMode(MODE_INSSPACERULED);
+  at(Point(50, 4*pitch + 0.5*pitch), press);
+  at(Point(50, 4*pitch + 1.0*pitch), INPUTEVENT_MOVE);
+  at(Point(50, 4*pitch + 2.6*pitch), INPUTEVENT_MOVE);
+  at(Point(50, 4*pitch + 2.6*pitch), release);
+  check(!line3.empty() && allOn(line3, 3), "double spaced, pressed on a blank line: the text line above stays put");
+  check(!line5b.empty() && allOn(line5b, 7), "double spaced, pressed on a blank line: the text below moves two lines");
 
   // off: the same double spaced text wraps onto the blank line, as ruled insert space always has
   scribbleMode->insSpaceSkipLines = false;
@@ -2540,6 +2568,81 @@ int ScribbleTest::skippedLinesTest()
   pushRight();
   check(allOn(wrapped, 4), "toggle off: words wrap to the very next line");
 
+  scribbleMode->insSpaceSkipLines = wasSkipping;
+  scribbleDoc->clearSelection();
+  return nbad;
+}
+
+// Ruled insert space split by direction (MODE_INSSPACEDOWN / MODE_INSSPACERIGHT): the same diagonal drag,
+//  from the gap after a line's first word, moves the rest of the line down by whole lines without moving it
+//  along the line with Down, and pushes it along the line without leaving it with Right.  The combined
+//  MODE_INSSPACERULED does both, so either check fails if the axis is not held.  Default test page: lined,
+//  40 pitch, margin 100.
+int ScribbleTest::insSpaceAxisTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: insert space axis: %s\n", what); }
+  };
+  auto at = [&](Point pagept, int ev) {
+    Point scr = scribbleArea->dimToScreen(scribbleArea->pageDimToDim(pagept));
+    ie(scr.x, scr.y, 0, pen, ev);
+  };
+  const Dim pitch = 40, textLeft = 110;
+  auto lineOf = [&](const Element* s) { return int(std::floor(s->com().y/pitch)); };
+  auto word = [&](Dim x, int line) {
+    std::vector<Element*> letters;
+    scribbleMode->setMode(MODE_STROKE);
+    for(int ii = 0; ii < 4; ++ii) {
+      Dim lx = x + ii*14, top = line*pitch;
+      at(Point(lx, top + 0.35*pitch), press);
+      at(Point(lx + 4, top + 0.85*pitch), INPUTEVENT_MOVE);
+      at(Point(lx + 8, top + 0.35*pitch), INPUTEVENT_MOVE);
+      at(Point(lx + 11, top + 0.85*pitch), INPUTEVENT_MOVE);
+      at(Point(lx + 11, top + 0.85*pitch), release);
+      Element* last = NULL;
+      for(Element* s : scribbleArea->currPage->children()) last = s;
+      letters.push_back(last);
+    }
+    return letters;
+  };
+  auto allOn = [&](const std::vector<Element*>& strokes, int line) {
+    for(Element* s : strokes) if(lineOf(s) != line) return false;
+    return true;
+  };
+  auto leftOf = [&](const std::vector<Element*>& strokes) {
+    Dim left = MAX_DIM;
+    for(Element* s : strokes) left = std::min(left, s->bbox().left);
+    return left;
+  };
+  const bool wasSkipping = scribbleMode->insSpaceSkipLines;
+  scribbleMode->insSpaceSkipLines = false;
+  for(int mode : {MODE_INSSPACEDOWN, MODE_INSSPACERIGHT}) {
+    scribbleDoc->newDocument();
+    doCommand(ID_RESETZOOM);
+    scribbleDoc->app->setPen(ScribblePen(Color::BLACK, 2, ScribblePen::TIP_ROUND));
+    std::vector<Element*> first = word(textLeft, 3);
+    std::vector<Element*> second = word(textLeft + 4*14 + 16, 3);
+    std::vector<Element*> below = word(textLeft, 5);
+    const Dim secondLeft = leftOf(second);
+    // the same diagonal drag for both: 80 right and two lines down
+    Dim px = textLeft + 4*14 + 8;
+    scribbleMode->setMode(mode);
+    at(Point(px, 3.5*pitch), press);
+    for(int ii = 1; ii <= 8; ++ii) at(Point(px + 10*ii, (3.5 + 0.25*ii)*pitch), INPUTEVENT_MOVE);
+    at(Point(px + 80, 5.5*pitch), release);
+    check(allOn(first, 3), "the word before the press stays where it is");
+    if(mode == MODE_INSSPACEDOWN) {
+      check(allOn(second, 5), "down: the rest of the line moves down two lines");
+      check(std::abs(leftOf(second) - secondLeft) < 0.5, "down: the rest of the line does not move along it");
+      check(allOn(below, 7), "down: the text below moves down with it");
+    }
+    else {
+      check(allOn(second, 3), "right: the rest of the line stays on its line");
+      check(leftOf(second) > secondLeft + 40, "right: the rest of the line is pushed right");
+      check(allOn(below, 5), "right: the text below stays on its line");
+    }
+  }
   scribbleMode->insSpaceSkipLines = wasSkipping;
   scribbleDoc->clearSelection();
   return nbad;
@@ -2981,6 +3084,7 @@ void ScribbleTest::runAll(bool runsynctest)
   nUnitFailed += rulingRegionTest();
   nUnitFailed += reflowIndentTest();
   nUnitFailed += skippedLinesTest();
+  nUnitFailed += insSpaceAxisTest();
   runAllTime = mSecSinceEpoch() - runAllTime;
   // restore global config
   srandpp(mSecSinceEpoch());
