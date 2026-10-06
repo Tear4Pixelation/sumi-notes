@@ -297,3 +297,26 @@ bool TagStore::save() const
   fclose(f);
   return true;
 }
+
+bool TagStore::isDescendant(const std::string& tagId, const std::string& ancestorId) const
+{
+  for(const TagNode* tagNode = tag(tagId); tagNode && !tagNode->parentId.empty(); tagNode = tag(tagNode->parentId)) {
+    if(tagNode->parentId == ancestorId)
+      return true;
+  }
+  return false;
+}
+
+TagStore::FilterMatch TagStore::matchFilter(const std::vector<std::string>& tagIds,
+    const std::set<std::string>& filterTags) const
+{
+  FilterMatch result;
+  for(const std::string& filterTag : filterTags) {
+    bool exact = std::find(tagIds.begin(), tagIds.end(), filterTag) != tagIds.end();
+    if(exact || std::any_of(tagIds.begin(), tagIds.end(), [&](const std::string& id){ return isDescendant(id, filterTag); }))
+      ++result.matched;
+    if(exact)
+      ++result.exact;
+  }
+  return result;
+}

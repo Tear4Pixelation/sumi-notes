@@ -406,4 +406,6 @@
   <string name="scan_back">Back</string>
   <string name="scan_addmore">Add More</string>
   <string name="scan_next">Next</string>
+  <string name="tags_match_all">Matches all selected tags</string>
+  <string name="tags_match_some">Matches some selected tags</string>
 </resources>

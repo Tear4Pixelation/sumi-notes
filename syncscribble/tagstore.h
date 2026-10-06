@@ -4,6 +4,7 @@
 #include <vector>
 #include <map>
 #include <ctime>
+#include <set>
 
 // A tag (or subtag) in the sidebar's tag tree. Tags are strictly a tree, not folders on disk --
 // see tagstore.cpp for why the tree itself has to live in an index file rather than be derived
@@ -63,6 +64,19 @@ public:
   bool cachedDocTags(const std::string& relPath, time_t mtime, std::vector<std::string>* outTagIds,
       std::string* outPageTags = NULL) const;
   void removeDoc(const std::string& relPath);
+
+  // true if tagId sits anywhere below ancestorId in the tree (not if they are the same tag)
+  bool isDescendant(const std::string& tagId, const std::string& ancestorId) const;
+
+  // How a document's (or page's) tags meet a tag filter.  A filter tag is matched by the tag itself or
+  //  by any of its subtags; exact counts the filter tags carried as themselves, so a document tagged
+  //  only #math/algebra matches a #math filter but not exactly - a "top-level" match.
+  struct FilterMatch { size_t matched = 0; size_t exact = 0; };
+  FilterMatch matchFilter(const std::vector<std::string>& tagIds, const std::set<std::string>& filterTags) const;
+  // Order within the partial-match group below the browser's separator: more exact matches first, so
+  //  a document carrying a filter tag itself comes before one reaching it only through a subtag.  A
+  //  strict weak order meant for std::stable_sort, which keeps the folder order among equals.
+  static bool partialMatchBefore(const FilterMatch& lhs, const FilterMatch& rhs) { return lhs.exact > rhs.exact; }
 
   static std::vector<std::string> parseTagList(const char* s);
   static std::string formatTagList(const std::vector<std::string>& tagIds);

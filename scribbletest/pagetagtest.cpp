@@ -1,7 +1,7 @@
 // Unit tests for the page tag summary (docs/agent/page-tags.md) and the tag index's document cache in
 //  syncscribble/tagstore.cpp.  No GL context and no document, so they also build and run on their own:
 //
-//   g++ -std=c++14 -O2 -DNDEBUG -I . -I syncscribble -DPAGETAGTEST_MAIN
+//   g++ -std=c++14 -O2 -DNDEBUG -I . -I stb -I syncscribble -DPAGETAGTEST_MAIN
 //       scribbletest/pagetagtest.cpp syncscribble/tagstore.cpp -o pagetagtest && ./pagetagtest
 //   (one command, run from the repo root.)
 //
@@ -18,6 +18,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <algorithm>
 
 #include "tagstore.h"
 
@@ -100,6 +101,40 @@ static void testIndexKeepsEmptyFields(const std::string& dir)
   remove(indexPath.c_str());
 }
 
+// The browser's tag filter (TagDocList::rebuildDocGrid): a filter tag is met by the tag or any subtag, and
+//  among the partial matches below the separator an exact match comes before a top-level one.
+static void testFilterMatchOrder(const std::string& dir)
+{
+  TagStore store(dir + "write-pagetagtest-filter");
+  std::string math = store.addTag("math");
+  std::string algebra = store.addTag("algebra", math);
+  std::string linear = store.addTag("linear", algebra);
+  std::string homework = store.addTag("homework");
+  std::set<std::string> filter = {math, homework};
+
+  TagStore::FilterMatch viaSubtag = store.matchFilter({algebra}, filter);
+  pageTagCheck(viaSubtag.matched == 1 && viaSubtag.exact == 0, "subtag meets its supertag, not exactly");
+  TagStore::FilterMatch viaGrandchild = store.matchFilter({linear}, filter);
+  pageTagCheck(viaGrandchild.matched == 1 && viaGrandchild.exact == 0, "a grandchild meets it too");
+  TagStore::FilterMatch exactMatch = store.matchFilter({math}, filter);
+  pageTagCheck(exactMatch.matched == 1 && exactMatch.exact == 1, "the tag itself is an exact match");
+  TagStore::FilterMatch both = store.matchFilter({homework, algebra, math}, filter);
+  pageTagCheck(both.matched == 2 && both.exact == 2, "each filter tag counted once");
+  pageTagCheck(store.matchFilter({homework}, {math}).matched == 0, "an unrelated tag does not match");
+  pageTagCheck(store.matchFilter({math}, {algebra}).matched == 0, "a supertag does not meet its subtag");
+
+  // partial matches in folder order: top-level, exact, top-level, exact
+  std::vector<std::pair<TagStore::FilterMatch, std::string>> partial = {
+    {viaSubtag, "a"}, {exactMatch, "b"}, {viaGrandchild, "c"}, {store.matchFilter({homework}, filter), "d"}};
+  std::stable_sort(partial.begin(), partial.end(), [](const auto& lhs, const auto& rhs){
+    return TagStore::partialMatchBefore(lhs.first, rhs.first);
+  });
+  std::string order;
+  for(const auto& entry : partial)
+    order += entry.second;
+  pageTagCheck(order == "bdac", "exact matches first, folder order kept within each");
+}
+
 int runPageTagTests()
 {
   nPageTagChecksFailed = 0;
@@ -108,6 +143,7 @@ int runPageTagTests()
   testPageTagsRoundTrip();
   testPageTagsEdgeCases();
   testIndexKeepsEmptyFields(dir);
+  testFilterMatchOrder(dir);
   return nPageTagChecksFailed;
 }
 

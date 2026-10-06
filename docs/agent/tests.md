@@ -55,6 +55,9 @@ The page tag summary and the tag index's document cache are tested in `scribblet
 XML escaping, malformed and tagless records, and that the index keeps a DOC line whose last fields are
 empty (the getline split dropped them, so untagged documents were reread on every refresh) while a
 pre-page-tag four-field line is a miss. All three kinds were confirmed to fail against the broken code.
+`testFilterMatchOrder()` pins the browser's tag filter: a subtag (and a grandchild) meets its supertag but
+not exactly, and below the separator exact matches sort before top-level ones in otherwise folder order -
+it fails with `partialMatchBefore()` returning false (the old, unordered grid).
 
 The layer table is tested the same way again in `scribbletest/layertest.cpp` (`runLayerTests()`),
 standalone-buildable - see the command in its header. Its checks are the fail-open rule, the current

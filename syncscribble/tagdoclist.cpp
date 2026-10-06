@@ -239,11 +239,7 @@ Widget* TagDocList::createTagRow(const std::string& tagId, int depth)
 
 bool TagDocList::isTagDescendant(const std::string& tagId, const std::string& ancestorId) const
 {
-  for(const TagNode* tagNode = tagStore.tag(tagId); tagNode && !tagNode->parentId.empty(); tagNode = tagStore.tag(tagNode->parentId)) {
-    if(tagNode->parentId == ancestorId)
-      return true;
-  }
-  return false;
+  return tagStore.isDescendant(tagId, ancestorId);
 }
 
 // parentId empty = make it a root tag.  A tag's documents are untouched: they carry the tag's id, and
@@ -500,11 +496,14 @@ void TagDocList::rebuildDocGrid()
   fileUseNode->setViewport(symbolSize);
 
   std::string query = toLower(docSearchQuery);
-  std::vector<DocEntry> allDocs, someDocs;
+  std::vector<DocEntry> allDocs;
+  // the partial matches, each with how it met the filter, for ordering them (partialMatchBefore)
+  std::vector<std::pair<TagStore::FilterMatch, DocEntry>> someDocs;
   // a tagged page, shown as its own card beside (not instead of) its notebook
   // matched: the page's own tags that the filter picked it for - shown blinking when it opens
   struct PageCard { FSPath path; TagStore::PageTags page; std::vector<std::string> matched; };
-  std::vector<PageCard> allPages, somePages;
+  std::vector<PageCard> allPages;
+  std::vector<std::pair<TagStore::FilterMatch, PageCard>> somePages;
   // A tag also matches documents carrying any of its subtags. Only here, not in the tree: selecting
   //  a supertag does not check its subtags. So with a supertag and one of its subtags both active,
   //  documents with that subtag satisfy both and sort above those with only a sibling subtag.
@@ -520,13 +519,11 @@ void TagDocList::rebuildDocGrid()
       allDocs.push_back(doc);  // pages are only listed when filtering by a tag
       continue;
     }
-    size_t matched = std::count_if(activeTags.begin(), activeTags.end(), [&](const std::string& t){
-      return carries(doc.tagIds, t);
-    });
-    if(matched == activeTags.size())
+    TagStore::FilterMatch docMatch = tagStore.matchFilter(doc.tagIds, activeTags);
+    if(docMatch.matched == activeTags.size())
       allDocs.push_back(doc);
-    else if(matched > 0)
-      someDocs.push_back(doc);
+    else if(docMatch.matched > 0)
+      someDocs.emplace_back(docMatch, doc);
 
     // A page inherits its notebook's tags, so #math + #homework finds the homework page in a math
     //  notebook.  It is listed only for a tag of its own, though - otherwise filtering by #math would
@@ -534,20 +531,28 @@ void TagDocList::rebuildDocGrid()
     for(const TagStore::PageTags& page : doc.pageTags) {
       if(!std::any_of(activeTags.begin(), activeTags.end(), [&](const std::string& t){ return carries(page.tagIds, t); }))
         continue;
-      size_t pageMatched = std::count_if(activeTags.begin(), activeTags.end(), [&](const std::string& t){
-        return carries(page.tagIds, t) || carries(doc.tagIds, t);
-      });
+      // the page's own tags plus the ones it inherits from its notebook
+      std::vector<std::string> pageAndDocTags = page.tagIds;
+      pageAndDocTags.insert(pageAndDocTags.end(), doc.tagIds.begin(), doc.tagIds.end());
+      TagStore::FilterMatch pageMatch = tagStore.matchFilter(pageAndDocTags, activeTags);
       std::vector<std::string> matched;
       for(const std::string& id : page.tagIds) {
         if(std::any_of(activeTags.begin(), activeTags.end(), [&](const std::string& t){ return carries({id}, t); }))
           matched.push_back(id);
       }
-      if(pageMatched == activeTags.size())
+      if(pageMatch.matched == activeTags.size())
         allPages.push_back({doc.path, page, matched});
       else
-        somePages.push_back({doc.path, page, matched});
+        somePages.emplace_back(pageMatch, PageCard{doc.path, page, matched});
     }
   }
+  // below the separator, a document carrying a filter tag itself before one that only reaches it
+  //  through a subtag (an exact match before a top-level one); stable, so equals keep folder order
+  auto partialBefore = [](const auto& lhs, const auto& rhs){
+    return TagStore::partialMatchBefore(lhs.first, rhs.first);
+  };
+  std::stable_sort(someDocs.begin(), someDocs.end(), partialBefore);
+  std::stable_sort(somePages.begin(), somePages.end(), partialBefore);
 
   auto addCell = [this, &iconSize, &symbolSize](Widget* group, const DocEntry& doc){
     Button* item = new Button(gridItemProto->clone());
@@ -690,6 +695,20 @@ void TagDocList::rebuildDocGrid()
     SvgPainter::elideText(subnode, itemWidth);
   };
 
+  // a small caption over each group when the grid is split (two or more tags active, see below)
+  auto addGroupLabel = [this](const char* text){
+    Widget* label = new Widget(createTextNode(text));
+    label->node->addClass("doc-group-label");
+    label->node->addClass("weak");
+    label->node->setAttribute("box-anchor", "left");
+    label->node->setAttribute("font-size", "12");
+    label->setMargins(8, 0, 4, 8);
+    docGrid->addWidget(label);
+  };
+  bool splitGrid = !someDocs.empty() || !somePages.empty();
+  if(splitGrid && (!allDocs.empty() || !allPages.empty()))
+    addGroupLabel(_("Matches all selected tags"));
+
   Widget* allGroup = createDocRowGroup();
   docGrid->addWidget(allGroup);
   for(const DocEntry& doc : allDocs)
@@ -700,14 +719,15 @@ void TagDocList::rebuildDocGrid()
   // Multi-select with 2+ tags active: documents matching every active tag are shown above this
   // separator, documents matching only some of them below it - see the header comment on
   // multiSelectMode for why this beats a strict all-or-nothing AND filter.
-  if(!someDocs.empty() || !somePages.empty()) {
+  if(splitGrid) {
     docGrid->addWidget(createHRule());
+    addGroupLabel(_("Matches some selected tags"));
     Widget* someGroup = createDocRowGroup();
     docGrid->addWidget(someGroup);
-    for(const DocEntry& doc : someDocs)
-      addCell(someGroup, doc);
-    for(const PageCard& card : somePages)
-      addPageCell(someGroup, card);
+    for(const auto& entry : someDocs)
+      addCell(someGroup, entry.second);
+    for(const auto& entry : somePages)
+      addPageCell(someGroup, entry.second);
   }
 
   // documents the search or tag filter now hides drop out of the selection (see selectMode)

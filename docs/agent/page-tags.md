@@ -166,6 +166,16 @@ Page numbers are fine *here* because it is a snapshot rewritten from the pages o
 - A page **inherits its notebook's tags** for matching (user's call): `#math` + `#homework` finds the
   homework page in a math notebook. In multi-select, the page lands above the separator (matches all) and
   the notebook below it (matches some).
+- **The split grid is captioned and the lower half is ordered.** With two or more tags active and anything
+  in the partial group, a `weak` 12px caption sits over each half: "Matches all selected tags" and, under
+  the separator, "Matches some selected tags" (user asked for "All matching tags shown in the library" /
+  "Singular match"; tightened). With a single tag, or when nothing matches only partly, there is no
+  separator and no caption. Below the separator, documents carrying a selected tag **itself** come before
+  ones reaching it only through a subtag (`#math/algebra` under a `#math` filter - a "top-level" match):
+  `TagStore::matchFilter()` counts `exact` beside `matched`, and `partialMatchBefore()` sorts by `exact`
+  descending with `std::stable_sort`, so folder order holds among equals. Page cards below the separator
+  are ordered the same way, over the page's tags plus its notebook's. The upper half is not reordered.
+  Tested in `pagetagtest.cpp` (`testFilterMatchOrder`), confirmed failing with the ordering disabled.
 - A page card opens its notebook at that page (`TagDocList::selectedPage`, `ScribbleDoc::gotoPage()`). The
   `doRefresh()` there is needed - outside an input event nothing else updates the page counter, which
   otherwise kept saying 1/2 on page 2.

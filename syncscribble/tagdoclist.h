@@ -123,7 +123,8 @@ private:
   // Single-select by default (clicking a tag replaces the filter); the "Filter Check" toolbar button
   // toggles multi-select, where clicking accumulates tags into activeTags instead. With 2+ tags active,
   // rebuildDocGrid() splits the grid into documents carrying *every* active tag (shown first) and a
-  // separator, then documents carrying only *some* of them (shown after) -- see rebuildDocGrid().
+  // separator, then documents carrying only *some* of them (shown after), each half captioned and the
+  // lower one ordered exact matches first (TagStore::partialMatchBefore) -- see rebuildDocGrid().
   bool multiSelectMode = false;
   std::set<std::string> activeTags;
   std::string tagSearchQuery;
