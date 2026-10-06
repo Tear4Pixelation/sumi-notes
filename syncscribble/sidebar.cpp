@@ -753,7 +753,24 @@ void Sidebar::onAdd()
     if(!area)
       return;
     // the outline entry names the page it is on, so the only sensible default is the current page
-    scribbleDoc->setPageOutline(area->getCurrPageNum(), _("Untitled"), 0);
+    int pagenum = area->getCurrPageNum();
+    // one entry per page: Add on a page that already has one renames it, rather than clobbering its
+    //  title (and resetting its level) the way creating a fresh entry over it would
+    if(pagenum < scribbleDoc->document->numPages() && scribbleDoc->document->pages[pagenum]->hasOutlineEntry()) {
+      renameOutline(pagenum);
+      return;
+    }
+    // named on creation, like a new tag (TagDocList::addTag): an "Untitled" entry is never what the user
+    //  wants, and Cancel or an empty name creates nothing, so there is nothing to undo either.  The entry
+    //  is made only after the dialog, as the single undo step setPageOutline() pushes.
+    closeRowMenus();
+    TagNameDialog dialog(_("New Outline Entry"), "");
+    int dialogResult = Application::execDialog(&dialog);
+    std::string title = dialog.getName();
+    // the modal loop ran events: a peer (sync) may have deleted pages meanwhile
+    if(dialogResult != Dialog::ACCEPTED || title.empty() || pagenum >= scribbleDoc->document->numPages())
+      return;
+    scribbleDoc->setPageOutline(pagenum, title.c_str(), 0);
     rebuildList();
   }
 }

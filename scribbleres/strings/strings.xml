@@ -137,6 +137,7 @@
   <string name="bookmarks">Bookmarks</string>
   <string name="margin_content">Margin Content</string>
   <string name="untitled">Untitled</string>
+  <string name="new_outline_entry">New Outline Entry</string>
   <string name="menu_pathselect">Path Select</string>
   <string name="menu_delete">Delete</string>
   <string name="menu_invert">Invert</string>

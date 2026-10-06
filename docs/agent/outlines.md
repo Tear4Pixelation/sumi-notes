@@ -43,6 +43,23 @@ and nestable. One page, one entry: the intended way to work is a page per subjec
   onto the undo history. `UndoHistory::addItem()` calls `commit()`, which does the `dirtyCount++` - it
   must not also be done at the call site (the convention `Page::setProperties()` follows).
 
+## Adding an entry names it first
+
+The sidebar's **+** (`Sidebar::onAdd()`) asks for the title before anything is made, with the same
+`TagNameDialog` and the same rules as a new tag (`TagDocList::addTag`): "New Outline Entry", an empty
+field, and **Cancel or an empty name creates nothing**. It used to make an "Untitled" entry at once,
+which the user then always had to rename (user's call: "having an untitled outline is never a good
+idea").
+
+- The entry is made only after the dialog returns, so creation is still the **one** `PageOutlineItem`
+  `setPageOutline()` pushes - one undo step, one sync item - and a cancel leaves no history at all.
+  The page count is re-checked after the dialog: its modal loop runs events, so a peer could have
+  deleted the page meanwhile.
+- **+ on a page that already has an entry opens Rename instead** (one entry per page). The old code
+  silently overwrote the title with "Untitled" and reset the level to 0; Rename keeps the stored level.
+- Verified in agent-display: prompt shown, entry listed under its name, + again opens Rename prefilled,
+  one Ctrl+Z removes the entry (undo greys out), + then Cancel leaves the list empty.
+
 Known gap: **`Document::outline(loadpages=true)` loads every page** that has never been loaded, since
 an unloaded page cannot be known to carry an entry. For a large delay-loaded document that is the
 whole file. `loadpages=false` skips them instead, at the cost of an incomplete outline. Doing better
