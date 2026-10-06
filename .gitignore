@@ -19,3 +19,5 @@ syncscribble/ReleaseSDL/
 SDL-wasm/
 __pycache__/
 .nimbalyst/
+# iOS signing key, certificate and profile - never commit
+sumi-signing/

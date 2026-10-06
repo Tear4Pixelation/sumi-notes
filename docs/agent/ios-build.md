@@ -45,12 +45,13 @@ Needs the paid Apple Developer membership (ad hoc distribution) and `libimobiled
 ## Building and installing
 
 ```
-gh workflow run ios.yml && gh run watch
-gh run download --name sumi-ios-adhoc-ipa           # Sumi.ipa
-ideviceinstaller install Sumi.ipa                   # older ideviceinstaller: -i Sumi.ipa
+gh workflow run -R Tear4Pixelation/sumi-notes ios.yml && gh run watch -R Tear4Pixelation/sumi-notes
+gh run download -R Tear4Pixelation/sumi-notes --name sumi-ios-adhoc-ipa   # Sumi.ipa
+ideviceinstaller install Sumi.ipa                                         # older ideviceinstaller: -i Sumi.ipa
 ```
 
-The build log prints which app id it signed and when the profile expires.
+`-R` is needed because `gh` in this checkout resolves to upstream `styluslabs/Write` (404 on `ios.yml`);
+`gh repo set-default Tear4Pixelation/sumi-notes` makes it unnecessary. The build log prints which app id it signed and when the profile expires.
 
 ## Crash logs and symbols
 
@@ -82,5 +83,5 @@ even though the UUID differs; the extra commit only changes the embedded short h
 
 - No TestFlight / App Store upload: that needs an App Store profile and an upload step with an App Store
   Connect API key. The Makefile already builds the same IPA for any distribution profile (`DIST` != 0).
-- As of 2026-10-03 the iOS job has never run (no Mac here, and it was not run on GitHub yet), so the
-  first run may still need fixing.
+- The job first ran on 2026-10-03 (unsigned IPA); the first ad hoc signed IPA came from the 2026-10-04 run.
+  Whether that IPA installs and runs on the iPad is not recorded here.
