@@ -1115,11 +1115,11 @@ static const char* icons__ic_menu_sidebar_right_svg = R"~~~~(<?xml version="1.0"
 static const char* icons__ic_menu_split_bt_svg = R"~~~~(<?xml version="1.0" encoding="utf-8"?>
 <svg version="1.2" baseProfile="tiny" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
   x="0px" y="0px" viewBox="0 0 24 24" xml:space="preserve">
-<!-- reicon "sidebar-bottom" (outline), https://reicon.dev - MIT -->
-<g class="icon">
+<!-- reicon "sidebar-top" (outline), https://reicon.dev - MIT -->
+<g class="icon" transform="rotate(180 12 12)">
   <path fill="none" d="M21.97 15V9C21.97 4 19.97 2 14.97 2H8.96997C3.96997 2 1.96997 4 1.96997 9V15C1.96997 20 3.96997 22 8.96997 22H14.97C19.97 22 21.97 20 21.97 15Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-  <path fill="none" d="M22 15.5H2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-  <path fill="none" d="M14.56 8.5L12 11.06L9.44 8.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path fill="none" d="M22 8.5H2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path fill="none" d="M14.56 15.4999L12 12.9399L9.44 15.4999" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
 </g>
 </svg>
 )~~~~";
@@ -1139,11 +1139,11 @@ static const char* icons__ic_menu_split_lr_svg = R"~~~~(<?xml version="1.0" enco
 static const char* icons__ic_menu_split_rl_svg = R"~~~~(<?xml version="1.0" encoding="utf-8"?>
 <svg version="1.2" baseProfile="tiny" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
   x="0px" y="0px" viewBox="0 0 24 24" xml:space="preserve">
-<!-- reicon "sidebar-bottom" (outline), https://reicon.dev - MIT -->
-<g class="icon" transform="rotate(-90 12 12)">
+<!-- reicon "sidebar-top" (outline), https://reicon.dev - MIT -->
+<g class="icon" transform="rotate(90 12 12)">
   <path fill="none" d="M21.97 15V9C21.97 4 19.97 2 14.97 2H8.96997C3.96997 2 1.96997 4 1.96997 9V15C1.96997 20 3.96997 22 8.96997 22H14.97C19.97 22 21.97 20 21.97 15Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-  <path fill="none" d="M22 15.5H2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-  <path fill="none" d="M14.56 8.5L12 11.06L9.44 8.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path fill="none" d="M22 8.5H2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path fill="none" d="M14.56 15.4999L12 12.9399L9.44 15.4999" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
 </g>
 </svg>
 )~~~~";

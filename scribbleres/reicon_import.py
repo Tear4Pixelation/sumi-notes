@@ -101,8 +101,7 @@ MAPPING = {
   'ic_menu_shape_head_start': 'arrow-left',
   'ic_menu_shape_head_end': 'arrow-right',
   'ic_menu_share': 'share',
-  'ic_menu_split_bt': 'sidebar-bottom',
-  'ic_menu_split_tb': 'sidebar-top',
+  # ic_menu_split_* (all four split view directions) are in ROTATE
   'ic_menu_stretch': 'scale',
   'ic_menu_undo': 'undo',
   'ic_menu_zoom': 'magnifier',
@@ -112,10 +111,12 @@ MAPPING = {
 
 # reicon has no vertical-dots icon, so the horizontal one is rotated in place
 ROTATE = {'ic_menu_overflow': ('more-h', 90),
-  # the split view's L/R icons are its T/B icons turned a quarter anticlockwise (top -> left), so the
-  #  four read as one family - and do not reuse sidebar-left/-right, which are the sidebar button's
+  # the four split view icons are one glyph turned to face each edge (top, bottom, left, right), so
+  #  they read as one family - and none reuses sidebar-left/-right, which are the sidebar button's
+  'ic_menu_split_tb': ('sidebar-top', 0),
+  'ic_menu_split_bt': ('sidebar-top', 180),
   'ic_menu_split_lr': ('sidebar-top', -90),
-  'ic_menu_split_rl': ('sidebar-bottom', -90)}
+  'ic_menu_split_rl': ('sidebar-top', 90)}
 
 # the document list draws these at thumbnail size rather than toolbar size, where the outline weight
 # reads as spindly; everything else in the app stays outline
