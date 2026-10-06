@@ -166,6 +166,31 @@ Designed in the Penpot page "Create page" as a proposition, not followed to the 
 Known gaps: the classic `DocumentList` new-document path (non-library platforms) is unchanged; the Pages
 popup opens downwards and runs off a 720 px screen's bottom; no automated test; new strings are untranslated.
 
+# Tags under a notebook's title (browser)
+
+Two notebooks named nearly alike ("Lecture Notes", "Lecture Notes (1)") are told apart by their tags, so
+every notebook cell carries one line under its title: the tag glyph (`ic_tag.svg`, the `#` the sidebar
+uses) and the notebook's own tag names, comma-separated (`addDocTagsLine()` in `tagdoclist.cpp`).
+
+- **From the cache only**: the ids are `DocEntry::tagIds`, which `collectDocuments()` has already read
+  from the `.write-tags` cache (by mtime), and the names come from the `TagStore`. Nothing opens a file
+  for it - unlike the cover color and thumbnail beside it, which each still read the file per cell.
+- **Document tags only, not page tags.** A notebook's tagged pages already appear as their own page cards
+  when filtering, and every page tag listed on the notebook would make the line long and noisy.
+- **Fitted, not wrapped**: as many whole names as fit the cell width, then `+N` for the rest; if not even
+  the first fits, it is elided with `...` and the count kept. Measured with the same bounds calculator
+  `elideText()` uses, so the cell must already be in the document (it is: `addWidget()` comes first).
+- **Tags being filtered on go last**: every notebook in the grid then carries them, so they tell nothing
+  apart; the others are what is worth the room.
+- **Untagged notebooks get no line and no reserved gap.** Instead every grid item is `box-anchor="top"`
+  (`gridItemProto`), so a shorter cell aligns to its row's top - unanchored, a flex child is centred
+  across the row and its preview sat lower than its neighbours' (page cards, with their notebook line,
+  had the same problem). A row is one line taller only if one of its cells has tags.
+- Colors are the existing `text.weak` (`--text-weak`) and `.icon` rules; no new CSS or token.
+
+Gaps: tag names only, not their parent path, so two subtags of the same name under different parents
+look the same; the line is not tappable (it does not filter by that tag); light theme not looked at.
+
 # Select mode (browser)
 
 The Select FAB (`ic_menu_multiselect`, reicon `check-square`) puts `TagDocList` into select mode: the

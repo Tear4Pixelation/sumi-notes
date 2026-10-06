@@ -425,6 +425,62 @@ static Widget* createDocRowGroup()
   return group;
 }
 
+// width of a text node's laid-out text; the node must already be in the window's document, or its font
+//  is not resolved (the same bounds calculator elideText() uses)
+static real laidOutTextWidth(SvgText* textnode)
+{
+  SvgDocument* root = textnode->rootDocument();
+  SvgPainter* bounder = root && root->boundsCalculator ? root->boundsCalculator : SvgDocument::sharedBoundsCalc;
+  std::vector<GlyphPosition> glyphs = bounder->glyphPositions(textnode);
+  return glyphs.empty() ? 0 : glyphs.back().right;
+}
+
+// The notebook's own tags under its title, so two notebooks with near-identical names can be told apart:
+//  a tag glyph and the names on one line, as many as fit in maxWidth, the rest as "+N". Builds nothing for
+//  an untagged notebook.  `column` must be in the document already (text is measured).
+static void addDocTagsLine(SvgContainerNode* column, const std::vector<std::string>& tagNames, real maxWidth)
+{
+  if(tagNames.empty())
+    return;
+  static const real glyphSize = 12, glyphGap = 4;
+  SvgG* line = new SvgG();
+  line->addClass("doc-cell-tags");
+  line->setAttribute("layout", "flex");
+  line->setAttribute("flex-direction", "row");
+  line->setAttribute("margin", "0 0 4 0");
+  SvgUse* glyph = new SvgUse(Rect::wh(glyphSize, glyphSize), "", SvgGui::useFile("icons/ic_tag.svg"));
+  glyph->addClass("icon");
+  glyph->setAttribute("margin", fstring("0 %g 0 0", glyphGap).c_str());
+  line->addChild(glyph);
+  SvgText* textnode = createTextNode("");
+  textnode->addClass("weak");  // text.weak: var(--text-weak), the subdued text color of the theme
+  textnode->setAttribute("font-size", "12");
+  line->addChild(textnode);
+  column->addChild(line);
+
+  real textWidth = maxWidth - glyphSize - glyphGap;
+  auto summary = [&](size_t shown){
+    std::string text = joinStr(std::vector<std::string>(tagNames.begin(), tagNames.begin() + shown), ", ");
+    if(shown < tagNames.size())
+      text += fstring("  +%d", int(tagNames.size() - shown));
+    return text;
+  };
+  // the most leading names that fit whole, then the count of the rest
+  for(size_t shown = tagNames.size(); shown > 0; --shown) {
+    textnode->setText(summary(shown).c_str());
+    if(laidOutTextWidth(textnode) <= textWidth)
+      return;
+  }
+  // not even the first name fits: cut it short, keeping room for the count
+  std::string countText = tagNames.size() > 1 ? fstring("  +%d", int(tagNames.size() - 1)) : "";
+  textnode->setText(countText.c_str());
+  real countWidth = countText.empty() ? 0 : laidOutTextWidth(textnode);
+  textnode->setText(tagNames.front().c_str());
+  SvgPainter::elideText(textnode, textWidth - countWidth);
+  if(!countText.empty())
+    textnode->addText(countText.c_str());
+}
+
 void TagDocList::rebuildDocGrid()
 {
   // Same reasoning as rebuildTagTree()'s detach: docContextPopup/docTagsPopup are reparented onto
@@ -563,6 +619,19 @@ void TagDocList::rebuildDocGrid()
     SvgText* textnode = static_cast<SvgText*>(item->containerNode()->selectFirst(".title-text"));
     textnode->addText(name.c_str());
     SvgPainter::elideText(textnode, itemWidth);
+
+    // from the tag cache collectDocuments() already filled - never a file read per cell.  Tags not being
+    //  filtered on come first: every notebook shown carries the active ones, so they tell nothing apart.
+    std::vector<std::string> tagNames, filteredNames;
+    for(const std::string& id : doc.tagIds) {
+      const TagNode* tagNode = tagStore.tag(id);
+      if(!tagNode)
+        continue;
+      bool filtered = activeTags.count(id) > 0;
+      (filtered ? filteredNames : tagNames).push_back(tagNode->name);
+    }
+    tagNames.insert(tagNames.end(), filteredNames.begin(), filteredNames.end());
+    addDocTagsLine(textnode->parent()->asContainerNode(), tagNames, itemWidth);
   };
 
   // the page's preview, its name (the outline title, if it has one), and which notebook it is in
@@ -1630,9 +1699,11 @@ void TagDocList::createUI()
   mainLayout->addWidget(content);
 
   // grid item prototype - identical to DocumentList's, kept as a local copy since the two views are
-  // deliberately independent (see tagdoclist.h)
+  // deliberately independent (see tagdoclist.h).  Anchored to the top of its grid row: cells differ in
+  //  height (a notebook's tag line, a page card's notebook line), and unanchored a shorter one is
+  //  centred, so its preview sits lower than its neighbours'.
   static const char* gridItemProtoSVG = R"(
-    <g class="listitem" margin="14 16" layout="box">
+    <g class="listitem" margin="14 16" layout="box" box-anchor="top">
       <rect box-anchor="fill" width="48" height="48"/>
       <g layout="flex" flex-direction="column">
         <g class="image-container" box-anchor="hfill" layout="box"></g>
