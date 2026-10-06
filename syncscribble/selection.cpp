@@ -541,9 +541,14 @@ static int workingLine(Element* s, const RulingFrame& f)
 //  the rule has its centre, so the letters of the line above the press moved too.
 RulingFrame skippedLineFrame(const RulingFrame& frame, Point pos)
 {
+  return skippedLineFrame(frame, frame.line(pos, Page::BLANK_Y_RULING));
+}
+
+RulingFrame skippedLineFrame(const RulingFrame& frame, int line)
+{
   const Dim yr = frame.yrulingOr(Page::BLANK_Y_RULING);
   RulingFrame skipped = frame;
-  skipped.origin = frame.toPage(Point(0, frame.line(pos, yr)*yr));
+  skipped.origin = frame.toPage(Point(0, line*yr));
   skipped.yRuling = 2*yr;
   return skipped;
 }

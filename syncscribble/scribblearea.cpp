@@ -233,22 +233,64 @@ void ScribbleArea::zoomCenter(Dim newZoom, bool snap)
 //  snap the user can see, so it must not move the view (see roundZoom())
 static constexpr Dim ZOOM_SNAP_ALIGN_MIN = 0.02;
 
+// the page exactly as wide as the view - no horzBorder margin either side (it used to leave one, so the
+//  snap target had a gap on both sides; see docs/agent/navigation.md)
+Dim ScribbleArea::fitWidthZoom(int pagenum) const
+{
+  return getViewWidth()/page(pagenum)->width()/preScale;
+}
+
+// whether a zoom gesture ending at `zoom` snaps to the fit width zoom `wzoom`: within 10% of it, unless fit
+//  width is itself within 5% of 100%, or zoom rounds to the 100% step - 100% always has priority.  This is
+//  the one predicate behind the snap (roundZoom()) and the "Fit" toast, so the toast never promises a snap
+//  that does not happen
+bool ScribbleArea::snapsToFitWidth(Dim zoom, Dim wzoom) const
+{
+  if(cfg->Bool("continuousZoom"))
+    return false;
+  if(!(wzoom < 1.1*zoom && zoom < 1.1*wzoom && (wzoom > 1.05 || wzoom < 0.95)))
+    return false;
+  return zoomSteps[nearestZoomStep(zoom)] != 1;
+}
+
+bool ScribbleArea::nearFitWidth(Dim px, Dim py) const
+{
+  int pagenum = dimToPageNum(screenToDim(Point(px, py)));
+  return snapsToFitWidth(mZoom, fitWidthZoom(pagenum));
+}
+
+// line the page up with the view after a fit snap, but only across the scroll direction (horizontally in
+//  the usual vertical layout) - never along it, so the reading position never jumps
+void ScribbleArea::alignFitPage(int pagenum, bool fitWidth)
+{
+  // ensure that page under center of gesture is active
+  setPageNum(pagenum);
+  Rect pageRect = pageDimToDim(currPage->rect());
+  Point screenCenter = screenToDim(Point(getViewWidth()/2, getViewHeight()/2));
+  Point shift(0, 0);  // in dim units, the amount the page moves on screen
+  if(viewMode != VIEWMODE_HORZ)
+    shift.x = fitWidth ? (screenToDim(Point(0, 0)).x - pageRect.left) : (screenCenter.x - pageRect.center().x);
+  if(viewMode != VIEWMODE_VERT && !fitWidth)
+    shift.y = screenCenter.y - pageRect.center().y;
+  if(shift.x != 0 || shift.y != 0)
+    doPan(shift.x*mScale, shift.y*mScale);
+}
+
 void ScribbleArea::roundZoom(Dim px, Dim py)
 {
   // should we still snap to width, height if continuous zoom enabled? use continuousZoom > 1?
   if(cfg->Bool("continuousZoom"))
     return;
-  Dim xborder = cfg->Float("horzBorder");
   // use page under center of gesture for snapping to width, height
   int pagenum = dimToPageNum(screenToDim(Point(px, py)));
-  Dim wzoom = (getViewWidth() - 2*xborder)/page(pagenum)->width()/preScale;
+  Dim wzoom = fitWidthZoom(pagenum);
   Dim hzoom = getViewHeight()/page(pagenum)->height()/preScale;
   Dim zoom = mZoom;
+  bool fitWidth = snapsToFitWidth(zoom, wzoom);
   ScribbleView::roundZoom(px, py);
   // zoom = 100% always has priority
   if(mZoom == 1)
     return;
-  bool fitWidth = wzoom < 1.1*zoom && zoom < 1.1*wzoom && (wzoom > 1.05 || wzoom < 0.95);
   bool fitHeight = !fitWidth && hzoom < 1.1*zoom && zoom < 1.1*hzoom && (hzoom > 1.05 || hzoom < 0.95);
   if(!fitWidth && !fitHeight)
     return;
@@ -257,26 +299,65 @@ void ScribbleArea::roundZoom(Dim px, Dim py)
   //  put. Aligning the page to the view is then done only across the scroll direction (horizontally in the
   //  usual vertical layout), and only when the zoom really changed: a two finger pan at fit zoom always
   //  changes the zoom by a hair, and fit height used to center the whole page, so the view jumped along
-  //  the page with no visible zoom snap (see docs/agent/navigation.md)
+  //  the page with no visible zoom snap (see docs/agent/navigation.md).  At or below fit width the
+  //  horizontal pan is locked anyway (updateContentDim()), so a fit width page is flush regardless
   zoomTo(fitZoom, px, py);
   if(std::abs(fitZoom/zoom - 1) < ZOOM_SNAP_ALIGN_MIN)
     return;
-  // ensure that page under center of gesture is active
-  setPageNum(pagenum);
-  Rect pageRect = pageDimToDim(currPage->rect());
-  Point screenCenter = screenToDim(Point(getViewWidth()/2, getViewHeight()/2));
-  Point shift(0, 0);  // in dim units, the amount the page moves on screen
-  if(viewMode != VIEWMODE_HORZ)
-    shift.x = fitWidth ? (screenToDim(Point(xborder, 0)).x - pageRect.left) : (screenCenter.x - pageRect.center().x);
-  if(viewMode != VIEWMODE_VERT && fitHeight)
-    shift.y = screenCenter.y - pageRect.center().y;
-  if(shift.x != 0 || shift.y != 0)
-    doPan(shift.x*mScale, shift.y*mScale);
+  alignFitPage(pagenum, fitWidth);
+}
+
+// Ctrl+wheel: no step rounding (the wheel is continuous), only the snap to fit width the toast promised
+void ScribbleArea::wheelZoomFinish(Dim px, Dim py)
+{
+  bool snap = nearFitWidth(px, py);
+  showFitHint(false);
+  if(!snap)
+    return;
+  int pagenum = dimToPageNum(screenToDim(Point(px, py)));
+  zoomTo(fitWidthZoom(pagenum), px, py);
+  zoomStepsIdx = nearestZoomStep(mZoom);
+  alignFitPage(pagenum, true);
+  uiChanged(UIState::Zoom);
+}
+
+// At or below fit width there is no horizontal pan at all: the pages in view are centered, which at exactly
+//  fit is flush with both edges.  Without this the horzBorder margins left 2*horzBorder of sideways play
+//  between fit width and the zoom where the page is that much narrower than the view.  "Fit" is judged by
+//  the widest page *in view*, not contentWidth (the widest page in the document): one landscape page must
+//  not unlock sideways panning on every portrait page, so this is rechecked on every pan.  Not in the
+//  horizontal layout, where horizontal is the scroll direction.  Half a pixel of tolerance, as fit width is
+//  computed in floating point.  Returns true if the limits changed
+bool ScribbleArea::updateHorzPanLock()
+{
+  Dim minx = freeMinOriginX, maxx = freeMaxOriginX;
+  Dim viewwidth = getViewWidth();
+  if(viewMode != VIEWMODE_HORZ && numPages() > 0) {
+    Dim viswidth = 0;
+    if(viewMode == VIEWMODE_SINGLE)
+      viswidth = currPage->width();
+    else {
+      int firstvis = dimToPageNum(Point(0, viewportRect.top));
+      int lastvis = std::min(dimToPageNum(Point(0, viewportRect.bottom)), numPages() - 1);
+      for(int ii = firstvis; ii <= lastvis; ++ii)
+        viswidth = std::max(viswidth, page(ii)->width());
+    }
+    // pages are centered in contentWidth with centerPages, else left aligned at 0
+    if(viswidth > 0 && viswidth*mScale <= viewwidth + 0.5)
+      minx = maxx = (viewwidth - (centerPages ? contentWidth : viswidth)*mScale)/2;
+  }
+  bool changed = minx != minOriginX || maxx != maxOriginX;
+  minOriginX = minx;
+  maxOriginX = maxx;
+  return changed;
 }
 
 void ScribbleArea::doPan(Dim dx, Dim dy)
 {
   ScribbleView::doPan(dx, dy);
+  // the pages now in view may lock (or unlock) sideways panning; pan by 0 to clamp to the new limits
+  if(updateHorzPanLock())
+    ScribbleView::doPan(0, 0);
   if(viewMode == VIEWMODE_SINGLE || (currMode != MODE_NONE && currMode != MODE_PAN))
     return;
 
@@ -1997,12 +2078,22 @@ DocPosition ScribbleArea::getPos() const
   return DocPosition(currPageNum, dimToPageDim(screenToDim(Point(0,0))));
 }
 
-// double tap to zoom to 100 percent
+// double tap zooms to the same gapless fit width a pinch snaps to; a second one, at fit, back to 100%
 void ScribbleArea::doDblClickAction(Point pos)
 {
   //scribbleDoc->setActiveArea(this);
-  zoomTo(1, pos.x, pos.y);
-  roundZoom(pos.x, pos.y); // update zoom step index
+  int pagenum = dimToPageNum(screenToDim(pos));
+  Dim wzoom = fitWidthZoom(pagenum);
+  if(std::abs(mZoom/wzoom - 1) < 1E-3) {
+    zoomTo(1, pos.x, pos.y);
+    roundZoom(pos.x, pos.y); // update zoom step index
+  }
+  else {
+    zoomTo(wzoom, pos.x, pos.y);
+    zoomStepsIdx = nearestZoomStep(mZoom);
+    alignFitPage(pagenum, true);
+  }
+  uiChanged(UIState::Zoom);
 }
 
 bool ScribbleArea::viewHref(const char* href)
@@ -2758,10 +2849,38 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
       marginLeft = MIN_DIM;
     }
   }
-  // text written on every second line: insert space and reflow work in text lines (see skippedLineFrame)
-  if(currMode == MODE_INSSPACERULED && scribbleDoc->scribbleMode->insSpaceSkipLines) {
-    gestureFrame = skippedLineFrame(gestureFrame, pos);
+  // what ruled insert space moves: the line it starts on and the local x it starts at (MIN_DIM: that whole
+  //  line); the press's own line and x for Right and the combined tool
+  insSpaceSelLine = initialLine;
+  insSpaceSelX = lx;
+  const bool skipLines = currMode == MODE_INSSPACERULED && scribbleDoc->scribbleMode->insSpaceSkipLines;
+  if(currMode == MODE_INSSPACERULED && insSpaceAxis == MODE_INSSPACEDOWN) {
+    // Insert Lines: near a rule line moves the block below it, mid-line splits the line at the pen, and with
+    //  Skip Lines a press on a blank line moves the text line below it as a block (see insertLinesStart())
+    const RulingFrame lineFrame = gestureFrame;
+    const Dim yr = lineFrame.yrulingOr(Page::BLANK_Y_RULING);
+    auto lineHasInk = [&](int line) {
+      for(Element* s : currPage->children()) {
+        if(s->isRulingRegion() || currPage->regionAt(s->com()) != lineFrame.region)
+          continue;
+        Point local = lineFrame.toLocal(s->com());
+        if(int(std::floor(local.y/yr)) == line && local.x >= marginLeft)  // not a bookmark in the margin
+          return true;
+      }
+      return false;
+    };
+    InsertLinesStart start = insertLinesStart(lineFrame.toLocal(pos).y, yr, skipLines, lineHasInk);
+    if(skipLines)
+      gestureFrame = skippedLineFrame(lineFrame, start.line);
     prevLine = initialLine = gestureFrame.line(pos, Page::BLANK_Y_RULING);
+    insSpaceSelLine = skipLines ? 0 : start.line;
+    if(start.wholeLine)
+      insSpaceSelX = MIN_DIM;
+  }
+  // text written on every second line: insert space and reflow work in text lines (see skippedLineFrame)
+  else if(skipLines) {
+    gestureFrame = skippedLineFrame(gestureFrame, pos);
+    prevLine = initialLine = insSpaceSelLine = gestureFrame.line(pos, Page::BLANK_Y_RULING);
   }
   if(currSelection) {
     // clear selection depending on mode
@@ -3060,21 +3179,39 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
   case MODE_INSSPACERULED:
     tempSelection = new Selection(selsource);
     tempSelection->ruling = gestureFrame;
-    ruledSelector = new RuledSelector(tempSelection, selColMode);
-    ruledSelector->selectRuledAfter(lx, prevLine);
+  {
+    // a whole line moves whatever columns it has (as a press in the margin does); a region has no margin
+    //  to make findStops() stand down, so the selector is told directly
+    const RuledSelector::ColMode colMode = insSpaceSelX == MIN_DIM ? RuledSelector::COL_NONE : selColMode;
+    tempSelection = new Selection(selsource);
+    tempSelection->ruling = gestureFrame;
+    ruledSelector = new RuledSelector(tempSelection, colMode);
+    ruledSelector->selectRuledAfter(insSpaceSelX, insSpaceSelLine);
     // if cursor down past left margin, we sort strokes, but we'll only
     //  enable inserting horz space if there are strokes on the first line
-    if(lx > marginLeft && tempSelection->sortRuled() == prevLine)
+    int firstLine = tempSelection->sortRuled();
+    if(insSpaceSelX > marginLeft && firstLine == insSpaceSelLine)
       insertSpaceX = true;
     else
       insertSpaceX = false;
+    // Insert Lines dragged back up erases the ink the moved text lands on, from where that text starts
+    //  rather than from the pen: pressed anywhere left of a line's rest that an earlier Insert Lines split
+    //  off, the drag up rejoins it without eating the start of the line it rejoins (which ends left of the
+    //  split, so short of the rest)
+    insSpaceEraseX = insSpaceSelX;
+    if(insSpaceAxis == MODE_INSSPACEDOWN && insSpaceSelX > marginLeft) {
+      insSpaceEraseX = MAX_DIM;
+      if(firstLine == insSpaceSelLine)
+        insSpaceEraseX = std::max(insSpaceSelX, gestureFrame.localBBox(tempSelection->strokes.front()->bbox()).left);
+    }
     // erase strokes convered by negative ruled insert space
     if(cfg->Bool("insSpaceErase")) {
       // second ruled selector for erasing strokes covered by negative insert space
       insSpaceEraseSelection = new Selection(selsource, Selection::STROKEDRAW_NONE);
       insSpaceEraseSelection->ruling = gestureFrame;
-      insSpaceEraseSelector = new RuledSelector(insSpaceEraseSelection, selColMode);
+      insSpaceEraseSelector = new RuledSelector(insSpaceEraseSelection, colMode);
     }
+  }
   default:
     break;
   }
@@ -3430,7 +3567,18 @@ void ScribbleArea::doMoveEvent(const InputEvent& event)
     else
       setPageDims(-1, initialPageSize.height() + gestureFrame.yrulingOr(Page::BLANK_Y_RULING) * (line - initialLine), true);
     // erase for negative insert space
-    if(insSpaceEraseSelection) {
+    if(insSpaceEraseSelection && insSpaceAxis == MODE_INSSPACEDOWN) {
+      // Insert Lines moves what it selected (from insSpaceSelX on insSpaceSelLine) by whole lines; the ink
+      //  it lands on runs from insSpaceEraseX on its new first line to where it started
+      int target = insSpaceSelLine + (line - initialLine);
+      if(target < insSpaceSelLine) {
+        insSpaceEraseSelector->findStops(insSpaceSelX, target);  // columns found from the pen, as always
+        insSpaceEraseSelector->selectRuled(insSpaceEraseX, target, insSpaceSelX, insSpaceSelLine);
+      }
+      else
+        insSpaceEraseSelection->clear();
+    }
+    else if(insSpaceEraseSelection) {
       Dim lx0 = gestureFrame.toLocal(initialPos).x;
       if(line < initialLine || (line == initialLine && lx < lx0))
         insSpaceEraseSelector->selectRuled(lx, line, lx0, initialLine);
@@ -4309,6 +4457,9 @@ void ScribbleArea::updateContentDim()
   //  content is centered in window
   if(minOriginX > maxOriginX)
     minOriginX = maxOriginX = (minOriginX + maxOriginX)/2;
+  freeMinOriginX = minOriginX;
+  freeMaxOriginX = maxOriginX;
+  updateHorzPanLock();
   // +10 to prevent very small scroll range which causes undesired behavior with scroll handle
   if(minOriginY + 10 > maxOriginY)
     minOriginY = maxOriginY = (minOriginY + maxOriginY)/2;

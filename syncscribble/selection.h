@@ -97,6 +97,8 @@ public:
 
 // for text written on every second line: a frame whose lines are the line at pos and every second one from it
 RulingFrame skippedLineFrame(const RulingFrame& frame, Point pos);
+// the same with its first text line given as a line of `frame` (Insert Lines picks it, see insertLinesStart())
+RulingFrame skippedLineFrame(const RulingFrame& frame, int line);
 
 // clipboard owns its strokes, unlike Selection
 class Clipboard

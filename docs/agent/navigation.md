@@ -85,7 +85,46 @@ Now a fit snap zooms about the gesture point, like a step snap, and only then al
 - **across** the scroll direction (horizontally in the vertical layout, vertically in the horizontal one,
   both in single-page view) - never along it, so the reading position never jumps.
 
-Pinned by `zoomSnapTest` (a 1180x760 view, since the test area is otherwise 1x1 and neither fit applies).
+Pinned by `zoomSnapTest` (a 1180x760 view, so fit width and fit height are far enough apart to snap separately).
+
+### Fit width: gapless, a "Fit" toast, and no sideways pan at or below it
+
+- **Fit width has no margin** (`ScribbleArea::fitWidthZoom()`): the page is exactly as wide as the view. It
+  used to subtract `2*horzBorder`, so the snap target had a 10 px gray gap either side. `horzBorder` itself
+  is still the over-scroll margin when zoomed in past fit.
+- **One predicate, `snapsToFitWidth()`, drives both the snap and the toast**: within 10% of fit width,
+  fit width not itself within 5% of 100%, and the zoom not rounding to the 100% step (100% wins). The toast
+  must never promise a snap that `roundZoom()` will not make, so do not give either its own threshold.
+- **The toast** is a `TextBox` built in `ScribbleWidget::create()` (`fitToastSVG`), centered in the
+  scribble area's box layout, styled like the floating bar: `.fit-toast-bg` / `.fit-toast-text` in
+  `ugui/theme.cpp` use `--floating-bg`, `--floating-outline` and `--text`. It is `hitTransparent`, since it
+  appears mid-gesture. `ScribbleView::showFitHint()` shows or hides it: `panZoomMove()` updates it after every
+  pinch step, and every way a pinch ends (`panZoomFinish`, `panZoomCancel`, two-to-one finger) hides it.
+- **Ctrl+wheel has no release**, so it used to never snap at all. It now updates the toast on every notch, and
+  `ScribbleWidget::scheduleWheelZoomSnap()` restarts a 400 ms timer. When the wheel goes quiet,
+  `ScribbleArea::wheelZoomFinish()` makes **only** the fit width snap. It does not round to zoom steps,
+  because the wheel is meant to be continuous.
+- **Double tap** (`doDblClickAction`, reached only through a pan: touch, or the Pan tool with a mouse) zooms
+  to the same gapless fit width for the page under the pointer. A second double tap, already at fit, goes
+  to 100%, which is what double tap used to do.
+- **At or below fit width, horizontal pan is locked** (`ScribbleArea::updateHorzPanLock()`), with
+  `minOriginX == maxOriginX`, the visible pages centered, and flush at exactly fit. Vertical pan is
+  untouched, and a fling's x component stops because both limits are hit. Traps:
+  - **Judge "fit" by the widest page in view, not `contentWidth`.** `contentWidth` is the widest page in the
+    *document*, so a single landscape page (a PDF import) unlocked sideways pan on every portrait page.
+    That was seen in agent-display on a real document. The lock is therefore re-evaluated in
+    `ScribbleArea::doPan()` on every pan, followed by `ScribbleView::doPan(0, 0)` to clamp to the new limits.
+    `freeMinOriginX`/`freeMaxOriginX` keep the unlocked limits from `updateContentDim()`.
+  - The lock position is "content centered" with `centerPages`, since every page is centered in
+    `contentWidth`, and "widest visible page centered" without it.
+  - There is a 0.5 px tolerance, because fit width is computed in floating point.
+  - The horizontal layout is excluded: there, horizontal is the scroll direction.
+- **This changed `test5`'s reference.** Its 600-wide page in the 600-wide test view is exactly at fit, so the
+  page is now flush (`xOffset` 0, not -10) and later strokes land 10 units further right.
+- **Not testable here: pinch.** agent-display has no multi-touch, so the pinch path of the toast is covered
+  only by reading the code and by the shared predicate. Ctrl+wheel, double click (Pan tool) and
+  Shift/horizontal wheel at fit were checked in agent-display. Pass `--wheelZoomSpeed=0.5` there: one
+  injected notch arrives as two steps (1.25^2), which jumps straight past the 10% window.
 
 ## Testing this (agent-display)
 

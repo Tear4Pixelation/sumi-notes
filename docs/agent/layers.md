@@ -5,8 +5,8 @@ hidden, and content on one cannot be selected, erased, moved or otherwise edited
 `LAYERS_INVESTIGATION.md`; that document is the rationale (including why the obvious design is
 wrong), this is the summary. The entry points are
 `ScribbleDoc::addLayer`/`removeLayer`/`setLayerLocked`/`setLayerHidden`/`setCurrentLayer`/
-`moveLayer`/`moveSelToLayer`; the UI over them is the layers view of [sidebar.md](sidebar.md), which so far reaches `addLayer`, `setCurrentLayer`, `setLayerLocked`, and through a row's
-right-click menu `setLayerName` and `removeLayer`.
+`moveLayer`/`moveSelToLayer`; the UI over them is the layers view of [sidebar.md](sidebar.md), which so far reaches `addLayer`, `setCurrentLayer`, `setLayerLocked`, `moveLayer` (each
+row's drag grip), and through a row's right-click menu `setLayerName` and `removeLayer`.
 
 **A layer is a tag on the element, not a `<g>` in the SVG.** `Element::layer()` serializes as
 `__layer`, the same custom-attribute convention as `__shape`/`__comx`/`__timestamp`. That buys the
@@ -99,7 +99,7 @@ layer and drop the rest on save. The attribute has no such failure mode.
   elements on the layer being removed and they must be reassigned undoably rather than orphaned.
 
 Known gaps: hiding a layer in a large delay-loaded document only
-affects loaded pages until the rest are loaded; and `setLayerHidden` and `moveLayer` have no UI yet
+affects loaded pages until the rest are loaded; and `setLayerHidden` has no UI yet
 (see the sidebar's own gaps in [sidebar.md](sidebar.md)).
 
 **Move to Layer** is a labeled dropdown on the selection popup (`MainWindow::refreshSelPopup()`, rebuilt

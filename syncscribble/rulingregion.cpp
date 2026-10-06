@@ -84,6 +84,15 @@ Point RulingFrame::snapToGrid(Point p, Dim fallback) const
   return toPage(Point(std::floor(local.x/xr + 0.5)*xr, std::floor(local.y/yr + 0.5)*yr));
 }
 
+InsertLinesStart insertLinesStart(Dim localY, Dim yr, bool skipLines, const std::function<bool(int)>& lineHasInk)
+{
+  int rule = int(std::floor(localY/yr + 0.5));
+  if(std::abs(localY - rule*yr) <= INSERT_LINES_SNAP*yr)
+    return {rule, true};
+  int line = int(std::floor(localY/yr));
+  return {line, skipLines && !lineHasInk(line)};
+}
+
 // RulingRegionParams
 
 constexpr Dim RulingRegionParams::MIN_PITCH;  // C++14: std::max takes it by reference

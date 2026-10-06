@@ -3,6 +3,7 @@
 #include "selection.h"
 
 #include "ugui/widgets.h"  // TODO: move loadSVGFragment somewhere else
+#include "resources.h"
 //extern const char* scribbleScrollerSVG;
 
 const char* scrollHandleSVG = R"#(
@@ -11,6 +12,16 @@ const char* scrollHandleSVG = R"#(
   <rect fill="#000" fill-opacity="0.4" box-anchor="vfill" x="22" width="4" height="36"/>
 </g>
 )#";
+
+// "Fit", centered over the canvas while a zoom gesture would snap to fit width if it ended now; styled
+//  like the floating bar (docs/agent/ui-floating-bar.md) - colors in ugui/theme.cpp (.fit-toast-*)
+static const char* fitToastSVG = R"#(<g class="fit-toast" layout="box">
+  <rect class="fit-toast-bg" box-anchor="fill" width="20" height="20" rx="14" ry="14"/>
+  <text class="fit-toast-text" font-size="17" margin="10 22"></text>
+</g>)#";
+
+// Ctrl+wheel zoom snaps to fit width once the wheel has been idle this long
+static constexpr int WHEEL_ZOOM_SNAP_MS = 400;
 
 static const char* scrollIndSVG = R"#(<g class="scroll-indicator" box-anchor="right top">
   <rect fill="#888" box-anchor="vfill" width="4" height="20" rx="2" ry="2"/>
@@ -41,6 +52,12 @@ ScribbleWidget* ScribbleWidget::create(Widget* container, ScribbleView* area)
   contents->addWidget(scrollIndicator);
   contents->addWidget(scrollContainer);
   scrollContainer->setLayoutIsolate(true);
+  TextBox* fitToast = new TextBox(loadSVGFragment(fitToastSVG));
+  fitToast->setText(_("Fit"));
+  fitToast->hitTransparent = true;  // shown mid-gesture: must never take a press meant for the page
+  fitToast->setVisible(false);
+  contents->addWidget(fitToast);
+  areaWidget->fitToast = fitToast;
   // isolate layout so page number change when scrolling doesn't trigger full relayout; can't set on
   //  statusbar since scroll handle will be dirty too
   contents->setLayoutIsolate(true);
@@ -117,6 +134,8 @@ ScribbleWidget::ScribbleWidget(ScribbleView* sv) : Widget(new SvgCustomNode), sc
         Dim speed = scribbleView->cfg->Float("wheelZoomSpeed")/120.0;
         Point p = window()->gui()->prevFingerPos - scribbleView->screenOrigin;
         scribbleView->zoomBy(std::pow(1.25, speed*event->wheel.y), p.x, p.y);
+        scribbleView->showFitHint(scribbleView->nearFitWidth(p.x, p.y));
+        scheduleWheelZoomSnap(p);
         scribbleView->doRefresh();
       }
       else {
@@ -271,6 +290,24 @@ void ScribbleWidget::showScroller()
       scrollIndicator->setVisible(false);
     }
     return opacity > finalopacity ? 50 : 0;
+  });
+}
+
+void ScribbleWidget::showFitToast(bool show)
+{
+  if(fitToast && fitToast->isVisible() != show)
+    fitToast->setVisible(show);
+}
+
+void ScribbleWidget::scheduleWheelZoomSnap(Point pos)
+{
+  if(!window() || !window()->gui())
+    return;
+  wheelSnapTimer = window()->gui()->setTimer(WHEEL_ZOOM_SNAP_MS, this, wheelSnapTimer, [this, pos](){
+    wheelSnapTimer = NULL;  // a callback returning 0 removes its timer
+    scribbleView->wheelZoomFinish(pos.x, pos.y);
+    scribbleView->doRefresh();
+    return 0;
   });
 }
 

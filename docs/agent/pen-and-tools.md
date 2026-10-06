@@ -251,3 +251,44 @@ reason, and a user would have to understand the heuristic to use the tool. (For 
 that reaches blank lines is underlines, not descenders - `calcCom` leans on a stroke's first point and top,
 so descenders stay on their line.) Tested by `ScribbleTest::skippedLinesTest()`, mutation-checked: ignoring
 the toggle and forcing it on each fail it.
+
+**Insert Lines has three press zones** (second-day report; `insertLinesStart()` in `rulingregion.cpp`,
+applied in `doPressEvent()`). They hold for Insert Lines only. Insert Space in Line and the internal combined
+`MODE_INSSPACERULED`, which the tests use, still take the press's own line and x. Lines are the gesture's
+frame (`rulingAt()`, so a Paper Patch's pitch and tilt), at single pitch even with Skip Lines:
+
+- **Within `INSERT_LINES_SNAP` (0.2) x pitch of a rule line**, on either side of it: the whole block from the
+  line below that rule moves, whatever x the pen is at. A pen resting on the rule a line's text sits on
+  therefore moves the lines *below* that text ("very close to the line, you move the entire part that is
+  below it").
+- **Mid-line** (the middle 60%): the line splits at the pen. Its part right of the pen, and everything
+  below, moves (the line break the tool already made).
+- **With Skip Lines, a mid-line press on a line with no ink** is on the blank line above a text line, and
+  moves that text line as a block. It used to split it at the pen. You had to put the pen on the text line
+  *above* to move a block ("two lines above"), which is the report's complaint. "Has ink" means a stroke
+  centre in that single-pitch line, on the same ruling, right of the margin (bookmarks don't count). This
+  checks where the pen is, not which lines are text lines, so the toggle stays a toggle. An underline in a
+  blank line makes that line count as text, which gives the old split.
+
+A whole-line start is `insSpaceSelX = MIN_DIM`, like a press in the margin: no column stops (a region has
+no margin, so the selectors get `COL_NONE` directly), no sideways move, no reflow. For a split,
+`insSpaceSelLine`/`insSpaceSelX` are the press. Steps are still counted from the line under the pen, so a
+press just above a rule moves the block one line as soon as the pen crosses that rule. With Skip Lines the
+doubled frame starts at the chosen line's top (`skippedLineFrame(frame, line)`). For a snapped press that
+can put the pen on line -1 of that frame, which is fine for the same reason.
+
+**Rejoining a split** is Insert Lines dragged back up. The negative-space erase used to start on the target
+line at the pen's x. So a press left of the split-off rest, which is where the pen naturally goes, ate the
+end of the line it was rejoining. For a split, Insert Lines now starts that erase at the left edge of the
+moved text's first line (`insSpaceEraseX`, never left of the pen; MAX_DIM if that line is empty). It erases
+only what the moved text lands on, and the line being rejoined ends left of the split, so the rejoin is
+clean wherever the pen goes down. Whole-line starts and margin presses keep the full-line erase, because
+dragging a block up over lines is how lines get deleted. Column stops are still found from the pen
+(`findStops()` is called explicitly before `selectRuled()`, which would otherwise use the erase's start).
+Each gesture is one undo step. Insert Space in Line pulled back left rejoins as it always has.
+
+Tested standalone by `regiontest` (the zones; with the zones removed, 5 checks fail) and in-app by the end of
+`ScribbleTest::insSpaceAxisTest()`: near-rule block, split then rejoin without erasing, and Skip Lines on a
+blank line versus a text line. With the press zones and the erase change reverted, 4 checks fail. Verified
+in agent-display on lined paper: near-rule block, mid-line split, rejoin from left of the rest, and one
+Ctrl+Z back to the split.

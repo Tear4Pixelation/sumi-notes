@@ -156,6 +156,12 @@ protected:
   bool uiDirty;
   void uiChanged(int reason);
   void roundZoom(Dim px, Dim py) override;
+  // fit width: the page exactly as wide as the view, no margin (see docs/agent/navigation.md)
+  Dim fitWidthZoom(int pagenum) const;
+  bool snapsToFitWidth(Dim zoom, Dim wzoom) const;
+  bool nearFitWidth(Dim px, Dim py) const override;
+  void wheelZoomFinish(Dim px, Dim py) override;
+  void alignFitPage(int pagenum, bool fitWidth);
   void doPan(Dim dx, Dim dy) override;
   void doRefresh() override;
   void pageSizeChanged() override;
@@ -192,6 +198,7 @@ protected:
   void dirtyPage(int pagenum, Rect dirty);
 
   void updateContentDim();
+  bool updateHorzPanLock();
   void drawThumbnail(Image* dest);
   void drawWatermark(Painter* painter, Page* page, const Rect& dirty);  // for iOS IAP
   void drawImage(Painter* imgpaint, const Rect& dirty) override;
@@ -235,6 +242,13 @@ protected:
   // which ruled insert space tool started the gesture: MODE_INSSPACEDOWN (lines only), MODE_INSSPACERIGHT
   //  (along the line only) or MODE_INSSPACERULED (both); the gesture itself runs as MODE_INSSPACERULED
   int insSpaceAxis = MODE_INSSPACERULED;
+  // what ruled insert space moves, in gestureFrame: everything after local x insSpaceSelX on line
+  //  insSpaceSelLine (MIN_DIM: the whole line).  The press's own line and x, except where Insert Lines picks
+  //  another start (insertLinesStart()); insSpaceEraseX is where Insert Lines dragged up starts erasing on
+  //  the line its text lands on
+  int insSpaceSelLine = 0;
+  Dim insSpaceSelX = 0;
+  Dim insSpaceEraseX = 0;
   // for resize selection
   Point scaleOrigin;
   Dim bookmarkSnapX;
@@ -248,6 +262,9 @@ protected:
   Dim currPageYOrigin = 0;
   Dim contentHeight = 0;
   Dim contentWidth = 0;
+  // horizontal scroll limits before updateHorzPanLock() pins them at or below fit width
+  Dim freeMinOriginX = 0;
+  Dim freeMaxOriginX = 0;
 
   // we'll only display one page at a time for now (like OneNote)
   int currPageNum = INT_MAX;

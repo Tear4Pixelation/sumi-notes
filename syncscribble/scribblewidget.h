@@ -20,6 +20,9 @@ public:
   void startTimer(Dim periodMs);
   void setScrollPosition(Dim pos, Dim vfrac);
   void showScroller();
+  void showFitToast(bool show);
+  // after a Ctrl+wheel zoom, the snap to fit width waits for the wheel to pause (there is no release)
+  void scheduleWheelZoomSnap(Point pos);
 
   ScribbleView* scribbleView;
   Widget* scroller = NULL;
@@ -32,6 +35,8 @@ public:
   TextBox* timeRangeLabel = NULL;
   TextBox* zoomLabel = NULL;
   Widget* focusIndicator = NULL;
+  Widget* fitToast = NULL;
+  Timer* wheelSnapTimer = NULL;
   Button* nextPage = NULL;
   Button* prevPage = NULL;
 

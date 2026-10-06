@@ -9,6 +9,7 @@
 // runRegionTests() returns the number of failed checks and is also called from ScribbleTest::runAll().
 
 #include <stdio.h>
+#include <algorithm>
 
 #include "rulingregion.h"
 
@@ -151,6 +152,35 @@ int runRegionTests()
     regionCheck(std::abs(r.frame().toLocal(held).y) < 1E-9 && std::abs(r.frame().toLocal(held).x - 50) < 1E-9,
         "on a rotated region, the nearest point is on the rotated edge");
     regionCheck(r.outline, "new regions are outlined");
+  }
+
+  // Insert Lines' zones (second-day report), pitch 40 so the snap band is 8 either side of a rule
+  {
+    const Dim yr = 40;
+    auto inkOn = [](std::vector<int> lines) {
+      return [lines](int line) { return std::find(lines.begin(), lines.end(), line) != lines.end(); };
+    };
+    auto none = inkOn({});
+    InsertLinesStart start = insertLinesStart(3.5*yr, yr, false, none);
+    regionCheck(start.line == 3 && !start.wholeLine, "mid-line: split line 3 at the pen");
+    start = insertLinesStart(3*yr + 3, yr, false, none);
+    regionCheck(start.line == 3 && start.wholeLine, "just below rule 3: the whole of line 3 down");
+    start = insertLinesStart(3*yr - 3, yr, false, none);
+    regionCheck(start.line == 3 && start.wholeLine, "just above rule 3 (bottom of line 2): the whole of line 3 down");
+    start = insertLinesStart(4*yr - 0.15*yr, yr, false, none);
+    regionCheck(start.line == 4 && start.wholeLine, "near the rule the text sits on: the block below it");
+    start = insertLinesStart(3*yr + 0.3*yr, yr, false, none);
+    regionCheck(start.line == 3 && !start.wholeLine, "past the snap band: a split again");
+    start = insertLinesStart(-3, yr, false, none);
+    regionCheck(start.line == 0 && start.wholeLine, "just above a region's top rule: its first line as a block");
+    // Skip Lines, text on lines 3 and 5: the blank line 4 between them moves line 5 whole, not split
+    auto text = inkOn({3, 5});
+    start = insertLinesStart(4.5*yr, yr, true, text);
+    regionCheck(start.line == 4 && start.wholeLine, "skip lines, blank line above a text line: that text line as a block");
+    start = insertLinesStart(5.5*yr, yr, true, text);
+    regionCheck(start.line == 5 && !start.wholeLine, "skip lines, inside a text line: split it at the pen");
+    start = insertLinesStart(4.5*yr, yr, false, text);
+    regionCheck(start.line == 4 && !start.wholeLine, "without skip lines an empty line is just a line");
   }
 
   return nRegionChecksFailed;

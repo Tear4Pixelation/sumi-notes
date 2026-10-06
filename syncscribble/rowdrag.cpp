@@ -5,21 +5,27 @@
 // in UI units, the same space event coordinates are in; about a third of a list row
 static constexpr real DRAG_START_DIST = 10;
 
-void RowDrag::addRow(Button* row, int key)
+void RowDrag::addRow(Button* row, int key, Button* grip)
 {
   rows[row] = key;
+  // the widget the gesture starts on; a grip is "draggable" so a ScrollWidget passes it drags along
+  //  the axis it scrolls, too (see the header)
+  Button* source = grip ? grip : row;
+  if(grip)
+    grip->node->addClass("draggable");
   // Added after Button's own handler, so it runs first (later handlers have priority) - which is what
   //  lets a drop swallow the release before Button turns it into a click.
-  row->addHandler([this, row](SvgGui* gui, SDL_Event* event){
+  source->addHandler([this, row, source](SvgGui* gui, SDL_Event* event){
     if(event->type == SDL_FINGERDOWN && event->tfinger.fingerId == SDL_BUTTON_LMASK) {
       sourceRow = row;
+      sourceWidget = source;
       dragging = false;
       pressPos = Point(event->tfinger.x, event->tfinger.y);
       return false;  // Button still handles the press
     }
-    if(sourceRow != row)
+    if(sourceWidget != source)
       return false;
-    if(event->type == SDL_FINGERMOTION && gui->pressedWidget == row) {
+    if(event->type == SDL_FINGERMOTION && gui->pressedWidget == source) {
       Point pos(event->tfinger.x, event->tfinger.y);
       if(!dragging && pos.dist(pressPos) >= DRAG_START_DIST) {
         dragging = true;
@@ -47,6 +53,7 @@ void RowDrag::addRow(Button* row, int key)
       return false;
     if(!dragging) {
       sourceRow = NULL;
+      sourceWidget = NULL;
       return false;  // a plain click
     }
     int src = rows[row];
@@ -55,8 +62,8 @@ void RowDrag::addRow(Button* row, int key)
     bool doDrop = released && hoverTarget && (hoverTarget == rootTarget || rows.count(hoverTarget));
     if(doDrop)
       dst = hoverTarget == rootTarget ? ROOT : rows[hoverTarget];
-    row->node->removeClass("pressed");
-    row->node->removeClass("hovered");
+    source->node->removeClass("pressed");
+    source->node->removeClass("hovered");
     endDrag();
     if(doDrop)
       drop(gui, src, dst);
@@ -99,6 +106,7 @@ void RowDrag::endDrag()
   if(sourceRow)
     sourceRow->node->removeClass("dragging");
   sourceRow = NULL;
+  sourceWidget = NULL;
   dragging = false;
 }
 
@@ -121,6 +129,7 @@ void RowDrag::clear()
     setHover(NULL);
   hoverTarget = NULL;
   sourceRow = NULL;
+  sourceWidget = NULL;
   dragging = false;
   rows.clear();
 }

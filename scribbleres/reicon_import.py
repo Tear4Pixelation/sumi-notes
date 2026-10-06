@@ -68,8 +68,8 @@ MAPPING = {
   'ic_menu_hidden': 'eye-off',
   'ic_menu_visible': 'eye',
   'ic_menu_outline': 'list3',
-  # the sidebar toolbar button, whose glyph names the edge the sidebar is docked to.  Deliberately
-  # not reusing ic_menu_split_lr/_rl, which are the same reicon glyphs but mean *split view*
+  # the sidebar toolbar button, whose glyph names the edge the sidebar is docked to.  The split view's
+  # L/R icons are *not* these glyphs (see ROTATE), so the two buttons cannot be mistaken for each other
   'ic_menu_sidebar_left': 'sidebar-left',
   'ic_menu_sidebar_right': 'sidebar-right',
   'ic_menu_minus': 'minus',
@@ -83,6 +83,8 @@ MAPPING = {
   'ic_menu_preferences': 'sliders',
   'ic_menu_prev': 'chevron-left',
   'ic_menu_redo': 'redo',
+  # the drag handle on a sidebar layer row (sidebar.cpp)
+  'ic_menu_reorder': 'reorder',
   'ic_menu_refresh': 'refresh',
   'ic_menu_save': 'floppy2',
   # the document browser's select mode (tagdoclist.cpp); not ic_menu_select*, which are the editor's
@@ -100,8 +102,6 @@ MAPPING = {
   'ic_menu_shape_head_end': 'arrow-right',
   'ic_menu_share': 'share',
   'ic_menu_split_bt': 'sidebar-bottom',
-  'ic_menu_split_lr': 'sidebar-left',
-  'ic_menu_split_rl': 'sidebar-right',
   'ic_menu_split_tb': 'sidebar-top',
   'ic_menu_stretch': 'scale',
   'ic_menu_undo': 'undo',
@@ -111,7 +111,11 @@ MAPPING = {
 }
 
 # reicon has no vertical-dots icon, so the horizontal one is rotated in place
-ROTATE = {'ic_menu_overflow': ('more-h', 90)}
+ROTATE = {'ic_menu_overflow': ('more-h', 90),
+  # the split view's L/R icons are its T/B icons turned a quarter anticlockwise (top -> left), so the
+  #  four read as one family - and do not reuse sidebar-left/-right, which are the sidebar button's
+  'ic_menu_split_lr': ('sidebar-top', -90),
+  'ic_menu_split_rl': ('sidebar-bottom', -90)}
 
 # the document list draws these at thumbnail size rather than toolbar size, where the outline weight
 # reads as spindly; everything else in the app stays outline

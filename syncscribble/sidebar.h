@@ -111,6 +111,8 @@ private:
   // the outline as last built, for canDrop's "not onto its own descendant"
   std::vector<OutlineEntry> shownEntries;
   std::unique_ptr<RowDrag> outlineDrag;
+  // reorders layers; keyed by layer id, picked up by each row's grip (ic_menu_reorder)
+  std::unique_ptr<RowDrag> layerDrag;
 
   // One persistent popup per row kind, reparented onto the row that opened it (TagDocList::showTagMenu
   //  explains why), and what it was opened for.

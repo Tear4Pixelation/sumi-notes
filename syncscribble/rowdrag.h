@@ -11,6 +11,13 @@
 //  gesture, and it hands a drag to the row only when it starts *sideways* (ScrollWidget's filter passes
 //  through a drag along an axis it cannot scroll) - so vertical drags keep scrolling the list, and a
 //  row is picked up by moving sideways first.
+//
+// A row can instead be given a *grip* (addRow's third argument): a visible handle that is the only place
+//  the row is picked up from, in any direction and with any pointer.  The grip carries ugui's "draggable"
+//  class, which makes ScrollWidget hand it the drag whatever its axis - so a vertical drag on the grip
+//  moves the row while a vertical drag anywhere else on it still scrolls.  The sidebar's layer rows use
+//  this: a reorder is a vertical gesture, which the sideways rule above would never let through on a
+//  tablet, and an invisible gesture is one nobody finds.
 
 #include "ugui/widgets.h"
 #include <functional>
@@ -31,8 +38,9 @@ public:
   // whether `src` may be dropped on `dst`, e.g. not on its own descendant; unset allows everything
   std::function<bool(int src, int dst)> canDrop;
 
-  // makes `row` draggable and a drop target, identified to the callbacks as `key` (>= 0)
-  void addRow(Button* row, int key);
+  // makes `row` draggable and a drop target, identified to the callbacks as `key` (>= 0); with `grip`,
+  //  the row is picked up only by that widget (a Button inside the row), in any direction
+  void addRow(Button* row, int key, Button* grip = NULL);
   // a widget that stands for "top level", e.g. the tag browser's All Documents row
   void setRootTarget(Widget* target) { rootTarget = target; }
   // forget every row; call before the rows are deleted
@@ -47,8 +55,10 @@ private:
   Widget* ownerWidget;
   std::unordered_map<Widget*, int> rows;
   Widget* rootTarget = NULL;
-  // the row the current press started on, and whether it has become a drag
+  // the row the current press started on (and the widget pressed: the row, or its grip), and whether
+  //  it has become a drag
   Widget* sourceRow = NULL;
+  Widget* sourceWidget = NULL;
   bool dragging = false;
   Point pressPos;
   Widget* hoverTarget = NULL;

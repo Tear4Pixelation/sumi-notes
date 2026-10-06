@@ -199,6 +199,12 @@ void ScribbleView::roundZoom(Dim px, Dim py)
     zoomTo(zoomSteps[zoomStepsIdx], px, py);
 }
 
+void ScribbleView::showFitHint(bool show)
+{
+  if(widget)
+    widget->showFitToast(show);
+}
+
 // viewport is independent of pan offsets
 //Rect ScribbleView::imageToDim(const Rect& r) const
 //{
@@ -357,6 +363,7 @@ void ScribbleView::panZoomMove(const InputEvent& event, int prevpoints, int next
     return;
 
   if(npoints >= 2 && nextpoints < 2) {
+    showFitHint(false);
     if(mZoom != initPanZoom)
       roundZoom(prevPointerCOM.x, prevPointerCOM.y);
     //initPanZoom = mZoom;'
@@ -376,6 +383,8 @@ void ScribbleView::panZoomMove(const InputEvent& event, int prevpoints, int next
     if(ABS(newPointerDist - prevPointerDist) >= TOUCH_TOLERANCE) {
       zoomBy(newPointerDist / prevPointerDist, com.x, com.y);
       prevPointerDist = newPointerDist;
+      // while the fingers are still down: "Fit" if letting go here would snap to fit width
+      showFitHint(nearFitWidth(com.x, com.y));
     }
   }
   // don't call this fn unless you want to pan!
@@ -400,6 +409,7 @@ void ScribbleView::panZoomMove(const InputEvent& event, int prevpoints, int next
 
 void ScribbleView::panZoomFinish(const InputEvent& event)
 {
+  showFitHint(false);
   // any zooming prevents clicking or kinetic scroll
   if(mZoom != initPanZoom) {
     roundZoom(prevPointerCOM.x, prevPointerCOM.y);
@@ -451,6 +461,7 @@ void ScribbleView::panZoomFinish(const InputEvent& event)
 
 void ScribbleView::panZoomCancel()
 {
+  showFitHint(false);
   if(mZoom != initPanZoom)
     setZoom(initPanZoom);
   setCornerPos(initPanOrigin);

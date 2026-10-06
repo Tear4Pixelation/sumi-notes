@@ -29,6 +29,9 @@ static const Dim sbSelectorH    = 74*floatUIScale;
 static const Dim sbSelectorIcon = 32*floatUIScale;
 static const Dim sbSearchH      = 55*floatUIScale;
 static const Dim sbIconSize     = 24*floatUIScale;
+// A layer row's drag grip: the icon is the row's icon size, but on touch its hit target is a full
+//  toolbar button, as the bottom row's are - a 15 pt grip is not something a finger can find.
+static const Dim sbGripCell     = floatTouchUI ? floatBtnSize : sbIconSize;
 // The bottom row's buttons (add, pin, side, search).  On desktop each cell is just its icon, as in the
 //  design; for touch that is far too small to hit, so the cell becomes a full toolbar button and the
 //  icon the toolbar's icon size (see floatTouchUI in basics.h).
@@ -184,6 +187,27 @@ void Sidebar::createUI()
       }
     }
     return src != dst;
+  };
+
+  // drag a layer row by its grip onto another row to take that row's place in the stack.  moveLayer
+  //  works in table indices, which are looked up at the drop: the keys are ids, since a search can
+  //  hide rows and the indices of what is shown would not be the table's.
+  layerDrag.reset(new RowDrag(this));
+  layerDrag->canDrop = [](int src, int dst){ return src != dst && dst != RowDrag::ROOT; };
+  layerDrag->onDrop = [this](int src, int dst){
+    if(!scribbleDoc)
+      return;
+    const LayerList& layerList = scribbleDoc->layers();
+    int fromIdx = -1, toIdx = -1;
+    for(int idx = 0; idx < layerList.size(); ++idx) {
+      if(layerList.layers[idx].id == src) fromIdx = idx;
+      if(layerList.layers[idx].id == dst) toIdx = idx;
+    }
+    // erase-then-insert at the target's index puts the layer where the target was, the target moving
+    //  one step towards where the dragged layer came from - in either direction
+    if(fromIdx >= 0 && toIdx >= 0)
+      scribbleDoc->moveLayer(fromIdx, toIdx);
+    rebuildList();
   };
 
   outlineMenu = createArrowPopup(Menu::VERT_LEFT);
@@ -525,6 +549,7 @@ void Sidebar::rebuildList()
   outlineMenu->removeFromParent();
   layerMenu->removeFromParent();
   outlineDrag->clear();
+  layerDrag->clear();
   window()->gui()->deleteContents(listView);
   // Building the outline loads every page not yet loaded, so the list is complete the moment it is
   //  shown.  With outline(false) here it held only the pages that happened to be loaded, and entries
@@ -675,6 +700,23 @@ void Sidebar::buildLayerRows()
       });
     };
     content->addWidget(lockBtn);
+
+    // The reorder grip, at the row's trailing end as on iOS.  A visible handle rather than a gesture on
+    //  the row itself: on a tablet the list scrolls vertically, so a vertical drag of the whole row can
+    //  only ever scroll it (rowdrag.h).  The grip is pressed instead of the row, so it never picks the
+    //  layer, and with a mouse it still needs DRAG_START_DIST of travel before it lifts anything.
+    Button* grip = createToolbutton(SvgGui::useFile("icons/ic_menu_reorder.svg"), _("Drag to Reorder"));
+    static_cast<SvgUse*>(grip->selectFirst(".icon")->node)->setViewport(Rect::wh(sbIconSize, sbIconSize));
+    Widget* gripBg = grip->selectFirst(".background");
+    if(gripBg && gripBg->node->type() == SvgNode::RECT)
+      static_cast<SvgRect*>(gripBg->node)->setRect(Rect::wh(sbGripCell, sbGripCell));
+    grip->node->addClass("sb-grip");
+    grip->setMargins(0, 0, 0, floatTouchUI ? 0 : sbPad);
+    content->addWidget(grip);
+    if(layerList.size() > 1)
+      layerDrag->addRow(static_cast<Button*>(row), layerId, grip);
+    else
+      grip->setVisible(false);  // nothing to reorder against
 
     if(info.id == currId)
       row->node->addClass("checked");

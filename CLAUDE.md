@@ -116,7 +116,7 @@ relevant file before changing that area.
 - [ruling-regions.md](docs/agent/ruling-regions.md) - Paper Patch: per-area ruling, `rulingAt()`, tilted frames, region panel
 - [document-scanning.md](docs/agent/document-scanning.md) - homography, warp, enhance, quad detection in `ulib`; capture per platform (Android camera apps, iOS camera sheet, desktop `Camera` backends + `CameraDialog`), the MJPEG Huffman-table trap
 - [shapes.md](docs/agent/shapes.md) - parametric shapes, `ShapeParams` descriptor, polyline/curve family, toggles, hold-to-snap recognition, 45 degree snap
-- [pen-and-tools.md](docs/agent/pen-and-tools.md) - marker centre-on-line, relative pen width, selection color/width/dash style, Switch Back, Select touching, reflow indent and word gap
+- [pen-and-tools.md](docs/agent/pen-and-tools.md) - marker centre-on-line, relative pen width, selection color/width/dash style, Switch Back, Select touching, reflow indent and word gap, Insert Lines press zones and rejoining a split
 - [history-panel.md](docs/agent/history-panel.md) - `ButtonDragTimeline` undo/redo ruler, lanes, `--screenDPI` layout preview
 - [night-mode.md](docs/agent/night-mode.md) - Invert Colors as a render-time `ColorMap`, mirrored theme vs lightness flip, never a document edit
 - [screenshot.md](docs/agent/screenshot.md) - region kept dashed after a selection (even an empty one), capture without paper/ruling, white-to-alpha, crop dialog, Copy / Add to page

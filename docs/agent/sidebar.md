@@ -80,8 +80,10 @@ the summary. `syncscribble/sidebar.cpp`.
   whenever the side changes, and the action is checkable so the button also reads as open/closed.
   The left/right variants are therefore not decorative: they say where the panel will appear. Note
   the sidebar's *own* side toggle shows the **opposite** glyph, because that one names the side it
-  would move to rather than where it is. These are deliberately **not** `ic_menu_split_lr`/`_rl`,
-  which are the same reicon glyphs but mean split view.
+  would move to rather than where it is. The split view's L/R icons used to be these same glyphs, so the
+  two buttons sat side by side looking identical; `ic_menu_split_lr`/`_rl` are now `sidebar-top`/
+  `sidebar-bottom` rotated -90 degrees (`ROTATE` in `scribbleres/reicon_import.py`), so the four split
+  icons read as one family and none of them is the sidebar's.
 - It goes through `addTBWidget`, so the overflow menu item is generated automatically when the panel
   is too narrow, rather than being a second hand-placed entry.
 - **Pinned, it sits *under* `#main-toolbar-container`**, and ugui hit-tests a container anywhere in its
@@ -120,9 +122,18 @@ the summary. `syncscribble/sidebar.cpp`.
 
 Known gaps: the lock toggle is drawn on every layer row (dimmed when unlocked) rather than only on
 locked ones as designed, because the design leaves an unlocked row no way to lock it; the layer
-preview is a plain block, since a layer spans every page and has no single thumbnail; hide and
-reorder exist in `LayerList` but have no place in the design yet; and a drag does not autoscroll a
-list longer than the panel.
+preview is a plain block, since a layer spans every page and has no single thumbnail; hide exists in
+`LayerList` but has no place in the design yet; and a drag does not autoscroll a list longer than the
+panel.
+
+- **Layers are reordered by a grip** (`ic_menu_reorder`, reicon `reorder`) at the trailing end of each
+  layer row, hidden when there is only one layer. Drag it onto another row and the layer takes that row's
+  place (`ScribbleDoc::moveLayer`, one undo step; the target shifts one step towards where the dragged
+  layer came from, in either direction). It is a visible handle rather than a gesture on the row because
+  a reorder is vertical, and on a tablet a vertical drag on a row can only ever scroll the list (see
+  below) - a user on an iPad could not find any way to reorder. Pressing the grip never picks the layer.
+  On touch builds its hit target is a full `floatBtnSize` toolbar cell, as the bottom row's are. Keys are
+  layer ids, mapped to table indices at the drop, so a search that hides rows does not skew them.
 
 ## Dragging list rows (`rowdrag.cpp`)
 
@@ -133,9 +144,15 @@ release is still the Button's click; past `DRAG_START_DIST` it is a drag and the
 With a **pen or finger the list's `ScrollWidget` owns the gesture** and passes a drag to the row only
 when it starts sideways (its filter's "axis it cannot scroll" rule), so vertical drags still scroll; for
 the same reason the row must accept motion events even below the threshold, or the scroll view takes the
-gesture back. Only the mouse path has been exercised (agent-pointer is a mouse). The drop is delivered on
+gesture back. **`addRow(row, key, grip)`** instead makes a grip button the only place the row is picked
+up from: the grip gets ugui's `draggable` class, which `ScrollWidget`'s filter checks *before* the axis
+rule, so a drag on the grip passes through in any direction while a drag anywhere else on the row still
+scrolls. Only the mouse path has been exercised (agent-pointer is a mouse); the touch path through
+`draggable` is ugui's own and was read, not driven. The drop is delivered on
 a 1 ms timer, since it rebuilds the list that owns the row still dispatching; keys must therefore stay
 valid across a rebuild - page numbers for the outline, and for tags a per-window id table that is never
-cleared. Feedback is class-based: `.drop-target` fills the row's sizing rect with an opaque dark blue (a
-stroke nudged the list, as it grows the bounds), `.dragging` greys the label (`opacity`, as a CSS rule
-or an attribute, did not show).
+cleared. Feedback is class-based: `.drop-target` fills the row's sizing rect with `--checked` at
+`fill-opacity: 0.3` (a stroke nudged the list, as it grows the bounds), `.dragging` turns the label
+`--text-weak` (`opacity`, as a CSS rule or an attribute, did not show). Both rules are in the sidebar
+section of `ugui/theme.cpp` and match only `.sb-row`; until they were added there was no rule at all, so
+a drag showed nothing. The tag browser's rows (`.tag-row`) still have none.

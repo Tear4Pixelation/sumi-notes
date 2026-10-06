@@ -1266,9 +1266,10 @@ int ScribbleTest::zoomSnapTest()
   scribbleDoc->newPage();
   scribbleDoc->newPage();
   area->gotoPage(1);
-  Dim xborder = ScribbleApp::cfg->Float("horzBorder");
   Page* page = area->page(1);
-  Dim wzoom = (area->getViewWidth() - 2*xborder)/page->width()/area->preScale;
+  // fit width has no margin: the page exactly as wide as the view
+  Dim wzoom = area->getViewWidth()/page->width()/area->preScale;
+  check(std::abs(area->fitWidthZoom(1) - wzoom) < 1e-9, "fit width is the gapless view width");
   Dim hzoom = area->getViewHeight()/page->height()/area->preScale;
   Point center(area->getViewWidth()/2, area->getViewHeight()/2);
   // the document point under the view's center, which a snap that only zooms about the center keeps there
@@ -1313,8 +1314,46 @@ int ScribbleTest::zoomSnapTest()
     check(std::abs(area->mZoom - wzoom) < 1e-9, "7% off fit width snaps to fit width");
     check(std::abs(before.y - after.y) < 0.5, "a snap to fit width does not scroll");
     Point pageLeft = area->dimToScreen(area->pageDimToDim(Point(0, 0)));
-    check(std::abs(pageLeft.x - xborder) < 1.5, "a snap to fit width lines the page up with the border");
+    check(std::abs(pageLeft.x) < 1.5, "a snap to fit width puts the page flush with the view's left edge");
   }
+
+  // at fit width there is no sideways pan, and the page is flush with both edges
+  area->zoomTo(wzoom, center.x, center.y);
+  Point pageLeftAtFit = area->dimToScreen(area->pageDimToDim(Point(0, 0)));
+  check(std::abs(pageLeftAtFit.x) < 1.5, "at fit width the page is flush with the view's left edge");
+  area->doPan(40, 0);
+  check(std::abs(area->dimToScreen(area->pageDimToDim(Point(0, 0))).x - pageLeftAtFit.x) < 0.5,
+      "at fit width a horizontal pan does nothing");
+  Dim yBefore = area->dimToScreen(area->pageDimToDim(Point(0, 0))).y;
+  area->doPan(-40, -60);
+  check(std::abs(area->dimToScreen(area->pageDimToDim(Point(0, 0))).y - yBefore) > 30,
+      "at fit width a vertical pan still scrolls");
+  // below fit width: still no sideways pan, and the page stays centered
+  area->zoomTo(wzoom*0.8, center.x, center.y);
+  area->doPan(-50, 0);
+  Rect pageOnScreen = area->dimToScreen(area->pageDimToDim(area->page(area->currPageNum)->rect()));
+  check(std::abs(pageOnScreen.center().x - center.x) < 1.5, "below fit width the page stays centered");
+  // above fit width, sideways panning works as before
+  area->zoomTo(wzoom*1.5, center.x, center.y);
+  Dim xBefore = area->dimToScreen(area->pageDimToDim(Point(0, 0))).x;
+  area->doPan(-30, 0);
+  check(std::abs(area->dimToScreen(area->pageDimToDim(Point(0, 0))).x - xBefore) > 20,
+      "above fit width a horizontal pan still works");
+
+  // the "Fit" toast's predicate: near fit width, not far from it
+  area->zoomTo(wzoom*1.06, center.x, center.y);
+  check(area->nearFitWidth(center.x, center.y), "6% off fit width shows the Fit toast");
+  area->zoomTo(wzoom*1.3, center.x, center.y);
+  check(!area->nearFitWidth(center.x, center.y), "30% off fit width shows no Fit toast");
+
+  // a double tap zooms to the same gapless fit width, and a second one back to 100%
+  area->zoomTo(2, center.x, center.y);
+  area->doDblClickAction(center);
+  check(std::abs(area->mZoom - wzoom) < 1e-9, "a double tap zooms to fit width");
+  check(std::abs(area->dimToScreen(area->pageDimToDim(Point(0, 0))).x) < 1.5,
+      "a double tap's fit width is flush with the view's left edge");
+  area->doDblClickAction(center);
+  check(area->mZoom == 1, "a double tap at fit width zooms to 100%");
   ScribbleApp::cfg->set("continuousZoom", wasContinuous);
   area->screenRect = wasScreenRect;
   area->resetZoom();
@@ -2766,6 +2805,71 @@ int ScribbleTest::insSpaceAxisTest()
       check(leftOf(second) > secondLeft + 40, "right: the rest of the line is pushed right");
       check(allOn(below, 5), "right: the text below stays on its line");
     }
+  }
+
+  // Insert Lines' zones (second-day report, see insertLinesStart()): a drag straight down or up
+  auto downDrag = [&](Point from, Dim dy) {
+    scribbleMode->setMode(MODE_INSSPACEDOWN);
+    at(from, press);
+    for(int ii = 1; ii <= 8; ++ii) at(Point(from.x, from.y + dy*ii/8), INPUTEVENT_MOVE);
+    at(Point(from.x, from.y + dy), release);
+  };
+  auto onPage = [&](const std::vector<Element*>& strokes) {
+    for(Element* s : strokes) {
+      bool found = false;
+      for(Element* t : scribbleArea->currPage->children()) found = found || t == s;
+      if(!found) return false;
+    }
+    return true;
+  };
+  auto fresh = [&]() {
+    scribbleDoc->newDocument();
+    doCommand(ID_RESETZOOM);
+    scribbleDoc->app->setPen(ScribblePen(Color::BLACK, 2, ScribblePen::TIP_ROUND));
+  };
+  const Dim gapX = textLeft + 4*14 + 8;  // between the two words of a line
+  {
+    // pressed just below the rule above a line, between its words: the whole line moves, not its rest
+    fresh();
+    std::vector<Element*> first = word(textLeft, 3), second = word(textLeft + 4*14 + 16, 3);
+    std::vector<Element*> below = word(textLeft, 5);
+    downDrag(Point(gapX, 3*pitch + 3), 2*pitch);
+    check(allOn(first, 5) && allOn(second, 5), "near the rule above a line: the whole line moves down");
+    check(allOn(below, 7), "near the rule above a line: the text below moves with it");
+  }
+  {
+    // split a line in the middle, then press anywhere left of the rest it put on the next line and drag up:
+    //  the rest rejoins its line, and the start of that line (ending left of the split) is not erased
+    fresh();
+    std::vector<Element*> first = word(textLeft, 3), second = word(textLeft + 4*14 + 16, 3);
+    std::vector<Element*> below = word(textLeft, 5);
+    downDrag(Point(gapX, 3.5*pitch), pitch);
+    check(allOn(first, 3) && allOn(second, 4) && allOn(below, 6), "mid-line: the rest of the line moves to a new line");
+    downDrag(Point(textLeft + 20, 4.5*pitch), -pitch);
+    check(onPage(first) && onPage(second) && onPage(below), "rejoining a split erases nothing");
+    check(onPage(first) && onPage(second) && allOn(first, 3) && allOn(second, 3), "rejoining a split: the line is whole again");
+    check(onPage(below) && allOn(below, 5), "rejoining a split: the text below moves back up");
+  }
+  {
+    // Skip Lines, text on lines 3, 5 and 7: pressed between the words but on the blank line 4, the whole
+    //  of line 5 moves down a text line - it used to split line 5 at the pen
+    scribbleMode->insSpaceSkipLines = true;
+    fresh();
+    std::vector<Element*> above = word(textLeft, 3);
+    word(textLeft + 4*14 + 16, 3);
+    std::vector<Element*> first = word(textLeft, 5), second = word(textLeft + 4*14 + 16, 5);
+    std::vector<Element*> last = word(textLeft, 7);
+    downDrag(Point(gapX, 4.5*pitch), 2*pitch);
+    check(allOn(above, 3), "skip lines, pressed on a blank line: the text line above stays");
+    check(allOn(first, 7) && allOn(second, 7), "skip lines, pressed on a blank line: the text line below moves whole");
+    check(allOn(last, 9), "skip lines, pressed on a blank line: the text below moves with it");
+    // inside a text line it still splits there
+    fresh();
+    first = word(textLeft, 5);
+    second = word(textLeft + 4*14 + 16, 5);
+    downDrag(Point(gapX, 5.5*pitch), 2*pitch);
+    check(allOn(first, 5) && allOn(second, 7), "skip lines, pressed inside a text line: split at the pen");
+    scribbleMode->insSpaceSkipLines = false;
   }
   scribbleMode->insSpaceSkipLines = wasSkipping;
   scribbleDoc->clearSelection();

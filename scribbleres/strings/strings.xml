@@ -314,6 +314,8 @@
   <string name="menu_zoompage">Zoom Page</string>
   <string name="menu_zoomwidth">Zoom Width</string>
   <string name="menu_resetzoom">Reset Zoom</string>
+  <string name="zoom_fit_toast">Fit</string>
+  <string name="drag_to_reorder">Drag to Reorder</string>
   <string name="menu_webview">Show Web View</string>
   <string name="menu_exportdocs">Backup Documents</string>
   <string name="menu_addbookmark">Bookmark</string>

@@ -800,6 +800,19 @@ static const char* icons__ic_menu_refresh_svg = R"~~~~(<?xml version="1.0" encod
 </svg>
 )~~~~";
 
+static const char* icons__ic_menu_reorder_svg = R"~~~~(<?xml version="1.0" encoding="utf-8"?>
+<svg version="1.2" baseProfile="tiny" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+  x="0px" y="0px" viewBox="0 0 24 24" xml:space="preserve">
+<!-- reicon "reorder" (outline), https://reicon.dev - MIT -->
+<g class="icon">
+  <path fill-rule="evenodd" clip-rule="evenodd" d="M19.75 10C19.75 10.4142 19.4142 10.75 19 10.75L5 10.75C4.58579 10.75 4.25 10.4142 4.25 10C4.25 9.58579 4.58579 9.25 5 9.25L19 9.25C19.4142 9.25 19.75 9.58579 19.75 10Z" fill="currentColor"/>
+  <path fill-rule="evenodd" clip-rule="evenodd" d="M19.75 14C19.75 14.4142 19.4142 14.75 19 14.75L5 14.75C4.58579 14.75 4.25 14.4142 4.25 14C4.25 13.5858 4.58579 13.25 5 13.25L19 13.25C19.4142 13.25 19.75 13.5858 19.75 14Z" fill="currentColor"/>
+  <path fill-rule="evenodd" clip-rule="evenodd" d="M19.75 6C19.75 6.41421 19.4142 6.75 19 6.75L5 6.75C4.58579 6.75 4.25 6.41421 4.25 6C4.25 5.58579 4.58579 5.25 5 5.25L19 5.25C19.4142 5.25 19.75 5.58579 19.75 6Z" fill="currentColor"/>
+  <path fill-rule="evenodd" clip-rule="evenodd" d="M19.75 18C19.75 18.4142 19.4142 18.75 19 18.75L5 18.75C4.58579 18.75 4.25 18.4142 4.25 18C4.25 17.5858 4.58579 17.25 5 17.25L19 17.25C19.4142 17.25 19.75 17.5858 19.75 18Z" fill="currentColor"/>
+</g>
+</svg>
+)~~~~";
+
 static const char* icons__ic_menu_save_svg = R"~~~~(<?xml version="1.0" encoding="utf-8"?>
 <svg version="1.2" baseProfile="tiny" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
   x="0px" y="0px" viewBox="0 0 24 24" xml:space="preserve">
@@ -1114,10 +1127,11 @@ static const char* icons__ic_menu_split_bt_svg = R"~~~~(<?xml version="1.0" enco
 static const char* icons__ic_menu_split_lr_svg = R"~~~~(<?xml version="1.0" encoding="utf-8"?>
 <svg version="1.2" baseProfile="tiny" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
   x="0px" y="0px" viewBox="0 0 24 24" xml:space="preserve">
-<!-- reicon "sidebar-left" (outline), https://reicon.dev - MIT -->
-<g class="icon">
-  <path fill-rule="evenodd" clip-rule="evenodd" d="M13.7693 4.62418C15.6761 4.62418 17.0308 4.62577 18.0585 4.76394C19.0645 4.8992 19.6442 5.15287 20.0674 5.57608C20.4906 5.99929 20.7443 6.57894 20.8795 7.58503C21.0177 8.61269 21.0193 9.96738 21.0193 11.8742C21.0193 13.781 21.0177 15.1357 20.8795 16.1634C20.7443 17.1694 20.4906 17.7491 20.0674 18.1723C19.6442 18.5955 19.0645 18.8492 18.0585 18.9844C17.0308 19.1226 15.6761 19.1242 13.7693 19.1242H9.76928C7.86246 19.1242 6.5078 19.1226 5.48014 18.9844C4.47405 18.8492 3.8944 18.5955 3.47119 18.1723C3.04798 17.7491 2.79431 17.1694 2.65905 16.1634C2.52088 15.1357 2.51929 13.781 2.51929 11.8742C2.51929 9.96738 2.52088 8.61269 2.65905 7.58503C2.79431 6.57894 3.04798 5.99929 3.47119 5.57608C3.8944 5.15287 4.47405 4.89921 5.48014 4.76394C6.5078 4.62577 7.86246 4.62418 9.76928 4.62418H13.7693ZM21.1281 4.51542C20.3797 3.76706 19.4307 3.43494 18.2583 3.27732C17.1191 3.12415 15.6635 3.12416 13.8257 3.12418H9.71287C7.87511 3.12416 6.41948 3.12415 5.28027 3.27732C4.10785 3.43494 3.1589 3.76706 2.41053 4.51542C1.66217 5.26379 1.33005 6.21274 1.17243 7.38516C1.01926 8.52437 1.01927 9.97998 1.01929 11.8178V11.9306C1.01927 13.7684 1.01926 15.224 1.17243 16.3632C1.33005 17.5356 1.66217 18.4846 2.41053 19.233C3.1589 19.9813 4.10785 20.3134 5.28027 20.4711C6.41948 20.6242 7.87511 20.6242 18.2583 20.4711C19.4307 20.3134 20.3797 19.9813 21.1281 19.233C21.8764 18.4846 22.2085 17.5356 22.3662 16.3632C22.5193 15.224 22.5193 13.7684 22.5193 11.9306V11.8178C22.5193 9.97998 22.5193 8.52437 22.3662 7.38516C22.2085 6.21274 21.8764 5.26379 21.1281 4.51542Z" fill="currentColor"/>
-  <path d="M4.74012 8.12219C5.15432 8.1233 5.48922 8.45998 5.48812 8.87419L5.48014 11.8742L5.47215 14.8742C5.47105 15.2884 5.13436 15.6233 4.72016 15.6222C4.30596 15.6211 3.97105 15.2844 3.97216 14.8702L3.98813 8.87019C3.98923 8.45599 4.32592 8.12109 4.74012 8.12219Z" fill="currentColor"/>
+<!-- reicon "sidebar-top" (outline), https://reicon.dev - MIT -->
+<g class="icon" transform="rotate(-90 12 12)">
+  <path fill="none" d="M21.97 15V9C21.97 4 19.97 2 14.97 2H8.96997C3.96997 2 1.96997 4 1.96997 9V15C1.96997 20 3.96997 22 8.96997 22H14.97C19.97 22 21.97 20 21.97 15Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path fill="none" d="M22 8.5H2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path fill="none" d="M14.56 15.4999L12 12.9399L9.44 15.4999" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
 </g>
 </svg>
 )~~~~";
@@ -1125,10 +1139,11 @@ static const char* icons__ic_menu_split_lr_svg = R"~~~~(<?xml version="1.0" enco
 static const char* icons__ic_menu_split_rl_svg = R"~~~~(<?xml version="1.0" encoding="utf-8"?>
 <svg version="1.2" baseProfile="tiny" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
   x="0px" y="0px" viewBox="0 0 24 24" xml:space="preserve">
-<!-- reicon "sidebar-right" (outline), https://reicon.dev - MIT -->
-<g class="icon">
-  <path fill-rule="evenodd" clip-rule="evenodd" d="M13.7693 4.62418C15.6761 4.62418 17.0308 4.62577 18.0585 4.76394C19.0645 4.8992 19.6442 5.15287 20.0674 5.57608C20.4906 5.99929 20.7443 6.57894 20.8795 7.58503C21.0177 8.61269 21.0193 9.96738 21.0193 11.8742C21.0193 13.781 21.0177 15.1357 20.8795 16.1634C20.7443 17.1694 20.4906 17.7491 20.0674 18.1723C19.6442 18.5955 19.0645 18.8492 18.0585 18.9844C17.0308 19.1226 15.6761 19.1242 13.7693 19.1242H9.76928C7.86246 19.1242 6.5078 19.1226 5.48014 18.9844C4.47405 18.8492 3.8944 18.5955 3.47119 18.1723C3.04798 17.7491 2.79431 17.1694 2.65905 16.1634C2.52088 15.1357 2.51929 13.781 2.51929 11.8742C2.51929 9.96738 2.52088 8.61269 2.65905 7.58503C2.79431 6.57894 3.04798 5.99929 3.47119 5.57608C3.8944 5.15287 4.47405 4.89921 5.48014 4.76394C6.5078 4.62577 7.86246 4.62418 9.76928 4.62418H13.7693ZM21.1281 4.51542C20.3797 3.76706 19.4307 3.43494 18.2583 3.27732C17.1191 3.12415 15.6635 3.12416 13.8257 3.12418H9.71287C7.87511 3.12416 6.41948 3.12415 5.28027 3.27732C4.10785 3.43494 3.1589 3.76706 2.41053 4.51542C1.66217 5.26379 1.33005 6.21274 1.17243 7.38516C1.01926 8.52437 1.01927 9.97998 1.01929 11.8178V11.9306C1.01927 13.7684 1.01926 15.224 1.17243 16.3632C1.33005 17.5356 1.66217 18.4846 2.41053 19.233C3.1589 19.9813 4.10785 20.3134 5.28027 20.4711C6.41948 20.6242 7.87511 20.6242 18.2583 20.4711C19.4307 20.3134 20.3797 19.9813 21.1281 19.233C21.8764 18.4846 22.2085 17.5356 22.3662 16.3632C22.5193 15.224 22.5193 13.7684 22.5193 11.9306V11.8178C22.5193 9.97998 22.5193 8.52437 22.3662 7.38516C22.2085 6.21274 21.8764 5.26379 21.1281 4.51542Z" fill="currentColor"/>
-  <path d="M18.5392 8.12219C18.9534 8.1233 19.2884 8.45998 19.2873 8.87419L19.2793 11.8742L19.2713 14.8742C19.2702 15.2884 18.9335 15.6233 18.5193 15.6222C18.1051 15.6211 17.7702 15.2844 17.7713 14.8702L17.7873 8.87019C17.7884 8.45599 18.1251 8.12109 18.5392 8.12219Z" fill="currentColor"/>
+<!-- reicon "sidebar-bottom" (outline), https://reicon.dev - MIT -->
+<g class="icon" transform="rotate(-90 12 12)">
+  <path fill="none" d="M21.97 15V9C21.97 4 19.97 2 14.97 2H8.96997C3.96997 2 1.96997 4 1.96997 9V15C1.96997 20 3.96997 22 8.96997 22H14.97C19.97 22 21.97 20 21.97 15Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path fill="none" d="M22 15.5H2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path fill="none" d="M14.56 8.5L12 11.06L9.44 8.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
 </g>
 </svg>
 )~~~~";
@@ -1392,6 +1407,7 @@ static void LOAD_RES_FN() { addStringResources({
   {"icons/ic_menu_prev.svg", icons__ic_menu_prev_svg},
   {"icons/ic_menu_redo.svg", icons__ic_menu_redo_svg},
   {"icons/ic_menu_refresh.svg", icons__ic_menu_refresh_svg},
+  {"icons/ic_menu_reorder.svg", icons__ic_menu_reorder_svg},
   {"icons/ic_menu_save.svg", icons__ic_menu_save_svg},
   {"icons/ic_menu_screenshot.svg", icons__ic_menu_screenshot_svg},
   {"icons/ic_menu_search2.svg", icons__ic_menu_search2_svg},
