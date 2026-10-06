@@ -1360,6 +1360,76 @@ int ScribbleTest::zoomSnapTest()
   return nbad;
 }
 
+int ScribbleTest::currentPageTest()
+{
+  int nbad = 0;
+  ScribbleArea* area = scribbleArea;
+  const Rect wasScreenRect = area->screenRect;
+  // landscape view, so at fit width a page is taller than the view and only two pages share it
+  area->screenRect = Rect::ltwh(0, 0, 800, 600);
+  for(ScribbleArea::viewmode_t mode : {ScribbleArea::VIEWMODE_VERT, ScribbleArea::VIEWMODE_HORZ}) {
+    const bool horz = mode == ScribbleArea::VIEWMODE_HORZ;
+    auto check = [&](bool ok, const char* what) {
+      if(!ok) { ++nbad; printf("FAIL: current page (%s): %s\n", horz ? "horizontal" : "vertical", what); }
+    };
+    scribbleDoc->newDocument();
+    scribbleDoc->newPage();
+    scribbleDoc->newPage();
+    // the view mode is read from the document's config (newDocument() starts a fresh one from the prefs)
+    scribbleDoc->cfg->set("viewMode", int(mode));
+    area->loadConfig(scribbleDoc->cfg);
+    area->pageSizeChanged();
+    check(area->viewMode == mode && (area->getPageOrigin(1).x > 0) == horz, "the layout under test is in use");
+    Point center(area->getViewWidth()/2, area->getViewHeight()/2);
+    area->zoomTo(area->fitWidthZoom(0), center.x, center.y);
+    area->gotoPage(0);
+    // the length of the view along the scroll direction, and the gap between pages, in screen px
+    const Dim viewLength = horz ? area->getViewWidth() : area->getViewHeight();
+    const Dim gap = area->pageSpacing*area->mScale;
+    // scroll so the start of page `nextPage` is `screenPos` px into the view
+    auto placeBoundary = [&](int nextPage, Dim screenPos) {
+      Point onScreen = area->dimToScreen(area->getPageOrigin(nextPage));
+      if(horz)
+        area->doPan(screenPos - onScreen.x, 0);
+      else
+        area->doPan(0, screenPos - onScreen.y);
+    };
+    check(area->currPageNum == 0, "the first page is current at the start");
+    // 30% of the view on page 1 and 70% on page 2 (the old rule kept page 1 until under a sixth showed)
+    placeBoundary(1, 0.3*viewLength);
+    check(area->currPageNum == 1, "a sliver of the first page and most of the second: the second is current");
+    placeBoundary(1, 0.7*viewLength);
+    check(area->currPageNum == 0, "scrolled back until the first page has most of the view: the first is current");
+    // the second page now shows 1% (of the view) more than the first: within the margin, nothing changes
+    placeBoundary(1, (viewLength + gap - 0.01*viewLength)/2);
+    check(area->currPageNum == 0, "a page showing barely more does not take over (no flicker)");
+    placeBoundary(1, 0.3*viewLength);
+    placeBoundary(1, (viewLength + gap + 0.01*viewLength)/2);
+    check(area->currPageNum == 1, "...in either direction");
+    // going to a page keeps it current even where the pan to it leaves a neighbour showing more: here
+    //  page 2 ends 30% into the view and page 3 fills the rest
+    Page* second = area->page(1);
+    Dim endInPage = 0.3*viewLength/area->mScale;
+    area->gotoPos(1, horz ? Point(second->width() - endInPage, 0) : Point(0, second->height() - endInPage), false);
+    check(area->dominantPageNum() == 2, "(setup) the third page shows more");
+    check(area->currPageNum == 1, "an explicit jump to a page makes it current");
+    // a page made current by drawing on it keeps that through a pan that does not move the view...
+    placeBoundary(1, 0.6*viewLength);
+    check(area->currPageNum == 0, "the first page is current again after scrolling");
+    area->setPageNum(1);
+    area->pageSizeChanged();
+    check(area->currPageNum == 1, "a page drawn on stays current while the view does not move");
+    // ...and loses it as soon as the view does
+    area->doPan(horz ? -3 : 0, horz ? 0 : -3);
+    check(area->currPageNum == 0, "after the view moves the page with most of it is current again");
+  }
+  area->screenRect = wasScreenRect;
+  scribbleDoc->newDocument();
+  area->pageSizeChanged();
+  area->resetZoom();
+  return nbad;
+}
+
 int ScribbleTest::arrowPopupTest()
 {
   int nbad = 0;
@@ -3310,6 +3380,7 @@ void ScribbleTest::runAll(bool runsynctest)
   nUnitFailed += twoFingerTapTest();
   nUnitFailed += shapeTapEditTest();
   nUnitFailed += zoomSnapTest();
+  nUnitFailed += currentPageTest();
   nUnitFailed += arrowPopupTest();
   nUnitFailed += pageTagTest();
   nUnitFailed += docStateSyncTest();

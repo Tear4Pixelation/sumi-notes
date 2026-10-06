@@ -84,6 +84,12 @@ and the serialization round trip including a name containing the separators.
   to 0.35 (and restores the zoom) so both pages are on screen for the drag. The placement and reset checks
   were confirmed to fail with the fixes disabled; the drag checks pin behaviour that was already right.
 
+- `ScribbleTest::currentPageTest()` - the current page is the one taking up most of the view, in the
+  vertical and the horizontal layout ([navigation.md](navigation.md#the-current-page-follows-the-page-taking-up-most-of-the-view)):
+  30/70 and 70/30 splits, no switch within the 2% margin in either direction, `gotoPos` keeping its page
+  where the next page shows more, and a page drawn on staying current until the view moves.
+  Mutation-tested: the old rule, no margin, no hold and re-choosing on an unmoved view each fail it.
+
 - `ScribbleTest::docStateSyncTest()` - the layer table and the theme as undo steps and on the sync
   wire. Each edit is checked three ways: it is one undo step, undo/redo restore it, and what it
   serializes reproduces the edit when fed back through `ScribbleSync::processItem()` on a bare

@@ -263,9 +263,12 @@ bool ScribbleArea::nearFitWidth(Dim px, Dim py) const
 //  the usual vertical layout) - never along it, so the reading position never jumps
 void ScribbleArea::alignFitPage(int pagenum, bool fitWidth)
 {
-  // ensure that page under center of gesture is active
-  setPageNum(pagenum);
-  Rect pageRect = pageDimToDim(currPage->rect());
+  // align the page under the center of the gesture, but do not make it current: the pan below (or the
+  //  zoom before it) leaves that to dominantPageNum(), the page taking up most of the view
+  if(numPages() < 1)
+    return;
+  pagenum = std::max(0, std::min(pagenum, numPages() - 1));
+  Rect pageRect = page(pagenum)->rect().translate(getPageOrigin(pagenum));
   Point screenCenter = screenToDim(Point(getViewWidth()/2, getViewHeight()/2));
   Point shift(0, 0);  // in dim units, the amount the page moves on screen
   if(viewMode != VIEWMODE_HORZ)
@@ -352,6 +355,46 @@ bool ScribbleArea::updateHorzPanLock()
   return changed;
 }
 
+// a page must show this much more of itself than the current page does (as a fraction of the view's area)
+//  to replace it, so a view resting where two pages show equally does not flicker between them
+static constexpr Dim PAGE_SWITCH_MARGIN = 0.02;
+
+// The current page is the one taking up the most of the view.  It used to stay current until it had left
+//  the view shrunk by a sixth on each side, and then the first (or last) page in view took over - so a
+//  sliver of the previous page at the top kept it current while the next page filled the screen.
+//  Ties, and anything within PAGE_SWITCH_MARGIN, keep the current page; among the others the earlier
+//  page wins.  Works for both scrolling layouts, as it compares areas, not positions along one axis
+int ScribbleArea::dominantPageNum() const
+{
+  int npages = numPages();
+  if(viewMode == VIEWMODE_SINGLE || npages < 1)
+    return currPageNum;
+  Rect view = screenToDim(screenRect);
+  Dim viewArea = view.width()*view.height();
+  if(!(viewArea > 0))
+    return currPageNum;
+  int firstvis = dimToPageNum(Point(view.left, view.top));
+  int lastvis = std::min(dimToPageNum(Point(view.right, view.bottom)), npages - 1);
+  int bestPage = -1;
+  Dim bestArea = 0, currArea = 0;
+  for(int ii = firstvis; ii <= lastvis; ++ii) {
+    Rect visible = page(ii)->rect().translate(getPageOrigin(ii)).rectIntersect(view);
+    Dim area = visible.isValid() ? visible.width()*visible.height() : 0;
+    if(ii == currPageNum)
+      currArea = area;
+    if(area > bestArea) {
+      bestArea = area;
+      bestPage = ii;
+    }
+  }
+  if(bestPage < 0 || bestPage == currPageNum)
+    return currPageNum;
+  // a current page out of view entirely is replaced however little the best page shows
+  if(currArea > 0 && bestArea <= currArea + PAGE_SWITCH_MARGIN*viewArea)
+    return currPageNum;
+  return bestPage;
+}
+
 void ScribbleArea::doPan(Dim dx, Dim dy)
 {
   ScribbleView::doPan(dx, dy);
@@ -361,24 +404,21 @@ void ScribbleArea::doPan(Dim dx, Dim dy)
   if(viewMode == VIEWMODE_SINGLE || (currMode != MODE_NONE && currMode != MODE_PAN))
     return;
 
-  Rect screenrect = screenToDim(screenRect);
-  Rect pagerect = pageDimToDim(currPage->rect());
-  // shrink screenrect so page changes before prev page is completely invisible
-  screenrect.pad(-screenrect.width()/6, -screenrect.height()/6);
-  if(!pagerect.overlaps(screenrect)) {
-    int firstvispage = dimToPageNum(Point(screenrect.left, screenrect.top));
-    if(currPageNum < firstvispage)
-      setPageNum(firstvispage);
-    else {
-      int lastvispage = dimToPageNum(Point(screenrect.right, screenrect.bottom));
-      if(currPageNum > lastvispage)
-        setPageNum(lastvispage);
-      else
-        return;
+  // Only a view that moved picks the page again: pageSizeChanged() pans by 0 (e.g. when a page grows
+  //  after a stroke), and that must not take the current page away from the one just drawn on.  An
+  //  explicit navigation (holdPageNum) records its view too, so the page it chose survives until a scroll
+  Rect view = screenToDim(screenRect);
+  if(view != pageChoiceView) {
+    pageChoiceView = view;
+    int dominant = holdPageNum ? currPageNum : dominantPageNum();
+    if(dominant != currPageNum) {
+      setPageNum(dominant);
+      uiChanged(UIState::Pan);
     }
-    uiChanged(UIState::Pan);
   }
 #ifdef ONE_TIME_TIPS
+  Rect screenrect = view;
+  screenrect.pad(-screenrect.width()/6, -screenrect.height()/6);
   if(showHelpTips && dimToPageNum(Point(screenrect.right, screenrect.bottom + 80)) == numPages()) {
     app->oneTimeTip("ghostpage", Point(screenRect.center().x, screenRect.bottom + 80),
       _("Double tap or drag selection here to add a new page."));
@@ -1949,8 +1989,20 @@ void ScribbleArea::doGotoPos(int pagenum, Point pos, bool exact)
   doRefresh();
 }
 
+// keeps the page an explicit navigation chose current through the pan that brings it into view (doPan())
+namespace {
+struct HoldPageNum
+{
+  bool& flag;
+  bool wasHeld;
+  HoldPageNum(bool& holdFlag) : flag(holdFlag), wasHeld(holdFlag) { flag = true; }
+  ~HoldPageNum() { flag = wasHeld; }
+};
+}
+
 void ScribbleArea::viewPos(int pagenum, Point pos)
 {
+  HoldPageNum hold(holdPageNum);
   saveCurrPos(pagenum, pos);
   setPageNum(pagenum);
   setVisiblePos(pageDimToDim(pos));
@@ -1958,6 +2010,7 @@ void ScribbleArea::viewPos(int pagenum, Point pos)
 
 void ScribbleArea::gotoPos(int pagenum, Point pos, bool savepos)
 {
+  HoldPageNum hold(holdPageNum);
   if(savepos)
     saveCurrPos(pagenum, pos);
   setPageNum(pagenum);
@@ -1977,6 +2030,7 @@ void ScribbleArea::gotoPage(int pagenum)
 // r is in page Dim of specified page
 void ScribbleArea::viewRect(int pagenum, const Rect& r)
 {
+  HoldPageNum hold(holdPageNum);
   if(pagenum != currPageNum)
     setPageNum(pagenum);
   if(!isVisible(pageDimToDim(r)))
@@ -1986,6 +2040,7 @@ void ScribbleArea::viewRect(int pagenum, const Rect& r)
 // adjust position and zoom to view entire rect r - used for optional view syncing for shared whiteboarding
 void ScribbleArea::setViewBox(const DocViewBox& vb)
 {
+  HoldPageNum hold(holdPageNum);
   setPageNum(vb.pagenum);
   Rect r = pageDimToDim(vb.box);
   Rect s = screenToDim(screenRect);

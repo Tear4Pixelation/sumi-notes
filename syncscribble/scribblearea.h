@@ -199,6 +199,8 @@ protected:
 
   void updateContentDim();
   bool updateHorzPanLock();
+  // the page taking up the most of the view, which becomes the current page on a scroll or zoom (doPan())
+  int dominantPageNum() const;
   void drawThumbnail(Image* dest);
   void drawWatermark(Painter* painter, Page* page, const Rect& dirty);  // for iOS IAP
   void drawImage(Painter* imgpaint, const Rect& dirty) override;
@@ -269,6 +271,10 @@ protected:
   // we'll only display one page at a time for now (like OneNote)
   int currPageNum = INT_MAX;
   Page* currPage = NULL;
+  // set while an explicit navigation (go to page, bookmark, ...) pans, so the page it chose stays current
+  bool holdPageNum = false;
+  // the view (in Dim) when doPan() last chose the current page - it only chooses again once the view moves
+  Rect pageChoiceView;
   Selection* tempSelection = NULL;
   Selection* currSelection = NULL;
   // selection for stroke fragments produced by free eraser
