@@ -140,6 +140,7 @@ void ScribbleDoc::restackLayers()
       page->contentNode->addChild(s->node);
     }
     page->dirtyCount++;
+    page->revision++;
   }
 }
 
@@ -312,16 +313,16 @@ void ScribbleDoc::updateDocConfig(Document::saveflags_t flags)
 // small enough that a notebook with many tagged pages stays small; wide enough for a hi-dpi card
 static const int PAGE_THUMB_WIDTH = 200;
 
-static std::string renderPageThumb(Page* page)
+Image ScribbleDoc::renderPageThumbnail(Page* page, int width)
 {
-  if(!page->ensureLoaded() || page->width() <= 0 || page->height() <= 0)
-    return "";
-  int height = std::min(int(PAGE_THUMB_WIDTH*page->height()/page->width() + 0.5), 4*PAGE_THUMB_WIDTH);
-  Image image(PAGE_THUMB_WIDTH, std::max(height, 1), Image::PNG);
+  if(!page->ensureLoaded() || page->width() <= 0 || page->height() <= 0 || width < 1)
+    return Image(0, 0);
+  int height = std::min(int(width*page->height()/page->width() + 0.5), 4*width);
+  Image image(width, std::max(height, 1), Image::PNG);
   Painter painter(Painter::PAINT_SW, &image);
   painter.beginFrame();
   painter.setAntiAlias(true);
-  Dim scale = PAGE_THUMB_WIDTH/page->width();
+  Dim scale = width/page->width();
   painter.scale(scale, scale);
   bool shadow = Page::enableDropShadow;
   Page::enableDropShadow = false;
@@ -330,7 +331,13 @@ static std::string renderPageThumb(Page* page)
   Element::FORCE_NORMAL_DRAW = false;
   Page::enableDropShadow = shadow;
   painter.endFrame();
-  return base64_encode(image.encode(Image::PNG));
+  return image;
+}
+
+static std::string renderPageThumb(Page* page)
+{
+  Image image = ScribbleDoc::renderPageThumbnail(page, PAGE_THUMB_WIDTH);
+  return image.isNull() ? std::string() : base64_encode(image.encode(Image::PNG));
 }
 
 void ScribbleDoc::updatePageTagSummary(Document* doc, ScribbleConfig* docCfg)
@@ -1270,6 +1277,20 @@ bool ScribbleDoc::setPageOutline(int pagenum, const char* title, int level)
   return true;
 }
 
+// A page to re-insert in a move: a clone, never the page itself.  PageDeletedItem frees its page when
+//  the history is discarded, so a page both deleted and re-added would be freed while still in the
+//  document.  This is what cut and paste of pages does too (pastePages).
+static Page* clonePage(Page* page)
+{
+  page->ensureLoaded();
+  SvgNode* svg = page->svgDoc->clone();
+  if(!svg->hasClass("write-page"))
+    svg->addClass("write-page");
+  Page* clone = new Page;
+  clone->loadSVG(static_cast<SvgDocument*>(svg));
+  return clone;
+}
+
 bool ScribbleDoc::nestOutlineEntry(int srcpage, int parentpage)
 {
   std::vector<OutlineEntry> entries = outline(true);
@@ -1340,20 +1361,10 @@ bool ScribbleDoc::nestOutlineEntry(int srcpage, int parentpage)
   int dest = movepages && insertat > firstpage ? insertat - npages : (movepages ? insertat : firstpage);
   startAction(std::min(firstpage, dest) | UndoHistory::MULTIPAGE);
   if(movepages) {
-    // Clones are inserted, never the pages just deleted: PageDeletedItem frees its page when the history
-    //  is discarded, so a page both deleted and re-added would be freed while still in the document.
-    //  This is what cut and paste of pages does too (pastePages).
+    // clones are inserted, never the pages just deleted (clonePage)
     std::vector<Page*> clones;
-    for(int ii = firstpage; ii < firstpage + npages; ++ii) {
-      Page* page = document->pages[ii];
-      page->ensureLoaded();
-      SvgNode* svg = page->svgDoc->clone();
-      if(!svg->hasClass("write-page"))
-        svg->addClass("write-page");
-      Page* clone = new Page;
-      clone->loadSVG(static_cast<SvgDocument*>(svg));
-      clones.push_back(clone);
-    }
+    for(int ii = firstpage; ii < firstpage + npages; ++ii)
+      clones.push_back(clonePage(document->pages[ii]));
     for(int ii = 0; ii < npages; ++ii)
       document->deletePage(firstpage);
     for(int ii = 0; ii < npages; ++ii)
@@ -1380,6 +1391,129 @@ bool ScribbleDoc::nestOutlineEntry(int srcpage, int parentpage)
   }
   doRefresh();
   return true;
+}
+
+// Page management (docs/agent/page-management.md)
+
+std::vector<int> ScribbleDoc::movedPageOrder(int npages, std::vector<int> pages, int after)
+{
+  std::sort(pages.begin(), pages.end());
+  pages.erase(std::unique(pages.begin(), pages.end()), pages.end());
+  if(pages.empty() || pages.front() < 0 || pages.back() >= npages || after < -1 || after >= npages
+      || std::binary_search(pages.begin(), pages.end(), after))
+    return {};
+  std::vector<int> order;
+  if(after < 0)
+    order = pages;
+  for(int ii = 0; ii < npages; ++ii) {
+    if(!std::binary_search(pages.begin(), pages.end(), ii))
+      order.push_back(ii);
+    if(ii == after)
+      order.insert(order.end(), pages.begin(), pages.end());
+  }
+  return order;
+}
+
+bool ScribbleDoc::movePages(std::vector<int> pages, int after, int* destOut)
+{
+  int npages = document->numPages();
+  std::vector<int> order = movedPageOrder(npages, pages, after);
+  if(order.empty())
+    return false;
+  // the first page whose position changes; if none does (the pages already follow `after`), nothing to do
+  int firstchanged = 0;
+  while(firstchanged < npages && order[firstchanged] == firstchanged)
+    ++firstchanged;
+  if(firstchanged == npages)
+    return false;
+  std::sort(pages.begin(), pages.end());
+  pages.erase(std::unique(pages.begin(), pages.end()), pages.end());
+  // where the moved block starts - read off the order, so movedPageOrder() is the one statement of where
+  //  pages go (the test checks it through this function)
+  int dest = int(std::find(order.begin(), order.end(), pages.front()) - order.begin());
+  if(destOut)
+    *destOut = dest;
+
+  clearSelection();
+  std::vector<Page*> clones;
+  for(int pagenum : pages)
+    clones.push_back(clonePage(document->pages[pagenum]));
+  startAction(firstchanged | UndoHistory::MULTIPAGE);
+  // back to front, so the page numbers still to delete stay valid
+  for(auto it = pages.rbegin(); it != pages.rend(); ++it)
+    document->deletePage(*it);
+  for(size_t ii = 0; ii < clones.size(); ++ii)
+    document->insertPage(clones[ii], dest + int(ii));
+  endAction();
+
+  // the ghost page copies the last page's custom ruling, and the last page may be another one now
+  updateGhostPage();
+  document->bookmarksDirty = true;
+  pageCountChanged(firstchanged, npages);
+  activeArea->gotoPage(dest);
+  uiChanged(UIState::MovePage);
+  return true;
+}
+
+void ScribbleDoc::deletePageList(const std::vector<int>& pages)
+{
+  clearSelection();
+  bool any = false;
+  for(int pagenum : pages) {
+    if(pagenum >= 0 && pagenum < document->numPages()) {
+      document->pages[pagenum]->isSelected = true;
+      any = true;
+    }
+  }
+  // deletePages() is the one place that deletes a page selection, and it already keeps a document that
+  //  loses every page valid (a fresh blank page, inside the same undo step)
+  if(any)
+    deletePages();
+}
+
+bool ScribbleDoc::savePagesCopy(const std::vector<int>& pages, const char* path)
+{
+  Document copy;
+  for(int pagenum : pages) {
+    if(pagenum >= 0 && pagenum < document->numPages())
+      copy.insertPage(clonePage(document->pages[pagenum]));
+  }
+  if(copy.numPages() < 1)
+    return false;
+  copy.layers = document->layers;
+  // this document's own settings (theme, layer table, ruling defaults, cover), opened at its start, as
+  //  SAVE_COPY does - but not its library tags, whose ids mean nothing outside this library
+  ScribbleConfig copyCfg(*cfg);
+  copyCfg.set("pageNum", 0);
+  copyCfg.set("xOffset", 0.0f);
+  copyCfg.set("yOffset", 0.0f);
+  copyCfg.set("docFormatVersion", Document::docFormatVersion);
+  copyCfg.set("tags", "");
+  updatePageTagSummary(&copy, &copyCfg);
+  copyCfg.saveConfig(copy.resetConfigNode());
+
+  std::string thumb;
+  if(cfg->Bool("saveThumbnail")) {
+    // the document list's frame (cover.h), filled by the first page as ScribbleArea::drawThumbnail does
+    Page* first = copy.pages.front();
+    Image image(240, int(std::round(240*Cover::PREVIEW_ASPECT)), Image::PNG);
+    Painter painter(Painter::PAINT_SW, &image);
+    painter.beginFrame();
+    painter.setAntiAlias(true);
+    Dim scale = std::max(image.width/first->width(), image.height/first->height());
+    painter.scale(scale, scale);
+    Element::FORCE_NORMAL_DRAW = true;
+    first->draw(&painter, Rect::wh(image.width/scale, image.height/scale));
+    Element::FORCE_NORMAL_DRAW = false;
+    painter.endFrame();
+    thumb = base64_encode(image.encode(Image::PNG));
+  }
+  Document::saveflags_t flags = Document::SAVE_FORCE | (cfg->Int("compressLevel", 2) << 24);
+  FileStream* strm = new FileStream(path, "wb+");
+  bool ok = copy.save(strm, thumb.empty() ? NULL : thumb.c_str(), flags);
+  if(!ok)
+    delete strm;  // save() takes ownership only on success
+  return ok;
 }
 
 void ScribbleDoc::openURL(const char* url)

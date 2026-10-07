@@ -1064,6 +1064,92 @@ int ScribbleTest::outlineNestTest()
   return nbad;
 }
 
+// The sidebar's Pages view (docs/agent/page-management.md): ScribbleDoc::movePages puts the moved pages
+//  straight *after* the page they were dropped on, or at the front for after = -1, in their original
+//  relative order whatever order they were picked in; deletePageList removes a set of pages.  Each is one
+//  undo step.  Pages are told apart by their widths, since a page has no name of its own.
+int ScribbleTest::pageMoveTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: page move: %s\n", what); }
+  };
+  const Dim baseWidth = 1000;
+  // the document's pages as the original page numbers their widths encode, e.g. "0 2 3 1 4 5"
+  auto order = [&](){
+    std::string result;
+    for(Page* page : scribbleDoc->document->pages)
+      result += fstring("%s%d", result.empty() ? "" : " ", int(std::round(page->width() - baseWidth)));
+    return result;
+  };
+  auto expect = [&](const char* want, const char* what){
+    std::string got = order();
+    check(got == want, what);
+    if(got != want)
+      printf("  expected '%s'\n  got      '%s'\n", want, got.c_str());
+  };
+
+  scribbleDoc->newDocument();
+  for(int ii = 0; ii < 5; ++ii)
+    scribbleDoc->newPage();  // 6 pages
+  scribbleDoc->startAction(0 | UndoHistory::MULTIPAGE);
+  for(int ii = 0; ii < 6; ++ii) {
+    PageProperties props = scribbleDoc->document->pages[ii]->getProperties();
+    props.width = baseWidth + ii;
+    scribbleDoc->document->pages[ii]->setProperties(&props);
+  }
+  scribbleDoc->endAction();
+  scribbleDoc->setPageOutline(1, "One", 0);
+  const char* start = "0 1 2 3 4 5";
+  expect(start, "the starting order");
+
+  check(scribbleDoc->movePages({1}, 3), "moving page 1 after page 3 succeeds");
+  expect("0 2 3 1 4 5", "a page dropped on another lands right after it");
+  check(scribbleDoc->document->pages[3]->outlineTitle == "One", "the moved page keeps its outline entry");
+  scribbleDoc->doCommand(ID_UNDO);
+  expect(start, "one undo puts it back");
+  scribbleDoc->doCommand(ID_REDO);
+  expect("0 2 3 1 4 5", "redo moves it again");
+  scribbleDoc->doCommand(ID_UNDO);
+
+  check(scribbleDoc->movePages({4, 1}, 2), "moving pages 4 and 1 after page 2 succeeds");
+  expect("0 2 1 4 3 5", "several pages land after the target in their document order, not the order picked");
+  scribbleDoc->doCommand(ID_UNDO);
+  expect(start, "moving several pages is one undo step");
+
+  check(scribbleDoc->movePages({3, 5}, -1), "moving pages 3 and 5 to the front succeeds");
+  expect("3 5 0 1 2 4", "after = -1 puts them before the first page");
+  scribbleDoc->doCommand(ID_UNDO);
+  check(scribbleDoc->movePages({0, 2}, 5), "moving pages 0 and 2 after the last page succeeds");
+  expect("1 3 4 5 0 2", "after the last page means at the end");
+  scribbleDoc->doCommand(ID_UNDO);
+  check(scribbleDoc->movePages({0}, 1), "moving page 0 after page 1 succeeds");
+  expect("1 0 2 3 4 5", "a page moved forward by one swaps with its neighbour");
+  scribbleDoc->doCommand(ID_UNDO);
+  expect(start, "back to the start");
+
+  check(!scribbleDoc->movePages({2}, 2), "a page cannot be dropped on itself");
+  check(!scribbleDoc->movePages({2, 3}, 3), "pages cannot be dropped on one of themselves");
+  check(!scribbleDoc->movePages({2}, 1), "a page already after its target is not moved");
+  check(!scribbleDoc->movePages({0, 1}, -1), "pages already at the front are not moved");
+  check(!scribbleDoc->movePages({6}, 0), "a page out of range is refused");
+  check(!scribbleDoc->movePages({}, 0), "an empty move is refused");
+  expect(start, "a refused move changes nothing");
+  check(scribbleDoc->document->numPages() == 6, "moves neither add nor lose pages");
+
+  scribbleDoc->deletePageList({3, 1});
+  expect("0 2 4 5", "the listed pages are deleted");
+  scribbleDoc->doCommand(ID_UNDO);
+  expect(start, "deleting a page list is one undo step");
+  scribbleDoc->deletePageList({0, 1, 2, 3, 4, 5});
+  check(scribbleDoc->document->numPages() == 1, "deleting every page leaves one blank page");
+  scribbleDoc->doCommand(ID_UNDO);
+  expect(start, "deleting every page is one undo step too");
+
+  scribbleDoc->newDocument();
+  return nbad;
+}
+
 // Phase 5: restyling must move the theme's own ink and nothing else, and must undo in one step.
 // Layers (LAYERS_INVESTIGATION.md).  runLayerTests() in layertest.cpp covers the table's own logic;
 //  everything here needs a document: the lock actually blocking the editing paths, the undo item, the
@@ -3372,6 +3458,7 @@ void ScribbleTest::runAll(bool runsynctest)
   nUnitFailed += penWidthPresetTest();
   nUnitFailed += outlineTest();
   nUnitFailed += outlineNestTest();
+  nUnitFailed += pageMoveTest();
   nUnitFailed += notefulImportTest();
   nUnitFailed += notefulArchiveTest();
   nUnitFailed += pdfImportTest();

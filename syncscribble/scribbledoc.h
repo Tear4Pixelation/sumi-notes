@@ -56,6 +56,21 @@ public:
   // parent's section.
   bool nestOutlineEntry(int srcpage, int parentpage);
   static constexpr int OUTLINE_OUTDENT = -2;
+  // Page management (the sidebar's Pages view, docs/agent/page-management.md).  Move `pages` - any order,
+  //  duplicates ignored - so they follow page `after` in their original relative order; after = -1 puts
+  //  them at the very front.  One undo step.  Returns false if the move is impossible (`after` is one of
+  //  the moved pages, or out of range) or changes nothing.  destOut gets the moved block's first page.
+  bool movePages(std::vector<int> pages, int after, int* destOut = NULL);
+  // the page order movePages() produces, as old page numbers in their new order; empty if it is refused
+  static std::vector<int> movedPageOrder(int npages, std::vector<int> pages, int after);
+  // delete the listed pages as one undo step; deleting every page leaves one blank page, as deletePages()
+  void deletePageList(const std::vector<int>& pages);
+  // write the listed pages, in that order, to a new document at `path` (format by extension), with this
+  //  document's settings, theme and layer table but none of its library tags
+  bool savePagesCopy(const std::vector<int>& pages, const char* path);
+  // the whole page drawn `width` px wide at its own proportions, without selection styling or drop shadow;
+  //  loads the page.  A null image for a page that cannot be loaded.  Page tag cards and the Pages view.
+  static Image renderPageThumbnail(Page* page, int width);
   std::vector<OutlineEntry> outline(bool loadpages = true) { return document->outline(loadpages); }
   // Page tags (docs/agent/page-tags.md).  Take every tag element with one of `tagIds` off a page, as one
   //  undoable action; false if there were none.  Adding is ScribbleArea::startTagPlacement().

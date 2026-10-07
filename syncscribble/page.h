@@ -58,6 +58,14 @@ public:
   enum loadstatus_t {LOAD_SVG_ERROR=-1, NOT_LOADED=0, LOAD_OK=1} loadStatus = NOT_LOADED;
   // dirtyCount is managed by undo system; page needs to be written out if != 0
   int dirtyCount = 0;
+  // Bumped by every change the undo system records - undo and redo included - and never reset.  Unlike
+  //  dirtyCount, which a save zeroes and an undo counts back down, it tells two versions of a page apart,
+  //  so the sidebar's page thumbnails (docs/agent/page-management.md) key their cache on it.
+  unsigned int revision = 0;
+  // Unique for the life of the process, never reused - unlike the Page*, whose address a page allocated
+  //  after this one is freed can take.  The sidebar's page thumbnails and selection are keyed by it.
+  unsigned int uid = nextUid();
+  static unsigned int nextUid() { static unsigned int lastUid = 0; return ++lastUid; }
   //int autoSavedDirtyCount = NOT_AUTO_SAVED;  // dirtyCount value of last autosave
   int blockIdx = -1;
   std::string fileName;

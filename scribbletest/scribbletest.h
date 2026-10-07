@@ -29,6 +29,9 @@ public:
   int penWidthPresetTest();
   int outlineTest();
   int outlineNestTest();
+  // the sidebar's Pages view: moving pages after a target (or to the front) keeps the moved pages' order,
+  //  is one undo step, and deleting a page list - all of them included - is one undo step too
+  int pageMoveTest();
   // a Noteful notebook becomes pages with their ruling, ink on the right layers, the outline and an
   //  extended page for ink below the edge; the layer table survives a save of the bare Document
   int notefulImportTest();

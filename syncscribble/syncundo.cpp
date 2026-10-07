@@ -8,17 +8,17 @@ StrokeUndoItem::StrokeUndoItem(Element* s_, Page* p_) : s(s_), page(p_) {}
 
 void StrokeUndoItem::commit()
 {
-  page->dirtyCount++;
+  page->dirtyCount++;  page->revision++;
 }
 
 void StrokeUndoItem::undo()
 {
-  page->dirtyCount--;
+  page->dirtyCount--;  page->revision++;
 }
 
 void StrokeUndoItem::redo()
 {
-  page->dirtyCount++;
+  page->dirtyCount++;  page->revision++;
 }
 
 // if user saves doc, does undo, then makes a change discarding the history which includes saved state, it is
@@ -237,7 +237,7 @@ void PageChangedItem::discard(bool undone) {}
 
 void PageChangedItem::commit()
 {
-  p->dirtyCount++;
+  p->dirtyCount++;  p->revision++;
 }
 
 void PageChangedItem::swapProps()
@@ -253,20 +253,20 @@ void PageChangedItem::swapProps()
 void PageChangedItem::undo()
 {
   swapProps();
-  p->dirtyCount--;
+  p->dirtyCount--;  p->revision++;
 }
 
 void PageChangedItem::redo()
 {
   swapProps();
-  p->dirtyCount++;
+  p->dirtyCount++;  p->revision++;
 }
 
 void PageOutlineItem::discard(bool undone) {}
 
 void PageOutlineItem::commit()
 {
-  p->dirtyCount++;
+  p->dirtyCount++;  p->revision++;
 }
 
 void PageOutlineItem::swapOutline()
@@ -281,13 +281,13 @@ void PageOutlineItem::swapOutline()
 void PageOutlineItem::undo()
 {
   swapOutline();
-  p->dirtyCount--;
+  p->dirtyCount--;  p->revision++;
 }
 
 void PageOutlineItem::redo()
 {
   swapOutline();
-  p->dirtyCount++;
+  p->dirtyCount++;  p->revision++;
 }
 
 DocumentUndoItem::DocumentUndoItem(Page* p_, int pagenum_, Document* document_)
