@@ -42,18 +42,29 @@ public:
   //  With it set, drops go to onDropZone instead of onDrop.  The Pages view uses it for "before page 1".
   std::function<int(int dst, Widget* target, Point pos)> zoneAt;
   std::function<void(int src, int dst, int zone)> onDropZone;
+  // Dragging a row out of its list (the sidebar's tabs onto the canvas).  While the pointer is over no
+  //  row, onDragOutside gets its position, and a NaN point once it is back over a row or the drag ends;
+  //  a release over no row calls onDropOutside on the next event-loop turn, like onDrop.  pos is in
+  //  window coordinates.  Unset, a release over no row simply cancels the drag, as before.
+  std::function<void(int src, Point pos)> onDragOutside;
+  std::function<void(int src, Point pos)> onDropOutside;
 
   // makes `row` draggable and a drop target, identified to the callbacks as `key` (>= 0); with `grip`,
-  //  the row is picked up only by that widget (a Button inside the row), in any direction
-  void addRow(Button* row, int key, Button* grip = NULL);
+  //  the row is picked up only by that widget (a Button inside the row), in any direction - unless
+  //  rowToo, which keeps the row itself draggable as well (a sideways drag with a pen or finger, any drag
+  //  with a mouse), the grip adding the vertical one
+  void addRow(Button* row, int key, Button* grip = NULL, bool rowToo = false);
   // a widget that stands for "top level", e.g. the tag browser's All Documents row
   void setRootTarget(Widget* target) { rootTarget = target; }
   // forget every row; call before the rows are deleted
   void clear();
 
 private:
-  Widget* targetAt(SvgGui* gui, Widget* from, Point pos, int* keyOut) const;
+  // the row or root target under pos; hitOut, if given, gets the widget hit there
+  Widget* targetAt(SvgGui* gui, Widget* from, Point pos, int* keyOut, Widget** hitOut = NULL) const;
   void setHover(Widget* target, int zone = 0);
+  void setOutside(int src, Point pos);
+  void addSource(Button* row, Button* source);
   void endDrag();
   void drop(SvgGui* gui, int src, int dst, int zone);
 
@@ -68,4 +79,7 @@ private:
   Point pressPos;
   Widget* hoverTarget = NULL;
   int hoverZone = 0;
+  // the drag is over no row (only tracked with onDropOutside set), and where it last was
+  bool overOutside = false;
+  Point outsidePos;
 };

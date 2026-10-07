@@ -348,6 +348,9 @@ void ScribbleApp::init()
   removeDir(tempPath.c_str(), false);
 
   initLibrary();
+  // the open tabs come back unloaded - each one is just a path until it is shown (editortabs.cpp)
+  if(outDoc.empty())
+    restoreTabs();
   // not for a command line conversion (--out), which must not stop to ask anything
   if(outDoc.empty()) {
     offerLibraryMigration();
@@ -459,6 +462,14 @@ void ScribbleApp::init()
       return;
     }
   }
+  // reopenLastDoc decides, as it always has, whether a document is shown at start: the tab that was active
+  if(cfg->Bool("reopenLastDoc") && !tabs.empty()) {
+    int lastActive = std::min(std::max(0, cfg->Int("activeTab")), tabs.size() - 1);
+    if(showTabInArea(lastActive, activeArea())) {
+      onLoadFile(activeDoc()->fileName());
+      return;
+    }
+  }
   if(cfg->Bool("reopenLastDoc") && recentDocs.size() > 0
       && FSPath(recentDocs[0]).exists() && doOpenDocument(recentDocs[0]))
     return;
@@ -477,6 +488,12 @@ ScribbleApp::~ScribbleApp()
   delete bookmarkArea;
   for(ScribbleDoc* doc : scribbleDocs)
     delete doc;
+  // background tabs' documents are owned by their tabs
+  for(EditorTab& tab : tabs.tabs) {
+    if(tab.doc && std::find(scribbleDocs.begin(), scribbleDocs.end(), tab.doc) == scribbleDocs.end())
+      delete tab.doc;
+    tab.doc = NULL;
+  }
   for(ScribbleArea* area : scribbleAreas)
     delete area;
   delete scribbleMode;
@@ -528,6 +545,8 @@ std::string ScribbleApp::messageBox(MessageType type,
 
 /// config ///
 
+static int tabUnloadCheckMs(int timeoutSecs);
+
 void ScribbleApp::loadConfig()
 {
   SvgWriter::DEFAULT_SAVE_IMAGE_SCALED = cfg->Bool("savePicScaled") ? std::max(Dim(1), gui->paintScale) : 0;
@@ -551,6 +570,20 @@ void ScribbleApp::loadConfig()
   ScribbleArea::BACKGROUND_COLOR =
       lightTheme ? ScribbleArea::BACKGROUND_COLOR_LIGHT : ScribbleArea::BACKGROUND_COLOR_DARK;
 
+  // editor tabs: unload background tabs idle past tabUnloadSecs (editortabs.cpp)
+  int tabUnloadSecs = cfg->Int("tabUnloadSecs");
+  if(tabUnloadTimer) {
+    gui->removeTimer(tabUnloadTimer);
+    tabUnloadTimer = NULL;
+  }
+  if(tabUnloadSecs > 0) {
+    int checkMs = tabUnloadCheckMs(tabUnloadSecs);
+    tabUnloadTimer = gui->setTimer(checkMs, win, [this, checkMs](){
+      unloadIdleTabs();
+      return checkMs;
+    });
+  }
+
   // If we want to retain discard changes, we should make copy of doc before autosave
   // reasonable not to disable this when losing focus (on desktop), unless we save immediately
   int autoSaveInterval = cfg->Int("autoSaveInterval");
@@ -571,6 +604,13 @@ void ScribbleApp::loadConfig()
   }
 }
 
+// started from loadConfig(), so a changed tabUnloadSecs takes effect without a restart
+static int tabUnloadCheckMs(int timeoutSecs)
+{
+  // a quarter of the timeout, so a tab goes at most 25% late, but not more often than once a second
+  return std::min(std::max(timeoutSecs*1000/4, 1000), 60000);
+}
+
 void ScribbleApp::saveConfig()
 {
   // save window layout
@@ -578,6 +618,11 @@ void ScribbleApp::saveConfig()
   //cfg->set("mainWindowState", saveState().toBase64().constData());
   cfg->set("bookmarkColor", bookmarkColor.argb());
   cfg->set("recentDocs", joinStr(recentDocs, ":::").c_str());
+  // the tab list, so a restart brings it back (restoreTabs)
+  if(tabsEnabled()) {
+    cfg->set("openTabs", tabs.serialize().c_str());
+    cfg->set("activeTab", activeArea() ? std::max(0, activeTabIndex()) : 0);
+  }
   // save mode of tools
   cfg->set("toolModes", scribbleMode->saveModes().c_str());
   if(penToolbar)
@@ -641,9 +686,19 @@ bool ScribbleApp::closeSplit()
     setActiveArea(scribbleAreas[1]);
     if(!maybeSave())  // should we always prompt ... maybe better to stick w/ usual behavior
       return false;
-    activeDoc()->newDocument();
+    // with tabs the second pane's document stays open as a tab (or, untitled, goes); either way the
+    //  pane is emptied below and rebuildShownDocs() sorts out which
+    if(!tabsEnabled())
+      activeDoc()->newDocument();
   }
   setActiveArea(scribbleAreas[0]);
+  if(tabsEnabled()) {
+    detachDoc(scribbleAreas[1]);
+    rebuildShownDocs();
+    updateSplitLabels();
+    onLoadFile(activeDoc()->fileName());
+    return true;
+  }
   scribbleAreas[1]->scribbleDoc->removeArea(scribbleAreas[1]);
   for(ScribbleArea* area : scribbleAreas)
     area->widget->fileNameLabel->setVisible(false);
@@ -702,6 +757,11 @@ void ScribbleApp::maybeQuit()
         if(!maybeSave())
           return;   // don't quit
       }
+    }
+    // background tabs were saved when they were left; only a whiteboard peer can have changed one since
+    for(EditorTab& tab : tabs.tabs) {
+      if(tab.doc && tab.doc->nViews == 0)
+        saveTabDoc(tab.doc);
     }
     saveConfig();
     finish();
@@ -1211,6 +1271,10 @@ void ScribbleApp::appSuspending()
       else
         doc->saveDocument();  //checkExtModified(doc) || doc->saveDocument() -- can't prompt anyway
     }
+  }
+  for(EditorTab& tab : tabs.tabs) {
+    if(tab.doc && tab.doc->nViews == 0)
+      saveTabDoc(tab.doc);
   }
   saveConfig();
   if(!disableConfigSave)
@@ -1859,6 +1923,19 @@ bool ScribbleApp::moveLibraryTo(const std::string& newRoot)
     if(moved.exists() && openDoc.first->openDocument(moved.c_str()) == Document::LOAD_OK && openDoc.first == activeDoc())
       onLoadFile(moved.c_str(), false);
   }
+  // the other tabs follow: a background one is clean (saved when it was left), so it is simply unloaded
+  //  and reloads from its new path when it is next shown
+  for(EditorTab& tab : tabs.tabs) {
+    if(!StringRef(tab.path).startsWith(oldRoot.c_str()))
+      continue;
+    if(tab.doc && tab.doc->nViews == 0 && !tab.doc->isModified()) {
+      delete tab.doc;
+      tab.doc = NULL;
+    }
+    if(!tab.doc)
+      tab.path = newRoot + tab.path.substr(oldRoot.size());
+  }
+  syncTabs();
   if(tagDocList)
     tagDocList->setRoot(libraryRoot.c_str());
   writeConfigFile();
@@ -2199,6 +2276,7 @@ void ScribbleApp::onLoadFile(const std::string& filename, bool addrecent)
   }
   else
     populateRecentFiles();
+  syncTabs();
 }
 
 void ScribbleApp::newDocument()
@@ -2212,7 +2290,13 @@ void ScribbleApp::newDocument()
 
 void ScribbleApp::doNewDocument()
 {
-  activeDoc()->newDocument();
+  // a tab whose file is still there stays open behind the new document; one deleted outside the app
+  //  (checkExtModified) is reset to untitled, which closes its tab
+  ScribbleDoc* doc = activeDoc();
+  if(tabsEnabled() && tabs.findDoc(doc) >= 0 && FSPath(doc->fileName()).exists())
+    showUntitledInArea(activeArea());
+  else
+    doc->newDocument();
   onLoadFile("");
   askThemeForNewDoc();
 }
@@ -2319,7 +2403,36 @@ bool ScribbleApp::doOpenDocument(std::string filename)
 bool ScribbleApp::doOpenDocument(IOStream* filestrm)
 {
   std::string filename = filestrm->name();
-  if(activeDoc()->nViews > 1) {
+  // Editor tabs: a document already open is switched to, not reloaded (which would drop its undo
+  //  history); any other gets its own ScribbleDoc, so the one being left stays open as a tab.  An
+  //  untitled document being left is not a tab, and is opened over as it always was.
+  ScribbleDoc* leftDoc = NULL;
+  TabViewState leftView;
+  if(tabsEnabled() && !filename.empty()) {
+    int existing = tabs.find(filename);
+    if(existing >= 0) {
+      delete filestrm;
+      if(!showTabInArea(existing, activeArea()))
+        return false;
+      onLoadFile(activeDoc()->fileName());
+      return true;
+    }
+    ScribbleDoc* prev = activeDoc();
+    if(tabs.findDoc(prev) >= 0 || prev->nViews > 1) {
+      tabInsertAnchor = tabs.findDoc(prev);
+      leftDoc = prev;
+      DocPosition pos = activeArea()->getPos();
+      leftView.pagenum = pos.pagenum;
+      leftView.x = pos.pos.x;
+      leftView.y = pos.pos.y;
+      leftView.zoom = activeArea()->getZoom();
+      ScribbleDoc* doc = new ScribbleDoc(this, cfg, scribbleMode);
+      detachDoc(activeArea());
+      attachDoc(doc, activeArea(), NULL);
+      scribbleDocs.push_back(doc);
+    }
+  }
+  else if(activeDoc()->nViews > 1) {
     if(filename == activeDoc()->fileName())
       return true;  // same doc selected for split ... do nothing
     // single doc split -> separate doc split
@@ -2356,6 +2469,20 @@ bool ScribbleApp::doOpenDocument(IOStream* filestrm)
 
   // try to open document - note that even if filestrm is not open, this could work (e.g. for missing .html)
   Document::loadresult_t res = activeDoc()->openDocument(filestrm);
+  if(tabsEnabled()) {
+    if(res == Document::LOAD_FATAL && leftDoc) {
+      // back to the document that was left, where it was
+      ScribbleDoc* failed = detachDoc(activeArea());
+      attachDoc(leftDoc, activeArea(), &leftView);
+      rebuildShownDocs();  // deletes the failed one
+      (void)failed;
+      tabInsertAnchor = -1;
+      repaintBookmarks(true);
+    }
+    else
+      rebuildShownDocs();
+    updateSplitLabels();
+  }
   if(res == Document::LOAD_OK || res == Document::LOAD_EMPTYDOC) {
     onLoadFile(activeDoc()->fileName());
 #if PLATFORM_MOBILE
@@ -2454,6 +2581,17 @@ void ScribbleApp::closeDocs(const FSPath& path)
         onLoadFile("");
     }
   }
+  // tabs no pane shows go with their files (they are saved, so nothing is lost); shown ones were reset
+  //  to untitled above, which syncTabs() takes as closing them
+  for(int ii = tabs.size() - 1; ii >= 0; --ii) {
+    ScribbleDoc* doc = tabs[ii].doc;
+    if((!doc || doc->nViews == 0) && StringRef(tabs[ii].path).startsWith(path.c_str())
+        && !(doc && doc->isModified())) {
+      tabs.remove(ii);
+      releaseDocIfOrphan(doc);
+    }
+  }
+  syncTabs();
 }
 
 // returns true to indicate scribbleDoc is synced with disk file (so no save/loaded needed)

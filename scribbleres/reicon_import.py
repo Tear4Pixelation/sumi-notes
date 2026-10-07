@@ -72,6 +72,8 @@ MAPPING = {
   # L/R icons are *not* these glyphs (see ROTATE), so the two buttons cannot be mistaken for each other
   'ic_menu_sidebar_left': 'sidebar-left',
   'ic_menu_sidebar_right': 'sidebar-right',
+  # editor tabs: the toolbar button and the sidebar view that list the open documents (sidebartabs.cpp)
+  'ic_menu_tabs': 'files',
   'ic_menu_minus': 'minus',
   'ic_menu_next': 'chevron-right',
   'ic_menu_pagesel': 'layers',

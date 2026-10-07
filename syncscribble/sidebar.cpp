@@ -173,6 +173,7 @@ void Sidebar::createUI()
   viewMenu->addItem(_("Outline"), SvgGui::useFile("icons/ic_menu_outline.svg"), [this](){ setView(OUTLINE); });
   viewMenu->addItem(_("Layers"), SvgGui::useFile("icons/ic_menu_pagesel.svg"), [this](){ setView(LAYERS); });
   viewMenu->addItem(_("Pages"), SvgGui::useFile("icons/ic_menu_pages.svg"), [this](){ setView(PAGES); });
+  viewMenu->addItem(_("Tabs"), SvgGui::useFile("icons/ic_menu_tabs.svg"), [this](){ setView(TABS); });
   setupPopupMenu(viewSelector, viewMenu);
   panelContent->addWidget(viewSelector);
 
@@ -228,6 +229,8 @@ void Sidebar::createUI()
       scribbleDoc->moveLayer(fromIdx, toIdx);
     rebuildList();
   };
+
+  setupTabDrag();
 
   outlineMenu = createArrowPopup(Menu::VERT_LEFT);
   outlineMenu->addItem(_("Rename"), NULL, [this](){ renameOutline(menuPage); });
@@ -411,6 +414,11 @@ void Sidebar::installDismissFilter()
     if(target && (target == this || target->isDescendantOf(this)
         || target == pageSelectBar || target->isDescendantOf(pageSelectBar)))
       return false;
+    // the toolbar buttons that open and close the sidebar do that on their own click (MainWindow)
+    for(Widget* widget = target; widget; widget = widget->parent()) {
+      if(widget->node->hasClass("sb-toggle"))
+        return false;
+    }
     setOpen(false);
     return false;
   };
@@ -425,6 +433,11 @@ SvgGui* Sidebar::gui() const
 void Sidebar::setView(View v)
 {
   currView = v;
+  // picked while showing temporarily: shown, but the view the sidebar comes back to is still the stored one
+  if(temporary) {
+    refresh();
+    return;
+  }
   ScribbleApp::cfg->set("sidebarView", int(v));
   refresh();
 }
@@ -436,6 +449,9 @@ void Sidebar::setPinned(bool pin)
   if(pinned == pin)
     return;
   pinned = pin;
+  // a pin pressed while showing temporarily is a real choice: it is what the close comes back to
+  if(temporary)
+    storedPinned = pin;
   ScribbleApp::cfg->set("sidebarPinned", pin ? 1 : 0);
   if(pinBtn)
     pinBtn->setChecked(pin);
@@ -482,10 +498,12 @@ void Sidebar::schedulePlacement()
 // two presentations it now belongs to.
 void Sidebar::applyPlacement(bool wasOpen)
 {
+  placing = true;
   setOpen(false);
   reparent();
   if(wasOpen)
     setOpen(true);
+  placing = false;
 }
 
 void Sidebar::updateInsets()
@@ -560,7 +578,73 @@ void Sidebar::setOpen(bool open)
     pageSelectBar->setVisible(open && pageSelectMode && currView == PAGES);
   if(open)
     refresh();
-  ScribbleApp::cfg->set("sidebarVisible", open ? 1 : 0);
+  // closing a temporary showing - by any route: outside press, Escape, a tab picked, a button - is what
+  //  puts the stored state back; and while temporary, nothing about it is stored
+  if(!open && temporary && !placing) {
+    endTemporary();
+    return;
+  }
+  if(!temporary)
+    ScribbleApp::cfg->set("sidebarVisible", open ? 1 : 0);
+  mainWindow->updateSidebarButton();
+}
+
+void Sidebar::showTemporary(View v)
+{
+  if(temporary) {
+    endTemporary();
+    return;
+  }
+  temporary = true;
+  storedView = currView;
+  storedPinned = pinned;
+  storedOpen = isOpen();
+  currView = v;
+  // A closed sidebar opens floating, over the canvas, for what is meant as a glance; an open one just
+  //  changes what it lists.  The reparent is safe here, unlike from the pin button: this runs from the
+  //  toolbar, outside the widget being moved.
+  if(!storedOpen && pinned) {
+    pinned = false;
+    if(pinBtn)
+      pinBtn->setChecked(false);
+    reparent();
+  }
+  if(isOpen())
+    refresh();
+  else
+    setOpen(true);
+  mainWindow->updateSidebarButton();
+}
+
+void Sidebar::endTemporary()
+{
+  temporary = false;
+  currView = storedView;
+  bool reopen = storedOpen;
+  setVisible(false);
+  if(pinned != storedPinned) {
+    pinned = storedPinned;
+    if(pinBtn)
+      pinBtn->setChecked(pinned);
+    // This can run from a press inside the sidebar (Escape, a tab row), so the move to the other parent
+    //  waits for the next event-loop turn, as schedulePlacement() does and for the same reason.
+    if(gui()) {
+      gui()->setTimer(1, mainWindow, [this, reopen](){
+        reparent();
+        if(reopen)
+          setOpen(true);
+        mainWindow->updateSidebarButton();
+        return 0;
+      });
+      mainWindow->updateSidebarButton();
+      return;
+    }
+    reparent();
+  }
+  if(reopen) {
+    setVisible(true);
+    refresh();
+  }
   mainWindow->updateSidebarButton();
 }
 
@@ -589,13 +673,16 @@ void Sidebar::refresh()
 {
   ScribbleDoc* prevDoc = scribbleDoc;
   scribbleDoc = ScribbleApp::app ? ScribbleApp::app->activeDoc() : NULL;
-  const char* label = currView == OUTLINE ? _("Outline") : (currView == LAYERS ? _("Layers") : _("Pages"));
+  const char* label = currView == OUTLINE ? _("Outline") : currView == LAYERS ? _("Layers")
+      : currView == TABS ? _("Tabs") : _("Pages");
   if(viewLabel)
     viewLabel->setText(label);
   if(viewIcon)
     viewIcon->setTarget(SvgGui::useFile(currView == OUTLINE ? "icons/ic_menu_outline.svg"
-        : (currView == LAYERS ? "icons/ic_menu_pagesel.svg" : "icons/ic_menu_pages.svg")));
-  searchEdit->setEmptyText(currView == OUTLINE ? _("Search outlines") : _("Search layers"));
+        : currView == LAYERS ? "icons/ic_menu_pagesel.svg"
+        : currView == TABS ? "icons/ic_menu_tabs.svg" : "icons/ic_menu_pages.svg"));
+  searchEdit->setEmptyText(currView == OUTLINE ? _("Search outlines")
+      : currView == TABS ? _("Search tabs") : _("Search layers"));
   // Pages has no search (page thumbnails have no text to match) and no Add; it has Select instead
   bool pages = currView == PAGES;
   if(pages && searchRow->isVisible())
@@ -611,6 +698,8 @@ void Sidebar::refresh()
 
 std::string Sidebar::docState(ScribbleDoc* doc) const
 {
+  if(currView == TABS)
+    return tabsState();
   if(!doc)
     return "none";
   std::string state = fstring("%p %d|", (void*)doc, int(currView));
@@ -669,6 +758,7 @@ void Sidebar::rebuildList()
   layerDrag->clear();
   pageDrag->clear();
   pageCells.clear();
+  tabDrag->clear();
   window()->gui()->deleteContents(listView);
   // Building the outline loads every page not yet loaded, so the list is complete the moment it is
   //  shown.  With outline(false) here it held only the pages that happened to be loaded, and entries
@@ -680,6 +770,11 @@ void Sidebar::rebuildList()
     entries = scribbleDoc->outline(true);
   shownEntries = entries;
   shownState = docState(scribbleDoc);
+  // the tabs are the application's, not the document's
+  if(currView == TABS) {
+    buildTabRows();
+    return;
+  }
   if(!scribbleDoc)
     return;
   if(currView == OUTLINE)
@@ -863,6 +958,16 @@ void Sidebar::buildLayerRows()
 
 void Sidebar::onAdd()
 {
+  // a new tab is a document opened from the library; deferred, since the library is modal and this
+  //  is still the press on the add button
+  if(currView == TABS) {
+    gui()->setTimer(1, mainWindow, [](){
+      if(ScribbleApp::app)
+        ScribbleApp::app->openDocument();
+      return 0;
+    });
+    return;
+  }
   if(!scribbleDoc)
     return;
   if(currView == LAYERS) {

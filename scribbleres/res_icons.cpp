@@ -1210,6 +1210,16 @@ static const char* icons__ic_menu_switch_back_svg = R"~~~~(<?xml version="1.0" e
 </svg>
 )~~~~";
 
+static const char* icons__ic_menu_tabs_svg = R"~~~~(<?xml version="1.0" encoding="utf-8"?>
+<svg version="1.2" baseProfile="tiny" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+  x="0px" y="0px" viewBox="0 0 24 24" xml:space="preserve">
+<!-- reicon "files" (outline), https://reicon.dev - MIT -->
+<g class="icon">
+  <path d="M 8.3333 14.3333 H 4.3333 c -0.736 0 -1.3333 -0.5973 -1.3333 -1.3333 V 3.6667 c 0 -0.736 0.5973 -1.3333 1.3333 -1.3333 H 9.6666 l 2.6667 2.6667 v 1.3333" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"></path><polyline points="9 2.3333 9 5 11.6666 5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"></polyline><path d="M 20.9999 12.3333 v 8 c 0 0.736 -0.5973 1.3333 -1.3333 1.3333 h -6.6666 c -0.736 0 -1.3333 -0.5973 -1.3333 -1.3333 v -9.3333 c 0 -0.736 0.5973 -1.3333 1.3333 -1.3333 h 5.3333 l 2.6667 2.6667 Z" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"></path><polyline points="18.3333 9.6666 18.3333 12.3333 20.9999 12.3333" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"></polyline>
+</g>
+</svg>
+)~~~~";
+
 static const char* icons__ic_menu_toggle_erase_stroke_svg = R"~~~~(<?xml version="1.0" encoding="utf-8"?>
 <svg version="1.2" baseProfile="tiny" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
   x="0px" y="0px" viewBox="555 158.51 33 33" xml:space="preserve">
@@ -1475,6 +1485,7 @@ static void LOAD_RES_FN() { addStringResources({
   {"icons/ic_menu_split_tb.svg", icons__ic_menu_split_tb_svg},
   {"icons/ic_menu_stretch.svg", icons__ic_menu_stretch_svg},
   {"icons/ic_menu_switch_back.svg", icons__ic_menu_switch_back_svg},
+  {"icons/ic_menu_tabs.svg", icons__ic_menu_tabs_svg},
   {"icons/ic_menu_toggle_erase_stroke.svg", icons__ic_menu_toggle_erase_stroke_svg},
   {"icons/ic_menu_toggle_ruled.svg", icons__ic_menu_toggle_ruled_svg},
   {"icons/ic_menu_toggle_select_touch.svg", icons__ic_menu_toggle_select_touch_svg},

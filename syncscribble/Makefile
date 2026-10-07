@@ -41,7 +41,10 @@ SOURCES = \
   notefulfile.cpp \
   notefulimport.cpp \
   sidebar.cpp \
+  sidebartabs.cpp \
   rowdrag.cpp \
+  tablist.cpp \
+  editortabs.cpp \
   rulingdialog.cpp \
   themedialog.cpp \
   cover.cpp \

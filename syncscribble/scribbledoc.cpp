@@ -300,10 +300,13 @@ void ScribbleDoc::loadConfig(bool refresh)
 
 void ScribbleDoc::updateDocConfig(Document::saveflags_t flags)
 {
-  DocPosition docpos = (flags & Document::SAVE_COPY) ? DocPosition(0, 0, 0) : activeArea->getPos();
-  cfg->set("pageNum", docpos.pagenum);
-  cfg->set("xOffset", docpos.pos.x);
-  cfg->set("yOffset", docpos.pos.y);
+  // a background editor tab has no pane: the position it was left at is already in cfg (editortabs.cpp)
+  if((flags & Document::SAVE_COPY) || activeArea) {
+    DocPosition docpos = (flags & Document::SAVE_COPY) ? DocPosition(0, 0, 0) : activeArea->getPos();
+    cfg->set("pageNum", docpos.pagenum);
+    cfg->set("xOffset", docpos.pos.x);
+    cfg->set("yOffset", docpos.pos.y);
+  }
   cfg->set("docFormatVersion", Document::docFormatVersion);
   updatePageTagSummary(document, cfg);
   cfg->saveConfig(document->resetConfigNode());
@@ -698,7 +701,8 @@ bool ScribbleDoc::saveDocument(IOStream* strm, Document::saveflags_t flags)
   flags |= cfg->Int("compressLevel", 2) << 24;  // ignored for uncompressed formats
 
   bool ok = false;
-  if(cfg->Bool("saveThumbnail")) {
+  // the thumbnail is drawn by a pane, so a background tab (saved on exit after a peer's edit) goes without
+  if(cfg->Bool("saveThumbnail") && activeArea) {
 #if PLATFORM_IOS
     IOStream* thumbstrm = strm ? strm : document->blockStream.get();
     if(thumbstrm->type() & IOStream::UIDOCSTREAM) {
@@ -1028,7 +1032,9 @@ void ScribbleDoc::exitPageSelMode()
 
 void ScribbleDoc::doCancelAction()
 {
-  activeArea->doCancelAction();
+  // no pane, no action in progress: a background editor tab
+  if(activeArea)
+    activeArea->doCancelAction();
 }
 
 // set dimensions for future pages
@@ -1726,7 +1732,7 @@ int ScribbleDoc::getScribbleMode(int modemod)
 
 int ScribbleDoc::getActiveMode() const
 {
-  return activeArea->currMode;
+  return activeArea ? activeArea->currMode : int(MODE_NONE);
 }
 
 Color ScribbleDoc::getCurrPageColor() const

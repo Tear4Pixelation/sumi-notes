@@ -73,6 +73,8 @@ public:
 
   // some of these need to be made private
   DocPosition getPos() const;
+  // put the view back where an editor tab left it (editortabs.cpp): zoom, then page and corner position
+  void restoreView(int pagenum, Point pos, Dim zoom);
   void doGotoPos(int pagenum, Point pos, bool exact = true);
   void doCommand(int itemid);
   bool doTimerEvent(Timestamp t) override;

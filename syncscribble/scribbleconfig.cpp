@@ -217,6 +217,11 @@ void ScribbleConfig::init()
   cfg["sidebarPinned"] = 1;
   cfg["sidebarLeft"] = 1;
   cfg["sidebarView"] = 0;  // Sidebar::OUTLINE
+  // Editor tabs (docs/agent/editor-tabs.md): a background tab's document is unloaded after this many
+  //  seconds without being shown, and reloaded from its file when it is switched back to; 0 = never
+  cfg["tabUnloadSecs"] = 600;
+  // which of the restored tabs (cfgS openTabs) was active, so a restart reopens that one
+  cfg["activeTab"] = 0;
 
   cfgF["themeSeedHue"] = 218.0f;
   cfgF["themeVividness"] = 1.0f;
@@ -315,6 +320,8 @@ void ScribbleConfig::init()
   //cfgS["mainWindowGeometry"] = "";
   cfgS["windowState"] = "";
   cfgS["recentDocs"] = "";
+  // the open tabs, in order, as recentDocs: paths joined by ":::"
+  cfgS["openTabs"] = "";
   cfgS["currFolder"] = "";
   cfgS["libraryPath"] = "";  // "" until the first run acquires one (ScribbleApp::initLibrary)
   cfgS["toolModes"] = "";

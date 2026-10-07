@@ -6,6 +6,7 @@
 #include "basics.h"
 #include "application.h"
 #include "scribblepen.h"
+#include "tablist.h"
 #if PLATFORM_ANDROID
 #include "android/androidhelper.h"
 #elif PLATFORM_IOS
@@ -200,6 +201,29 @@ public:
   bool openSplitDoc();
   bool closeSplit();
 
+  // Editor tabs (docs/agent/editor-tabs.md, editortabs.cpp).  Every document with a file is a tab; a pane
+  //  shows one tab's document.  scribbleDocs stays what it always was - the documents shown in a pane -
+  //  and a background tab's document is owned by its tab alone, so nothing iterating scribbleDocs ever
+  //  meets a document with no pane (doCancelAction, updateDocConfig and the thumbnail need one).
+  TabList tabs;
+  bool tabsEnabled() const;
+  // the tab of the active pane's document, -1 for an untitled document
+  int activeTabIndex() const;
+  // show tab `idx` in `area` (the active pane by default), saving the document it replaces first
+  bool switchToTab(int idx, ScribbleArea* area = NULL);
+  // save the tab's document and close it; every pane showing it moves to a neighbouring tab, or to the
+  //  library when it was the last
+  bool closeTab(int idx);
+  void moveTab(int from, int to);
+  // a tab row dragged out of the sidebar and released over a pane at `pos` (window coordinates): onto
+  //  the existing pane of a split, or - unsplit - into a new pane on the edge nearest the drop
+  bool dropTabOnCanvas(int idx, Point pos);
+  // feedback while dragging: highlight what dropTabOnCanvas would do at `pos`; NaN hides it
+  void previewTabDrop(Point pos);
+  // bring the list in line with the documents in the panes (new file, Save As, a document reset to
+  //  untitled); called from onLoadFile
+  void syncTabs();
+
   void repaintBookmarks(bool newdoc = false);
   void refreshUI(ScribbleDoc* doc, int reason);
   bool oneTimeTip(const char* id, Point pos = {}, const char* message = NULL);
@@ -265,6 +289,20 @@ private:
   size_t historyPos = 0;  // used in penChanged
 
   bool maybeSave(bool prompt = false);
+  // editor tabs, see the public section
+  bool showTabInArea(int idx, ScribbleArea* area);
+  void attachDoc(ScribbleDoc* doc, ScribbleArea* area, const TabViewState* view);
+  ScribbleDoc* detachDoc(ScribbleArea* area);
+  void releaseDocIfOrphan(ScribbleDoc* doc);
+  void rebuildShownDocs();
+  void showUntitledInArea(ScribbleArea* area);
+  bool saveTabDoc(ScribbleDoc* doc);
+  void unloadIdleTabs();
+  void restoreTabs();
+  void updateSplitLabels();
+  ScribbleArea* areaAt(Point pos) const;
+  int tabInsertAnchor = -1;
+  Timer* tabUnloadTimer = NULL;
   bool checkExtModified();
   bool checkExtModified(ScribbleDoc* doc);
   void doNewDocument();

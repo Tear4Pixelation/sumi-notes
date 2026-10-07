@@ -2017,6 +2017,17 @@ void ScribbleArea::gotoPos(int pagenum, Point pos, bool savepos)
   setCornerPos(pageDimToDim(pos));
 }
 
+void ScribbleArea::restoreView(int pagenum, Point pos, Dim zoom)
+{
+  if(zoom > 0) {
+    setZoom(zoom);
+    zoomStepsIdx = nearestZoomStep(mZoom);
+  }
+  // the file may have lost pages since the view was taken (reloaded after an outside edit)
+  gotoPos(std::max(0, std::min(pagenum, numPages() - 1)), pos, false);
+  uiChanged(UIState::Zoom);
+}
+
 // used for next page, prev page, so we never save previous position
 void ScribbleArea::gotoPage(int pagenum)
 {

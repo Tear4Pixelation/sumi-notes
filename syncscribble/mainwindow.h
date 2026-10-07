@@ -32,6 +32,9 @@ public:
   void refreshCommonUI(ScribbleDoc* doc, const UIState* uiState);
   // sync the toolbar sidebar button's glyph (which edge) and checked state (open) with the sidebar
   void updateSidebarButton();
+  // Editor tabs: highlight the half of `area` a dropped tab would open a new pane in (edge is a DropEdge,
+  //  tablist.h), or the whole pane for edge -1; area NULL hides it
+  void showTabDropPreview(ScribbleArea* area, int edge);
   void refreshUI(ScribbleDoc* doc, int reason);
   void orientationChanged();
   bool oneTimeTip(const char* id, Point pos = {}, const char* message = NULL);
@@ -87,7 +90,9 @@ public:
   Action* actionSave;
   Action* actionPage_Setup;
   Action* actionTheme;
-  Action* actionShow_Sidebar;
+  Action* actionShow_Sidebar = NULL;
+  // opens the sidebar in its Tabs view for a moment, leaving its own view, pin and open state alone
+  Action* actionShow_Tabs = NULL;
   Action* actionTagDocList;
   Action* actionUndo;
   Action* actionRedo;
@@ -242,6 +247,10 @@ public:
   Splitter* scribbleSplitter = NULL;
   Widget* focusIndicator2 = NULL;
   Widget* splitPlaceholder = NULL;
+  // what a tab dragged onto the canvas would do, one per pane (showTabDropPreview)
+  Widget* tabDropPreview[2] = {NULL, NULL};
+  ScribbleArea* tabDropPreviewArea = NULL;
+  int tabDropPreviewEdge = -1;
   //enum {SplitNone, SplitHorz, SplitVert, SplitNumStates};
   // splitState = +/- SPLIT_XXX : > 0 if open, < 0 if not; toggle just flips sign
   enum SplitState { SPLIT_TOGGLE=0, SPLIT_H12, SPLIT_H21, SPLIT_V12, SPLIT_V21 };

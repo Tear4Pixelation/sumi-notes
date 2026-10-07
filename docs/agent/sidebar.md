@@ -1,7 +1,8 @@
 # The general-purpose sidebar
 
-A panel with three views - the document's **outline**, its **layer table** and its **pages** (a thumbnail
-grid with select mode, drag to move, delete and export: [page-management.md](page-management.md)) - over the
+A panel with four views - the document's **outline**, its **layer table**, its **pages** (a thumbnail
+grid with select mode, drag to move, delete and export: [page-management.md](page-management.md)) and the
+open documents (**Tabs**, see [editor-tabs.md](editor-tabs.md)) - over the
 backends in [outlines.md](outlines.md) and [layers.md](layers.md); it is the first UI either feature has had. Opened from a button at the
 left end of the **page ops** floating panel (Bookmarks is off the toolbar for now; Ctrl+B and View > Bookmarks still open it). Designed in the Penpot file
 "General purpose sidebar" and specified in `SIDEBAR_SPEC.md`; that document is the rationale, this is
@@ -159,3 +160,14 @@ class-based: `.drop-target` fills the row's sizing rect with `--checked` at
 `--text-weak` (`opacity`, as a CSS rule or an attribute, did not show). Both rules are in the sidebar
 section of `ugui/theme.cpp` and match only `.sb-row`; until they were added there was no rule at all, so
 a drag showed nothing. The tag browser's rows (`.tag-row`) still have none.
+
+## Tabs view and the temporary showing
+
+The Tabs view's rows are built in `sidebartabs.cpp` (`buildTabRows`, `tabsState` for `refreshIfChanged`),
+keeping `sidebar.cpp`'s changes to the view enum, the selector entry and a few dispatch lines.
+`showTemporary()`/`endTemporary()` open the sidebar in a view without storing view, pin or open state
+(`temporary` suppresses the cfg writes in `setView`/`setOpen`; `placing` keeps `applyPlacement`'s own
+close from ending it). The press-outside filter skips widgets with class `sb-toggle` (the toolbar's
+Sidebar and Tabs buttons), which otherwise closed a floating sidebar on press only for the click to reopen
+it. `RowDrag` has additive `onDragOutside`/`onDropOutside` hooks and `addRow(..., rowToo)` (grip *and*
+row draggable); details in [editor-tabs.md](editor-tabs.md).

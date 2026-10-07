@@ -1580,8 +1580,15 @@ void MainWindow::createToolBars()
     // The sidebar button sits at the left end of the page ops panel: the sidebar itself defaults to
     //  the left edge, so the control is on the side of what it opens.  Bookmarks is off the toolbar
     //  for now; Ctrl+B still toggles the panel.
-    addTBWidget(pageopsRow->addAction(actionShow_Sidebar), actionShow_Sidebar->priority,
-        {actionShow_Sidebar});
+    Widget* sidebarBtn = pageopsRow->addAction(actionShow_Sidebar);
+    addTBWidget(sidebarBtn, actionShow_Sidebar->priority, {actionShow_Sidebar});
+    // the open documents, next to the sidebar they appear in
+    Widget* tabsBtn = pageopsRow->addAction(actionShow_Tabs);
+    addTBWidget(tabsBtn, actionShow_Tabs->priority, {actionShow_Tabs});
+    // both toggle the sidebar themselves, so its press-outside dismissal must leave them alone - or a
+    //  press on either closes the floating sidebar and the click then opens it straight back
+    sidebarBtn->node->addClass("sb-toggle");
+    tabsBtn->node->addClass("sb-toggle");
     addTBWidget(pageopsRow->addAction(actionPaste), actionPaste->priority, {actionPaste});
     addTBWidget(pageopsRow->addAction(actionSplitView), actionSplitView->priority, {actionSplitView});
     floatBox(pageopsRow, floatInset, floatSidePad, floatEdgeInset);
@@ -2008,7 +2015,50 @@ void MainWindow::updateSidebarButton()
     return;
   actionShow_Sidebar->setIcon(SvgGui::useFile(
       sidebar->isOnLeft() ? ":/icons/ic_menu_sidebar_left.svg" : ":/icons/ic_menu_sidebar_right.svg"));
-  actionShow_Sidebar->setChecked(sidebar->isOpen());
+  actionShow_Sidebar->setChecked(sidebar->isOpen() && !sidebar->isTemporary());
+  if(actionShow_Tabs)
+    actionShow_Tabs->setChecked(sidebar->isOpen() && sidebar->isTemporary());
+}
+
+// The new pane takes the half of the pane nearest the drop (ScribbleApp::dropTabOnCanvas), so that half
+//  is what lights up: a fill rect over the pane's container, its margins cutting away the other half.
+//  The container is a box layout, so margins on a fill-anchored rect are its position.
+void MainWindow::showTabDropPreview(ScribbleArea* area, int edge)
+{
+  // called on every motion event of the drag: only a change of pane or edge touches the layout, which
+  //  otherwise relaid out the canvas per event and fell seconds behind the pointer
+  if(area == tabDropPreviewArea && (!area || edge == tabDropPreviewEdge))
+    return;
+  tabDropPreviewArea = area;
+  tabDropPreviewEdge = edge;
+  for(Widget* preview : tabDropPreview) {
+    if(preview)
+      preview->setVisible(false);
+  }
+  if(!area || !area->widget || !area->widget->parent())
+    return;
+  int pane = area == app->scribbleAreas[0] ? 0 : 1;
+  Widget* container = area->widget->parent();
+  if(!tabDropPreview[pane]) {
+    SvgRect* rect = new SvgRect(Rect::wh(20, 20));
+    rect->setAttribute("box-anchor", "fill");
+    rect->addClass("tab-drop-preview");
+    tabDropPreview[pane] = new Widget(rect);
+    // added last, so it draws over the pane and the split placeholder
+    container->addWidget(tabDropPreview[pane]);
+  }
+  Rect bounds = container->node->bounds();
+  Dim halfWidth = bounds.width()/2, halfHeight = bounds.height()/2;
+  Widget* preview = tabDropPreview[pane];
+  // setMargins is (top, right, bottom, left)
+  switch(edge) {
+  case int(DropEdge::LEFT): preview->setMargins(0, halfWidth, 0, 0); break;
+  case int(DropEdge::RIGHT): preview->setMargins(0, 0, 0, halfWidth); break;
+  case int(DropEdge::TOP): preview->setMargins(0, 0, halfHeight, 0); break;
+  case int(DropEdge::BOTTOM): preview->setMargins(halfHeight, 0, 0, 0); break;
+  default: preview->setMargins(0); break;
+  }
+  preview->setVisible(true);
 }
 
 void MainWindow::setupActions()
@@ -2138,6 +2188,11 @@ void MainWindow::setupActions()
   // the glyph names the edge the sidebar is docked to, so it is swapped whenever that changes
   //  (updateSidebarButton); checkable so the toolbar button reads as open/closed
   actionShow_Sidebar->setCheckable(true);
+  // Editor tabs (docs/agent/editor-tabs.md): the open documents, one press away, without the sidebar
+  //  forgetting what it was showing - Sidebar::showTemporary() puts its view and placement back on close
+  actionShow_Tabs = createAction("actionShow_Tabs",
+      "Tabs", ":/icons/ic_menu_tabs.svg", "", [this](){ sidebar->showTemporary(Sidebar::TABS); });
+  actionShow_Tabs->setCheckable(true);
   // With the tag browser, documents live in the library, so the folder browser is no longer a way to
   //  browse; it survives only as the file picker behind Import, which copies what it opens into the
   //  library. Without it, the tag browser stays reachable from here.

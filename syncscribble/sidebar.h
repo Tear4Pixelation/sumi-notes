@@ -30,7 +30,8 @@ class MainWindow;
 class Sidebar : public Widget
 {
 public:
-  enum View { OUTLINE = 0, LAYERS, PAGES };
+  // TABS: the open documents (editor tabs, sidebartabs.cpp)
+  enum View { OUTLINE = 0, LAYERS, PAGES, TABS };
 
   Sidebar(MainWindow* mw);
 
@@ -50,6 +51,11 @@ public:
   bool isOnLeft() const { return onLeft; }
 
   void setOpen(bool open);
+  // Open in view `v` *for now*: the stored view, pin and open state are left as they are, and the next
+  //  close puts them back (the toolbar's Tabs button).  Called again while showing temporarily, it
+  //  ends it.  Floating if the sidebar was closed, so the canvas is not resized for a glance.
+  void showTemporary(View v);
+  bool isTemporary() const { return temporary; }
   bool isOpen() const { return isVisible(); }
   void toggleOpen() { setOpen(!isOpen()); }
   // reapply the panel's margins, e.g. after ScribbleApp::topInset changed
@@ -70,6 +76,13 @@ private:
   void rebuildList();
   void buildOutlineRows(const std::vector<OutlineEntry>& entries);
   void buildLayerRows();
+  // the Tabs view (sidebartabs.cpp): one row per open document, and the drag that reorders them or
+  //  drops one onto the canvas
+  void buildTabRows();
+  void setupTabDrag();
+  void tabChosen();
+  // leave temporary mode: the stored view and pin come back, and it closes unless it was open before
+  void endTemporary();
   Widget* createRow(Dim height, Dim leftPad);
   void toggleSearch();
   void onAdd();
@@ -108,6 +121,8 @@ private:
   std::string thumbnailInputs(ScribbleDoc* doc) const;
   // a signature of the document state the list is built from, for refreshIfChanged
   std::string docState(ScribbleDoc* doc) const;
+  // the same for the Tabs view (sidebartabs.cpp)
+  std::string tabsState() const;
 
   MainWindow* mainWindow;
   ScribbleDoc* scribbleDoc = NULL;
@@ -140,6 +155,16 @@ private:
   std::unique_ptr<RowDrag> outlineDrag;
   // reorders layers; keyed by layer id, picked up by each row's grip (ic_menu_reorder)
   std::unique_ptr<RowDrag> layerDrag;
+  // reorders tabs, or drops one on the canvas to split it; keyed by tab index
+  std::unique_ptr<RowDrag> tabDrag;
+
+  // showTemporary(): what to put back on close
+  bool temporary = false;
+  View storedView = OUTLINE;
+  bool storedPinned = true;
+  bool storedOpen = false;
+  // applyPlacement() closes and reopens around a reparent; that close is not the user closing it
+  bool placing = false;
 
   // One persistent popup per row kind, reparented onto the row that opened it (TagDocList::showTagMenu
   //  explains why), and what it was opened for.
