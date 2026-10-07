@@ -15,21 +15,6 @@
 //  as one group the size of frame.  cropToFrame cuts a notebook's thumbnail to the frame's proportions
 //  from its top left - those saved before the frame (240 x 400, the view rather than the page) lose their
 //  bottom, which is better than a frame taller than every other notebook's.
-static SvgNode* createFramedThumbnail(Image thumbnail, const Rect& frame, bool cropToFrame)
-{
-  if(cropToFrame) {
-    real cropWidth = std::min(real(thumbnail.width), thumbnail.height/Cover::PREVIEW_ASPECT);
-    real cropHeight = std::min(real(thumbnail.height), thumbnail.width*Cover::PREVIEW_ASPECT);
-    if(int(cropWidth) < thumbnail.width || int(cropHeight) < thumbnail.height)
-      thumbnail = thumbnail.cropped(Rect::wh(cropWidth, cropHeight));
-  }
-  Cover::roundCorners(&thumbnail, Cover::previewRadius(frame.width())*thumbnail.width/frame.width());
-  SvgG* group = new SvgG();
-  group->addChild(new SvgImage(std::move(thumbnail), frame.toSize()));
-  group->addChild(loadSVGFragment(Cover::outlineSVG(frame.width(), frame.height()).c_str()));
-  return group;
-}
-
 TagNameDialog::TagNameDialog(const char* title, const char* initialName) : PopupDialog(createPopupDialogNode())
 {
   nameEdit = createTextEdit();
@@ -594,7 +579,7 @@ void TagDocList::rebuildDocGrid()
       container->addChild(loadSVGFragment(Cover::coverSVG(Color::fromArgb(coverArgb),
           iconSize.width(), iconSize.height()).c_str()));
     else if(!thumbnail.isNull())
-      container->addChild(createFramedThumbnail(std::move(thumbnail), iconSize, true));
+      container->addChild(Cover::framedImage(std::move(thumbnail), iconSize, true));
     else
       container->addChild(fileUseNode->clone());
     if(selectMode) {
@@ -668,7 +653,7 @@ void TagDocList::rebuildDocGrid()
       spacer->setAttribute("fill", "none");
       container->addChild(spacer);
       // the frame's corners and outline, at the page's own shape
-      SvgNode* image = createFramedThumbnail(std::move(thumbnail), imageRect, false);
+      SvgNode* image = Cover::framedImage(std::move(thumbnail), imageRect, false);
       image->setAttribute("box-anchor", "bottom");
       container->addChild(image);
     }

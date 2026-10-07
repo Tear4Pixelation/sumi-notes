@@ -37,6 +37,11 @@ public:
   std::function<void(int src, int dst)> onDrop;
   // whether `src` may be dropped on `dst`, e.g. not on its own descendant; unset allows everything
   std::function<bool(int src, int dst)> canDrop;
+  // Optional: which part of the target `dst` the pointer is over (pos in window coordinates, like the
+  //  target's bounds).  Zone 0 is "onto", shown as .drop-target; any other zone is shown as .drop-before.
+  //  With it set, drops go to onDropZone instead of onDrop.  The Pages view uses it for "before page 1".
+  std::function<int(int dst, Widget* target, Point pos)> zoneAt;
+  std::function<void(int src, int dst, int zone)> onDropZone;
 
   // makes `row` draggable and a drop target, identified to the callbacks as `key` (>= 0); with `grip`,
   //  the row is picked up only by that widget (a Button inside the row), in any direction
@@ -48,9 +53,9 @@ public:
 
 private:
   Widget* targetAt(SvgGui* gui, Widget* from, Point pos, int* keyOut) const;
-  void setHover(Widget* target);
+  void setHover(Widget* target, int zone = 0);
   void endDrag();
-  void drop(SvgGui* gui, int src, int dst);
+  void drop(SvgGui* gui, int src, int dst, int zone);
 
   Widget* ownerWidget;
   std::unordered_map<Widget*, int> rows;
@@ -62,4 +67,5 @@ private:
   bool dragging = false;
   Point pressPos;
   Widget* hoverTarget = NULL;
+  int hoverZone = 0;
 };

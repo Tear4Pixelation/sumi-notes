@@ -5,6 +5,7 @@
 #include "ulib/image.h"
 #include "ulib/oklab.h"
 #include "ulib/stringutil.h"
+#include "ugui/widgets.h"  // loadSVGFragment
 
 namespace Cover {
 
@@ -95,6 +96,21 @@ const std::vector<Color>& presetSeeds()
     seeds.push_back(oklchToColor(ColorOkLch(0.98, 0, 0)));       // white
   }
   return seeds;
+}
+
+SvgNode* framedImage(Image thumbnail, const Rect& frame, bool cropToFrame)
+{
+  if(cropToFrame) {
+    real cropWidth = std::min(real(thumbnail.width), thumbnail.height/PREVIEW_ASPECT);
+    real cropHeight = std::min(real(thumbnail.height), thumbnail.width*PREVIEW_ASPECT);
+    if(int(cropWidth) < thumbnail.width || int(cropHeight) < thumbnail.height)
+      thumbnail = thumbnail.cropped(Rect::wh(cropWidth, cropHeight));
+  }
+  roundCorners(&thumbnail, previewRadius(frame.width())*thumbnail.width/frame.width());
+  SvgG* group = new SvgG();
+  group->addChild(new SvgImage(std::move(thumbnail), frame.toSize()));
+  group->addChild(loadSVGFragment(outlineSVG(frame.width(), frame.height()).c_str()));
+  return group;
 }
 
 }  // namespace Cover

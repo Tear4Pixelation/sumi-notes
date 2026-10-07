@@ -8,6 +8,7 @@
 #include "layers.h"
 #include "tagdoclist.h"  // TagNameDialog, the app's small "enter a name" prompt
 #include "application.h"
+#include "cover.h"
 #include "ulib/stringutil.h"
 #include <algorithm>
 
@@ -44,6 +45,21 @@ static const Dim sbPreview      = 70*floatUIScale;
 static const Dim sbIndent       = 20*floatUIScale;   // per outline level (design: 12 -> 32 left pad)
 static const Dim sbTitleSize    = 24*floatUIScale;   // row titles, search text
 static const Dim sbSubSize      = 18*floatUIScale;   // view label, page numbers, layer names
+
+// The Pages view (docs/agent/page-management.md): two thumbnails per row across the list, each in the
+//  page-shaped frame every preview in the document list shares (cover.h), so a page here looks like the
+//  page card it would be there.
+static const Dim sbThumbGap     = sbPad;
+static const Dim sbThumbW       = (sbWidth - 2*sbPad - sbThumbGap)/2;
+static const Dim sbThumbH       = sbThumbW*Cover::PREVIEW_ASPECT;
+// the accent bar on a thumbnail's edge saying where a dragged page will land
+static const Dim sbDropBarW     = 8*floatUIScale;
+// select mode's check badge, scaled from the document list's (24 on a ~150 wide card) to this card
+static const Dim sbBadgeSize    = 18;
+static const Dim sbBadgeInset   = 5;
+static const Dim sbCheckSize    = 12;
+// how long one turn of the event loop may spend rendering thumbnails before it lets input through
+static const int thumbBudgetMs  = 12;
 
 // The sidebar's inset from the window, taken from the floating toolbar's own geometry (basics.h)
 //  rather than from the design file's numbers.  The panel has to *line up* with the toolbar above
@@ -141,7 +157,7 @@ void Sidebar::createUI()
   )", sbSelectorH, sbCorner, sbCorner, sbPad, sbPad);
   std::unique_ptr<SvgNode> selProto(loadSVGFragment(selSvg.c_str()));
   Button* viewSelector = new Button(selProto->clone());
-  SvgUse* viewIcon = new SvgUse(Rect::wh(sbSelectorIcon, sbSelectorIcon), "", SvgGui::useFile("icons/ic_menu_outline.svg"));
+  viewIcon = new SvgUse(Rect::wh(sbSelectorIcon, sbSelectorIcon), "", SvgGui::useFile("icons/ic_menu_outline.svg"));
   viewIcon->addClass("icon");
   viewSelector->selectFirst(".sb-view-icon")->containerNode()->addChild(viewIcon);
   SvgUse* viewChevron = new SvgUse(Rect::wh(sbSelectorIcon, sbSelectorIcon), "", SvgGui::useFile("icons/chevron_down.svg"));
@@ -156,6 +172,7 @@ void Sidebar::createUI()
   ArrowPopup* viewMenu = createArrowPopup(Menu::VERT_LEFT);
   viewMenu->addItem(_("Outline"), SvgGui::useFile("icons/ic_menu_outline.svg"), [this](){ setView(OUTLINE); });
   viewMenu->addItem(_("Layers"), SvgGui::useFile("icons/ic_menu_pagesel.svg"), [this](){ setView(LAYERS); });
+  viewMenu->addItem(_("Pages"), SvgGui::useFile("icons/ic_menu_pages.svg"), [this](){ setView(PAGES); });
   setupPopupMenu(viewSelector, viewMenu);
   panelContent->addWidget(viewSelector);
 
@@ -172,6 +189,8 @@ void Sidebar::createUI()
   listContainer->setMargins(sbPad, 0, 0, 0);
   listContainer->addWidget(listScroll);
   panelContent->addWidget(listContainer);
+  // thumbnails are rendered for what is on screen (renderThumbnails), so scrolling has to ask for more
+  listScroll->onScroll = [this](){ if(currView == PAGES) ensureThumbTimer(); };
 
   // drag an outline row onto another to nest it there (layers have no nesting)
   outlineDrag.reset(new RowDrag(this));
@@ -225,6 +244,43 @@ void Sidebar::createUI()
     rebuildList();
   });
   setupAutoClosePopup(outlineMenu);
+
+  // Pages view: drag a thumbnail onto another to move the page (in select mode, a selected thumbnail
+  //  carries the whole selection) to straight *after* that page.  The leading half of page 1 is the one
+  //  place that means "before", or nothing could ever be moved to the front.
+  pageDrag.reset(new RowDrag(this));
+  pageDrag->canDrop = [this](int src, int dst){
+    if(src == dst || !scribbleDoc || dst < 0 || dst >= scribbleDoc->document->numPages())
+      return false;
+    // carrying the selection: not onto one of the pages being carried
+    bool carrying = pageSelectMode && selectedPageUids.count(scribbleDoc->document->pages[src]->uid);
+    return !(carrying && selectedPageUids.count(scribbleDoc->document->pages[dst]->uid));
+  };
+  pageDrag->zoneAt = [](int dst, Widget* target, Point pos){
+    return dst == 0 && pos.x < target->node->bounds().center().x ? 1 : 0;
+  };
+  pageDrag->onDropZone = [this](int src, int dst, int zone){ dropPages(src, dst, zone); };
+
+  // long press / right click on a thumbnail, outside select mode: the bar's actions for that one page.
+  //  Each runs on the next event-loop turn: a file dialog pumps events, and a refresh it lets through
+  //  would rebuild the grid this popup is parented to.
+  pageMenu = createArrowPopup(Menu::VERT_LEFT);
+  auto deferPageAction = [this](int kind){
+    closeRowMenus();
+    int pagenum = menuPage;
+    gui()->setTimer(1, mainWindow, [this, kind, pagenum](){
+      if(kind < 0)
+        deletePages({pagenum});
+      else
+        exportPages(kind, {pagenum});
+      return 0;
+    });
+  };
+  pageMenu->addItem(_("Export PDF"), SvgGui::useFile("icons/ic_menu_pdf.svg"), [=](){ deferPageAction(0); });
+  pageMenu->addItem(_("Share"), SvgGui::useFile("icons/ic_menu_share.svg"), [=](){ deferPageAction(1); });
+  pageMenu->addItem(_("Export PNG"), SvgGui::useFile("icons/ic_menu_image.svg"), [=](){ deferPageAction(2); });
+  pageMenu->addItem(_("Delete Page"), SvgGui::useFile("icons/ic_menu_discard.svg"), [=](){ deferPageAction(-1); });
+  setupAutoClosePopup(pageMenu);
 
   layerMenu = createArrowPopup(Menu::VERT_LEFT);
   layerMenu->addItem(_("Rename"), NULL, [this](){ renameLayer(menuLayer); });
@@ -281,12 +337,14 @@ void Sidebar::createUI()
     actionsRow->addWidget(btn);
     return btn;
   };
-  addAction("icons/ic_menu_plus.svg", _("Add"), [this](){ onAdd(); });
+  addBtn = addAction("icons/ic_menu_plus.svg", _("Add"), [this](){ onAdd(); });
+  // the Pages view's Select takes Add's place (refresh() swaps them): a page is added from the canvas
+  selectBtn = addAction("icons/ic_menu_multiselect.svg", _("Select"), [this](){ setPageSelectMode(!pageSelectMode); });
   pinBtn = addAction("icons/ic_menu_pin.svg", _("Pin Sidebar"), [this](){ setPinned(!pinned); });
   // the icon names the side the sidebar would move *to*, so it is the opposite of where it is now
   sideBtn = addAction(onLeft ? "icons/ic_menu_sidebar_right.svg" : "icons/ic_menu_sidebar_left.svg",
       _("Move Sidebar"), [this](){ setOnLeft(!onLeft); });
-  addAction("icons/ic_menu_search2.svg", _("Search"), [this](){ toggleSearch(); });
+  searchBtn = addAction("icons/ic_menu_search2.svg", _("Search"), [this](){ toggleSearch(); });
   pinBtn->setChecked(pinned);
   panelContent->addWidget(actions);
 
@@ -296,6 +354,8 @@ void Sidebar::createUI()
   //  the panel's left margin).  This rect paints the column in the canvas surround colour, so the
   //  margins read as background instead of as stale canvas.  Pinned only - floating, the sidebar
   //  must stay transparent over the canvas it is covering.
+  pageSelectBar = createPageSelectBar();
+
   backFill = createFillRect();  // already a Widget
   backFill->node->addClass("sb-backfill");
   addWidget(backFill);
@@ -303,6 +363,11 @@ void Sidebar::createUI()
 
   // Escape closes a floating sidebar; the press-outside case is handled by the event filter below.
   addHandler([this](SvgGui* g, SDL_Event* event){
+    // with the focus in the sidebar (after a tap on a thumbnail, say), Escape first leaves select mode
+    if(pageSelectMode && event->type == SDL_KEYDOWN && event->key.keysym.sym == SDLK_ESCAPE) {
+      setPageSelectMode(false);
+      return true;
+    }
     if(pinned || !isVisible())
       return false;
     if(event->type == SDL_KEYDOWN && !event->key.repeat && event->key.keysym.sym == SDLK_ESCAPE) {
@@ -335,9 +400,16 @@ void Sidebar::installDismissFilter()
   if(!container)
     return;
   container->eventFilter = [this](SvgGui* g, Widget* target, SDL_Event* event){
+    // Escape leaves the Pages view's select mode wherever the focus is, as it does in the document list
+    if(event->type == SDL_KEYDOWN && event->key.keysym.sym == SDLK_ESCAPE && pageSelectMode && isVisible()) {
+      setPageSelectMode(false);
+      return true;
+    }
     if(event->type != SDL_FINGERDOWN || pinned || !isVisible())
       return false;
-    if(target && (target == this || target->isDescendantOf(this)))
+    // select mode's bar floats over the canvas but belongs to the sidebar
+    if(target && (target == this || target->isDescendantOf(this)
+        || target == pageSelectBar || target->isDescendantOf(pageSelectBar)))
       return false;
     setOpen(false);
     return false;
@@ -427,6 +499,14 @@ void Sidebar::updateInsets()
   // below the toolbar, which steps down past the status bar (MainWindow::orientationChanged())
   panel->setMargins(sbTopInset + ScribbleApp::topInset, onLeft ? sbCanvasGutter : sbEdgeInset,
       sbEdgeInset, onLeft ? sbEdgeInset : sbCanvasGutter);
+  // select mode's bar is wider than the panel, so it floats over the canvas, one edge inset beside the
+  //  panel on whichever side the panel is, and 43 up as in the document list (ui-floating-bar.md) - which
+  //  also keeps it clear of the page number strip in the canvas's bottom corner
+  if(pageSelectBar) {
+    Dim fromEdge = sbEdgeInset + sbWidth + sbCanvasGutter + sbEdgeInset;
+    pageSelectBar->node->setAttribute("box-anchor", onLeft ? "bottom left" : "bottom right");
+    pageSelectBar->setMargins(0, onLeft ? 0 : fromEdge, 43, onLeft ? fromEdge : 0);
+  }
 }
 
 void Sidebar::reparent()
@@ -473,6 +553,11 @@ void Sidebar::setOpen(bool open)
     return;
   }
   setVisible(open);
+  // hiding a widget drops its timers, the thumbnail renderer's included
+  if(!open)
+    thumbTimer = NULL;
+  if(pageSelectBar)
+    pageSelectBar->setVisible(open && pageSelectMode && currView == PAGES);
   if(open)
     refresh();
   ScribbleApp::cfg->set("sidebarVisible", open ? 1 : 0);
@@ -502,11 +587,25 @@ bool Sidebar::matchesSearch(const std::string& text) const
 
 void Sidebar::refresh()
 {
+  ScribbleDoc* prevDoc = scribbleDoc;
   scribbleDoc = ScribbleApp::app ? ScribbleApp::app->activeDoc() : NULL;
-  const char* label = currView == OUTLINE ? _("Outline") : _("Layers");
+  const char* label = currView == OUTLINE ? _("Outline") : (currView == LAYERS ? _("Layers") : _("Pages"));
   if(viewLabel)
     viewLabel->setText(label);
+  if(viewIcon)
+    viewIcon->setTarget(SvgGui::useFile(currView == OUTLINE ? "icons/ic_menu_outline.svg"
+        : (currView == LAYERS ? "icons/ic_menu_pagesel.svg" : "icons/ic_menu_pages.svg")));
   searchEdit->setEmptyText(currView == OUTLINE ? _("Search outlines") : _("Search layers"));
+  // Pages has no search (page thumbnails have no text to match) and no Add; it has Select instead
+  bool pages = currView == PAGES;
+  if(pages && searchRow->isVisible())
+    toggleSearch();
+  addBtn->setVisible(!pages);
+  searchBtn->setVisible(!pages);
+  selectBtn->setVisible(pages);
+  // select mode belongs to the Pages view of one document
+  if(pageSelectMode && (!pages || scribbleDoc != prevDoc))
+    setPageSelectMode(false);
   rebuildList();
 }
 
@@ -519,8 +618,10 @@ std::string Sidebar::docState(ScribbleDoc* doc) const
     for(const OutlineEntry& entry : doc->outline(false))
       state += fstring("%d %d %s\n", entry.pagenum, entry.level, entry.title.c_str());
   }
-  else
+  else if(currView == LAYERS)
     state += doc->layers().serialize() + fstring("|%d", doc->currentLayer());
+  else
+    state += pageOrderState(doc);
   return state;
 }
 
@@ -531,8 +632,23 @@ void Sidebar::refreshIfChanged()
   if(!isVisible())
     return;
   ScribbleDoc* doc = ScribbleApp::app ? ScribbleApp::app->activeDoc() : NULL;
-  if(doc != scribbleDoc || docState(doc) != shownState)
+  if(doc != scribbleDoc || docState(doc) != shownState) {
     refresh();
+    return;
+  }
+  // Pages: the order is unchanged, but a page may have been drawn on (its revision moved on), or a layer
+  //  hidden; the stale thumbnails keep showing until their new ones are rendered, so nothing flickers
+  if(currView == PAGES && doc) {
+    std::string inputs = thumbnailInputs(doc);
+    if(inputs != shownThumbnailInputs) {
+      shownThumbnailInputs = inputs;
+      thumbnails.clear();
+      for(PageCell& cell : pageCells)
+        cell.upToDate = false;
+    }
+    ensureThumbTimer();
+    updateCurrentPage();
+  }
 }
 
 void Sidebar::rebuildList()
@@ -548,8 +664,11 @@ void Sidebar::rebuildList()
   closeRowMenus();
   outlineMenu->removeFromParent();
   layerMenu->removeFromParent();
+  pageMenu->removeFromParent();
   outlineDrag->clear();
   layerDrag->clear();
+  pageDrag->clear();
+  pageCells.clear();
   window()->gui()->deleteContents(listView);
   // Building the outline loads every page not yet loaded, so the list is complete the moment it is
   //  shown.  With outline(false) here it held only the pages that happened to be loaded, and entries
@@ -565,8 +684,10 @@ void Sidebar::rebuildList()
     return;
   if(currView == OUTLINE)
     buildOutlineRows(entries);
-  else
+  else if(currView == LAYERS)
     buildLayerRows();
+  else
+    buildPageGrid();
 }
 
 void Sidebar::buildOutlineRows(const std::vector<OutlineEntry>& entries)
@@ -791,6 +912,7 @@ void Sidebar::closeRowMenus()
 {
   closeAutoClosePopup(outlineMenu);
   closeAutoClosePopup(layerMenu);
+  closeAutoClosePopup(pageMenu);
 }
 
 void Sidebar::renameOutline(int pagenum)
@@ -852,4 +974,420 @@ void Sidebar::nestOutline(int src, int dst)
     collapsedPages.clear();
   }
   rebuildList();
+}
+
+// ---- Pages view (docs/agent/page-management.md) ----
+
+// the page's own shape fitted into a thumbnail slot, as the document list fits a page card (cover.h)
+static Rect pageFaceRect(const Page* page)
+{
+  Dim width = page->props.width, height = page->props.height;
+  if(width <= 0 || height <= 0)
+    return Rect::wh(sbThumbW, sbThumbH);
+  real scale = std::min(sbThumbW/width, sbThumbH/height);
+  return Rect::wh(width*scale, height*scale);
+}
+
+// a page not rendered yet: its paper color in the page's own shape, framed like a thumbnail
+static SvgNode* createPagePlaceholder(const Page* page)
+{
+  Rect face = pageFaceRect(page);
+  real radius = Cover::previewRadius(face.width());
+  // the paper color is the document's own, not chrome, so it is the page's color rather than a token
+  std::string svg = fstring("<g class=\"sb-page-face\"><rect width=\"%.2f\" height=\"%.2f\" rx=\"%.2f\" ry=\"%.2f\""
+      " fill=\"#%06X\"/>%s</g>", face.width(), face.height(), radius, radius,
+      page->props.color.rgb() & 0xFFFFFF, Cover::outlineSVG(face.width(), face.height()).c_str());
+  return loadSVGFragment(svg.c_str());
+}
+
+std::string Sidebar::pageOrderState(ScribbleDoc* doc) const
+{
+  std::string state = fstring("%d|", int(pageSelectMode));
+  for(Page* page : doc->document->pages)
+    state += fstring("%u ", page->uid);
+  return state;
+}
+
+std::string Sidebar::thumbnailInputs(ScribbleDoc* doc) const
+{
+  return doc->layers().serialize();
+}
+
+std::vector<int> Sidebar::selectedPageNums() const
+{
+  std::vector<int> pagenums;
+  if(!scribbleDoc)
+    return pagenums;
+  for(int ii = 0; ii < scribbleDoc->document->numPages(); ++ii) {
+    if(selectedPageUids.count(scribbleDoc->document->pages[ii]->uid))
+      pagenums.push_back(ii);
+  }
+  return pagenums;
+}
+
+void Sidebar::buildPageGrid()
+{
+  Document* doc = scribbleDoc->document;
+  int npages = doc->numPages();
+  // the selection and the rendered thumbnails only ever name pages still in the document
+  std::set<unsigned int> present;
+  for(Page* page : doc->pages)
+    present.insert(page->uid);
+  for(auto it = selectedPageUids.begin(); it != selectedPageUids.end();)
+    it = present.count(*it) ? std::next(it) : selectedPageUids.erase(it);
+  for(auto it = thumbnails.begin(); it != thumbnails.end();)
+    it = present.count(it->first) ? std::next(it) : thumbnails.erase(it);
+  std::string inputs = thumbnailInputs(scribbleDoc);
+  if(inputs != shownThumbnailInputs)
+    thumbnails.clear();
+  shownThumbnailInputs = inputs;
+
+  Widget* gridRow = NULL;
+  for(int pagenum = 0; pagenum < npages; ++pagenum) {
+    Page* page = doc->pages[pagenum];
+    if(pagenum % 2 == 0) {
+      gridRow = new Widget(new SvgG());
+      gridRow->node->setAttribute("layout", "flex");
+      gridRow->node->setAttribute("flex-direction", "row");
+      gridRow->node->setAttribute("box-anchor", "left");
+      gridRow->setMargins(0, 0, sbPad, 0);
+      listView->addWidget(gridRow);
+    }
+    // the slot is always the full thumbnail size, so every row lines up whatever shape its pages are; the
+    //  page sits at the slot's bottom, on its number, as a page card does in the document list
+    std::string svg = fstring(R"(
+      <g class="sb-page-cell" layout="flex" flex-direction="column" align-items="center">
+        <g class="sb-thumb-slot" layout="box">
+          <rect class="sb-thumb-sizer" width="%.2f" height="%.2f"/>
+          <g class="sb-thumb-holder" layout="box" box-anchor="bottom"></g>
+          <rect class="sb-drop-bar sb-drop-before" box-anchor="left vfill" width="%.2f" height="20"/>
+          <rect class="sb-drop-bar sb-drop-after" box-anchor="right vfill" width="%.2f" height="20"/>
+        </g>
+        <text class="sb-sub sb-page-num" margin="%.2f 0 0 0"></text>
+      </g>
+    )", sbThumbW, sbThumbH, sbDropBarW, sbDropBarW, sbPad/2);
+    std::unique_ptr<SvgNode> proto(loadSVGFragment(svg.c_str()));
+    Button* cell = new Button(proto->clone());
+    if(pagenum % 2)
+      cell->setMargins(0, 0, 0, sbThumbGap);
+    SvgText* number = static_cast<SvgText*>(cell->containerNode()->selectFirst(".sb-page-num"));
+    number->setAttr<float>("font-size", sbSubSize);
+    number->addText(fstring("%d", pagenum + 1).c_str());
+
+    Widget* holder = cell->selectFirst(".sb-thumb-holder");
+    SvgContainerNode* holderNode = holder->containerNode();
+    holderNode->addChild(createPagePlaceholder(page));
+    Rect face = pageFaceRect(page);
+    real radius = Cover::previewRadius(face.width());
+    // The marks hug the page rather than the slot.  Select mode's ring and check badge exist only on
+    //  cells built in select mode, as in the document list; the current page's ring is left out there,
+    //  where a second ring of the same accent would read as a selection.
+    if(pageSelectMode) {
+      SvgRect* ring = new SvgRect(Rect::wh(20, 20), radius, radius);
+      ring->addClass("select-ring");
+      ring->setAttribute("box-anchor", "fill");
+      holderNode->addChild(ring);
+      SvgG* badge = new SvgG();
+      badge->addClass("select-badge");
+      badge->setAttribute("box-anchor", "top right");
+      badge->setAttribute("layout", "box");
+      badge->setAttribute("margin", fstring("%g %g 0 0", sbBadgeInset, sbBadgeInset).c_str());
+      SvgRect* badgeBg = new SvgRect(Rect::wh(sbBadgeSize, sbBadgeSize), sbBadgeSize/2, sbBadgeSize/2);
+      badgeBg->addClass("select-badge-bg");
+      badge->addChild(badgeBg);
+      SvgUse* check = new SvgUse(Rect::wh(sbCheckSize, sbCheckSize), "", SvgGui::useFile("icons/ic_menu_accept.svg"));
+      check->addClass("icon");
+      check->addClass("select-check");
+      badge->addChild(check);
+      holderNode->addChild(badge);
+      cell->setChecked(selectedPageUids.count(page->uid) > 0);
+    }
+    else {
+      SvgRect* currRing = new SvgRect(Rect::wh(20, 20), radius, radius);
+      currRing->addClass("sb-current-ring");
+      currRing->setAttribute("box-anchor", "fill");
+      holderNode->addChild(currRing);
+    }
+
+    cell->onClicked = [this, pagenum](){
+      if(pageSelectMode) {
+        togglePageSelected(pagenum);
+        return;
+      }
+      // through ScribbleDoc, which also refreshes the page number display - from a click in the sidebar
+      //  nothing else would
+      if(scribbleDoc)
+        scribbleDoc->gotoPage(pagenum);
+      updateCurrentPage();
+      // an unpinned sidebar is in the way of the page it just navigated to
+      if(!pinned)
+        setOpen(false);
+    };
+    // the row menu is select mode's bar for one page; in select mode, as in the document list, it is off
+    SvgGui::setupRightClick(cell, [this, pagenum, cell](SvgGui*, Widget*, Point){
+      if(pageSelectMode)
+        return;
+      menuPage = pagenum;
+      showRowMenu(pageMenu, cell);
+    });
+    pageDrag->addRow(cell, pagenum);
+    gridRow->addWidget(cell);
+    pageCells.push_back(PageCell{cell, holder, page->uid, 0, false});
+
+    // already rendered (before a move, an insert, a switch of view): shown at once, no placeholder flash
+    auto cached = thumbnails.find(page->uid);
+    if(cached != thumbnails.end() && cached->second.revision == page->revision)
+      showThumbnail(pageCells.size() - 1, cached->second.image);
+  }
+  shownCurrPage = -1;
+  updateCurrentPage();
+  updatePageSelectBar();
+  ensureThumbTimer();
+}
+
+// swaps the cell's face (placeholder or older image) for this image, in place
+void Sidebar::showThumbnail(size_t cellIdx, const Image& image)
+{
+  PageCell& cell = pageCells[cellIdx];
+  Page* page = scribbleDoc->document->pages[cellIdx];
+  cell.upToDate = true;
+  cell.shownRevision = page->revision;
+  if(image.isNull())
+    return;  // a page that cannot be loaded keeps its placeholder
+  SvgContainerNode* holderNode = cell.holder->containerNode();
+  SvgNode* oldFace = holderNode->selectFirst(".sb-page-face");
+  SvgNode* face = Cover::framedImage(image.copy(), pageFaceRect(page), false);
+  face->addClass("sb-page-face");
+  holderNode->addChild(face, oldFace);
+  if(oldFace) {
+    // NB removeChild() returns the node *after* the one removed, not the removed one
+    holderNode->removeChild(oldFace);
+    delete oldFace;
+  }
+  cell.holder->redraw();
+}
+
+void Sidebar::ensureThumbTimer()
+{
+  if(thumbTimer || currView != PAGES || !isVisible() || !gui())
+    return;
+  thumbTimer = gui()->setTimer(1, this, [this](){
+    int next = renderThumbnails();
+    if(next <= 0)
+      thumbTimer = NULL;
+    return next;
+  });
+}
+
+// Visible-first and lazy: what is on screen, then a screen's worth either side so a short scroll finds
+//  them ready, and nothing further - a 300 page document renders only what is looked at, and the time
+//  budget hands the event loop back between thumbnails.  Each one is cached by page (Page::uid) and the
+//  page's revision, so it is rendered again only when the page changes.
+int Sidebar::renderThumbnails()
+{
+  if(currView != PAGES || !scribbleDoc || !gui() || pageCells.empty())
+    return 0;
+  Rect view = listScroll->node->bounds();
+  Rect first = pageCells.front().cell->node->bounds();
+  if(!view.isValid() || view.height() <= 0 || !first.isValid())
+    return 20;  // not laid out yet
+  // Which cells are near the view is worked out from the grid's row pitch, not by asking every cell for
+  //  its bounds: with 300 pages that alone outran the time budget under ASan, so a tick returned before
+  //  rendering anything and the timer spun forever.  Cached bounds move with the scroll (ScrollWidget).
+  real pitch = pageCells.size() > 2 ? pageCells[2].cell->node->bounds().top - first.top : 0;
+  if(pitch <= 0)
+    pitch = first.height() + sbPad;
+  int nrows = int(pageCells.size() + 1)/2;
+  auto rowRange = [&](real top, real bottom, int* firstRow, int* lastRow){
+    *firstRow = std::max(0, int(std::floor((top - first.top)/pitch)));
+    *lastRow = std::min(nrows - 1, int(std::floor((bottom - first.top)/pitch)));
+  };
+  int viewFirst, viewLast, nearFirst, nearLast;
+  rowRange(view.top, view.bottom, &viewFirst, &viewLast);
+  // a screen's worth either side, so a short scroll finds them ready
+  rowRange(view.top - view.height(), view.bottom + view.height(), &nearFirst, &nearLast);
+  thumbWidthPx = std::max(16, int(sbThumbW*gui()->paintScale + 0.5));
+  Document* doc = scribbleDoc->document;
+  Timestamp start = mSecSinceEpoch();
+  bool renderedOne = false;
+  for(int pass = 0; pass < 2; ++pass) {
+    int lo = pass == 0 ? viewFirst : nearFirst, hi = pass == 0 ? viewLast : nearLast;
+    for(int ii = 2*lo; ii <= 2*hi + 1 && ii < int(pageCells.size()) && ii < doc->numPages(); ++ii) {
+      PageCell& cell = pageCells[ii];
+      Page* page = doc->pages[ii];
+      if(cell.uid != page->uid)
+        return 0;  // the grid is out of date; refreshIfChanged() is about to rebuild it
+      if(cell.upToDate && cell.shownRevision == page->revision)
+        continue;
+      // at least one per turn, however slow the build, so the work always moves forward
+      if(renderedOne && mSecSinceEpoch() - start > thumbBudgetMs)
+        return 1;  // more on the next turn
+      auto cached = thumbnails.find(page->uid);
+      if(cached == thumbnails.end() || cached->second.revision != page->revision) {
+        if(cached != thumbnails.end())
+          thumbnails.erase(cached);
+        Image image = ScribbleDoc::renderPageThumbnail(page, thumbWidthPx);
+        cached = thumbnails.emplace(page->uid, Thumbnail{page->revision, std::move(image)}).first;
+      }
+      showThumbnail(ii, cached->second.image);
+      renderedOne = true;
+    }
+  }
+  return 0;
+}
+
+void Sidebar::updateCurrentPage()
+{
+  ScribbleArea* area = ScribbleApp::app ? ScribbleApp::app->activeArea() : NULL;
+  int curr = area && area->scribbleDoc == scribbleDoc ? area->getCurrPageNum() : -1;
+  if(curr == shownCurrPage)
+    return;
+  if(shownCurrPage >= 0 && shownCurrPage < int(pageCells.size()))
+    pageCells[shownCurrPage].cell->node->removeClass("current");
+  if(curr >= 0 && curr < int(pageCells.size()))
+    pageCells[curr].cell->node->addClass("current");
+  shownCurrPage = curr;
+}
+
+// The document list's select mode bar (ui-floating-bar.md), built by the same createSelectBarButton.  It
+//  holds the count and the actions for the selected pages, with Done last.
+Widget* Sidebar::createPageSelectBar()
+{
+  Widget* bar = new Widget(new SvgG());
+  bar->node->addClass("selectbar");
+  bar->node->addClass("page-selectbar");
+  bar->node->setAttribute("layout", "box");
+  SvgRect* barBg = new SvgRect(Rect::wh(20, 20), 14, 14);
+  barBg->addClass("selectbar-bg");
+  barBg->setAttribute("box-anchor", "fill");
+  bar->containerNode()->addChild(barBg);
+  Widget* barRow = new Widget(new SvgG());
+  barRow->node->setAttribute("layout", "flex");
+  barRow->node->setAttribute("flex-direction", "row");
+  barRow->node->setAttribute("align-items", "center");
+  barRow->setMargins(6);
+  pageSelectCount = createTextNode(_("Select pages"));
+  pageSelectCount->addClass("selectbar-count");
+  Widget* countLabel = new Widget(pageSelectCount);
+  countLabel->setMargins(0, 14, 0, 12);
+  barRow->addWidget(countLabel);
+  // an action on the selection, run on the next turn: a file dialog pumps events, and the delete rebuilds
+  auto addAction = [&](const char* icon, const char* title, int kind){
+    Button* btn = TagDocList::createSelectBarButton(icon, title);
+    btn->onClicked = [this, kind](){
+      std::vector<int> pages = selectedPageNums();
+      gui()->setTimer(1, mainWindow, [this, kind, pages](){
+        if(kind < 0)
+          deletePages(pages);
+        else
+          exportPages(kind, pages);
+        return 0;
+      });
+    };
+    barRow->addWidget(btn);
+    pageSelectActions.push_back(btn);
+    return btn;
+  };
+  addAction("icons/ic_menu_discard.svg", _("Delete"), -1)->node->addClass("selectbar-delete");
+  addAction("icons/ic_menu_pdf.svg", _("Export PDF"), 0);
+  addAction("icons/ic_menu_share.svg", _("Share"), 1);
+  addAction("icons/ic_menu_image.svg", _("Export PNG"), 2);
+  Widget* separator = new Widget(new SvgRect(Rect::wh(1, 28)));
+  separator->node->addClass("selectbar-sep");
+  separator->setMargins(0, 6);
+  barRow->addWidget(separator);
+  Button* doneBtn = TagDocList::createSelectBarButton("icons/ic_menu_cancel.svg", _("Done"));
+  doneBtn->onClicked = [this](){ setPageSelectMode(false); };
+  barRow->addWidget(doneBtn);
+  bar->addWidget(barRow);
+  bar->setVisible(false);
+  Widget* overlay = mainWindow->selectFirst("#main-container");
+  if(overlay)
+    overlay->addWidget(bar);
+  return bar;
+}
+
+// Entering or leaving rebuilds the grid, since only select mode's cells carry the ring and badge; a
+//  toggle restyles its cell in place.  Thumbnails are cached, so a rebuild renders nothing again.
+void Sidebar::setPageSelectMode(bool on)
+{
+  if(pageSelectMode == on)
+    return;
+  closeRowMenus();
+  pageSelectMode = on;
+  selectedPageUids.clear();
+  if(selectBtn)
+    selectBtn->setChecked(on);
+  if(pageSelectBar)
+    pageSelectBar->setVisible(on && isVisible() && currView == PAGES);
+  rebuildList();
+}
+
+void Sidebar::togglePageSelected(int pagenum)
+{
+  if(!scribbleDoc || pagenum < 0 || pagenum >= scribbleDoc->document->numPages() || pagenum >= int(pageCells.size()))
+    return;
+  unsigned int uid = scribbleDoc->document->pages[pagenum]->uid;
+  bool selected = !selectedPageUids.count(uid);
+  if(selected)
+    selectedPageUids.insert(uid);
+  else
+    selectedPageUids.erase(uid);
+  pageCells[pagenum].cell->setChecked(selected);
+  updatePageSelectBar();
+}
+
+void Sidebar::updatePageSelectBar()
+{
+  if(!pageSelectCount)
+    return;
+  size_t count = selectedPageUids.size();
+  pageSelectCount->setText(count ? fstring(_("%d selected"), int(count)).c_str() : _("Select pages"));
+  for(Button* btn : pageSelectActions)
+    btn->setEnabled(count > 0);
+}
+
+void Sidebar::dropPages(int src, int dst, int zone)
+{
+  if(!scribbleDoc || src < 0 || src >= scribbleDoc->document->numPages())
+    return;
+  // in select mode a selected thumbnail carries the whole selection; any other carries only itself
+  bool carrying = pageSelectMode && selectedPageUids.count(scribbleDoc->document->pages[src]->uid);
+  std::vector<int> moving = carrying ? selectedPageNums() : std::vector<int>{src};
+  int after = zone ? -1 : dst;
+  int dest = 0;
+  if(scribbleDoc->movePages(moving, after, &dest)) {
+    if(carrying) {
+      // the moved pages are clones (ScribbleDoc::movePages), so the selection follows them by position
+      selectedPageUids.clear();
+      for(size_t ii = 0; ii < moving.size() && dest + int(ii) < scribbleDoc->document->numPages(); ++ii)
+        selectedPageUids.insert(scribbleDoc->document->pages[dest + ii]->uid);
+    }
+    // movePages already shows the moved pages; this also refreshes the page number display, which a
+    //  drop delivered on a timer (RowDrag) would otherwise leave stale
+    scribbleDoc->gotoPage(dest);
+  }
+  rebuildList();
+}
+
+void Sidebar::deletePages(const std::vector<int>& pages)
+{
+  if(!scribbleDoc || pages.empty())
+    return;
+  scribbleDoc->deletePageList(pages);
+  selectedPageUids.clear();
+  rebuildList();
+}
+
+void Sidebar::exportPages(int kind, const std::vector<int>& pages)
+{
+  ScribbleApp* app = ScribbleApp::app;
+  if(!app || pages.empty())
+    return;
+  if(kind == 0)
+    app->exportPagesPDF(pages);
+  else if(kind == 1)
+    app->sharePagesDocument(pages);
+  else
+    app->exportPagesPNG(pages);
 }

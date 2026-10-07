@@ -34,6 +34,9 @@ public:
 class TagDocList : public Window
 {
 public:
+  // a button of select mode's floating bar; also the sidebar's Pages view's bar (sidebar.cpp), so the two
+  //  bars cannot drift apart
+  static Button* createSelectBarButton(const char* iconPath, const char* tooltip);
   TagDocList(const char* root);
 
   std::string selectedFile;
@@ -111,7 +114,6 @@ private:
   Widget* createTagRow(const std::string& tagId, int depth);
   Widget* createNavRow(const char* iconPath, const char* title);
   Widget* createFab(const char* iconPath, real diameter, bool primary);
-  Button* createSelectBarButton(const char* iconPath, const char* tooltip);
   Widget* createRoundedBg(real w, real h, real radius, const char* fillColor);
 
   TagStore tagStore;

@@ -138,6 +138,21 @@
   <string name="margin_content">Margin Content</string>
   <string name="untitled">Untitled</string>
   <string name="new_outline_entry">New Outline Entry</string>
+  <!-- the sidebar's Pages view (docs/agent/page-management.md) -->
+  <string name="sidebar_pages">Pages</string>
+  <string name="pages_select">Select pages</string>
+  <string name="pages_selected">%d selected</string>
+  <string name="pages_done">Done</string>
+  <string name="pages_delete_page">Delete Page</string>
+  <string name="pages_share">Share</string>
+  <string name="pages_share_title">Share Pages</string>
+  <string name="pages_export_png">Export PNG</string>
+  <string name="pages_save_error">Error saving document.</string>
+  <string name="pages_save_error_folder">Error saving document. Please try a different folder.</string>
+  <string name="pages_image_error">Error saving image.</string>
+  <string name="pages_image_error_folder">Error saving image. Please try a different folder.</string>
+  <string name="see_attached_file">See attached file</string>
+  <string name="see_attached_image">See attached image</string>
   <string name="menu_pathselect">Path Select</string>
   <string name="menu_delete">Delete</string>
   <string name="menu_invert">Invert</string>

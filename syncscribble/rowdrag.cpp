@@ -35,7 +35,8 @@ void RowDrag::addRow(Button* row, int key, Button* grip)
         int targetKey;
         Widget* target = targetAt(gui, row, pos, &targetKey);
         bool allowed = target && target != row && (!canDrop || canDrop(rows[row], targetKey));
-        setHover(allowed ? target : NULL);
+        int zone = allowed && zoneAt ? zoneAt(targetKey, target, pos) : 0;
+        setHover(allowed ? target : NULL, zone);
       }
       // Accepted even below the threshold: when a ScrollWidget passes a pen or touch drag through to
       //  this row it checks that the row takes the first motion event, and takes the gesture back for
@@ -58,6 +59,7 @@ void RowDrag::addRow(Button* row, int key, Button* grip)
     }
     int src = rows[row];
     int dst = 0;
+    int zone = hoverZone;
     // hoverTarget is only ever set to a target canDrop allowed
     bool doDrop = released && hoverTarget && (hoverTarget == rootTarget || rows.count(hoverTarget));
     if(doDrop)
@@ -66,7 +68,7 @@ void RowDrag::addRow(Button* row, int key, Button* grip)
     source->node->removeClass("hovered");
     endDrag();
     if(doDrop)
-      drop(gui, src, dst);
+      drop(gui, src, dst, zone);
     return true;  // swallowed, so Button does not also report a click
   });
 }
@@ -89,15 +91,18 @@ Widget* RowDrag::targetAt(SvgGui* gui, Widget* from, Point pos, int* keyOut) con
   return NULL;
 }
 
-void RowDrag::setHover(Widget* target)
+void RowDrag::setHover(Widget* target, int zone)
 {
-  if(target == hoverTarget)
+  if(target == hoverTarget && zone == hoverZone)
     return;
-  if(hoverTarget)
+  if(hoverTarget) {
     hoverTarget->node->removeClass("drop-target");
+    hoverTarget->node->removeClass("drop-before");
+  }
   hoverTarget = target;
+  hoverZone = target ? zone : 0;
   if(hoverTarget)
-    hoverTarget->node->addClass("drop-target");
+    hoverTarget->node->addClass(hoverZone ? "drop-before" : "drop-target");
 }
 
 void RowDrag::endDrag()
@@ -113,10 +118,12 @@ void RowDrag::endDrag()
 // Deferred to the next turn of the event loop: a drop changes what the list shows, so the callback
 //  rebuilds it - deleting the row whose handler is still running.  The same reason Sidebar defers its
 //  reparenting and TagDocList detaches its popup before a rebuild.
-void RowDrag::drop(SvgGui* gui, int src, int dst)
+void RowDrag::drop(SvgGui* gui, int src, int dst, int zone)
 {
-  gui->setTimer(1, ownerWidget, [this, src, dst](){
-    if(onDrop)
+  gui->setTimer(1, ownerWidget, [this, src, dst, zone](){
+    if(onDropZone)
+      onDropZone(src, dst, zone);
+    else if(onDrop)
       onDrop(src, dst);
     return 0;
   });
@@ -128,6 +135,7 @@ void RowDrag::clear()
   if(hoverTarget == rootTarget)
     setHover(NULL);
   hoverTarget = NULL;
+  hoverZone = 0;
   sourceRow = NULL;
   sourceWidget = NULL;
   dragging = false;

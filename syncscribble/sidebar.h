@@ -1,7 +1,8 @@
 #pragma once
 
-// The general-purpose sidebar (SIDEBAR_SPEC.md): one panel with two views - the document's outline
-//  (table of contents) and its layer table - over the backends in document.h/layers.h.
+// The general-purpose sidebar (SIDEBAR_SPEC.md): one panel with three views - the document's outline
+//  (table of contents), its layer table, and its pages as a thumbnail grid (docs/agent/page-management.md)
+//  - over the backends in document.h/layers.h/scribbledoc.h.
 //
 // It exists in two presentations, and they are deliberately ONE widget in two parents rather than
 //  two widgets:
@@ -20,6 +21,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 class ScribbleDoc;
@@ -28,7 +30,7 @@ class MainWindow;
 class Sidebar : public Widget
 {
 public:
-  enum View { OUTLINE = 0, LAYERS };
+  enum View { OUTLINE = 0, LAYERS, PAGES };
 
   Sidebar(MainWindow* mw);
 
@@ -80,6 +82,30 @@ private:
   void renameLayer(int layerId);
   // drop of the outline row on page `src` onto the row on page `dst`, or RowDrag::ROOT
   void nestOutline(int src, int dst);
+
+  // ---- Pages view (docs/agent/page-management.md) ----
+  void buildPageGrid();
+  Widget* createPageSelectBar();
+  void setPageSelectMode(bool on);
+  void togglePageSelected(int pagenum);
+  void updatePageSelectBar();
+  // the selected pages' current numbers, ascending
+  std::vector<int> selectedPageNums() const;
+  // drop of thumbnail `src` on thumbnail `dst`; zone 1 = the leading half of the first page, i.e. before it
+  void dropPages(int src, int dst, int zone);
+  void deletePages(const std::vector<int>& pages);
+  void exportPages(int kind, const std::vector<int>& pages);
+  // the current page's mark, restyled in place
+  void updateCurrentPage();
+  // keep rendering thumbnails near the visible part of the grid, a few per event-loop turn
+  void ensureThumbTimer();
+  // renders thumbnails until a small time budget is spent; the timer's next period, 0 when none is left
+  int renderThumbnails();
+  void showThumbnail(size_t cellIdx, const Image& image);
+  // a signature of the page order, and of what every thumbnail is drawn from, for refreshIfChanged
+  std::string pageOrderState(ScribbleDoc* doc) const;
+  // the layer table and its hidden flags, which every thumbnail depends on
+  std::string thumbnailInputs(ScribbleDoc* doc) const;
   // a signature of the document state the list is built from, for refreshIfChanged
   std::string docState(ScribbleDoc* doc) const;
 
@@ -97,6 +123,7 @@ private:
   Widget* searchRow = NULL;
   TextEdit* searchEdit = NULL;
   SvgText* viewLabel = NULL;
+  SvgUse* viewIcon = NULL;  // the selector shows the current view's menu icon
   Button* pinBtn = NULL;
   Button* sideBtn = NULL;
   std::string searchQuery;
@@ -122,4 +149,34 @@ private:
   Button* layerDeleteItem = NULL;
   int menuPage = -1;
   int menuLayer = -1;
+
+  // ---- Pages view ----
+  // bottom row buttons that only belong to some views
+  Button* addBtn = NULL;
+  Button* searchBtn = NULL;
+  Button* selectBtn = NULL;
+  struct PageCell {
+    Button* cell;
+    Widget* holder;     // the page-shaped box inside the cell: placeholder or image, rings, badge
+    unsigned int uid;   // Page::uid of the page it shows
+    unsigned int shownRevision;  // Page::revision its image was rendered from
+    bool upToDate;      // false: still the placeholder, or an image of an older state of the page
+  };
+  std::vector<PageCell> pageCells;
+  // rendered thumbnails by Page::uid, so a rebuild (a move, an insert) does not render them all again
+  struct Thumbnail { unsigned int revision; Image image; };
+  std::unordered_map<unsigned int, Thumbnail> thumbnails;
+  std::string shownThumbnailInputs;
+  int thumbWidthPx = 0;
+  Timer* thumbTimer = NULL;
+  int shownCurrPage = -1;
+  // selection by Page::uid, so it survives renumbering; pruned to the document at every rebuild
+  std::set<unsigned int> selectedPageUids;
+  bool pageSelectMode = false;
+  std::unique_ptr<RowDrag> pageDrag;
+  ArrowPopup* pageMenu = NULL;
+  // select mode's floating bar, over the canvas beside the sidebar (it is wider than the panel)
+  Widget* pageSelectBar = NULL;
+  SvgText* pageSelectCount = NULL;
+  std::vector<Button*> pageSelectActions;  // disabled while nothing is selected
 };

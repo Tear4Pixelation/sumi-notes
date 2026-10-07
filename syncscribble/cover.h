@@ -5,6 +5,8 @@
 #include "ulib/color.h"
 
 class Image;
+class SvgNode;
+struct Rect;
 
 // A notebook cover: one color the user picks (the seed), and a band across it generated from that
 //  color.  The band is the seed moved in OKLab lightness towards the middle - darker on a light cover,
@@ -32,6 +34,11 @@ std::string outlineSVG(real w, real h);
 // makes the corners outside a radius-px rounded rectangle transparent (antialiased), so a thumbnail
 //  bitmap has the frame's shape; usvg can only clip to rectangles
 void roundCorners(Image* image, real radius);
+
+// a thumbnail in the frame: corners rounded, outline on top, drawn at `frame` (its own size: a page keeps
+//  its proportions); cropToFrame first cuts it from its top left to PREVIEW_ASPECT, for a document
+//  thumbnail of the older 240 x 400 kind.  Shared by the document list and the sidebar's Pages view.
+SvgNode* framedImage(Image thumbnail, const Rect& frame, bool cropToFrame);
 
 Color bandColor(Color seed);
 

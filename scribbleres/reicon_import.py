@@ -75,6 +75,10 @@ MAPPING = {
   'ic_menu_minus': 'minus',
   'ic_menu_next': 'chevron-right',
   'ic_menu_pagesel': 'layers',
+  # the sidebar's Pages view (sidebar.cpp): its view selector glyph, and its export actions
+  'ic_menu_pages': 'grid',
+  'ic_menu_pdf': 'file-pdf',
+  'ic_menu_image': 'image',
   'ic_menu_pan': 'hand',
   'ic_menu_paste': 'clipboard-text',
   'ic_menu_people': 'people',
