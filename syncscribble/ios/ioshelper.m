@@ -295,6 +295,19 @@ void iosSendFile(const char* filename)  //, const char* mimetype, const char* ti
   [sdlViewController presentViewController:sendActivity animated:YES completion:nil];
 }
 
+void iosSendFiles(const char** filenames, int count)
+{
+  NSMutableArray* fileurls = [NSMutableArray arrayWithCapacity:count];
+  for(int ii = 0; ii < count; ++ii)
+    [fileurls addObject:[NSURL fileURLWithPath:@(filenames[ii])]];
+  UIActivityViewController* sendActivity =
+      [[UIActivityViewController alloc] initWithActivityItems:fileurls applicationActivities:nil];
+  UIView* topView = sdlViewController.view;
+  sendActivity.popoverPresentationController.sourceView = topView;
+  sendActivity.popoverPresentationController.sourceRect = CGRectMake(topView.bounds.size.width/2, 0, 0, 0);
+  [sdlViewController presentViewController:sendActivity animated:YES completion:nil];
+}
+
 // combined handler for drag and drop and Apple Pencil double tap
 
 @interface InteractionHandler : NSObject

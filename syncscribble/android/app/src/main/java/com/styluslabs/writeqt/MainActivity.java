@@ -8,6 +8,7 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.lang.reflect.Method;
+import java.util.ArrayList;
 
 import android.content.Context;
 import android.content.Intent;
@@ -258,6 +259,22 @@ public class MainActivity extends SDLActivity implements View.OnTouchListener, V
     intent.putExtra(Intent.EXTRA_STREAM, contentUri);
     intent.setType(mimetype);
     startActivity(Intent.createChooser(intent, finaltitle));
+  }
+
+  // several files in one share sheet: the sidebar's Pages view exporting one PNG per page
+  public void sendDocuments(String[] filepaths, String mimetype, String title)
+  {
+    String authority = packageId() + ".fileprovider";
+    ArrayList<Uri> contentUris = new ArrayList<Uri>();
+    for(String filepath : filepaths)
+      contentUris.add(FileProvider.getUriForFile(getContext(), authority, new File(filepath)));
+    final Intent intent = new Intent(android.content.Intent.ACTION_SEND_MULTIPLE);
+    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+    intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+    intent.putExtra(Intent.EXTRA_SUBJECT, title);
+    intent.putParcelableArrayListExtra(Intent.EXTRA_STREAM, contentUris);
+    intent.setType(mimetype);
+    startActivity(Intent.createChooser(intent, title));
   }
 
   public void openUrl(String url)

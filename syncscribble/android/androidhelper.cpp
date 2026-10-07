@@ -146,6 +146,22 @@ void AndroidHelper::sendFile(const char* filename, const char* mimetype, const c
   fn.env->CallVoidMethod(fn.activity, fn.method_id, jfilename, jmimetype, jtitle);
 }
 
+void AndroidHelper::sendFiles(const std::vector<std::string>& filenames, const char* mimetype, const char* title)
+{
+  AndroidMethod fn("sendDocuments", "([Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V");
+  if(!fn.method_id) return;
+  jclass stringClass = fn.env->FindClass("java/lang/String");
+  jobjectArray jfilenames = fn.env->NewObjectArray(jsize(filenames.size()), stringClass, NULL);
+  for(size_t ii = 0; ii < filenames.size(); ++ii) {
+    jstring jfilename = fn.env->NewStringUTF(filenames[ii].c_str());
+    fn.env->SetObjectArrayElement(jfilenames, jsize(ii), jfilename);
+    fn.env->DeleteLocalRef(jfilename);
+  }
+  jstring jmimetype = fn.env->NewStringUTF(mimetype);
+  jstring jtitle = fn.env->NewStringUTF(title);
+  fn.env->CallVoidMethod(fn.activity, fn.method_id, jfilenames, jmimetype, jtitle);
+}
+
 bool AndroidHelper::rawResourceToFile(const char* resname, const char* outfile)
 {
   AndroidMethod fn("assetToFile", "(Ljava/lang/String;Ljava/lang/String;)Z");

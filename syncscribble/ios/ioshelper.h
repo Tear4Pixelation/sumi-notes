@@ -13,6 +13,8 @@ extern void iosOpenUrl(const char* url);
 extern void iosRequestReview(void);
 extern const char* iosGetLocale(void);
 extern void iosSendFile(const char* filename);
+// several files in one share sheet
+extern void iosSendFiles(const char** filenames, int count);
 extern int iosClipboardChangeCount(void);
 extern int iosGetClipboardImage(void);
 extern int iosSafeAreaInsets(float* top, float* bottom);

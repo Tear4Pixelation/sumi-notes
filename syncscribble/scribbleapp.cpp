@@ -3173,15 +3173,35 @@ void clipboardFromBuffer(const unsigned char* buff, size_t len, int is_image)
 
 /// PDF export ///
 
-void ScribbleApp::writePDF(std::ostream& strm)
+void ScribbleApp::writePDF(std::ostream& strm, const std::vector<int>& pages)
 {
   Document* doc = activeDoc()->document;
-  PdfWriter pdf(doc->numPages());
+  std::vector<int> pagenums;
+  for(int pagenum : pages) {
+    if(pagenum >= 0 && pagenum < doc->numPages())
+      pagenums.push_back(pagenum);
+  }
+  if(pages.empty()) {
+    for(int ii = 0; ii < doc->numPages(); ++ii)
+      pagenums.push_back(ii);
+  }
+  PdfWriter pdf(pagenums.size());
   pdf.anyHref = true;  // hack to work around our hack for links
   //pdf.compressionLevel = 0;  // for debugging
   Dim ptsPerDim = 72.0/150;
-  pdf.resolveLink = [doc](const char* href, int* pgnum){ return doc->findNamedNode(href, pgnum); };
-  for(Page* page : doc->pages) {
+  // a link names its target by the document's page number, which is not the PDF's when only some pages
+  //  are written; a link to a page left out goes nowhere
+  pdf.resolveLink = [doc, pagenums](const char* href, int* pgnum) -> SvgNode* {
+    int docpage = doc->numPages() - 1;
+    SvgNode* target = doc->findNamedNode(href, &docpage);
+    auto it = std::find(pagenums.begin(), pagenums.end(), docpage);
+    if(!target || it == pagenums.end())
+      return NULL;
+    *pgnum = int(it - pagenums.begin());
+    return target;
+  };
+  for(int pagenum : pagenums) {
+    Page* page = doc->pages[pagenum];
     page->ensureLoaded();
     pdf.newPage(page->width(), page->height(), ptsPerDim);
     pdf.drawNode(page->svgDoc.get());
@@ -3189,12 +3209,12 @@ void ScribbleApp::writePDF(std::ostream& strm)
   pdf.write(strm);
 }
 
-bool ScribbleApp::writePDF(const std::string& filename)
+bool ScribbleApp::writePDF(const std::string& filename, const std::vector<int>& pages)
 {
   std::ofstream f(PLATFORM_STR(filename.c_str()), std::ios::out | std::ios::binary);
   if(!f)
     return false;
-  writePDF(f);
+  writePDF(f, pages);
   f.close();
   return true;
 }
@@ -3220,6 +3240,142 @@ void ScribbleApp::exportPDF()
   });
 }
 #endif
+
+/// page management exports (docs/agent/page-management.md) ///
+
+std::string ScribbleApp::pagesExportName(const std::vector<int>& pages)
+{
+  std::string name = activeDoc()->fileName()[0] ? FSPath(activeDoc()->fileName()).baseName() : std::string("Untitled");
+  return pages.size() == 1 ? fstring("%s-p%d", name.c_str(), pages.front() + 1) : name + "-pages";
+}
+
+#if PLATFORM_EMSCRIPTEN
+// the browser has no file system the user can reach: every export is a download
+static void downloadFile(const std::string& path)
+{
+  std::string contents = readFile(path.c_str());
+  jsSaveFile(FSPath(path).fileName().c_str(), contents.data(), contents.size());
+}
+#endif
+
+void ScribbleApp::exportPagesPDF(const std::vector<int>& pages)
+{
+  if(pages.empty())
+    return;
+#if PLATFORM_EMSCRIPTEN
+  std::string path = FSPath(tempPath).childPath(pagesExportName(pages) + ".pdf");
+  if(writePDF(path, pages))
+    downloadFile(path);
+#else
+  FilePicker::saveFile(_("Export PDF"), pagesExportName(pages) + ".pdf", "pdf", [this, pages](const std::string& filename){
+    if(writePDF(filename, pages))
+      return true;
+    messageBox(Error, _("Export PDF"), _("Error saving document. Please try a different folder."));
+    return false;
+  });
+#endif
+}
+
+// A new document holding just these pages, for the share sheet.  The desktop has no share sheet, so
+//  there it is saved through the save dialog instead, like Export PDF.
+void ScribbleApp::sharePagesDocument(const std::vector<int>& pages)
+{
+  if(pages.empty())
+    return;
+  std::string name = pagesExportName(pages) + ".svgz";
+#if PLATFORM_MOBILE || PLATFORM_EMSCRIPTEN
+  std::string path = FSPath(tempPath).childPath(name);
+  if(!activeDoc()->savePagesCopy(pages, path.c_str())) {
+    messageBox(Error, _("Share Pages"), _("Error saving document."));
+    return;
+  }
+#if PLATFORM_EMSCRIPTEN
+  downloadFile(path);
+#else
+  sendFile(_("See attached file"), path);
+#endif
+#else
+  FilePicker::saveFile(_("Share Pages"), name, "svgz", [this, pages](const std::string& filename){
+    // the format follows the extension (Document::save), so a name typed without one still gets svgz
+    std::string path = FSPath(filename).extension() == "svgz" ? filename : filename + ".svgz";
+    if(activeDoc()->savePagesCopy(pages, path.c_str()))
+      return true;
+    messageBox(Error, _("Share Pages"), _("Error saving document. Please try a different folder."));
+    return false;
+  });
+#endif
+}
+
+Image ScribbleApp::renderPageImage(Page* page)
+{
+  page->ensureLoaded();
+  Rect dirty = page->rect();
+  Dim scale = gui->paintScale;
+  Image img(page->width()*scale, page->height()*scale, Image::PNG);
+  Painter imgpaint(Painter::PAINT_SW | Painter::SRGB_AWARE, &img);
+  imgpaint.beginFrame();
+  imgpaint.scale(scale);
+  imgpaint.setsRGBAdjAlpha(true);
+  page->draw(&imgpaint, dirty, cfg->Bool("sendRuleLines"));
+  imgpaint.endFrame();
+  return img;
+}
+
+static bool writePng(const Image& img, const std::string& path)
+{
+  std::ofstream pngstrm(PLATFORM_STR(path.c_str()), std::ios::binary);
+  if(!pngstrm)
+    return false;
+  auto pngenc = img.encodePNG();
+  pngstrm.write((char*)pngenc.data(), pngenc.size());
+  return bool(pngstrm);
+}
+
+// One image per page.  The desktop save dialog picks one file, so several pages are written beside it as
+//  name-N.png, N the page number; on mobile they all go to one share sheet.
+void ScribbleApp::exportPagesPNG(const std::vector<int>& pages)
+{
+  if(pages.empty())
+    return;
+  // the files for the chosen path: the path itself for one page, name-N.png beside it for several
+  auto writeAll = [this, pages](const std::string& chosen, std::vector<std::string>* written){
+    Document* doc = activeDoc()->document;
+    std::string base = FSPath(chosen).extension() == "png" ? FSPath(chosen).basePath() : chosen;
+    for(int pagenum : pages) {
+      if(pagenum < 0 || pagenum >= doc->numPages())
+        continue;
+      std::string path = pages.size() == 1 ? base + ".png" : fstring("%s-%d.png", base.c_str(), pagenum + 1);
+      if(!writePng(renderPageImage(doc->pages[pagenum]), path))
+        return false;
+      if(written)
+        written->push_back(path);
+    }
+    return true;
+  };
+#if PLATFORM_MOBILE || PLATFORM_EMSCRIPTEN
+  std::vector<std::string> written;
+  std::string name = activeDoc()->fileName()[0] ? FSPath(activeDoc()->fileName()).baseName() : std::string("Untitled");
+  if(!writeAll(FSPath(tempPath).childPath(name + ".png"), &written)) {
+    messageBox(Error, _("Export PNG"), _("Error saving image."));
+    return;
+  }
+#if PLATFORM_EMSCRIPTEN
+  for(const std::string& path : written)
+    downloadFile(path);
+#else
+  sendFiles(_("See attached image"), written);
+#endif
+#else
+  std::string name = pages.size() == 1 ? pagesExportName(pages) : (activeDoc()->fileName()[0]
+      ? FSPath(activeDoc()->fileName()).baseName() : std::string("Untitled"));
+  FilePicker::saveFile(_("Export PNG"), name + ".png", "png", [this, writeAll](const std::string& filename){
+    if(writeAll(filename, NULL))
+      return true;
+    messageBox(Error, _("Export PNG"), _("Error saving image. Please try a different folder."));
+    return false;
+  });
+#endif
+}
 
 /// dialogs ///
 
@@ -3351,18 +3507,28 @@ void ScribbleApp::sendFile(const std::string& body, const std::string& attachfil
 #endif
 }
 
+void ScribbleApp::sendFiles(const std::string& body, const std::vector<std::string>& attachfiles)
+{
+  if(attachfiles.size() == 1) {
+    sendFile(body, attachfiles.front());
+    return;
+  }
+#if PLATFORM_ANDROID
+  AndroidHelper::sendFiles(attachfiles, "image/png", FSPath(activeDoc()->fileName()).baseName().c_str());
+#elif PLATFORM_IOS
+  std::vector<const char*> paths;
+  for(const std::string& file : attachfiles)
+    paths.push_back(file.c_str());
+  iosSendFiles(paths.data(), int(paths.size()));
+#else
+  for(const std::string& file : attachfiles)
+    sendFile(body, file);
+#endif
+}
+
 void ScribbleApp::sendPageImage()
 {
-  Page* page = activeArea()->getCurrPage();
-  Rect dirty = page->rect();
-  Dim scale = gui->paintScale;
-  Image img(page->width()*scale, page->height()*scale, Image::PNG);
-  Painter imgpaint(Painter::PAINT_SW | Painter::SRGB_AWARE, &img);
-  imgpaint.beginFrame();
-  imgpaint.scale(scale);
-  imgpaint.setsRGBAdjAlpha(true);
-  page->draw(&imgpaint, dirty, cfg->Bool("sendRuleLines"));
-  imgpaint.endFrame();
+  Image img = renderPageImage(activeArea()->getCurrPage());
 
   std::string basename = activeDoc()->fileName()[0] ?
       FSPath(activeDoc()->fileName()).baseName() : std::string("untitled");

@@ -1,6 +1,9 @@
 #ifndef ANDROIDHELPER_H
 #define ANDROIDHELPER_H
 
+#include <string>
+#include <vector>
+
 class ScribbleApp;
 
 class AndroidHelper
@@ -12,6 +15,8 @@ public:
   static int detectPenType(int pentype);
   static void openUrl(const char* url);
   static void sendFile(const char* filename, const char* mimetype, const char* title);
+  // several files in one share sheet (ACTION_SEND_MULTIPLE)
+  static void sendFiles(const std::vector<std::string>& filenames, const char* mimetype, const char* title);
   static void getImage();
   // the system file picker (ACTION_OPEN_DOCUMENT / ACTION_CREATE_DOCUMENT) for FilePicker; the result
   //  comes back through jniFilePicked

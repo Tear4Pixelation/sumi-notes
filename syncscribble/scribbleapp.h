@@ -86,6 +86,14 @@ public:
   void openRecentFile(const std::string& filename);
   void createLink();
   void exportPDF();
+  // The sidebar's Pages view (docs/agent/page-management.md): the listed pages of the active document as a
+  //  PDF (save dialog), as a new Sumi document handed to the share sheet (the save dialog on desktop,
+  //  which has none), and as one PNG per page (save dialog, -N suffixes; the share sheet on mobile)
+  void exportPagesPDF(const std::vector<int>& pages);
+  void sharePagesDocument(const std::vector<int>& pages);
+  void exportPagesPNG(const std::vector<int>& pages);
+  // a page as an image at the size Send Page Image uses
+  Image renderPageImage(Page* page);
   void importPDF();
   bool doImportPdf(const std::string& pdfPath);
   std::string importPdfToDocFile(const std::string& pdfPath, std::string* errorOut = NULL);
@@ -263,12 +271,17 @@ private:
   bool doOpenDocument(std::string filename);
   bool doOpenDocument(IOStream* filestrm);
   void populateRecentFiles();
-  void writePDF(std::ostream& strm);
-  bool writePDF(const std::string& filename);
+  // pages: page numbers to write, in that order; empty = the whole document
+  void writePDF(std::ostream& strm, const std::vector<int>& pages = {});
+  bool writePDF(const std::string& filename, const std::vector<int>& pages = {});
   void saveConfig();
   void setWinTitle(const std::string& filename);
   void onLoadFile(const std::string& filename, bool addrecent = true);
   void sendFile(const std::string& body, const std::string& attachfile);
+  // several files in one share sheet (mobile only)
+  void sendFiles(const std::string& body, const std::vector<std::string>& attachfiles);
+  // the suggested file name (no extension) for an export of `pages`
+  std::string pagesExportName(const std::vector<int>& pages);
   bool openOrCreateDoc(bool cancelable = false);
   // the two document browsers behind openOrCreateDoc(), chosen by the useTagDocList pref
   bool openOrCreateDocClassic(bool cancelable = false);
