@@ -1,7 +1,8 @@
 # The general-purpose sidebar
 
-A panel with two views - the document's **outline** and its **layer table** - over the backends in
-[outlines.md](outlines.md) and [layers.md](layers.md); it is the first UI either feature has had. Opened from a button at the
+A panel with three views - the document's **outline**, its **layer table** and its **pages** (a thumbnail
+grid with select mode, drag to move, delete and export: [page-management.md](page-management.md)) - over the
+backends in [outlines.md](outlines.md) and [layers.md](layers.md); it is the first UI either feature has had. Opened from a button at the
 left end of the **page ops** floating panel (Bookmarks is off the toolbar for now; Ctrl+B and View > Bookmarks still open it). Designed in the Penpot file
 "General purpose sidebar" and specified in `SIDEBAR_SPEC.md`; that document is the rationale, this is
 the summary. `syncscribble/sidebar.cpp`.
@@ -151,7 +152,9 @@ scrolls. Only the mouse path has been exercised (agent-pointer is a mouse); the 
 `draggable` is ugui's own and was read, not driven. The drop is delivered on
 a 1 ms timer, since it rebuilds the list that owns the row still dispatching; keys must therefore stay
 valid across a rebuild - page numbers for the outline, and for tags a per-window id table that is never
-cleared. Feedback is class-based: `.drop-target` fills the row's sizing rect with `--checked` at
+cleared. An optional `zoneAt`/`onDropZone` pair lets a target have parts: the Pages view uses it so the left half of
+page 1 means "before" (`.drop-before` instead of `.drop-target`); without them nothing changes. Feedback is
+class-based: `.drop-target` fills the row's sizing rect with `--checked` at
 `fill-opacity: 0.3` (a stroke nudged the list, as it grows the bounds), `.dragging` turns the label
 `--text-weak` (`opacity`, as a CSS rule or an attribute, did not show). Both rules are in the sidebar
 section of `ugui/theme.cpp` and match only `.sb-row`; until they were added there was no rule at all, so

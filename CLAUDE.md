@@ -124,7 +124,8 @@ relevant file before changing that area.
 - [outlines.md](docs/agent/outlines.md) - per-page outline entries, `PageOutlineItem`, why no document-level index
 - [page-tags.md](docs/agent/page-tags.md) - tags on pages as `write-pagetag` elements, the toolbar tag button and placing tags on the pointer, to-do tags (ticked = page untagged), the `pagetags` summary and page thumbnails, page cards, inheritance and the blink
 - [layers.md](docs/agent/layers.md) - `__layer` tag not `<g>`, edit gate, lock semantics, `LayerTableItem`, sync of the table
-- [sidebar.md](docs/agent/sidebar.md) - outline/layers sidebar, pinned vs floating, sizing traps, row drag (`rowdrag.cpp`)
+- [sidebar.md](docs/agent/sidebar.md) - outline/layers/pages sidebar, pinned vs floating, sizing traps, row drag (`rowdrag.cpp`)
+- [page-management.md](docs/agent/page-management.md) - the sidebar's Pages view: thumbnail grid, select mode and bar, drag to move after a page (front = left half of page 1), delete, PDF/SVGZ/PNG export of a page set, lazy thumbnails keyed by `Page::uid`/`revision`
 - [navigation.md](docs/agent/navigation.md) - wheel/zoom/pan, sdl2-compat `preciseX/Y`, `SDL_Event = {}`, modifier tracking, testing scroll in agent-display
 - [stroke-input.md](docs/agent/stroke-input.md) - `CurveFitFilter` (measurements, failed Bezier fit), experimental Linux sub-pixel input
 - [tests.md](docs/agent/tests.md) - standalone test binaries (scan, shape, color, layer) and what each in-app `ScribbleTest` check pins

@@ -166,3 +166,9 @@ documents (worksheet, transparent clip) and which are left alone (photo, saturat
 image is untouched byte for byte, and that the flip lands paper on the ink-drawn paper and keeps a blue
 heading blue. See [night-mode.md](night-mode.md).
 
+
+- `ScribbleTest::pageMoveTest()` - the sidebar's Pages view backend ([page-management.md](page-management.md)):
+  `movePages` puts pages after the target (or at the front / end), keeps a multi-page move in document order,
+  refuses no-ops and drops onto a moved page, keeps a page's outline entry, and is one undo step; `deletePageList`
+  of a few pages and of every page is one undo step. Mutation-checked (insert before the target: 12 failures;
+  reversed multi-page order: 1).
