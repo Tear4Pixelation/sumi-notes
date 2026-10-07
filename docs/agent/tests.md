@@ -172,3 +172,9 @@ heading blue. See [night-mode.md](night-mode.md).
   refuses no-ops and drops onto a moved page, keeps a page's outline entry, and is one undo step; `deletePageList`
   of a few pages and of every page is one undo step. Mutation-checked (insert before the target: 12 failures;
   reversed multi-page order: 1).
+
+Persistent undo is tested by `ScribbleTest::undoPersistTest()` (unit-check count): edits covering
+strokes, a layer, a layer move, a page, an outline entry and a page deletion undo back to each recorded
+state after save and reopen, redo survives, and a file appended to externally opens with no history and
+loses its sidecar. `runAll()` turns persistence off for everything else. Mutation-checked four ways; see
+[undo-persistence.md](undo-persistence.md#tests).

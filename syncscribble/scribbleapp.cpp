@@ -29,6 +29,7 @@
 #include "usvg/pdfwriter.h"
 #include "ulib/unet.h"
 #include "usvg/svgparser.h"
+#include "undopersist.h"
 #if PLATFORM_WIN
 #include "windows/winhelper.h"
 #include <shellapi.h>  // for ShellExecute for openUrl
@@ -148,6 +149,9 @@ ScribbleApp::ScribbleApp(int argc, char* argv[])
   }
 #endif
   createPath(tempPath.c_str());
+  // beside saved/: app-private on every platform, never in the user's library (undopersist.h)
+  if(!savedPath.empty())
+    UndoPersist::dir = FSPath(savedPath).parent().childPath(PLATFORM_ANDROID ? ".undo-history/" : "undo-history/");
 
   cfg = new ScribbleConfig;
   if(!cfg->loadConfigFile(cfgFile.c_str())) {

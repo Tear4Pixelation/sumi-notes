@@ -2,6 +2,7 @@
 #include "documentlist.h"
 
 #include "scribbleapp.h"
+#include "undopersist.h"
 #include "scribbledoc.h"
 #include "touchwidgets.h"
 
@@ -601,6 +602,8 @@ void DocumentList::renameItem()
       ok = copyDocument(oldinfo, newinfo, true);
     else
       ok = moveFile(oldinfo, newinfo);
+    if(ok)
+      UndoPersist::documentMoved(oldinfo.path, newinfo.path);
   }
   if(!ok) {
     msgBar->setText(fstring(_("Error renaming \"%s\""), oldinfo.fileName().c_str()).c_str());
@@ -691,6 +694,9 @@ void DocumentList::pasteItem()
     ok = moveFile(srcinfo, destinfo);
   else
     copyFile(srcinfo, destinfo);
+  // a copy starts without history (its fingerprint would not match anyway); a move takes it along
+  if(ok && cutClipboard)
+    UndoPersist::documentMoved(srcinfo.path, destinfo.path);
   if(!ok) {
     msgBar->setText(fstring(_("Error moving \"%s\""), srcinfo.fileName().c_str()).c_str());
     msgBar->setVisible();

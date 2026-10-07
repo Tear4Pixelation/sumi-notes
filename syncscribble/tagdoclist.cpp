@@ -2,6 +2,7 @@
 #include "cover.h"
 
 #include "scribbleapp.h"
+#include "undopersist.h"
 #include "scribbledoc.h"
 #include "document.h"
 #include "scribbleconfig.h"
@@ -1284,6 +1285,7 @@ void TagDocList::renameDoc(const FSPath& path)
         fstring(_("Unable to rename \"%s\"."), path.baseName().c_str()));
     return;
   }
+  UndoPersist::documentMoved(path.path, newPath.path);
   tagStore.removeDoc(path.c_str());
   tagStore.save();
   refresh();
@@ -1302,7 +1304,8 @@ void TagDocList::deleteDoc(const FSPath& path)
   if(res != _("Delete"))
     return;
   ScribbleApp::app->closeDocs(path);
-  removeFile(path.c_str());
+  if(removeFile(path.c_str()))
+    UndoPersist::documentDeleted(path.path);  // its erased content must not outlive it
   tagStore.removeDoc(path.c_str());
   tagStore.save();
   refresh();
@@ -1369,8 +1372,10 @@ void TagDocList::deleteSelectedDocs()
   std::vector<std::string> failed;
   for(const std::string& path : selectedDocs) {
     ScribbleApp::app->closeDocs(FSPath(path));
-    if(removeFile(path.c_str()))
+    if(removeFile(path.c_str())) {
       tagStore.removeDoc(path.c_str());
+      UndoPersist::documentDeleted(path);
+    }
     else
       failed.push_back(FSPath(path).baseName());
   }

@@ -157,6 +157,12 @@ void ScribbleConfig::init()
   cfg["importLimitMemory"] = 0;
   cfg["importMemoryLimitMB"] = 512;
 
+  // persistent undo (docs/agent/undo-persistence.md): how many undo steps (and as many redo steps) of a
+  //  document survive saving and reopening, and the most its saved history may take on disk.  50 steps
+  //  covers a working session's worth of strokes and erasures at a few hundred KB; the KB cap is what
+  //  bounds a step that deletes pages full of images.  0 for either disables it.
+  cfg["undoPersistSteps"] = 50;
+  cfg["undoPersistMaxKB"] = 4096;
   // save thumbnail to HTML file - currently only disabled when running tests
   cfg["saveThumbnail"] = 1;
   // always use first page for thumbnail (so it serves as a title page)

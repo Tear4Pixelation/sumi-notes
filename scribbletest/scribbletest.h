@@ -77,6 +77,10 @@ public:
   int reflowIndentTest();
   int skippedLinesTest();
   int insSpaceAxisTest();
+  // persistent undo (docs/agent/undo-persistence.md): strokes, a layer, a layer move, a page, an outline
+  //  entry and a page deletion undo back step by step after save and reopen, redo survives too, and a
+  //  file changed behind the sidecar's back opens with no history at all
+  int undoPersistTest();
   void performanceTest();
   void inputTest();
   void syncSlaveMsg(std::string msg, int level);

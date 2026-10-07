@@ -9,6 +9,7 @@
 #include "scribbleapp.h"  // only for sync tests
 #include "mainwindow.h"  // arrowPopupTest
 #include "notefulimport.h"
+#include "undopersist.h"
 #include "pdfimport.h"
 #include "tagstore.h"
 #include "miniz/miniz_zip.h"
@@ -2516,6 +2517,139 @@ int ScribbleTest::shapeRoundTripTest()
   return nbad;
 }
 
+int ScribbleTest::undoPersistTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: undo persist: %s\n", what); }
+  };
+  // what an undo step can change, in a form that survives a save and reload unchanged: per page its
+  //  size and outline entry and each element's type, layer and (rounded) bounds; then the layer table
+  auto docState = [&]() {
+    Document* doc = scribbleDoc->document;
+    std::string state = fstring("%d pages;", doc->numPages());
+    for(Page* page : doc->pages) {
+      page->ensureLoaded(false);
+      state += fstring("[%.0fx%.0f '%s' %d:", page->width(), page->height(), page->outlineTitle.c_str(),
+          page->outlineLevel);
+      for(Element* s : page->children()) {
+        Rect bbox = s->bbox();
+        state += fstring("(%d L%d %.0f %.0f %.0f %.0f)", int(s->node->type()), s->layer(),
+            bbox.left, bbox.top, bbox.right, bbox.bottom);
+      }
+      state += "]";
+    }
+    for(const LayerInfo& info : scribbleDoc->layers().layers)
+      state += fstring("{%d %s %d %d}", info.id, info.name.c_str(), info.locked, info.hidden);
+    return state;
+  };
+  auto drawStroke = [&](Dim y) {
+    scribbleMode->setMode(MODE_STROKE);
+    ie(120, y, 0, pen, press);  ie(300, y, 0, pen);  ie(0, 0, 0, pen, release);
+  };
+
+  std::string prevDir = UndoPersist::dir;
+  bool prevEnabled = UndoPersist::enabled;
+  UndoPersist::dir = outPath + "/undo-history/";
+  UndoPersist::enabled = true;
+  std::string file = outPath + "/undo_persist_out.html";
+  removeFile(UndoPersist::sidecarPath(file));
+
+  scribbleDoc->newDocument();
+  scribbleDoc->app->setPen(ScribblePen(Color::BLACK, 2, ScribblePen::TIP_ROUND));
+  std::vector<std::string> states;
+  states.push_back(docState());
+  drawStroke(160);
+  states.push_back(docState());
+  drawStroke(260);
+  states.push_back(docState());
+  int top = scribbleDoc->addLayer("Top");
+  states.push_back(docState());
+  doCommand(ID_SELALL);
+  check(scribbleDoc->moveSelToLayer(top) == 2, "both strokes move to the new layer");
+  scribbleDoc->clearSelection();
+  states.push_back(docState());
+  scribbleDoc->newPage();
+  states.push_back(docState());
+  // user text with every character XML cares about
+  check(scribbleDoc->setPageOutline(1, "Notes & <\"odd\"> 'ones'", 1), "an outline entry is set");
+  states.push_back(docState());
+  // the strokes go out of the document with their page: the history alone holds them now
+  scribbleDoc->deletePage(0);
+  states.push_back(docState());
+  // and one step to undo before saving, so there is a redo step to keep
+  drawStroke(200);
+  std::string redoneState = docState();
+  check(redoneState != states.back(), "a stroke was drawn on the remaining page");
+  scribbleDoc->doUndoRedo(false);
+  check(docState() == states.back(), "undo of the last stroke before saving");
+  size_t nUndo = scribbleDoc->history->undoSteps();
+  check(nUndo == states.size() - 1, "one undo step per edit");
+
+  check(scribbleDoc->saveDocument(file.c_str()), "saving succeeds");
+  std::string sidecar = UndoPersist::sidecarPath(file);
+  check(FSPath(sidecar).exists(), "saving writes the history beside saved/, not into the document");
+  std::vector<char> docBytes;
+  readFile(&docBytes, file.c_str());
+  check(std::string(docBytes.begin(), docBytes.end()).find("undohistory") == std::string::npos,
+      "the document itself carries no history");
+
+  // reopen: the history is back, undo walks through every saved state
+  scribbleDoc->newDocument();
+  check(!scribbleDoc->history->canUndo(), "a new document has no history");
+  check(scribbleDoc->openDocument(file.c_str()) == Document::LOAD_OK, "reopening succeeds");
+  check(scribbleDoc->history->undoSteps() == nUndo, "every undo step is restored");
+  check(scribbleDoc->history->redoSteps() == 1, "the redo step is restored");
+  check(docState() == states.back(), "the reopened document is the saved one");
+  // UndoHistory::undo() must not be called with nothing to undo, so without the history there is
+  //  nothing further to walk through
+  auto cleanup = [&]() {
+    scribbleDoc->newDocument();
+    removeFile(file);
+    removeFile(sidecar);
+    UndoPersist::dir = prevDir;
+    UndoPersist::enabled = prevEnabled;
+  };
+  if(scribbleDoc->history->undoSteps() != nUndo || scribbleDoc->history->redoSteps() != 1) {
+    cleanup();
+    return nbad;
+  }
+  scribbleDoc->doUndoRedo(true);
+  check(docState() == redoneState, "redo after reopening draws the undone stroke again");
+  scribbleDoc->doUndoRedo(false);
+  for(size_t ii = states.size() - 1; ii-- > 0 && scribbleDoc->history->canUndo();) {
+    scribbleDoc->doUndoRedo(false);
+    if(docState() != states[ii]) {
+      printf("  step %d: expected %s\n  got %s\n", int(ii), states[ii].c_str(), docState().c_str());
+      check(false, "undo after reopening restores each earlier state");
+      break;
+    }
+  }
+  check(!scribbleDoc->history->canUndo(), "and stops at the first saved step");
+  // all the way forward again: redo of restored items is as exact as undo
+  while(scribbleDoc->history->canRedo())
+    scribbleDoc->doUndoRedo(true);
+  check(docState() == redoneState, "redo after reopening reaches the last state");
+
+  // a history whose file changed behind its back is dropped, not applied to the wrong content
+  if(scribbleDoc->history->canUndo())
+    scribbleDoc->doUndoRedo(false);
+  check(scribbleDoc->saveDocument(), "saving again succeeds");
+  check(FSPath(sidecar).exists(), "saving again keeps a history");
+  scribbleDoc->newDocument();
+  {
+    FileStream external(file.c_str(), "ab");
+    external << "<!-- edited on another device -->\n";
+  }
+  check(scribbleDoc->openDocument(file.c_str()) == Document::LOAD_OK, "the changed file opens");
+  check(!scribbleDoc->history->canUndo() && !scribbleDoc->history->canRedo(),
+      "a file changed elsewhere opens with no history");
+  check(!FSPath(sidecar).exists(), "and its stale history is deleted");
+
+  cleanup();
+  return nbad;
+}
+
 int ScribbleTest::shapeSnapTest()
 {
   int nbad = 0;
@@ -3296,6 +3430,10 @@ int ScribbleTest::rulingRegionTest()
 void ScribbleTest::runAll(bool runsynctest)
 {
   nFailed = 0;
+  // the fixtures save and reopen documents and must not pick up (or leave) persisted undo histories;
+  //  undoPersistTest() turns it on for itself
+  bool undoPersistWas = UndoPersist::enabled;
+  UndoPersist::enabled = false;
   int nThumbsFailed = 0;
   int nUnitFailed = runScanTests() + runShapeTests() + runColorTests() + runLayerTests() + runLibraryTests()
       + runRegionTests() + runNotefulTests() + runPageTagTests() + runWidthPresetTests();
@@ -3477,6 +3615,7 @@ void ScribbleTest::runAll(bool runsynctest)
   nUnitFailed += reflowIndentTest();
   nUnitFailed += skippedLinesTest();
   nUnitFailed += insSpaceAxisTest();
+  nUnitFailed += undoPersistTest();
   runAllTime = mSecSinceEpoch() - runAllTime;
   // restore global config
   srandpp(mSecSinceEpoch());
@@ -3484,6 +3623,7 @@ void ScribbleTest::runAll(bool runsynctest)
   Element::SVG_NO_TIMESTAMP = false;
   ScribbleView::unitsPerPx = unitsPerPx;
   ScribbleApp::app->loadConfig();
+  UndoPersist::enabled = undoPersistWas;
   if(syncSlave)
     nFailed = syncSlave->nFailed;
   nFailed += nUnitFailed;

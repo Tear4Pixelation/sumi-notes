@@ -7,11 +7,14 @@
 #include "ulib/palettegen.h"
 
 class ScribbleDoc;
+class UndoPersistWriter;
 
+// persist() writes the item to the on-disk undo history (undopersist.cpp, docs/agent/undo-persistence.md)
 #define UNDO_ITEM_METHODS \
   void undo() override; \
   void redo() override; \
   void serialize(IOStream& strm) override; \
+  void persist(UndoPersistWriter& out) override; \
   UndoHistoryItem* inverse() override;
 
 // for add/remove items that may need to delete objects
@@ -32,6 +35,11 @@ public:
   virtual void redo() {}
   virtual void discard(bool undone) {}
   virtual void serialize(IOStream& strm) {}
+  // Unlike serialize(), which sends the live state a peer must reach, this writes the state the item
+  //  holds - what undo (or redo) will swap in - plus enough to rebuild the item against the reopened
+  //  document.  The default marks the writer failed, so an item type nobody taught to persist drops the
+  //  whole saved history instead of saving one that silently skips a step.
+  virtual void persist(UndoPersistWriter& out);
   virtual UndoHistoryItem* inverse() { return NULL; }
 
   static constexpr unsigned int HEADER                 = 0x00000001;
@@ -314,6 +322,7 @@ public:
 // ... full-blown tree view is way too complicated (http://e-texteditor.com/blog/2006/making-undo-usable)
 class UndoHistory {
   friend class ScribbleSync;
+  friend class UndoPersist;  // reads and rebuilds hist/pos for the on-disk history
   friend class ScribbleArea;  // used for recent stroke select ... we should instead provide methods
 
 public:

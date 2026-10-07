@@ -7,6 +7,7 @@
 #include "scribbleapp.h"
 #include "tagstore.h"
 #include "cover.h"
+#include "undopersist.h"
 
 
 ScribbleDoc::ScribbleDoc(ScribbleApp* parent, ScribbleConfig* _cfg, ScribbleMode* _mode)
@@ -667,6 +668,10 @@ Document::loadresult_t ScribbleDoc::openDocument(IOStream* strm, bool delayload)
   // no ghost page if any load errors to suggest user not modify document
   if((res == Document::LOAD_OK || res == Document::LOAD_EMPTYDOC) && scribbleMode)
     ghostPage.reset(generatePage(INT_MAX));
+  // the undo history saved with this exact file, if any; here rather than in a UI path so that every
+  //  open - the browser, a tab reloading an idle document, the command line - gets it back
+  if(res == Document::LOAD_OK && scribbleMode)
+    UndoPersist::restore(this);
   uiChanged(UIState::SetDoc);
   document->bookmarksDirty = false;
   app->repaintBookmarks(true);
@@ -715,6 +720,9 @@ bool ScribbleDoc::saveDocument(IOStream* strm, Document::saveflags_t flags)
 #if !PLATFORM_IOS
     fileLastMod = getFileMTime(fileName());
 #endif
+    // after the document is safely written, and fingerprinting the file as written
+    if(scribbleMode)
+      UndoPersist::save(this);
     app->refreshUI(this, (1 << UIState::SaveDoc));
   }
   else

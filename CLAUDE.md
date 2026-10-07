@@ -131,6 +131,7 @@ relevant file before changing that area.
 - [tests.md](docs/agent/tests.md) - standalone test binaries (scan, shape, color, layer) and what each in-app `ScribbleTest` check pins
 - [ui-floating-bar.md](docs/agent/ui-floating-bar.md) - **the reference UI component**: floating action bar (rounded container of FAB-sized buttons replacing the FABs in a mode), exact padding/radii/colors, card selection marks, top inset - build new floating UI like this
 - [agent-display.md](docs/agent/agent-display.md) - two displays (Wayland pointer vs Xwayland keys) and the traps when driving the app
+- [undo-persistence.md](docs/agent/undo-persistence.md) - last N undo/redo steps saved beside `saved/` (never in the document), keyed by path + file fingerprint, `persist()` writes held not live state, ownership contiguity, base for the crash journal
 - [ios-build.md](docs/agent/ios-build.md) - manual iOS workflow, ad hoc signing secrets set up from Linux, installing on the iPad
 
 Other design documents at the repo root: `SHAPES_SPEC.md`, `COLORS_SPEC.md`, `COLORS_HANDOFF.md`,

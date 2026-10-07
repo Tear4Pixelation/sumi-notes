@@ -19,6 +19,7 @@ SOURCES = \
   layers.cpp \
   page.cpp \
   syncundo.cpp \
+  undopersist.cpp \
   selection.cpp \
   document.cpp \
   scribblemode.cpp \
