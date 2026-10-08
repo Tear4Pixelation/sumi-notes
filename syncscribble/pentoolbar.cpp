@@ -1395,17 +1395,31 @@ bool PenToolbar::prepareWidths() {
 //  splitting into three lists that drift apart.
 // Off-palette colors are passed through untouched apart from the marker's alpha - the point of the
 //  escape hatch is that the color asked for is the color drawn.
+// The generator's `hl` is deliberately timid (chroma capped at 0.13, alpha 97): it was tuned to sit under
+//  text, and on white paper it read as a pale wash.  cusp-walk-1 is frozen, so the marker is made vivid
+//  here instead - the same hue and lightness with the chroma cap lifted (still never out of gamut) and
+//  a heavier alpha.  The marker is drawn *under* the ink (DRAW_UNDER), so more alpha does not cost
+//  legibility.  It only changes the pen's colour, so strokes already in a document are untouched.
+static const int MARKER_ALPHA = 165;
+static const double MARKER_MAX_CHROMA = 0.19;
+
+static Color vividMarker(Color hl, double vividness) {
+  ColorOkLch lch = oklchFromColor(Color(hl.red(), hl.green(), hl.blue()));
+  lch.C = std::min(oklchMaxChroma(lch.L, lch.h), real(MARKER_MAX_CHROMA))*vividness;
+  return oklchToColor(lch, MARKER_ALPHA);
+}
+
 Color PenToolbar::toolColor(Color c) const {
   if (widthsTool != ScribbleMode::DRAWTOOL_HIGHLIGHT)
     return c;
   const Palette *pal = themed ? docPalette() : NULL;
   int family = -1, variant = PALETTE_BASE;
   if (pal && pal->indexOf(c, &family, &variant) && family >= 0)
-    return pal->families[family].hl;
+    return vividMarker(pal->families[family].hl, pal->recipe.vividness);
   // the neutral has no highlighter variant of its own (it is exempt from the walk), and neither does
   //  an off-palette color; both simply take the marker's alpha
   Color out = c;
-  out.setAlpha(pal && !pal->families.empty() ? pal->families[0].hl.alpha() : 127);
+  out.setAlpha(MARKER_ALPHA);
   return out;
 }
 
