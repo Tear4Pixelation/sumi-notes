@@ -550,16 +550,16 @@ public:
   }
 };
 
-enum { REGION_LINED = 0, REGION_SQUARED, REGION_DOTTED };
+enum { REGION_LINED = 0, REGION_SQUARED, REGION_DOTTED, REGION_STAFF };
 
 static int regionKind(const RulingRegionParams& params)
 {
-  return params.dotRadius > 0 ? REGION_DOTTED : params.xRuling > 0 ? REGION_SQUARED : REGION_LINED;
+  return params.staff ? REGION_STAFF : params.dotRadius > 0 ? REGION_DOTTED : params.xRuling > 0 ? REGION_SQUARED : REGION_LINED;
 }
 
 static const char* regionKindTitle(int kind)
 {
-  return kind == REGION_DOTTED ? _("Dotted") : kind == REGION_SQUARED ? _("Squared") : _("Lined");
+  return kind == REGION_STAFF ? _("Music") : kind == REGION_DOTTED ? _("Dotted") : kind == REGION_SQUARED ? _("Squared") : _("Lined");
 }
 
 // lined reuses the ruled icon; there is no squared or dotted glyph among the icons, so those two are
@@ -576,10 +576,18 @@ static const SvgNode* regionKindIcon(int kind)
       <circle cx="6" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="18" cy="12" r="1.6"/>
       <circle cx="6" cy="18" r="1.6"/><circle cx="12" cy="18" r="1.6"/><circle cx="18" cy="18" r="1.6"/>
     </g></svg>)";
+  static const char* staffSVG = R"(<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+    <g class="icon" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+      <path d="M3 6H21M3 9H21M3 12H21M3 15H21M3 18H21"/>
+    </g></svg>)";
   static const SvgDocument* squared =
       SvgGui::useFile("region-kind-squared", std::unique_ptr<SvgDocument>(SvgParser().parseString(squaredSVG)));
   static const SvgDocument* dotted =
       SvgGui::useFile("region-kind-dotted", std::unique_ptr<SvgDocument>(SvgParser().parseString(dottedSVG)));
+  static const SvgDocument* staff =
+      SvgGui::useFile("region-kind-staff", std::unique_ptr<SvgDocument>(SvgParser().parseString(staffSVG)));
+  if(kind == REGION_STAFF)
+    return staff;
   if(kind == REGION_SQUARED)
     return squared;
   if(kind == REGION_DOTTED)
@@ -591,16 +599,22 @@ static const SvgNode* regionKindIcon(int kind)
 static const Dim regionMinSpacing = 10;
 static const Dim regionMaxSpacing = 120;
 
-static Dim regionSliderToSpacing(real pos)
+// music staves: the spacing is a whole staff band (9 staff spaces), so a larger range
+static const Dim regionMinStaffBand = 63;
+static const Dim regionMaxStaffBand = 270;
+
+static Dim regionSliderToSpacing(real pos, bool staff = false)
 {
+  Dim lo = staff ? regionMinStaffBand : regionMinSpacing, hi = staff ? regionMaxStaffBand : regionMaxSpacing;
   pos = std::min(std::max(pos, real(0)), real(1));
-  return std::round(regionMinSpacing*std::pow(regionMaxSpacing/regionMinSpacing, pos));
+  return std::round(lo*std::pow(hi/lo, pos));
 }
 
-static real regionSpacingToSlider(Dim spacing)
+static real regionSpacingToSlider(Dim spacing, bool staff = false)
 {
-  spacing = std::min(std::max(spacing, regionMinSpacing), regionMaxSpacing);
-  return std::log(spacing/regionMinSpacing)/std::log(regionMaxSpacing/regionMinSpacing);
+  Dim lo = staff ? regionMinStaffBand : regionMinSpacing, hi = staff ? regionMaxStaffBand : regionMaxSpacing;
+  spacing = std::min(std::max(spacing, lo), hi);
+  return std::log(spacing/lo)/std::log(hi/lo);
 }
 
 // The selection popup's layer list, rebuilt each time the popup opens (never while it is open, since its
@@ -687,12 +701,20 @@ void MainWindow::buildRegionPanel()
   chevron->addClass("icon");
   regionKindBtn->selectFirst(".title")->node->parent()->asContainerNode()->addChild(chevron);
   ArrowPopup* kindMenu = createArrowPopup(Menu::VERT_LEFT);
-  for(int kind : {REGION_LINED, REGION_SQUARED, REGION_DOTTED}) {
+  for(int kind : {REGION_LINED, REGION_SQUARED, REGION_DOTTED, REGION_STAFF}) {
     kindMenu->addItem(regionKindTitle(kind), regionKindIcon(kind), [this, kind](){
       editSelRegion([kind](RulingRegionParams& p){
+        // a staff's yRuling is a whole band, a line pitch's multiple, so switching to or from music
+        //  converts rather than keeping the number
+        bool wasStaff = p.staff;
         Dim pitch = p.yRuling > 0 ? p.yRuling : Page::BLANK_Y_RULING;
+        if(kind == REGION_STAFF && !wasStaff)
+          pitch = std::round(std::min(std::max(pitch*STAFF_BAND_SPACES/2.5, regionMinStaffBand), regionMaxStaffBand));
+        else if(kind != REGION_STAFF && wasStaff)
+          pitch = std::round(std::min(std::max(pitch*2.5/STAFF_BAND_SPACES, regionMinSpacing), regionMaxSpacing));
+        p.staff = kind == REGION_STAFF;
         p.yRuling = pitch;
-        p.xRuling = kind == REGION_LINED ? 0 : pitch;
+        p.xRuling = kind == REGION_LINED || kind == REGION_STAFF ? 0 : pitch;
         if(kind != REGION_DOTTED)
           p.dotRadius = 0;
         else if(p.dotRadius <= 0)
@@ -701,7 +723,7 @@ void MainWindow::buildRegionPanel()
     });
   }
   setupPopupMenu(regionKindBtn, kindMenu);
-  setupTooltip(regionKindBtn, _("Lines, squares or dots inside the patch"));
+  setupTooltip(regionKindBtn, _("Lines, squares, dots or music staves inside the patch"));
   addPanel({regionKindBtn});
 
   // spacing: squared and dotted keep their cells square
@@ -732,7 +754,7 @@ void MainWindow::buildRegionPanel()
       return;
     if(!regionSlideStart)
       regionSlideStart.reset(new RulingRegionParams(region->regionParams()));
-    Dim spacing = regionSliderToSpacing(pos);
+    Dim spacing = regionSliderToSpacing(pos, region->regionParams().staff);
     RulingRegionParams params = region->regionParams();
     params.yRuling = spacing;
     if(params.xRuling > 0)
@@ -827,7 +849,7 @@ void MainWindow::syncRegionRow()
     regionKindBtn->setIcon(regionKindIcon(kind));
     regionKindBtn->setTitle(regionKindTitle(kind));
     if(!regionSlideStart) {
-      regionSpacingSlider->setValue(regionSpacingToSlider(p.yRuling));
+      regionSpacingSlider->setValue(regionSpacingToSlider(p.yRuling, p.staff));
       regionSpacingText->setText(fstring("%.0f", p.yRuling).c_str());
     }
     for(auto check : {std::make_pair(regionPaperCheck, p.opaque), std::make_pair(regionOutlineCheck, p.outline)}) {

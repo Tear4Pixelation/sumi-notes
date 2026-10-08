@@ -10,6 +10,9 @@ clutter, shadows, low-contrast desks, noise, JPEG), the latter added because the
 while detection failed on real iPad photos. The old outermost-line detector fails 5 of the realistic
 checks; see [document-scanning.md](document-scanning.md) for the tuning env vars.
 
+The ruling-region geometry, music staves included (band of 5 lines, phase, sanitize, clipping, tilt), is
+tested the same way in `scribbletest/regiontest.cpp` (`runRegionTests()`; command in its header).
+
 The shape math is tested the same way in `scribbletest/shapetest.cpp` (`runShapeTests()`), which likewise
 builds and runs standalone - see the command in that file's header. On top of it,
 two checks that do need the application, both running after the `testN` loop and reporting through the

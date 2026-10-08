@@ -622,6 +622,7 @@ void ScribbleSync::processItem(pugi::xml_node& node)
       params.xRuling = node.attribute("xruling").as_double();
       params.yRuling = node.attribute("yruling").as_double();
       params.dotRadius = node.attribute("dotradius").as_double();
+      params.staff = node.attribute("staff").as_int(0) != 0;
       params.opaque = node.attribute("opaque").as_int(1) != 0;
       params.outline = node.attribute("outline").as_int(0) != 0;
       params.sanitize();
@@ -690,7 +691,8 @@ void ScribbleSync::processItem(pugi::xml_node& node)
       PageProperties props(node.attribute("width").as_float(), node.attribute("height").as_float(),
           node.attribute("xruling").as_float(), node.attribute("yruling").as_float(),
           node.attribute("marginLeft").as_float(), Color::fromArgb(node.attribute("color").as_uint()),
-          Color::fromArgb(node.attribute("rulecolor").as_uint()), node.attribute("dotradius").as_float(0));
+          Color::fromArgb(node.attribute("rulecolor").as_uint()), node.attribute("dotradius").as_float(0),
+          node.attribute("staff").as_int(0) != 0);
       item = new PageChangedItem(p, props);
     }
   }

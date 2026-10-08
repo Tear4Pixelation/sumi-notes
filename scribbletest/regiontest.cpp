@@ -183,6 +183,40 @@ int runRegionTests()
     regionCheck(start.line == 4 && !start.wholeLine, "without skip lines an empty line is just a line");
   }
 
+  {
+    // music staves: yRuling is a band of STAFF_BAND_SPACES (9) spaces, a staff of 5 lines centred in it
+    RulingRegionParams staffBox = RulingRegionParams::fromRect(Rect::ltrb(0, 0, 200, 720), 0, 72, 0, true);
+    Path2D staves = staffBox.linesPath();
+    regionCheck(segmentCount(staves) == 10*STAFF_LINES, "720 unit box at band 72 has 10 staves of 5 lines");
+    regionCheck(staves.size() >= 2 && nearPt(staves.point(0), Point(0, 20)) && nearPt(staves.point(1), Point(200, 20)),
+        "first staff line is 2.5 spaces (20) into the first band, full width");
+    regionCheck(staves.size() >= 10 && nearPt(staves.point(8), Point(0, 52)),
+        "fifth line of the first staff is 4 spaces (32) below the first");
+    regionCheck(staves.size() >= 12 && nearPt(staves.point(10), Point(0, 92)),
+        "the next staff starts a band (72) below the first");
+    regionCheck(staffBox.frame().staff, "the frame carries the staff flag");
+    RulingRegionParams lined = RulingRegionParams::fromRect(Rect::ltrb(0, 0, 200, 720), 0, 72);
+    regionCheck(segmentCount(lined.linesPath()) == 9 && !lined.frame().staff, "without it the same box is plain lines");
+    // a staff has no x ruling and no dots, whatever a file or peer says
+    RulingRegionParams mixed = staffBox;
+    mixed.xRuling = 30;
+    mixed.dotRadius = 2;
+    mixed.sanitize();
+    regionCheck(mixed.xRuling == 0 && mixed.dotRadius == 0 && segmentCount(mixed.linesPath()) == 50,
+        "sanitize drops a staff's x ruling and dots");
+    // lines are phased from the region's own top-left, and a short box cuts the staff that does not fit:
+    //  box 30..100 is 70 tall, so only band 0's five lines (local 20..52) fit, not band 1's (92..124)
+    RulingRegionParams cut = RulingRegionParams::fromRect(Rect::ltrb(0, 30, 200, 100), 0, 72, 0, true);
+    regionCheck(segmentCount(cut.linesPath()) == 5, "box 70 tall: one staff, phased from the box's top");
+    RulingRegionParams cut2 = RulingRegionParams::fromRect(Rect::ltrb(0, 30, 200, 50), 0, 72, 0, true);
+    regionCheck(segmentCount(cut2.linesPath()) == 0 && segmentCount(cut.linesPath()) == 5,
+        "box 20 tall ends before the first line (20) crosses it: none");
+    // a tilted staff region stays 5 parallel lines per band
+    RulingRegionParams tilted = staffBox;
+    tilted.angle = 0.3;
+    regionCheck(segmentCount(tilted.linesPath()) >= 40, "a tilted staff region still draws its staves");
+  }
+
   return nRegionChecksFailed;
 }
 

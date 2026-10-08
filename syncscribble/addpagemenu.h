@@ -33,6 +33,7 @@ struct PageLayout {
   Dim yRuling = 0;
   Dim marginLeft = 0;
   Dim dotRadius = 0;
+  bool staff = false;  // music staves; yRuling is then one staff band (rulingregion.h)
   // 0 = the document's default page size
   Dim width = 0;
   Dim height = 0;

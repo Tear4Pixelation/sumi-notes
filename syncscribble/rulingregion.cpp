@@ -200,6 +200,34 @@ static void addClippedLines(Path2D& path, const std::vector<Point>& local, Dim p
   }
 }
 
+// Staff lines, clipped to the outline.  Like addClippedLines, but the lines are 5 per band, not one, and a
+//  line on the outline's extreme is kept: the border is no reason to lose half a staff.
+template<typename ToPage>
+static void addClippedStaves(Path2D& path, const std::vector<Point>& local, Dim yr, ToPage toPage)
+{
+  if(yr <= 0 || local.size() < 3)
+    return;
+  Dim ymin = local[0].y, ymax = local[0].y;
+  for(const Point& p : local) {
+    ymin = std::min(ymin, p.y);
+    ymax = std::max(ymax, p.y);
+  }
+  int kmin = int(std::floor(ymin/yr)) - 1;
+  int kmax = int(std::ceil(ymax/yr));
+  if(kmax - kmin > MAX_REGION_LINES)
+    return;
+  for(int k = kmin; k <= kmax; ++k) {
+    for(int ii = 0; ii < STAFF_LINES; ++ii) {
+      Dim level = k*yr + staffLineOffset(ii, yr);
+      if(level <= ymin || level >= ymax)
+        continue;
+      std::vector<Dim> xs = spanCrossings(local, level);
+      for(size_t jj = 0; jj + 1 < xs.size(); jj += 2)
+        path.addLine(toPage(Point(xs[jj], level)), toPage(Point(xs[jj+1], level)));
+    }
+  }
+}
+
 Path2D RulingRegionParams::linesPath() const
 {
   Path2D path;
@@ -207,6 +235,10 @@ Path2D RulingRegionParams::linesPath() const
     return path;
   RulingFrame frame = this->frame();
   std::vector<Point> local = localCorners(*this);
+  if(staff) {
+    addClippedStaves(path, local, yRuling, [&](Point p){ return frame.toPage(p); });
+    return path;
+  }
   addClippedLines(path, local, yRuling, [&](Point p){ return frame.toPage(p); });
   // the x ruling's lines are horizontal in a frame turned a further quarter turn: swap the axes
   std::vector<Point> swapped;
@@ -268,6 +300,11 @@ void RulingRegionParams::sanitize()
   xRuling = pitch(xRuling);
   yRuling = pitch(yRuling);
   dotRadius = std::isfinite(dotRadius) && dotRadius > 0 ? std::min(dotRadius, Dim(50)) : Dim(0);
+  if(staff) {
+    // a staff is horizontal lines only
+    xRuling = 0;
+    dotRadius = 0;
+  }
 }
 
 void RulingRegionParams::transform(const Transform2D& tf)
@@ -305,7 +342,7 @@ int RulingRegionParams::bottomRightCorner() const
   return best;
 }
 
-RulingRegionParams RulingRegionParams::fromRect(const Rect& r, Dim xr, Dim yr, Dim dotr)
+RulingRegionParams RulingRegionParams::fromRect(const Rect& r, Dim xr, Dim yr, Dim dotr, bool staff)
 {
   RulingRegionParams params;
   params.corners = { Point(r.left, r.top), Point(r.right, r.top), Point(r.right, r.bottom), Point(r.left, r.bottom) };
@@ -313,6 +350,7 @@ RulingRegionParams RulingRegionParams::fromRect(const Rect& r, Dim xr, Dim yr, D
   params.xRuling = xr;
   params.yRuling = yr;
   params.dotRadius = dotr;
+  params.staff = staff;
   params.outline = true;
   return params;
 }
