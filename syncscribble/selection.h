@@ -243,9 +243,19 @@ public:
   Rect getBGBBox() override;
   void drawBG(Painter* painter) override;
   void setZoom(Dim zoom) override { mZoom = zoom; }
-  void transform(const Transform2D& tf) override { bgDirty = true; }
+  void transform(const Transform2D& tf) override { bgDirty = true; if(handleMoved) handlePage = tf.map(handlePage); }
   int shapeHandleHit(Point pos, bool touch) override;
   Point rotHandleHit(Point pos, bool touch) override;
+  // Where the red origin handle sits.  By default on the left edge at the first line, but the small grip
+  //  beside it (moveGripIndex()) relocates it anywhere inside the outline, onto something recognisable in
+  //  the content to line the ruling up with.  Relocating changes no parameter and makes no undo item.
+  //  Transient: lives in this selector (page coordinates), so it is gone when the region is deselected.
+  Point originHandlePos() const;
+  Point moveGripPos() const;
+  int moveGripIndex() const { return originHandleIndex() + 2; }
+  void setHandlePos(Point pos) { handlePage = pos; handleMoved = true; bgDirty = true; }
+  bool handleMoved = false;
+  Point handlePage;
   // the size handle is a shape handle (resizeHandleIndex()), not a scale handle: see resized()
   Point scaleHandleHit(Point pos, bool touch) override { return Point(NaN, NaN); }
 

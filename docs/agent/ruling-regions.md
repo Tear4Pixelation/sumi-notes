@@ -91,6 +91,17 @@ selection in `RegionSelector` (`selection.cpp`), the UI in `ScribbleArea` and th
   frame, so nothing jumps. This needed `RuledRange::nlines()` clamped: "to the end" is `MAX_LINE_NUM`
   (INT_MAX) lines, a range starting at line -1 is one more than an int holds, and the overflow made
   every range starting above line 0 select nothing. Not covered by an automated test.
+- **The red origin handle can be relocated** (`RegionSelector::originHandlePos()`, `moveGripPos()`): a small
+  hollow grip tied to it by a stem (up-right, screen units) drags the handle anywhere inside the outline, so
+  it can sit on something visible in the scan and the offset be dragged from there. Relocating is shape
+  handle index `n+2` (`moveGripIndex()`); it changes no parameter and makes no undo item (the move case
+  clears `regionHandleStart`, which is what release uses to decide to add a `RegionChangedItem` - do not
+  drop that). Dragging the handle itself still slides the origin, and a relocated handle rides along with
+  the pointer. **Transient by decision**: the position lives in the selector (page coordinates, mapped by
+  `transform()` when the region moves, clamped inside the outline by `clampInside` at use), so deselecting
+  resets it to the left edge. Storing it would need an attribute plus a `<regionchanged>` field for no
+  persistent meaning. The standalone regiontest does not cover it (selector needs the app); checked with
+  agent-display. The grip is black-on-white/bgStroke like the rotate grip, no new colors.
 
 Known gaps: page-level ruled insert space does not move regions below it (vertical/horizontal insert space
 do); content pushed past a region's edge by ruled insert space leaves it; a corner drag can make a

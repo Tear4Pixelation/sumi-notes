@@ -3078,6 +3078,7 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
     if(regionSelector) {
       regionHandleStart = regionSelector->region->regionParams();
       regionHandleStartPos = pos;
+      regionHandleStartHandle = regionSelector->originHandlePos();
     }
     else if(shapeSelector && shapeSelector->shapeElement())
       shapeHandleStart = shapeSelector->shapeElement()->shapeParams();
@@ -3488,10 +3489,26 @@ void ScribbleArea::doMoveEvent(const InputEvent& event)
       //  the lines.  None of them moves ink.
       Element* region = regionSelector->region;
       RulingRegionParams params = regionHandleStart;
+      if(shapeHandleIdx == regionSelector->moveGripIndex()) {
+        // relocate the origin handle only: no parameter changes, so no undo item either
+        regionHandleStart = RulingRegionParams();
+        dirtyScreen(currSelection->getBGBBox());
+        // the grip sits up-right of the handle: keep that gap by moving the handle to follow the pointer
+        regionSelector->setHandlePos(regionHandleStartHandle + (pos - regionHandleStartPos));
+        currSelection->invalidateBBox();
+        currSelection->xchgBGDirty(true);
+        dirtyScreen(currSelection->getBGBBox());
+        break;
+      }
       if(shapeHandleIdx >= 0 && shapeHandleIdx < int(params.corners.size()))
         params.corners[shapeHandleIdx] = pos;
       else if(shapeHandleIdx == int(params.corners.size()))
+      {
         params.origin = params.origin + (pos - regionHandleStartPos);
+        // a relocated handle rides along with the lines it is dragging
+        if(regionSelector->handleMoved)
+          regionSelector->setHandlePos(regionHandleStartHandle + (pos - regionHandleStartPos));
+      }
       else if(shapeHandleIdx == int(params.corners.size()) + 1)
         params = regionSelector->resized(regionHandleStart, regionHandleStartPos, pos);
       else
