@@ -201,7 +201,7 @@ protected:
 
   void updateContentDim();
   bool updateHorzPanLock();
-  // the page taking up the most of the view, which becomes the current page on a scroll or zoom (doPan())
+  // the page at the middle of the view, which becomes the current page on a scroll or zoom (doPan())
   int dominantPageNum() const;
   void drawThumbnail(Image* dest);
   void drawWatermark(Painter* painter, Page* page, const Rect& dirty);  // for iOS IAP

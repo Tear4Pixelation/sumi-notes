@@ -1483,17 +1483,25 @@ int ScribbleTest::currentPageTest()
         area->doPan(0, screenPos - onScreen.y);
     };
     check(area->currPageNum == 0, "the first page is current at the start");
-    // 30% of the view on page 1 and 70% on page 2 (the old rule kept page 1 until under a sixth showed)
+    // the page holding the middle of the view is current: 30% of the view on page 1 and 70% on page 2
     placeBoundary(1, 0.3*viewLength);
-    check(area->currPageNum == 1, "a sliver of the first page and most of the second: the second is current");
+    check(area->currPageNum == 1, "the middle of the view is on the second page: the second is current");
     placeBoundary(1, 0.7*viewLength);
-    check(area->currPageNum == 0, "scrolled back until the first page has most of the view: the first is current");
-    // the second page now shows 1% (of the view) more than the first: within the margin, nothing changes
-    placeBoundary(1, (viewLength + gap - 0.01*viewLength)/2);
-    check(area->currPageNum == 0, "a page showing barely more does not take over (no flicker)");
+    check(area->currPageNum == 0, "the middle is on the first page again: the first is current");
+    // the middle one px either side of the start of the second page (the gap above it belongs to page 1)
+    placeBoundary(1, viewLength/2);
+    check(area->currPageNum == 1, "the middle on the first px of the second page: the second is current");
+    placeBoundary(1, viewLength/2 + 1);
+    check(area->currPageNum == 0, "the middle in the last px of the gap: the first is current");
+    // the middle in the middle of the gap, scrolled slowly through it in both directions: no flicker
+    placeBoundary(1, viewLength/2 + gap/2);
+    check(area->currPageNum == 0, "the middle in the gap keeps the page above");
     placeBoundary(1, 0.3*viewLength);
-    placeBoundary(1, (viewLength + gap + 0.01*viewLength)/2);
-    check(area->currPageNum == 1, "...in either direction");
+    placeBoundary(1, viewLength/2 + gap/2);
+    check(area->currPageNum == 0, "...also when coming from the page below");
+    // a sliver of the second page at the edge of the view does not make it current
+    placeBoundary(1, 0.9*viewLength);
+    check(area->currPageNum == 0, "a sliver of the next page at the far edge does not take over");
     // going to a page keeps it current even where the pan to it leaves a neighbour showing more: here
     //  page 2 ends 30% into the view and page 3 fills the rest
     Page* second = area->page(1);
@@ -1509,7 +1517,7 @@ int ScribbleTest::currentPageTest()
     check(area->currPageNum == 1, "a page drawn on stays current while the view does not move");
     // ...and loses it as soon as the view does
     area->doPan(horz ? -3 : 0, horz ? 0 : -3);
-    check(area->currPageNum == 0, "after the view moves the page with most of it is current again");
+    check(area->currPageNum == 0, "after the view moves the page at its middle is current again");
   }
   area->screenRect = wasScreenRect;
   scribbleDoc->newDocument();

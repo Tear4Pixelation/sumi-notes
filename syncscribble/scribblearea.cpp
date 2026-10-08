@@ -355,44 +355,21 @@ bool ScribbleArea::updateHorzPanLock()
   return changed;
 }
 
-// a page must show this much more of itself than the current page does (as a fraction of the view's area)
-//  to replace it, so a view resting where two pages show equally does not flicker between them
-static constexpr Dim PAGE_SWITCH_MARGIN = 0.02;
-
-// The current page is the one taking up the most of the view.  It used to stay current until it had left
-//  the view shrunk by a sixth on each side, and then the first (or last) page in view took over - so a
-//  sliver of the previous page at the top kept it current while the next page filled the screen.
-//  Ties, and anything within PAGE_SWITCH_MARGIN, keep the current page; among the others the earlier
-//  page wins.  Works for both scrolling layouts, as it compares areas, not positions along one axis
+// The current page is the page containing the point at the middle of the view (along the scroll axis, which
+//  is all dimToPageNum() looks at).  The gap below (or right of) a page belongs to that page, so while the
+//  middle is in a gap the page above stays current; past the last page the last page is current and before
+//  the first the first.  The result depends only on the view, so it cannot flicker.  Single page view:
+//  the current page is the view.
 int ScribbleArea::dominantPageNum() const
 {
   int npages = numPages();
   if(viewMode == VIEWMODE_SINGLE || npages < 1)
     return currPageNum;
   Rect view = screenToDim(screenRect);
-  Dim viewArea = view.width()*view.height();
-  if(!(viewArea > 0))
+  if(!view.isValid())
     return currPageNum;
-  int firstvis = dimToPageNum(Point(view.left, view.top));
-  int lastvis = std::min(dimToPageNum(Point(view.right, view.bottom)), npages - 1);
-  int bestPage = -1;
-  Dim bestArea = 0, currArea = 0;
-  for(int ii = firstvis; ii <= lastvis; ++ii) {
-    Rect visible = page(ii)->rect().translate(getPageOrigin(ii)).rectIntersect(view);
-    Dim area = visible.isValid() ? visible.width()*visible.height() : 0;
-    if(ii == currPageNum)
-      currArea = area;
-    if(area > bestArea) {
-      bestArea = area;
-      bestPage = ii;
-    }
-  }
-  if(bestPage < 0 || bestPage == currPageNum)
-    return currPageNum;
-  // a current page out of view entirely is replaced however little the best page shows
-  if(currArea > 0 && bestArea <= currArea + PAGE_SWITCH_MARGIN*viewArea)
-    return currPageNum;
-  return bestPage;
+  Point middle = view.center();
+  return std::max(0, std::min(dimToPageNum(middle), npages - 1));
 }
 
 void ScribbleArea::doPan(Dim dx, Dim dy)
