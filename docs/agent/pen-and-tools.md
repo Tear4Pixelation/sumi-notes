@@ -295,8 +295,8 @@ frame (`rulingAt()`, so a Paper Patch's pitch and tilt), at single pitch even wi
   checks where the pen is, not which lines are text lines, so the toggle stays a toggle. An underline in a
   blank line makes that line count as text, which gives the old split.
 
-A whole-line start is `insSpaceSelX = MIN_DIM`, like a press in the margin: no column stops (a region has
-no margin, so the selectors get `COL_NONE` directly), no sideways move, no reflow. For a split,
+A whole-line start is `insSpaceSelX = MIN_DIM`, like a press in the margin: no sideways move, no reflow,
+and column stops only as described under "A vertical line is a boundary" below. For a split,
 `insSpaceSelLine`/`insSpaceSelX` are the press. Steps are still counted from the line under the pen, so a
 press just above a rule moves the block one line as soon as the pen crosses that rule. With Skip Lines the
 doubled frame starts at the chosen line's top (`skippedLineFrame(frame, line)`). For a snapped press that
@@ -317,3 +317,30 @@ Tested standalone by `regiontest` (the zones; with the zones removed, 5 checks f
 blank line versus a text line. With the press zones and the erase change reverted, 4 checks fail. Verified
 in agent-display on lined paper: near-rule block, mid-line split, rejoin from left of the rest, and one
 Ctrl+Z back to the split.
+
+**A vertical line is a boundary for Insert Lines** (two columns, a cue column, a divider). The mid-line
+split always had this: it selects like ruled select, whose column stops (`RuledSelector::findStops()`,
+`columnDetectMode`) end each line at the nearest tall stroke left and right of the pen. The whole-line
+starts (near a rule, Skip Lines on a blank line) used `COL_NONE`, so a press near a rule moved both sides.
+Now Insert Lines finds stops for those too, from the pen's x (`insSpaceColX`) and the line *above* the
+moved block (`insSpaceSelLine - 1`), before `selectRuledAfter()`; `findStops()` runs once, so the
+selector's own call then does nothing. Using the line above means a vertical line has to cross the rule
+being opened to count: one that starts on the moved line (under a heading, say) is not in the way and
+moves with the block. The negative-space erase of a drag back up uses the same stops, so it does not eat
+the other column. A press in the page margin still moves whole lines across every column (`findStops()`
+stands down left of the margin), and Insert Space in Line and the combined tool are unchanged.
+
+The line itself **stays**: it is not selected (it reaches above the moved block) and is not stretched.
+Stretching would rewrite the user's stroke, and the side that did not move still needs it where it is.
+Below the line's end the stops stop (`findStops()` clears every line after the first without one), so
+everything there moves with the column, as it would have to - the column pushed down runs into it. The
+cost is a gap of the inserted height between the line's end and the moved text below; extend the line if
+it matters. Not handled: dragged up past the vertical line's top, the erase is full width on the lines
+above it (those lines have no stops), and plain Insert Space (`MODE_INSSPACEVERT`, a rect selection)
+ignores vertical lines entirely.
+
+Tested by the "vertical line" checks at the end of `ScribbleTest::insSpaceAxisTest()`: left side moves,
+right side and the line stay, text below the line's end moves, a drag back up erases nothing on the
+right, a press right of the line moves only the right, and a line starting on the moved line moves with
+it. Mutation-checked: without the whole-line stops 2 checks fail; with them but the erase still finding
+stops the old way, 2 fail (one is the erase check). Verified in agent-display on lined paper.

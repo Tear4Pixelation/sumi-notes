@@ -253,6 +253,9 @@ protected:
   int insSpaceSelLine = 0;
   Dim insSpaceSelX = 0;
   Dim insSpaceEraseX = 0;
+  // the pen's local x at the press: the side of a vertical line (column stop) Insert Lines keeps to when it
+  //  moves whole lines (insSpaceSelX == MIN_DIM)
+  Dim insSpaceColX = 0;
   // for resize selection
   Point scaleOrigin;
   Dim bookmarkSnapX;

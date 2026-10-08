@@ -3302,6 +3302,49 @@ int ScribbleTest::insSpaceAxisTest()
     check(allOn(first, 5) && allOn(second, 7), "skip lines, pressed inside a text line: split at the pen");
     scribbleMode->insSpaceSkipLines = false;
   }
+  {
+    // a vertical line from line 1 to line 10 at x = 320 splits the page in two columns: Insert Lines pressed
+    //  near a rule moves only the pen's side of it, the line stays, and what is below the line's end moves
+    const Dim divX = 320, rightX = 340;
+    auto divider = [&](Dim top, Dim bottom) {
+      scribbleMode->setMode(MODE_STROKE);
+      at(Point(divX, top), press);
+      for(int ii = 1; ii <= 8; ++ii) at(Point(divX, top + (bottom - top)*ii/8), INPUTEVENT_MOVE);
+      at(Point(divX, bottom), release);
+      Element* last = NULL;
+      for(Element* s : scribbleArea->currPage->children()) last = s;
+      return last;
+    };
+    fresh();
+    Element* divLine = divider(1.2*pitch, 10.8*pitch);
+    const Rect lineBox = divLine->bbox();
+    std::vector<Element*> left3 = word(textLeft, 3), left5 = word(textLeft, 5);
+    std::vector<Element*> right3 = word(rightX, 3), right5 = word(rightX, 5);
+    std::vector<Element*> under = word(textLeft, 12);
+    downDrag(Point(textLeft + 20, 3*pitch + 3), 2*pitch);
+    check(allOn(left3, 5) && allOn(left5, 7), "vertical line: the pen's side moves down");
+    check(allOn(right3, 3) && allOn(right5, 5), "vertical line: the other side stays");
+    check(std::abs(divLine->bbox().top - lineBox.top) < 0.5 && std::abs(divLine->bbox().left - lineBox.left) < 0.5
+        && std::abs(divLine->bbox().bottom - lineBox.bottom) < 0.5, "vertical line: the line itself stays");
+    check(allOn(under, 14), "vertical line: the text below the line's end moves");
+    // dragged back up on the left: the right column, on the lines the left lands on, is not erased
+    downDrag(Point(textLeft + 20, 5*pitch + 3), -2*pitch);
+    check(onPage(right3) && onPage(right5) && allOn(right3, 3) && allOn(right5, 5),
+        "vertical line: dragging up erases nothing on the other side");
+    check(onPage(left3) && onPage(left5) && allOn(left3, 3) && allOn(left5, 5), "vertical line: dragged back up");
+    // pressed right of the line: only the right side moves
+    downDrag(Point(rightX + 20, 3*pitch + 3), pitch);
+    check(allOn(right3, 4) && allOn(right5, 6) && allOn(left3, 3) && allOn(left5, 5),
+        "vertical line: pressed right of it, only the right side moves");
+    // a vertical line starting on the moved line is not a boundary there: it moves with the block
+    fresh();
+    divLine = divider(3.2*pitch, 10.8*pitch);
+    left3 = word(textLeft, 3);
+    right3 = word(rightX, 3);
+    downDrag(Point(textLeft + 20, 3*pitch + 3), 2*pitch);
+    check(allOn(left3, 5) && allOn(right3, 5), "vertical line starting on the moved line: the whole line moves");
+    check(std::abs(divLine->bbox().top - (3.2 + 2)*pitch) < 3, "vertical line starting on the moved line: it moves too");
+  }
   scribbleMode->insSpaceSkipLines = wasSkipping;
   scribbleDoc->clearSelection();
   return nbad;
