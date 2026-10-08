@@ -28,6 +28,16 @@ mechanism is the same for all three draw tools, and only the default differs.
   the pen's width goes through it - the stroke builder, `createShapeElement()` and the hover cursor.
   What lands in the document is therefore always an absolute `stroke-width`, so the file format, the
   undo history and sync know nothing about relative widths.
+- **A selection inside a Paper Patch resolves against the patch's line**, as drawing does
+  (`resolvedPen(at)` -> `rulingAt(at)`). `PenToolbar::lineHeight()` is the one unit for presets, the
+  preview and `mainwindow.cpp`'s selection-to-pen conversion; in `SELECTION_MODE` it is
+  `Page::lineHeightFor()` of the strokes' centres (`selectionLineHeight()` in `rulingregion.cpp`), not the
+  page's `yruling()`. Strokes spanning regions: **the region (or the page) holding the most stroke centres
+  wins, a tie going to the earliest stroke** - never an average, since a mean pitch is a line height that
+  exists nowhere; the choice is by ink, so tilt does not matter (a pitch is the same tilted). The width
+  still lands as an absolute `stroke-width`, one value for the whole selection. Tested in
+  `scribbletest/regiontest.cpp` (fails if the function returns the page's pitch); the toolbar wiring is
+  compile-checked only.
 - **The toggle converts, it does not reinterpret.** Flipping it multiplies or divides the pen's width
   *and its presets* by the current line height, so nothing changes thickness on screen: 0.75 of a 40 unit
   ruling becomes 30, and back. Without that, turning it off would leave a 0.75 unit hairline.

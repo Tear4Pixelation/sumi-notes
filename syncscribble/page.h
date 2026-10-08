@@ -97,6 +97,8 @@ public:
   //  is what every ruled tool should ask, with the gesture's anchor point (usually where it was pressed),
   //  rather than yruling()/getLine(y), which only know the page's ruling.
   RulingFrame rulingAt(Point pos) const;
+  // line height relative widths of strokes with these centres are measured in (selectionLineHeight())
+  Dim lineHeightFor(const std::vector<Point>& centres) const;
   RulingFrame pageFrame() const;
   // the topmost region containing `pos`, or NULL
   Element* regionAt(Point pos) const;
