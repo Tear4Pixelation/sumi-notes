@@ -1,5 +1,6 @@
 #include <time.h>
 #include "mainwindow.h"
+#include "pdfimport.h"
 #include "scribbleapp.h"
 #include "scribblearea.h"
 #include "scribblewidget.h"
@@ -271,6 +272,7 @@ void MainWindow::refreshCommonUI(ScribbleDoc* doc, const UIState* uiState)
   // ScribbleDoc::deletePage() refuses to delete the only page
   actionDelete_Page->setEnabled(!uiState->rxOnly && uiState->totalPages > 1);
   actionInsertDocument->setEnabled(!uiState->rxOnly);
+  actionInsert_PDF->setEnabled(!uiState->rxOnly && PdfImport::isAvailable());
   // change title button icon to a cloud when connected
   titleButton->setIcon(uiState->syncActive ? swbIcon : appIcon);
 
@@ -2211,6 +2213,8 @@ void MainWindow::setupActions()
       "Scan Document as Page...", ":/icons/ic_menu_append_page.svg", "", SLOT(scanDocument(true)));
   // insert pages from another document
   actionInsertDocument = createAction("actionInsertDocument", "Insert Document...", "", "", SLOT(insertDocument()));
+  // the pages of a PDF, after the current page (ScribbleApp::insertPdfPages)
+  actionInsert_PDF = createAction("actionInsert_PDF", "Insert PDF...", "", "", SLOT(insertPDF()));
 
   actionBookmarksClose = createAction("actionBookmarksClose",
       "Close", ":/icons/ic_menu_cancel.svg", "", [this](){ toggleBookmarks(); });
@@ -2414,6 +2418,7 @@ void MainWindow::setupActions()
   docmenu->addAction(actionRevert);
   docmenu->addAction(actionSave_As);
   docmenu->addAction(actionInsertDocument);
+  docmenu->addAction(actionInsert_PDF);
 #if PLATFORM_MOBILE
   docmenu->addAction(actionSend_Page);
   docmenu->addAction(actionSend_HTML);

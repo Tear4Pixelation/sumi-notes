@@ -106,3 +106,19 @@ not at all, and the limit gives way by that much. MuPDF reacts to a failed alloc
 cache and retrying, then throws; that fails the one page (logged), never the app. The app reports
 reduced pages in a message box (`reportReducedPages`, not for `--out`). 128 MB holds the 300 DPI pages
 of both test files with at most one reduced; at 48 MB every page still imports, at >= 94 DPI.
+
+## Insert PDF (into the open document)
+
+Document menu > **Insert PDF...** (all platforms; disabled when read-only in sync or without PDF support) adds
+a PDF's pages to the *current* document instead of making a new one. Chosen: **after the current page** -
+the same place Insert Document puts pages, so the two behave alike.
+
+`ScribbleApp::insertPdfPages()` runs the ordinary `PdfImport::importPdf()` (same DPI/lossy prefs, memory
+budget, progress box, page size from the PDF, rule-layer background, no ruling) into a scratch `Document`
+with no `ImportSaver`, then `ScribbleDoc::insertPagesFrom()` moves the pages in between one
+`startAction(...|MULTIPAGE)` / `endAction()` pair. That function is the body Insert Document used to have
+inline and is shared with it, so the insertion is one undo step and `endAction()` sends it through
+`ScribbleSync` like any page insertion. Trap: unlike Import PDF the pages are held (encoded only) until the
+document is saved - nothing streams to disk, so a very long PDF costs its encoded size in memory, and the
+undo history keeps it too. No cancel (Import PDF has none either). Test: `pdfImportTest` inserts into a
+3-page document and checks +3 pages, placement after the current page, one undo step, undo/redo.

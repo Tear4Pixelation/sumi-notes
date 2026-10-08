@@ -757,6 +757,38 @@ int ScribbleTest::pdfImportTest()
     backgrounds = backgrounds && loaded->ensureLoaded(false) && loaded->ruleNode && loaded->ruleNode->selectFirst("image");
   check(backgrounds, "every page has its background image");
 
+  // Insert PDF: the pages go into the open document after the current page, as one undo step
+  // (the same two calls as ScribbleApp::insertPdfPages, which needs the app's active document)
+  {
+    scribbleDoc->newDocument();
+    scribbleDoc->newPage(-1);  // two pages, the second current
+    scribbleDoc->newPage(-1);  // three; the current page is the last
+    scribbleDoc->activeArea->gotoPage(0);
+    int before = scribbleDoc->document->numPages();
+    size_t undoBefore = scribbleDoc->history->undoSteps();
+    {
+      Document scratch;
+      PdfImport::Options insertOpts;
+      insertOpts.dpi = 72;
+      check(PdfImport::importPdf(&scratch, pdfPath.c_str(), insertOpts) == 3 && scribbleDoc->insertPagesFrom(&scratch) == 3,
+          "insert PDF succeeds");
+    }
+    Document* target = scribbleDoc->document;
+    check(target->numPages() == before + 3, "the PDF's three pages are added to the open document");
+    check(scribbleDoc->history->undoSteps() == undoBefore + 1, "inserting a PDF is a single undo step");
+    // after the current page (the first), so the original second page follows the PDF
+    bool placed = target->numPages() == before + 3;
+    for(int ii = 1; placed && ii <= 3; ++ii)
+      placed = target->pages[ii]->ensureLoaded(false) && target->pages[ii]->ruleNode
+          && target->pages[ii]->ruleNode->selectFirst("image") && target->pages[ii]->isCustomRuling;
+    check(placed, "the new pages follow the current page, with the PDF as their background");
+    scribbleDoc->doUndoRedo(false);
+    check(scribbleDoc->document->numPages() == before, "undo removes every inserted page");
+    scribbleDoc->doUndoRedo(true);
+    check(scribbleDoc->document->numPages() == before + 3, "redo brings them back");
+    scribbleDoc->newDocument();
+  }
+
   removeFile(pdfPath);
   removeFile(savedPath);
   return nbad;

@@ -740,22 +740,33 @@ Document::loadresult_t ScribbleDoc::insertDocument(IOStream* strm)
 {
   Document* otherdoc = new Document();
   Document::loadresult_t res = otherdoc->load(strm, false);
-  if(res == Document::LOAD_OK) {
-    int where = activeArea->currPageNum + 1;
-    startAction((where - 1) | UndoHistory::MULTIPAGE);
-    while(otherdoc->numPages() > 0) {
-      Page* page = otherdoc->deletePage(otherdoc->numPages() - 1);
-      document->insertPage(page, where);
-    }
-    endAction();
-    updateGhostPage();
-    pageCountChanged(where);
-    activeArea->gotoPos(where + 1, Point(-10, -10), false);
-    uiChanged(UIState::InsertDoc);
-    doRefresh();
-  }
+  if(res == Document::LOAD_OK)
+    insertPagesFrom(otherdoc);
   delete otherdoc;
   return res;
+}
+
+// Moves every page of `otherdoc` (left empty) into this document right after the current page, as one
+//  undo step that sync sends like any other.  Shared by Insert Document and Insert PDF
+//  (docs/agent/pdf-import.md).  Returns the number of pages moved.
+int ScribbleDoc::insertPagesFrom(Document* otherdoc)
+{
+  int count = otherdoc->numPages();
+  if(count <= 0)
+    return 0;
+  int where = activeArea->currPageNum + 1;
+  startAction((where - 1) | UndoHistory::MULTIPAGE);
+  while(otherdoc->numPages() > 0) {
+    Page* page = otherdoc->deletePage(otherdoc->numPages() - 1);
+    document->insertPage(page, where);
+  }
+  endAction();
+  updateGhostPage();
+  pageCountChanged(where);
+  activeArea->gotoPos(where + 1, Point(-10, -10), false);
+  uiChanged(UIState::InsertDoc);
+  doRefresh();
+  return count;
 }
 
 void ScribbleDoc::resetDocPrefs()

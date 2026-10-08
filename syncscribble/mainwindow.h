@@ -87,6 +87,7 @@ public:
   Action* actionPaste;
   Action* actionDupSel;
   Action* actionInsertDocument;
+  Action* actionInsert_PDF;
   Action* actionSave;
   Action* actionPage_Setup;
   Action* actionTheme;
