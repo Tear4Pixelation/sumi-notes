@@ -1766,7 +1766,7 @@ Point RegionSelector::scaleHandlePos() const
 }
 
 // the origin handle sits on the left edge, on the first line inside the region, and drags the lines
-static Point originHandlePos(const RulingRegionParams& params)
+static Point defaultOriginHandlePos(const RulingRegionParams& params)
 {
   RulingFrame f = params.frame();
   Rect r = regionLocalBBox(params);
@@ -1775,12 +1775,28 @@ static Point originHandlePos(const RulingRegionParams& params)
   return f.toPage(Point(r.left, firstLine < r.bottom ? firstLine : r.top));
 }
 
+Point RegionSelector::originHandlePos() const
+{
+  const RulingRegionParams& params = region->regionParams();
+  // a relocated handle stays where the user put it, but never outside the outline (a corner drag or a
+  //  peer's edit may have moved the outline away from it)
+  return handleMoved ? params.clampInside(handlePage) : defaultOriginHandlePos(params);
+}
+
+Point RegionSelector::moveGripPos() const
+{
+  // a small grip up and to the right of the handle, in screen units
+  Dim d = 3.2*(HANDLE_SIZE + 3)/mZoom;
+  return originHandlePos() + Point(d, -d);
+}
+
 Rect RegionSelector::getBGBBox()
 {
   Rect r = region->regionParams().bounds();
   r.rectUnion(rotHandlePos());
   r.rectUnion(scaleHandlePos());
-  r.rectUnion(originHandlePos(region->regionParams()));
+  r.rectUnion(originHandlePos());
+  r.rectUnion(moveGripPos());
   return r.pad(2*(HANDLE_SIZE + 3)/mZoom);
 }
 
@@ -1790,8 +1806,10 @@ int RegionSelector::shapeHandleHit(Point pos, bool touch)
   Dim a = ((touch ? 2*HANDLE_SIZE : HANDLE_SIZE) + 3)/mZoom;
   // the origin handle wins over a corner it happens to sit on: a corner can also be reached by
   //  dragging along its edges, the origin cannot
-  if((pos - originHandlePos(params)).dist() <= a*1.2)
+  if((pos - originHandlePos()).dist() <= a*1.2)
     return originHandleIndex();
+  if((pos - moveGripPos()).dist() <= a*1.2)
+    return moveGripIndex();
   if((pos - scaleHandlePos()).dist() <= a*1.2)
     return resizeHandleIndex();
   for(int ii = int(params.corners.size()); ii-- > 0;) {
@@ -1855,10 +1873,17 @@ void RegionSelector::drawBG(Painter* painter)
   for(const Point& p : params.corners)
     painter->fillRect(Rect::centerwh(p, 2*a, 2*a), Color::BLACK);
   // the origin handle moves a number (the lines' phase), so it is red like the shape parameter handles
-  Point o = originHandlePos(params);
+  Point o = originHandlePos();
   painter->setStrokeBrush(Color::NONE);
   painter->setFillBrush(Color::RED);
   painter->drawPath(Path2D().addEllipse(o.x, o.y, a, a));
+  // the grip that relocates it (no parameter changes): small hollow circle tied to the handle by a stem
+  Point grip = moveGripPos();
+  painter->setStroke(bgStroke, 1/mZoom);
+  painter->drawLine(o, grip);
+  painter->setFillBrush(Color::WHITE);
+  painter->setStroke(Color::BLACK, 1/mZoom);
+  painter->drawPath(Path2D().addEllipse(grip.x, grip.y, a, a));
   // rotate and scale: hollow circles, which RectSelector's handles also are
   painter->setFillBrush(Color::WHITE);
   painter->setStroke(Color::BLACK, 1/mZoom);

@@ -348,6 +348,7 @@ protected:
   Timer* flashTimer = NULL;
   RulingRegionParams regionHandleStart;
   Point regionHandleStartPos;
+  Point regionHandleStartHandle;
   // the region under construction by the region tool (a drag, like the box shape)
   Element* regionInProgress = NULL;
   bool regionButtonsShown() const;
