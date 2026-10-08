@@ -17,12 +17,52 @@ The marker is `DRAW_UNDER`: it goes under the ink on its layer. A scan or photo 
 on the layer: the stroke goes above the last image and below the ink. Pages whose scan/PDF is the
 page background (`ruleNode`) were never affected - that is drawn below all elements.
 
-Decision: z-order, not multiply blending. Over an image the translucent marker is *above* the dark
-text, so the text is tinted by the highlight colour rather than staying pure black as it does under
-real ink. Multiply (`CompOp_Multiply` exists in usvg) would fix that but adds a render attribute to
-the file format, sync and night mode; not done. Export and night mode only see element order, so are
-unchanged. Tested by `ScribbleTest::layerTest()` (marker between scan and ink; the old code returned
-the image).
+Tested by `ScribbleTest::layerTest()` (marker between scan and ink; the old code returned the image).
+
+# Marker multiplies (text stays dark)
+
+Z-order alone was not enough: over a PDF page (the `ruleNode` image) or a scan (an image element) the
+marker is necessarily *above* the text, and drawn source-over it tinted black text the marker's color
+(measured: black came out (210, 51, 184) under the default magenta). A real highlighter is
+transparent ink - the paper takes the color, the print stays black - which is **multiply**. Now
+measured (0, 0, 0) on a PDF and (20, 9, 17) on a scan's (20, 20, 20) text, the highlight over
+paper unchanged.
+
+- **In the file:** `StrokeBuilder::create()` gives every `DRAW_UNDER` stroke `comp-op="multiply"`
+  (usvg's existing `comp-op` attribute; `SvgPainter` applies it per node). Noteful highlighters get
+  it too (`notefulimport.cpp`). An attribute rather than a rule because it is per stroke, travels
+  through undo, sync, copy/paste and selection recolor for free (recolor only touches fill), and
+  reaches export. Stylus Labs Write reads it and ignores it (`setCompOp()` there skips multiply).
+- **Old markers** (no `comp-op`): `Element::isLegacyMarker()` - path, `write-chisel-pen` class,
+  `fill-opacity` < 1 - is multiplied at render time in `Element::applyStyle()` and by PDF export
+  (`PdfWriter::defaultCompOp`). Nothing is rewritten on load. Old Noteful imports (stroked, no
+  class) are not caught; re-import them.
+- **Backends** (`Painter::setCompOp()`): GL is `glBlendFuncSeparate(GL_DST_COLOR,
+  GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA)` (premultiplied). The desktop/Android
+  renderer is `nanovg_vtex.h`, iOS is `nanovg_gl.h` with framebuffer fetch, which blends in the
+  shader - so the shader has its own multiply/screen (`GLNVG_BLEND_*` bits in `fillMode`). The
+  software renderer (thumbnails, page images, wasm) implements blend factors per channel now.
+- **Multiply against transparency does nothing** in the GL blend (the S*(1 - Da) term has no
+  factor). The screen is fine - every frame is drawn straight into the window framebuffer, page under
+  the marker, no offscreen layer or stroke cache. The software renderer and the FB fetch shader do
+  the full formula, so a screenshot without paper (transparent) still shows the marker.
+- **Dark paper** (night mode, or a document authored dark): multiply would hide the marker, so
+  `Painter::setDarkBackdrop()` turns multiply into **screen**, its mirror image (light text stays
+  light, dark paper is lightened). Set by `Page::draw()` from `Page::drawsDark()` (paper color through
+  the color map), by the in-progress stroke in `ScribbleArea::drawScreen()` and by `PenPreview`. PDF
+  export uses `PdfWriter::darkBackdrop` from the page color. See night-mode.md.
+- **PDF export:** `/BM /Multiply` (or `/Screen`) via ExtGState `GSMultiply`/`GSScreen`/`GSNormal`.
+  **SVG export** writes `comp-op`, which browsers ignore (they would want `mix-blend-mode`), so an
+  SVG opened elsewhere shows the old tint - no worse than before.
+- Not covered: the cross-view drag overlay (`OverlayWidget`) does not set the dark backdrop, so a
+  dragged marker in night mode multiplies until dropped.
+
+Tested by `ScribbleTest::markerBlendTest()` (software renderer): the stroke carries `comp-op`, black
+under it stays black, paper around it is colored, a marker without `comp-op` still multiplies, and on
+dark paper it lightens. Mutation-checked: drawing multiply as source-over fails the two dark-text
+checks; dropping the dark-backdrop swap fails the dark-paper check. The GL path was checked by
+screenshot in agent-display (PDF page and scan, normal and night mode); the FB fetch shader was
+compiled on Mesa's GLES 3.2 but has not run (iOS only).
 
 # Relative pen width
 

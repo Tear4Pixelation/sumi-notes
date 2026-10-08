@@ -44,6 +44,7 @@ public:
   // a locked layer must be immune to selection and to every eraser, and moving an element between
   // layers must undo both the layer and the restacking it caused
   int layerTest();
+  int markerBlendTest();
   // Select Touching: rect and lasso select take what they touch, including a stroke crossed with none of
   //  its points inside; off, only what lies entirely inside
   int selectTouchingTest();

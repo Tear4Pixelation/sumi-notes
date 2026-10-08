@@ -37,6 +37,17 @@ the document, so there is no inverted state to undo first.
 - Tested standalone by `scribbletest/nightmodetest.cpp` (command in its header); each check was confirmed to
   fail against an always-flip detector and against a per-channel (XOR-style) flip.
 
+## Marker (multiply) on dark paper
+
+The marker multiplies (pen-and-tools.md, "Marker multiplies"), and multiply can only darken: on night
+mode's near-black paper a highlight would vanish. `Page::draw()` asks `Page::drawsDark()` - the paper
+color *through the installed map*, so "force dark" pages and authored dark paper count too - and sets
+`Painter::setDarkBackdrop()`, which draws multiply as **screen**. Screen is multiply with every color
+inverted, i.e. what night mode's flip does to a multiplied highlight: the flipped (now light) text stays
+light and the dark paper takes the mapped marker color. Over dark paper screen matches what source-over
+gave before (measured (58, 0, 49) on (0, 0, 0) paper, text unchanged at (236, 235, 236)). An image that
+is *not* flipped (a photo) sits light on the dark page and is lightened rather than tinted - accepted.
+
 ## Other things drawn outside the map
 
 - The page drop shadow (`Page::draw`) - flipped, black became a white glow on the page edge.

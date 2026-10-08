@@ -125,6 +125,9 @@ public:
   Rect rect() const { return Rect::ltwh(0, 0, width(), height()); }
   Color color() const { return props.color; }
   void draw(Painter* painter, const Rect& dirty, bool rulelines = true);
+  // whether paper of this color comes out dark through the painter's color map (night mode) - where a
+  //  marker's multiply would hide it, so it is drawn as screen (Painter::setDarkBackdrop())
+  static bool drawsDark(const Painter* painter, Color paper);
 
   Rect getDirty() const { return SvgPainter::calcDirtyRect(svgDoc.get()); }
   void clearDirty() { SvgPainter::clearDirty(svgDoc.get()); }

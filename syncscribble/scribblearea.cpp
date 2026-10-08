@@ -4673,6 +4673,9 @@ void ScribbleArea::drawScreen(Painter* painter, const Rect& dirty)
       Point origin = getPageOrigin(scribbleDoc->activeArea->currPageNum);
       painter->translate(origin.x - currPageXOrigin, origin.y - currPageYOrigin);
     }
+    // as Page::draw() does for the stroke once it is on the page: a marker screens on dark paper
+    if(Page* strokePage = page(scribbleDoc->activeArea->currPageNum))
+      painter->setDarkBackdrop(Page::drawsDark(painter, strokePage->color()));
     //scribbleDoc->strokeBuilder->draw(painter, Rect());
     SvgPainter(painter).drawNode(scribbleDoc->strokeBuilder->getElement()->node);
     painter->restore();

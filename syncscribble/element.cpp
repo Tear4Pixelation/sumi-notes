@@ -1142,6 +1142,15 @@ void Element::serializeAttr(SvgWriter* writer)
   }
 }
 
+// A marker stroke multiplies (StrokeBuilder::create() writes comp-op).  Ones saved before that have no
+//  comp-op, but are recognizable: a chisel tip is the marker's, and only a marker is translucent.  Drawing
+//  (applyStyle()) and PDF export multiply them too, rather than a rewrite on load, so the file is untouched.
+bool Element::isLegacyMarker(const SvgNode* node)
+{
+  return node->type() == SvgNode::PATH && node->hasClass(CHISEL_PEN_CLASS) && !node->getAttr("comp-op")
+      && node->getFloatAttr("fill-opacity", 1) < 1;
+}
+
 void Element::applyStyle(SvgPainter* svgp) const
 {
   Painter* painter = svgp->p;
@@ -1162,6 +1171,9 @@ void Element::applyStyle(SvgPainter* svgp) const
     if(avgScale < 1)
       svgp->extraState().strokeOpacity *= avgScale*avgScale;
   }
+
+  if(painter->compOp() == Painter::CompOp_SrcOver && isLegacyMarker(node))
+    painter->setCompOp(Painter::CompOp_Multiply);
 
   // selection draw style must be applied to every graphic node individually, so we must ascend to see if any
   //  parent is selected; valid dirtyRect indicates we are drawing, as opposed to calculating bounds

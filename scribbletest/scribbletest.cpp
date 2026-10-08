@@ -2022,6 +2022,65 @@ int ScribbleTest::layerTest()
   return nbad;
 }
 
+// A marker multiplies, so dark text under it - a scan or an imported PDF page - stays dark, as under a
+//  real highlighter; drawn source-over, it tinted the text the marker's color.  Rendered with the software
+//  painter (thumbnails, page images and the wasm build), so the GL blend is not covered here.
+int ScribbleTest::markerBlendTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: marker blend: %s\n", what); }
+  };
+
+  scribbleDoc->newDocument();
+  Page* page = scribbleArea->currPage;
+  scribbleMode->setMode(MODE_STROKE);
+  scribbleDoc->app->setPen(ScribblePen(Color(255, 64, 224, 165), 30,
+      ScribblePen::TIP_CHISEL | ScribblePen::DRAW_UNDER));
+  ie(120, 160, 0, pen, press);  ie(400, 160, 0, pen);  ie(0, 0, 0, pen, release);
+  Element* marker = NULL;
+  for(Element* s : page->children()) { marker = s; }
+  check(marker != NULL, "a marker stroke was drawn");
+  if(!marker)
+    return nbad;
+  const SvgAttr* compOp = marker->node->getAttr("comp-op");
+  check(compOp && compOp->intVal() == Painter::CompOp_Multiply, "a marker stroke is written with comp-op multiply");
+
+  // black "text" under the left half of the stroke, as an image element (a scan), white paper under the rest
+  Rect box = marker->bbox();
+  Image black(4, 4);
+  for(int ii = 0; ii < 16; ++ii)
+    black.pixels()[ii] = 0xFF000000;
+  page->addStroke(new Element(new SvgImage(std::move(black),
+      Rect::ltrb(box.left - 10, box.top - 10, box.center().x, box.bottom + 10))), marker);
+
+  // one image pixel per page unit, so page coordinates are pixel coordinates
+  auto sample = [&](Dim x, Dim y) {
+    Image image = ScribbleDoc::renderPageThumbnail(page, int(page->width()));
+    const unsigned char* px = image.constBytes() + (size_t(y)*image.width + size_t(x))*4;
+    return Color(px[0], px[1], px[2], px[3]);
+  };
+  Point onText(box.left + box.width()/4, box.center().y), onPaper(box.right - box.width()/4, box.center().y);
+  auto isDark = [](Color c) { return c.red() + c.green() + c.blue() < 3*24; };
+  Color text = sample(onText.x, onText.y), paper = sample(onPaper.x, onPaper.y);
+  check(isDark(text), "dark text under a marker stays dark");
+  check(paper.green() < 200 && paper.red() > 200, "the marker still colors the paper around the text");
+
+  // a marker from before comp-op was written: the chisel class and translucency make it a marker
+  marker->node->removeAttr("comp-op");
+  marker->node->invalidate(false);
+  check(isDark(sample(onText.x, onText.y)), "a marker saved without comp-op multiplies too");
+  marker->node->setAttr<int>("comp-op", Painter::CompOp_Multiply);
+
+  // on dark paper multiply would hide the marker; it is screened instead, so it lightens the paper
+  PageProperties props = page->props;
+  props.color = Color(32, 32, 32);
+  page->setProperties(&props);
+  Color dark = sample(onPaper.x, onPaper.y);
+  check(dark.red() > 32 + 64, "a marker on dark paper is not hidden");
+  return nbad;
+}
+
 // The layer table and the theme as undo steps and on the sync wire.  Undo items *are* the sync
 //  protocol, so each edit is checked three ways: it is one undo step, undo and redo restore it, and
 //  what it serializes reproduces the edit when fed back through ScribbleSync::processItem() - the
@@ -3818,6 +3877,7 @@ void ScribbleTest::runAll(bool runsynctest)
   nUnitFailed += notefulArchiveTest();
   nUnitFailed += pdfImportTest();
   nUnitFailed += layerTest();
+  nUnitFailed += markerBlendTest();
   nUnitFailed += selectTouchingTest();
   nUnitFailed += twoFingerTapTest();
   nUnitFailed += timerBacklogTest();
