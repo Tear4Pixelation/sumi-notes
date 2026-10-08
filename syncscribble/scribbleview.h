@@ -88,8 +88,9 @@ protected:
   void zoomTo(Dim newZoom, Dim px, Dim py);
   void zoomBy(Dim s, Dim px, Dim py);
   virtual void roundZoom(Dim px, Dim py);
-  // true if a zoom gesture ending now, about (px, py), would snap to fit width - drives the "Fit" toast
-  virtual bool nearFitWidth(Dim px, Dim py) const { return false; }
+  // true if a zoom gesture ending now would snap to fit width (judged for the page at the middle of the
+  //  view, the one the snap fits) - drives the "Fit" toast
+  virtual bool nearFitWidth() const { return false; }
   // Ctrl+wheel has no release: ScribbleWidget calls this once the wheel has paused
   virtual void wheelZoomFinish(Dim px, Dim py) {}
   void showFitHint(bool show);

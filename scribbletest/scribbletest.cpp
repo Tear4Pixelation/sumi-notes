@@ -1507,9 +1507,9 @@ int ScribbleTest::zoomSnapTest()
 
   // the "Fit" toast's predicate: near fit width, not far from it
   area->zoomTo(wzoom*1.06, center.x, center.y);
-  check(area->nearFitWidth(center.x, center.y), "6% off fit width shows the Fit toast");
+  check(area->nearFitWidth(), "6% off fit width shows the Fit toast");
   area->zoomTo(wzoom*1.3, center.x, center.y);
-  check(!area->nearFitWidth(center.x, center.y), "30% off fit width shows no Fit toast");
+  check(!area->nearFitWidth(), "30% off fit width shows no Fit toast");
 
   // a double tap zooms to the same gapless fit width, and a second one back to 100%
   area->zoomTo(2, center.x, center.y);
@@ -1596,6 +1596,87 @@ int ScribbleTest::currentPageTest()
     area->doPan(horz ? -3 : 0, horz ? 0 : -3);
     check(area->currPageNum == 0, "after the view moves the page at its middle is current again");
   }
+  area->screenRect = wasScreenRect;
+  scribbleDoc->newDocument();
+  area->pageSizeChanged();
+  area->resetZoom();
+  return nbad;
+}
+
+// A zoom snap keeps the page the user is on - the one at the middle of the view when the gesture ends.  The
+//  snap zooms about the gesture point, so with the fingers far from the middle a 7% fit snap used to carry
+//  the middle across the next page boundary and the neighbour became current ("sent to another page").
+//  And with the fingers past the last page, the snap looked up the ghost page, which has no Page: a crash
+int ScribbleTest::fitSnapPageTest()
+{
+  int nbad = 0;
+  ScribbleArea* area = scribbleArea;
+  const Rect wasScreenRect = area->screenRect;
+  const bool wasContinuous = ScribbleApp::cfg->Bool("continuousZoom");
+  ScribbleApp::cfg->set("continuousZoom", false);
+  area->screenRect = Rect::ltwh(0, 0, 1180, 760);
+  for(ScribbleArea::viewmode_t mode : {ScribbleArea::VIEWMODE_VERT, ScribbleArea::VIEWMODE_HORZ}) {
+    const bool horz = mode == ScribbleArea::VIEWMODE_HORZ;
+    for(bool wheel : {false, true}) {
+      auto check = [&](bool ok, const char* what) {
+        if(!ok) {
+          ++nbad;
+          printf("FAIL: fit snap page (%s, %s): %s\n", horz ? "horizontal" : "vertical", wheel ? "wheel" : "pinch", what);
+        }
+      };
+      scribbleDoc->newDocument();
+      scribbleDoc->newPage();
+      scribbleDoc->newPage();
+      scribbleDoc->cfg->set("viewMode", int(mode));
+      area->loadConfig(scribbleDoc->cfg);
+      area->pageSizeChanged();
+      Point center(area->getViewWidth()/2, area->getViewHeight()/2);
+      const Dim viewLength = horz ? area->getViewWidth() : area->getViewHeight();
+      // the fit along the scroll direction (fit height, vertically) is the one whose snap scrolls the most;
+      //  the wheel only snaps to fit width
+      Dim fitZoom = (horz || wheel) ? area->fitWidthZoom(0) : area->getViewHeight()/area->page(0)->height()/area->preScale;
+      // the gesture ends 7% below the fit zoom, with the fingers near the far end of the view
+      Point gesture = horz ? Point(viewLength - 10, center.y) : Point(center.x, viewLength - 10);
+      auto snap = [&]() {
+        if(wheel)
+          area->wheelZoomFinish(gesture.x, gesture.y);
+        else
+          area->roundZoom(gesture.x, gesture.y);
+      };
+      auto placeBoundary = [&](int nextPage, Dim screenPos) {
+        Point onScreen = area->dimToScreen(area->getPageOrigin(nextPage));
+        area->doPan(horz ? screenPos - (onScreen.x) : 0, horz ? 0 : screenPos - onScreen.y);
+      };
+      area->zoomTo(fitZoom*0.93, center.x, center.y);
+      area->gotoPage(0);
+      // the middle of the view 12 px before the start of the second page: the first is current, the
+      //  fingers are over the second
+      placeBoundary(1, viewLength/2 + 12);
+      check(area->currPageNum == 0 && area->dimToPageNum(area->screenToDim(gesture)) == 1,
+          "(setup) the middle on the first page, the fingers on the second");
+      check(!wheel || area->nearFitWidth(), "(setup) the wheel zoom is near fit width");
+      snap();
+      check(std::abs(area->mZoom - fitZoom) < 1e-9, "the zoom snapped to fit");
+      check(area->currPageNum == 0, "the page at the middle when the gesture ended stays current");
+      // ...by scrolling no further than needed: the middle is back on the first page's last pixel
+      Point boundary = area->dimToScreen(area->getPageOrigin(1));
+      Dim past = (horz ? boundary.x : boundary.y) - viewLength/2;
+      check(past > 0 && past < 3, "the snap scrolls only as far as it has to");
+
+      // the fingers past the last page, over the ghost page: the snap fits the last page, without a crash
+      area->zoomTo(fitZoom*0.93, center.x, center.y);
+      area->doPan(horz ? -1E6 : 0, horz ? 0 : -1E6);  // to the end of the document
+      if(area->dimToPageNum(area->screenToDim(gesture)) == area->numPages()) {
+        area->nearFitWidth();
+        snap();
+        check(std::abs(area->mZoom - fitZoom) < 1e-9, "a snap with the fingers past the last page fits the last");
+        check(area->currPageNum == area->numPages() - 1, "...and the last page stays current");
+      }
+      else
+        check(false, "(setup) the fingers past the last page");
+    }
+  }
+  ScribbleApp::cfg->set("continuousZoom", wasContinuous);
   area->screenRect = wasScreenRect;
   scribbleDoc->newDocument();
   area->pageSizeChanged();
@@ -3884,6 +3965,7 @@ void ScribbleTest::runAll(bool runsynctest)
   nUnitFailed += shapeTapEditTest();
   nUnitFailed += zoomSnapTest();
   nUnitFailed += currentPageTest();
+  nUnitFailed += fitSnapPageTest();
   nUnitFailed += arrowPopupTest();
   nUnitFailed += libraryResizeTest();
   nUnitFailed += pageTagTest();

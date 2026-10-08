@@ -95,6 +95,12 @@ and the serialization round trip including a name containing the separators.
   over, `gotoPos` keeping its page where the next page is at the middle, and a page drawn on staying current
   until the view moves.
 
+- `ScribbleTest::fitSnapPageTest()` - a zoom snap (pinch `roundZoom` and Ctrl+wheel `wheelZoomFinish`, both
+  layouts) keeps the page at the middle current when the fingers are over the next page, scrolling under
+  3 px to do it, and a snap with the fingers past the last page fits the last page
+  ([navigation.md](navigation.md#a-snap-keeps-the-page-you-are-on)). Confirmed against the old code: the
+  page check fails in all four combinations, and the ghost-page case crashes (NULL `Page`).
+
 - `ScribbleTest::docStateSyncTest()` - the layer table and the theme as undo steps and on the sync
   wire. Each edit is checked three ways: it is one undo step, undo/redo restore it, and what it
   serializes reproduces the edit when fed back through `ScribbleSync::processItem()` on a bare

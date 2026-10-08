@@ -60,6 +60,7 @@ public:
   // the current page is the one taking up the most of the view, with a margin against flicker; explicit
   //  navigation and a page drawn on keep their page until the view moves
   int currentPageTest();
+  int fitSnapPageTest();
   // an arrow popup opened from the selection popup keeps its content inside its background wherever the
   //  selection popup sits, including where either one has to be moved to stay on screen
   int arrowPopupTest();
