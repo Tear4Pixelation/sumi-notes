@@ -48,6 +48,7 @@ static const char* tagDocListWindowSVG = R"#(
 //  width while the header, search box and bottom toolbar keep the design's padding. Rows indent 16 per
 //  level (was 20), for the same reason: nested tags keep room for their name and chevron.
 static constexpr int SIDEBAR_WIDTH = 260;
+static constexpr int LOGO_SIZE = 36;  // sidebar header logo, beside the 32px wordmark
 static constexpr int SIDEBAR_PAD_LEFT = 24, SIDEBAR_PAD_RIGHT = 24;
 static constexpr int TAG_LIST_BLEED_LEFT = 12, TAG_LIST_BLEED_RIGHT = 18;
 static constexpr int TAG_ROW_LEFT = 0, TAG_ROW_RIGHT = 4, TAG_ROW_INDENT = 16;
@@ -1416,7 +1417,17 @@ void TagDocList::createUI()
   titleNode->addClass("doclist-title");
   Widget* titleWidget = new Widget(titleNode);
   titleWidget->node->setAttribute("box-anchor", "left");
-  sidebarContent->addWidget(titleWidget);
+  // logo + wordmark; the logo's SVG carries .icon so it follows the theme's icon color
+  Widget* titleRow = new Widget(new SvgG());
+  titleRow->node->setAttribute("box-anchor", "left");
+  titleRow->node->setAttribute("layout", "flex");
+  titleRow->node->setAttribute("flex-direction", "row");
+  SvgUse* logo = new SvgUse(Rect::wh(LOGO_SIZE, LOGO_SIZE), "", SvgGui::useFile("icons/sumi_logo.svg"));
+  logo->addClass("icon");
+  logo->setAttribute("margin", "0 10 0 0");
+  titleRow->containerNode()->addChild(logo);
+  titleRow->addWidget(titleWidget);
+  sidebarContent->addWidget(titleRow);
 
   Widget* sep1 = createHRule();
   sep1->setMargins(12, 0, 0, 0);

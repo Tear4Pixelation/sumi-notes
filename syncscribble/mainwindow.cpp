@@ -1262,7 +1262,7 @@ Widget* MainWindow::createSplitPlaceholder(Widget* container)
 // see Qt version of this method for theme colors
 void MainWindow::setupTheme()
 {
-  appIcon = SvgGui::useFile(":/icons/write_icon_flat.svg");
+  appIcon = SvgGui::useFile(":/icons/sumi_logo.svg");
   orientationChanged();
 }
 
