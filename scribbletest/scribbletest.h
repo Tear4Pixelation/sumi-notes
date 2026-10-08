@@ -48,6 +48,8 @@ public:
   //  its points inside; off, only what lies entirely inside
   int selectTouchingTest();
   int twoFingerTapTest();
+  // a periodic timer slower than its own period does not hold back other timers (SvgGui::processTimers)
+  int timerBacklogTest();
   // shape edit mode without the Select tool: a finger tap on a shape selects it, a tap elsewhere and the
   //  first shape-tool drag outside only deselect
   int shapeTapEditTest();

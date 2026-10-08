@@ -3,6 +3,10 @@
 Five ways to move the view, all of which already existed in some form; what follows is mostly a
 record of why they did not work.
 
+**No fling, stiff scrolling and slow page switches together** were not a navigation bug: the fling runs on
+an ugui timer, and a slow periodic timer (the Pages view's thumbnails) used to starve every other timer.
+See the timer trap in [page-management.md](page-management.md#thumbnails).
+
 | gesture | what it does |
 |---|---|
 | mouse wheel | scroll up/down |
