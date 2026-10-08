@@ -183,6 +183,29 @@ int runRegionTests()
     regionCheck(start.line == 4 && !start.wholeLine, "without skip lines an empty line is just a line");
   }
 
+  // A selection's relative width is measured in the line of the patch it lies in (pen-and-tools.md)
+  {
+    RulingRegionParams patch = RulingRegionParams::fromRect(Rect::ltrb(100, 0, 300, 200), 0, 20);
+    int patchTag = 0;
+    const Dim pageYr = 40;
+    auto frameAt = [&](Point pos) {
+      return patch.contains(pos) ? patch.frame(&patchTag) : RulingFrame(Point(0, 0), 0, 0, pageYr, 0, NULL);
+    };
+    regionCheck(selectionLineHeight({Point(150, 100), Point(200, 120)}, frameAt, 40) == 20,
+        "strokes inside a patch: the patch's pitch, not the page's");
+    regionCheck(selectionLineHeight({Point(10, 10), Point(20, 30)}, frameAt, 40) == 40,
+        "strokes off the patch: the page's pitch");
+    regionCheck(selectionLineHeight({Point(10, 10), Point(150, 100), Point(200, 120)}, frameAt, 40) == 20,
+        "spanning the page and a patch: where most of the ink is");
+    regionCheck(selectionLineHeight({Point(150, 100), Point(10, 10)}, frameAt, 40) == 20,
+        "a tie goes to the earliest stroke (patch first)");
+    regionCheck(selectionLineHeight({Point(10, 10), Point(150, 100)}, frameAt, 40) == 40,
+        "a tie goes to the earliest stroke (page first)");
+    regionCheck(selectionLineHeight({}, frameAt, 33) == 33, "nothing selected: the fallback");
+    auto blank = [&](Point) { return RulingFrame(); };
+    regionCheck(selectionLineHeight({Point(1, 1)}, blank, 33) == 33, "an unruled frame: the fallback");
+  }
+
   return nRegionChecksFailed;
 }
 

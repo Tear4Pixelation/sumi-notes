@@ -351,3 +351,25 @@ void parseRegionPoints(const char* str, std::vector<Point>& points)
     points.push_back(Point(x, y));
   }
 }
+
+Dim selectionLineHeight(const std::vector<Point>& centres, const std::function<RulingFrame(Point)>& frameAt, Dim fallback)
+{
+  std::vector<RulingFrame> frames;
+  std::vector<int> votes;
+  int best = -1;
+  for(const Point& centre : centres) {
+    RulingFrame frame = frameAt(centre);
+    size_t idx = 0;
+    while(idx < frames.size() && frames[idx].region != frame.region)
+      ++idx;
+    if(idx == frames.size()) {
+      frames.push_back(frame);
+      votes.push_back(0);
+    }
+    ++votes[idx];
+    // strictly greater: a tie stays with the region met first
+    if(best < 0 || votes[idx] > votes[best])
+      best = int(idx);
+  }
+  return best < 0 ? fallback : frames[best].yrulingOr(fallback);
+}

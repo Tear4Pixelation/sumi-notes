@@ -148,6 +148,11 @@ RulingFrame Page::rulingAt(Point pos) const
   return region ? regionFrame(region) : pageFrame();
 }
 
+Dim Page::lineHeightFor(const std::vector<Point>& centres) const
+{
+  return selectionLineHeight(centres, [this](Point pos) { return rulingAt(pos); }, BLANK_Y_RULING);
+}
+
 Element* Page::regionNear(Point pos, Dim lines) const
 {
   Element* hit = NULL;

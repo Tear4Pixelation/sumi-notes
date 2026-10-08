@@ -1422,7 +1422,18 @@ Page* PenToolbar::currentPage() const {
 Dim PenToolbar::lineHeight() const {
   Page *page = currentPage();
   // yruling(true) falls back to the blank page ruling, so this is never zero
-  return page ? page->yruling(true) : Page::BLANK_Y_RULING;
+  if (!page)
+    return Page::BLANK_Y_RULING;
+  // a selection inside a Paper Patch is measured in the patch's line, as drawing there is
+  ScribbleArea *area = ScribbleApp::app->activeArea();
+  const Selection *sel = mode == SELECTION_MODE && area ? area->selection() : NULL;
+  if (sel && !sel->strokes.empty()) {
+    std::vector<Point> centres;
+    for (Element *stroke : sel->strokes)
+      centres.push_back(stroke->com());
+    return page->lineHeightFor(centres);
+  }
+  return page->yruling(true);
 }
 
 // a preset is previewed at the thickness it will actually draw at, so a relative one has to be

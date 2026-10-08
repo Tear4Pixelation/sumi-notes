@@ -49,6 +49,8 @@ edited in the selection's preset editor landing back in line heights, and a 144 
 `loadModes()`. Its toolbar checks fail three ways against the pre-fix toolbar, and the load check fails
 with the clamp removed.
 
+The relative-width reference for a selection (`selectionLineHeight()`: patch pitch, plurality across regions, tie to earliest stroke) is pinned in `scribbletest/regiontest.cpp`; mutation-checked by returning the fallback.
+
 The page tag summary and the tag index's document cache are tested in `scribbletest/pagetagtest.cpp`
 (`runPageTagTests()`), standalone-buildable - see the command in its header. Its checks are the
 `pagetags` round trip (a title holding every separator and XML character), that the stored form needs no

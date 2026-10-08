@@ -83,6 +83,13 @@ struct InsertLinesStart
 constexpr Dim INSERT_LINES_SNAP = 0.2;
 InsertLinesStart insertLinesStart(Dim localY, Dim yr, bool skipLines, const std::function<bool(int)>& lineHasInk);
 
+// The line height a selection's relative width is measured in: the ruling of the region most of its
+//  strokes' centres lie in (frameAt answers per centre, as Page::rulingAt does), the page's own when that
+//  is the plurality.  A tie goes to whichever of the tied regions holds the earliest stroke.  Strokes
+//  spanning regions are therefore resolved by where most of the ink is, never by an average - a mean of
+//  two pitches would be a line height that exists nowhere.  `fallback` stands in for an unruled frame.
+Dim selectionLineHeight(const std::vector<Point>& centres, const std::function<RulingFrame(Point)>& frameAt, Dim fallback);
+
 struct RulingRegionParams
 {
   std::vector<Point> corners;  // outline, in order around it; normally 4

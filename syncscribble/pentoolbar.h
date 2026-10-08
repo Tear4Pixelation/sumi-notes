@@ -83,6 +83,9 @@ public:
   //  style, opening a popup with the width presets, the width itself and solid/dashed/dotted.
   //  onWidthChanged is called after the width or the style is changed through it.
   Widget* createSingleWidth(std::function<void()> onWidthChanged = nullptr);
+  // line height relative widths are measured in; in SELECTION_MODE that of the Paper Patch holding most of
+  //  the selection (Page::lineHeightFor), else the page's
+  Dim lineHeight() const;
 
 private:
   friend class ScribbleTest;  // penWidthPresetTest() drives the preset row directly
@@ -153,7 +156,6 @@ private:
   bool prepareWidths();
   // line height of the page being drawn on; the unit relative widths are measured in
   Page* currentPage() const;
-  Dim lineHeight() const;
   // preview line thickness for a preset, in the swatch's units
   Dim widthPreview(Dim w) const;
 

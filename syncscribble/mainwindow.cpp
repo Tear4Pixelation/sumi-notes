@@ -1766,8 +1766,7 @@ void MainWindow::createToolBars()
     Dim width = penToolbar->pen.width;  // the selection's, in document units; -1 if it has several
     if(width > 0) {
       // a relative pen (the marker) holds its width in line heights
-      Page* page = app->activeArea()->getCurrPage();
-      Dim lineHeight = page ? page->yruling(true) : Page::BLANK_Y_RULING;
+      Dim lineHeight = penToolbar->lineHeight();
       pen.width = pen.hasFlag(ScribblePen::WIDTH_RELATIVE) ? width/lineHeight : width;
     }
     if(penToolbar->dashStyle >= 0)
