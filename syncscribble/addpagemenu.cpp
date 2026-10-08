@@ -687,6 +687,9 @@ bool layoutFromString(const char* str, PageLayout* layout)
   return true;
 }
 
+// how the "+" menu's Paper entry reaches the Add Page popup (see createAddMenuButton)
+static std::function<void()> openAddPagePopup;
+
 Button* createAddPageButton(Action* scanPageAction)
 {
   Button* btn = createToolbutton(SvgGui::useFile(":/icons/ic_menu_file_plus.svg"), _("Add Page"));
@@ -783,6 +786,45 @@ Button* createAddPageButton(Action* scanPageAction)
       populate();
       openAutoClosePopup(popup);
       btn->node->addClass("pressed");  // cleared by closeMenus(), which unpresses the popup's parent
+    }
+    return true;
+  });
+  // the "+" menu's Paper entry shows this same popup, from this button
+  openAddPagePopup = [btn, popup, populate](){
+    SvgGui* gui = popup->window() ? popup->window()->gui() : NULL;
+    if(!gui)
+      return;
+    gui->closeMenus();
+    populate();
+    openAutoClosePopup(popup);
+    btn->node->addClass("pressed");
+  };
+  return btn;
+}
+
+void showAddPagePopup()
+{
+  if(openAddPagePopup)
+    openAddPagePopup();
+}
+
+Button* createAddMenuButton(const std::vector<Action*>& actions)
+{
+  Button* btn = createToolbutton(SvgGui::useFile(":/icons/ic_menu_plus.svg"), _("Add to Page"));
+  ArrowPopup* popup = createArrowPopup(Menu::VERT_LEFT);
+  for(Action* action : actions)
+    popup->addAction(action);
+  setupAutoClosePopup(popup);
+  btn->addWidget(popup);
+  setupTooltip(btn, _("Add paper, a patch, a document or a photo to this page"));
+  // opened on press, for the same reason as the Add Page button's popup
+  btn->addHandler([btn, popup](SvgGui* gui, SDL_Event* event){
+    if(event->type != SDL_FINGERDOWN || event->tfinger.fingerId != SDL_BUTTON_LMASK)
+      return false;
+    if(gui->lastClosedMenu != popup) {
+      gui->closeMenus();
+      openAutoClosePopup(popup);
+      btn->node->addClass("pressed");
     }
     return true;
   });

@@ -1506,6 +1506,9 @@ void MainWindow::createToolBars()
         // adding a page is the one thing this button does that nothing else on a narrow toolbar does,
         //  so it outranks everything but undo/redo and the tools themselves
         addTBWidget(addPageBtn, 3);
+        Widget* addMenuBtn = AddPageMenu::createAddMenuButton(addMenuActions());
+        tb->addWidget(addMenuBtn);
+        addTBWidget(addMenuBtn, 3);
       }
       else if(tbcfg[jj] == "undoRedoBtn") {
         tb->addWidget(undoRedoBtn);
@@ -1606,6 +1609,9 @@ void MainWindow::createToolBars()
     Widget* addPageBtn = AddPageMenu::createAddPageButton(actionScan_Page);
     fileopsRow->addWidget(addPageBtn);
     addTBWidget(addPageBtn, 3);
+    Widget* addMenuBtn = AddPageMenu::createAddMenuButton(addMenuActions());
+    fileopsRow->addWidget(addMenuBtn);
+    addTBWidget(addMenuBtn, 3);
     addTBWidget(fileopsRow->addAction(actionSave), actionSave->priority, {actionSave});
     // History now lives at the end of the tools row instead (see addTools above)
     // the overflow panel hugs the file ops panel rather than being pushed to the window edge
@@ -2215,6 +2221,17 @@ void MainWindow::setupActions()
   actionInsertDocument = createAction("actionInsertDocument", "Insert Document...", "", "", SLOT(insertDocument()));
   // the pages of a PDF, after the current page (ScribbleApp::insertPdfPages)
   actionInsert_PDF = createAction("actionInsert_PDF", "Insert PDF...", "", "", SLOT(insertPDF()));
+
+  // the "+" beside Add Page: things to add to this page (docs/agent/paper.md).  Own actions, since the
+  //  menu words them differently from the overflow menu's.
+  actionAddPaper = createAction("actionAddPaper", "Paper", ":/icons/ic_menu_document.svg", "",
+      [](){ AddPageMenu::showAddPagePopup(); });
+  actionAddPatch = createAction("actionAddPatch", "Patch", ":/icons/ic_menu_toggle_ruled.svg", "",
+      [this](){ actionRulingRegion->onTriggered(); });
+  actionAddDocument = createAction("actionAddDocument", "Insert Document", ":/icons/ic_menu_add_doc.svg", "",
+      [this](){ app->scanDocument(false); });
+  actionAddPhoto = createAction("actionAddPhoto", "Insert Photo", ":/icons/ic_menu_add_pic.svg", "",
+      [this](){ app->insertImage(); });
 
   actionBookmarksClose = createAction("actionBookmarksClose",
       "Close", ":/icons/ic_menu_cancel.svg", "", [this](){ toggleBookmarks(); });
