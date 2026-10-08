@@ -2790,6 +2790,48 @@ int ScribbleTest::shapeSnapTest()
   undo();
   check(page->strokeCount() == 2, "undo should bring the erased stroke back");
 
+  // a scratch-out detected on lift (no hold) is kept in the history: undo gives the erased stroke back with
+  //  the scribble still on the page as ink, a second undo takes the scribble away
+  begin(0.8f);
+  scribbleDoc->cfg->set("liftScratchOut", 1);
+  scribbleDoc->cfg->set("liftScratchOutLevel", 2);
+  ie(260, 300, 0, pen, press); ie(290, 310, 0, pen); ie(320, 305, 0, pen); ie(0, 0, 0, pen, release);
+  ie(600, 600, 0, pen, press); ie(640, 610, 0, pen); ie(0, 0, 0, pen, release);
+  check(page->strokeCount() == 2, "two strokes to scratch over on lift");
+  for(int pass = 0; pass < 8; ++pass) {
+    for(int i = 0; i <= 20; ++i) {
+      Dim frac = i/Dim(20);
+      Dim x = pass % 2 ? 380 - 180*frac : 200 + 180*frac;
+      ie(x, 285 + 8*pass + 8*frac, 0, pen, pass == 0 && i == 0 ? press : 0);
+    }
+  }
+  ie(0, 0, 0, pen, release);
+  check(!scribbleArea->snapHoldUsed, "no hold was involved");
+  // the target is gone and the scribble itself is now a stroke on the page, beside the untouched one
+  check(page->strokeCount() == 2, "a lift scratch-out erases the target and keeps its own scribble as a stroke");
+  size_t stepsAfterErase = scribbleDoc->history->undoSteps();
+  undo();
+  check(page->strokeCount() == 3, "the first undo brings the erased stroke back and leaves the scribble");
+  undo();
+  check(page->strokeCount() == 2 && scribbleDoc->history->undoSteps() == stepsAfterErase - 2,
+      "the second undo removes the scribble");
+  redo();
+  redo();
+  check(page->strokeCount() == 2, "redo erases again");
+  // scribbling over nothing is not an erase, so it stays ink
+  begin(0.8f);
+  scribbleDoc->cfg->set("liftScratchOut", 1);
+  scribbleDoc->cfg->set("liftScratchOutLevel", 2);
+  for(int pass = 0; pass < 8; ++pass) {
+    for(int i = 0; i <= 20; ++i) {
+      Dim frac = i/Dim(20);
+      Dim x = pass % 2 ? 380 - 180*frac : 200 + 180*frac;
+      ie(x, 285 + 8*pass + 8*frac, 0, pen, pass == 0 && i == 0 ? press : 0);
+    }
+  }
+  ie(0, 0, 0, pen, release);
+  check(page->strokeCount() == 1, "a scribble over nothing stays as ink");
+
   scribbleDoc->newDocument();
   return nbad;
 }

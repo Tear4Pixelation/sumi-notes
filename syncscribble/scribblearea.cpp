@@ -1640,9 +1640,12 @@ void ScribbleArea::discardStrokeBuilder()
   }
 }
 
-// The scratch-out test alone over a stroke just finished; if it is one, its ink is dropped and what it
-//  was drawn over erased.
-bool ScribbleArea::scratchOutOnLift()
+// The scratch-out test alone over a stroke just finished.  If it is one and there is something under it,
+//  returns true with what it was drawn over in `erased` - selected, not yet deleted.  The scribble itself
+//  is left alone: the caller commits it as an ordinary stroke first and only then deletes `erased` as a
+//  second undo step, so a detection that was wrong costs one undo to get the writing back, with the
+//  scribble still on the page as the ink it really was.
+bool ScribbleArea::scratchOutOnLift(Selection& erased)
 {
   std::vector<shaperec::Vec2> stroke;
   stroke.reserve(snapSamples.size());
@@ -1654,10 +1657,13 @@ bool ScribbleArea::scratchOutOnLift()
   std::vector<Point> area;
   for(const shaperec::Vec2& pt : result.points)
     area.push_back(Point(pt.x/mScale, pt.y/mScale));
-  discardStrokeBuilder();
-  // doReleaseEvent has already started the action for this stroke and ends it
-  scratchOut(area, false);
-  return true;
+  if(area.size() < 3)
+    return false;
+  // the selector goes before `erased` does (and detaches itself from it); the scribble is not on the
+  //  page yet, so it cannot select itself
+  ScratchOutSelector selector(&erased, area);
+  erased.doSelect();
+  return erased.count() > 0;
 }
 
 // Runs the recognizer over the stroke so far and, if it is a shape, swaps the ink for it.  Returns false
@@ -3808,11 +3814,12 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
     break;
   case MODE_STROKE:
   {
-    // a scratch-out needs no hold: it erases as the pen lifts
-    if(!snapActive && snapSamples.size() > 2 && cfg->Bool("liftScratchOut") && scratchOutOnLift()) {
-      stopShapeSnap();
-      break;
-    }
+    // a scratch-out needs no hold: it erases as the pen lifts.  The scribble is committed as ink below and
+    //  the erase follows as its own undo step, so undoing the erase after a false detection gives the
+    //  writing back with the scribble over it
+    Selection scratchedOut(currPage, Selection::STROKEDRAW_NONE);
+    if(!snapActive && snapSamples.size() > 2 && cfg->Bool("liftScratchOut"))
+      scratchOutOnLift(scratchedOut);
     stopShapeSnap();
     if(snapActive) {
       commitSnapShape();
@@ -3861,6 +3868,11 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
     // if this is the first stroke created since last call to groupStrokes(), record it
     groupStrokes(currStroke);
     currStroke = NULL;
+    if(scratchedOut.count() > 0) {
+      scribbleDoc->endAction();
+      scribbleDoc->startAction(currPageNum);  // closed by the end of this release
+      scratchedOut.deleteStrokes();
+    }
     break;
   }
   case MODE_ERASEFREE:
