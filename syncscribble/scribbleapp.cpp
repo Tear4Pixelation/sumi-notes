@@ -2926,6 +2926,51 @@ bool ScribbleApp::doImportPdf(const std::string& pdfPath)
   return doOpenDocument(docPath);
 }
 
+// Insert PDF: the PDF's pages go into the open document, after the current page (as Insert Document does),
+//  not into a new document.  They are rendered exactly as for Import PDF (importPdf: same DPI, page size and
+//  rule-layer background, no ruling), into a scratch Document that ScribbleDoc::insertPagesFrom then moves in
+//  as one undo step - so Undo removes the whole PDF and sync sends it as a page insertion.  Unlike Import PDF
+//  nothing is streamed to disk: the pages (encoded images only) are held until the document is saved.
+void ScribbleApp::insertPDF()
+{
+  if(!PdfImport::isAvailable()) {
+    messageBox(Warning, _("Insert PDF"), _("This build of Sumi does not include PDF support."));
+    return;
+  }
+  FilePicker::openFile(_("Insert PDF"), "pdf", [this](const std::string& filename){
+    if(!filename.empty())
+      insertPdfPages(filename);
+  });
+}
+
+bool ScribbleApp::insertPdfPages(const std::string& pdfPath)
+{
+  std::string fileName = FSPath(pdfPath).fileName();
+  ProgressBox progress(_("Insert PDF"));
+  progress.update(fstring(_("Importing %s..."), fileName.c_str()));
+  PdfImport::MemoryBudget budget(importMemoryLimit());
+  PdfImport::Options opts;
+  opts.dpi = std::max(72, cfg->Int("pdfImportDPI"));
+  opts.lossy = cfg->Bool("pdfImportLossy");
+  opts.budget = &budget;
+  opts.onProgress = [&](int pageNum, int numPages) {
+    progress.update(fstring(_("Importing %s (page %d of %d)..."), fileName.c_str(), pageNum + 1, numPages));
+    return true;
+  };
+  std::string err;
+  Document pdfdoc;
+  int numPages = PdfImport::importPdf(&pdfdoc, pdfPath.c_str(), opts, &err);
+  if(numPages <= 0 || activeDoc()->insertPagesFrom(&pdfdoc) <= 0) {
+    progress.close();
+    messageBox(Warning, _("Insert PDF"),
+        fstring(_("Error importing %s: %s"), fileName.c_str(), err.c_str()));
+    return false;
+  }
+  progress.close();
+  reportReducedPages(budget, _("Insert PDF"));
+  return true;
+}
+
 // Does the actual work of doImportPdf(), without touching the UI beyond a status notification, and
 // returns the path of the document it created (empty on failure).  Kept separate so the command line
 // can import a PDF and then follow exactly the same path as any other document it is given.

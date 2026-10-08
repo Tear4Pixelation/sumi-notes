@@ -172,6 +172,7 @@ public:
   // the same partial read for any config value, as its string; empty if not found
   static std::string extractDocConfigValue(const char* filename, const char* name);
   Document::loadresult_t insertDocument(IOStream* strm);
+  int insertPagesFrom(Document* otherdoc);
   const char* fileName() const { return document->fileName(); }
 
 //private:
