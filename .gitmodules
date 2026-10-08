@@ -16,7 +16,7 @@
 	ignore = untracked
 [submodule "nanovgXC"]
 	path = nanovgXC
-	url = https://github.com/styluslabs/nanovgXC.git
+	url = https://github.com/Tear4Pixelation/nanovgXC.git
 	ignore = untracked
 [submodule "ulib"]
 	path = ulib
@@ -24,7 +24,7 @@
 	ignore = untracked
 [submodule "usvg"]
 	path = usvg
-	url = https://github.com/styluslabs/usvg.git
+	url = https://github.com/Tear4Pixelation/usvg.git
 	ignore = untracked
 [submodule "ugui"]
 	path = ugui
