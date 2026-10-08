@@ -72,20 +72,19 @@ second finger down to the gesture finishing. The pan the fingers started is **ca
 `ScribbleView::doTwoFingerTap()` is the hook; only `ScribbleArea` acts on it (one `ID_UNDO`).
 Pinned by `twoFingerTapTest`.
 
-## The current page follows the page taking up most of the view
+## The current page follows the middle of the view
 
 `currPageNum` is the page number in the page strip, the target of Add Page, page tags, the outline's "this
 page" and everything else that says "current page". In the scrolling layouts (vertical and horizontal)
-`ScribbleArea::doPan()` picks it with `dominantPageNum()`: the page with the **largest visible area**.
-- **The old rule** kept a page current until it had left the view shrunk by a sixth on every side, and
-  then the first (or last) page in view took over. A sliver of the previous page at the top, more than a
-  sixth of the view, kept it current while the next page filled the screen. The user reported that as
-  strange.
-- **Hysteresis**: a page must show `PAGE_SWITCH_MARGIN` (2% of the view's area) more than the current page
-  does to replace it, so a view resting at the crossover does not flicker. Ties keep the current page.
-  Among the others the earlier page wins. A current page entirely out of view is always replaced.
-- **Areas, not positions along one axis**, so the same code serves both layouts. Single page view is
-  untouched: there the current page *is* the view.
+`ScribbleArea::doPan()` picks it with `dominantPageNum()` (name kept from an earlier largest-area rule): the
+**page containing the point at the middle of the view**, via `dimToPageNum()` (scroll axis only).
+- **History**: the first rule kept a page current until it left the view shrunk by a sixth per side; the
+  second picked the largest visible area with a 2% margin. Both let a sliver of a page decide. The user
+  wants the page under the middle of the screen.
+- **Gaps**: `dimToPageNum()` gives the gap below (right of) a page to that page, so with the middle in a gap
+  the page above stays current. Before the first page the first, past the last the last (the ghost page is
+  clamped). The result depends on the view alone, so no hysteresis is needed and it cannot flicker.
+- **Single page view** is untouched: there the current page *is* the view.
 - **Only a view that moved chooses again** (`pageChoiceView`). `pageSizeChanged()` pans by 0, for example
   when a page grows after a stroke, and must not take the page away from the one just drawn on.
 - **Drawing on or tapping a page still makes it current**, even a page showing less than its neighbour.
@@ -96,14 +95,13 @@ page" and everything else that says "current page". In the scrolling layouts (ve
   (`pageCountChanged` uses `gotoPos`) and sync view boxes can pan to a spot where a neighbour shows more,
   for example to the end of a page. The page asked for stays current until the user scrolls.
 - **`alignFitPage()` no longer makes the page under the gesture current.** It aligns that page's rect, and
-  the pan or zoom picks the dominant page as usual. Otherwise a fit snap with no shift left the gesture
+  the pan or zoom picks the page at the middle as usual. Otherwise a fit snap with no shift left the gesture
   page current with nothing to correct it.
 - The doPan gate on `currMode` (only `MODE_NONE`/`MODE_PAN`) is unchanged, so edge auto-scroll while dragging
   a selection does not switch pages mid-drag.
 
-Pinned by `currentPageTest`, for both layouts. Each part was checked against code without it: the old rule fails
-8 checks, no margin fails the 4 flicker checks, no hold fails the 2 explicit-jump checks, and re-choosing on
-an unmoved view fails the 2 drawn-on-page checks. Note that the view mode comes from the *document's* config,
+Pinned by `currentPageTest`, for both layouts: middle on either side of a page start, in a gap, a sliver at the
+edge, explicit jump, drawn-on page. Note that the view mode comes from the *document's* config,
 so a test must set `scribbleDoc->cfg` and call `area->loadConfig()`. Setting `area->viewMode` or the global
 pref quietly leaves the layout vertical.
 
