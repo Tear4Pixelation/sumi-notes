@@ -134,7 +134,7 @@ ScribbleWidget::ScribbleWidget(ScribbleView* sv) : Widget(new SvgCustomNode), sc
         Dim speed = scribbleView->cfg->Float("wheelZoomSpeed")/120.0;
         Point p = window()->gui()->prevFingerPos - scribbleView->screenOrigin;
         scribbleView->zoomBy(std::pow(1.25, speed*event->wheel.y), p.x, p.y);
-        scribbleView->showFitHint(scribbleView->nearFitWidth(p.x, p.y));
+        scribbleView->showFitHint(scribbleView->nearFitWidth());
         scheduleWheelZoomSnap(p);
         scribbleView->doRefresh();
       }
