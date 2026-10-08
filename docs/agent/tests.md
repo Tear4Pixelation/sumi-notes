@@ -174,6 +174,9 @@ heading blue. See [night-mode.md](night-mode.md).
   refuses no-ops and drops onto a moved page, keeps a page's outline entry, and is one undo step; `deletePageList`
   of a few pages and of every page is one undo step. Mutation-checked (insert before the target: 12 failures;
   reversed multi-page order: 1).
+- `ScribbleTest::libraryResizeTest()` - a `TagDocList` follows `SvgGui::SCREEN_RESIZED` (shrinking and growing);
+  [document-library.md](document-library.md#following-the-window-size-browser). Mutation-checked: without the
+  handler the bounds stay at the opening size and both checks fail.
 - `ScribbleTest::timerBacklogTest()` - ugui's `SvgGui::processTimers()`: a 1 ms periodic timer whose
   callback takes 5 ms (as the Pages view's thumbnail timer does) must not hold back a 1 ms timer set
   meanwhile; the quick one may wait for at most two of the slow one's ticks. Mutation-checked: without the

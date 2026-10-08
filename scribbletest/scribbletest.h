@@ -62,6 +62,7 @@ public:
   // an arrow popup opened from the selection popup keeps its content inside its background wherever the
   //  selection popup sits, including where either one has to be moved to stay on screen
   int arrowPopupTest();
+  int libraryResizeTest();
   // page tags: placing never leaves one off a page (gap, beside, below the last page), a pen placement is
   //  selected, a tag dragged to another page moves its count there and undoes, and opening another document
   //  drops tags still on the pointer

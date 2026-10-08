@@ -12,6 +12,7 @@
 #include "undopersist.h"
 #include "pdfimport.h"
 #include "tagstore.h"
+#include "tagdoclist.h"  // libraryResizeTest
 #include "miniz/miniz_zip.h"
 
 // document scanning math; unlike everything else here it needs neither GL nor a document
@@ -1651,6 +1652,38 @@ int ScribbleTest::arrowPopupTest()
   }
   gui->closeMenus();
   scribbleDoc->clearSelection();
+  return nbad;
+}
+
+// The library browser (TagDocList) is a modal window of its own sized once in setup(); SvgGui reports a
+//  main window resize to every window as SCREEN_RESIZED, and the browser has to follow it
+//  (docs/agent/document-library.md). Fails without the handler: the bounds stay at their opening size.
+int ScribbleTest::libraryResizeTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: library resize: %s\n", what); }
+  };
+  SvgGui* gui = ScribbleApp::gui;
+  if(!gui || !ScribbleApp::win) {
+    printf("library resize test skipped: no main window\n");
+    return 0;
+  }
+  const char* tmpEnv = getenv("TMPDIR");
+  FSPath scratch(fstring("%s/write-libresize-%d/", tmpEnv && tmpEnv[0] ? tmpEnv : "/tmp", rand() % 1000000));
+  if(!createPath(scratch))
+    return nbad + 1;
+  {
+    TagDocList browser(scratch.c_str());
+    browser.setWinBounds(Rect::wh(1280, 720));
+    Rect smaller = Rect::wh(900, 600);
+    browser.sdlUserEvent(gui, SvgGui::SCREEN_RESIZED, 0, &smaller);
+    check(browser.winBounds().toSize() == smaller, "shrinking the window shrinks the browser");
+    Rect larger = Rect::wh(1600, 900);
+    browser.sdlUserEvent(gui, SvgGui::SCREEN_RESIZED, 0, &larger);
+    check(browser.winBounds().toSize() == larger, "growing the window grows the browser");
+  }
+  removeDir(scratch);
   return nbad;
 }
 
@@ -3792,6 +3825,7 @@ void ScribbleTest::runAll(bool runsynctest)
   nUnitFailed += zoomSnapTest();
   nUnitFailed += currentPageTest();
   nUnitFailed += arrowPopupTest();
+  nUnitFailed += libraryResizeTest();
   nUnitFailed += pageTagTest();
   nUnitFailed += docStateSyncTest();
   nUnitFailed += curveFitTest();

@@ -1861,6 +1861,13 @@ void TagDocList::createUI()
   // everything, so this only ever runs when nothing more specific (a button, a row, the text edit
   // itself) already consumed the press.
   addHandler([this](SvgGui* gui, SDL_Event* event){
+    // the browser is a modal window of its own: setup() sizes it to the main window once, and SvgGui
+    //  only tells windows about a resize through SCREEN_RESIZED, so without this the browser kept the
+    //  size it opened at (DocumentList and Dialog both handle it the same way)
+    if(event->type == SvgGui::SCREEN_RESIZED) {
+      setWinBounds(static_cast<Rect*>(event->user.data1)->toSize());
+      return true;
+    }
     if(event->type == SDL_KEYDOWN && event->key.keysym.sym == SDLK_ESCAPE && selectMode) {
       setSelectMode(false);
       return true;

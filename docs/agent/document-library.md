@@ -226,6 +226,18 @@ the rows plainly if it is ever called while detached. Repro in agent-display (ri
 open the browser, right-click a card > Manage Tags > Done, back, reopen the browser, right-click >
 Manage Tags.
 
+# Following the window size (browser)
+
+`TagDocList` is a modal `Window` of its own with no `sdlWindow`, sized to the main window once in `setup()`.
+SvgGui tells such windows about a resize only through `SvgGui::SCREEN_RESIZED` (sent from
+`sdlWindowEvent`'s `SIZE_CHANGED` to every window), so the browser needs its own handler for it, as
+`DocumentList` and `Dialog` have: without one it kept the size it opened at - cropped when the window shrank,
+leaving the editor showing around it when it grew. The handler is the first branch of the window handler in
+`createUI()`; the grid is a wrapping flex row, so setting the bounds is all the relayout it needs (no cached
+column count). The pinned sidebar and split view do not matter here: the browser covers the whole window,
+not the canvas area. Pinned in `ScribbleTest::libraryResizeTest()`. Resizing live cannot be driven from
+agent-display: cage forces its single toplevel to the output size (1280x720) and ignores `xdotool windowsize`.
+
 # Top inset (iOS status bar)
 
 The editor used to paint `#ios-statusbar-bg`, a full-width toolbar-colored strip that pushed the whole
