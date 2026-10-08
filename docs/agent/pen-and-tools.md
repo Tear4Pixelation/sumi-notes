@@ -344,3 +344,21 @@ right side and the line stay, text below the line's end moves, a drag back up er
 right, a press right of the line moves only the right, and a line starting on the moved line moves with
 it. Mutation-checked: without the whole-line stops 2 checks fail; with them but the erase still finding
 stops the old way, 2 fail (one is the erase check). Verified in agent-display on lined paper.
+
+# Marker: vivid colour and alpha
+
+The marker used to read as a pale wash. Now: alpha **165** (was 127 for the default pen, 97 for a themed
+family's `hl`), and a themed swatch's highlighter colour is its family's `hl` with the chroma cap lifted
+from 0.13 to **0.19** (OKLCH, same hue and lightness, still clamped to the gamut, scaled by the recipe's
+`vividness`). The unthemed default pen colour went from (255,127,255) to (255,64,224) - the old RGB was
+itself pale, so alpha alone could not make it vivid.
+
+- **`cusp-walk-1` is not touched** (frozen). The boost lives in `vividMarker()` / `PenToolbar::toolColor()`
+  in `pentoolbar.cpp`, so it is a property of the pen colour, not of the palette.
+- **Existing strokes keep their colour**: a stroke stores its own RGBA, and nothing rewrites documents.
+  Only strokes drawn from now on use the new values. A saved config's marker pen keeps its old alpha until
+  a swatch is picked again.
+- Legibility: the marker is `DRAW_UNDER`, so ink on the same layer is painted over it; more alpha does not
+  hide text. Night mode is a render-time `ColorMap` (see night-mode.md) and maps whatever colour is stored.
+- Verified in agent-display (Debug build) with a marker stroke over a pen line on lined paper: clearly
+  saturated pink, line fully visible. Themed variants were not screenshotted.
