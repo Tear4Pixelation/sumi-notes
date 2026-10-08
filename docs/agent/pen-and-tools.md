@@ -9,6 +9,21 @@ eraser's `ic_menu_toggle_ruled` icon), shown only while the marker is the active
 in `setPen()` *before* its early return, since switching tools with an identical pen still changes it.
 Not covered by automated tests.
 
+# Marker over scanned images
+
+The marker is `DRAW_UNDER`: it goes under the ink on its layer. A scan or photo inserted as an
+**image element** is opaque and sits first in the layer's run, so "under everything" put the stroke
+*behind the picture* and the highlight vanished. `Page::layerFirstElement()` therefore skips images
+on the layer: the stroke goes above the last image and below the ink. Pages whose scan/PDF is the
+page background (`ruleNode`) were never affected - that is drawn below all elements.
+
+Decision: z-order, not multiply blending. Over an image the translucent marker is *above* the dark
+text, so the text is tinted by the highlight colour rather than staying pure black as it does under
+real ink. Multiply (`CompOp_Multiply` exists in usvg) would fix that but adds a render attribute to
+the file format, sync and night mode; not done. Export and night mode only see element order, so are
+unchanged. Tested by `ScribbleTest::layerTest()` (marker between scan and ink; the old code returned
+the image).
+
 # Relative pen width
 
 Any pen's thickness can be expressed as a **multiple of the page's line height** rather than in

@@ -1888,6 +1888,20 @@ int ScribbleTest::layerTest()
     // serialize() reports the element's *current* layer, which is what a peer has to apply
     check(n.attribute("layer").as_int(-1) == s->layer(), "the wire format carries the layer");
   }
+  // a DRAW_UNDER marker goes above a scanned image on its layer, below the ink: put under the (opaque)
+  //  image it would be invisible
+  {
+    scribbleDoc->newDocument();
+    Page* page = scribbleArea->currPage;
+    Element* scan = new Element(new SvgImage(Image(8, 8), Rect::ltwh(0, 0, 200, 200)));
+    page->addStroke(scan);
+    scribbleDoc->app->setPen(ScribblePen(Color::BLACK, 2, ScribblePen::TIP_ROUND));
+    drawStroke(160);
+    Element* ink = elementAt(1);
+    Element* under = page->layerFirstElement(scribbleDoc->currentLayer());
+    check(ink && under == ink, "a marker goes between the scan and the ink on its layer");
+    check(under != scan, "a marker is never put under an image");
+  }
   return nbad;
 }
 
