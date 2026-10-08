@@ -69,6 +69,25 @@ confirmation, since it is undoable (the browser's delete is not, which is why th
   cells before the budget check; with 300 pages under ASan that alone used up the budget, so each turn
   returned before rendering anything and the timer spun at 95% CPU with blank placeholders. Visible rows are
   now worked out from the first cell's position and the row pitch, and a turn always renders at least one.
+- **Trap: the thumbnail timer is a 1 ms periodic timer whose ticks take 12 ms or more, and ugui's
+  `SvgGui::processTimers()` used to make it starve everything else.** It advanced a periodic timer by one
+  period per tick (`nextTick += period`) and fired it again while `nextTick <= now`, so a timer slower than
+  its period fell further behind on every tick (12 ms of work per 1 ms of its clock), and one
+  `processTimers()` call ran its whole backlog back to back. Every other timer waited until that lagging
+  clock reached its own due time. Seen in real use as three things at once while thumbnails were being
+  rendered: no fling on the canvas (its animation timer starved), sidebar actions that showed their press
+  but did nothing for seconds (they run on 1 ms timers), and page switches of about 10 s (input queued
+  behind the blocked loop). Measured in agent-display (ASan build, 60 dense pages, Pages view opened,
+  then three next-page clicks 1 s apart): **before**, one `processTimers()` call fired the thumbnail timer
+  24 times in a row and blocked for 7071 ms; the clicks were handled 7339/6310/5277 ms after they were sent
+  and animation timers ran 6.9 s late. **After** (ugui: a periodic timer that has fallen behind is
+  rescheduled from the time its callback returned, so missed ticks are skipped): every call fires one
+  thumbnail tick (about 0.5 s for these pages in the ASan build, with other builds competing for the CPU),
+  and the clicks were handled 642/876/1225 ms after they were sent. Pinned by
+  `ScribbleTest::timerBacklogTest()`; with the reschedule removed it fails. The ugui change is the fix, not
+  the thumbnail code: any periodic timer whose callback can outlast its period (camera polling, a slow
+  frame during a fling) would back up the same way. What remains is the cost of one thumbnail per turn,
+  which input waits behind.
 - **Cache keyed by `Page::uid` + `Page::revision`**, both new. `revision` is bumped wherever the undo system
   changes `dirtyCount` (and on a layer restack) and is never reset; `dirtyCount` is zeroed by a save and
   counted back down by undo, so it cannot tell two versions apart. `uid` is unique for the process; a

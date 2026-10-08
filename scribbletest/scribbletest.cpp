@@ -1241,6 +1241,50 @@ int ScribbleTest::twoFingerTapTest()
   return nbad;
 }
 
+// A periodic timer whose callback outlasts its period (the sidebar's page thumbnails: a 1 ms timer, 12 ms or
+//  more of rendering per tick) must not hold back other timers.  SvgGui::processTimers() used to advance it
+//  by one period per tick and fire it again while it was behind, so its clock fell further back on every
+//  tick and a 1 ms timer set meanwhile - a sidebar action, a fling step - waited seconds for it to catch up.
+int ScribbleTest::timerBacklogTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: timer backlog: %s\n", what); }
+  };
+  SvgGui* gui = ScribbleApp::gui;
+  const int maxSlowTicks = 1000;
+  int slowTicks = 0;
+  bool slowDone = false, quickFired = false;
+  Timer* slowTimer = gui->setTimer(1, NULL, [&]() {
+    Timestamp start = mSecSinceEpoch();
+    while(mSecSinceEpoch() - start < 5) {}  // five times its period, as a thumbnail render is
+    ++slowTicks;
+    slowDone = quickFired || slowTicks >= maxSlowTicks;
+    return slowDone ? 0 : 1;
+  });
+  // let it run a few ticks, so a timer that keeps its missed ticks has fallen behind
+  Timestamp start = mSecSinceEpoch();
+  while(slowTicks < 4 && mSecSinceEpoch() - start < 3000)
+    gui->processTimers();
+  int ticksAtQuick = slowTicks, ticksBeforeQuick = -1;
+  Timer* quickTimer = gui->setTimer(1, NULL, [&]() {
+    quickFired = true;
+    ticksBeforeQuick = slowTicks - ticksAtQuick;
+    return 0;
+  });
+  start = mSecSinceEpoch();
+  while(!quickFired && mSecSinceEpoch() - start < 5000)
+    gui->processTimers();
+  check(quickFired, "a 1 ms timer fired at all beside a slow periodic timer");
+  check(ticksBeforeQuick >= 0 && ticksBeforeQuick <= 2, "a 1 ms timer waits for at most a tick or two of a slow one");
+  // both capture locals by reference
+  if(!quickFired)
+    gui->removeTimer(quickTimer);
+  if(!slowDone)
+    gui->removeTimer(slowTimer);
+  return nbad;
+}
+
 // Getting into and out of a shape's edit mode without visiting the Select tool (first-day report): with a
 //  pen in use, a finger tap on a shape selects it with its handles up and leaves the tool alone; a finger
 //  tap elsewhere, or the first shape-tool drag outside, only clears the selection.
@@ -3668,6 +3712,7 @@ void ScribbleTest::runAll(bool runsynctest)
   nUnitFailed += layerTest();
   nUnitFailed += selectTouchingTest();
   nUnitFailed += twoFingerTapTest();
+  nUnitFailed += timerBacklogTest();
   nUnitFailed += shapeTapEditTest();
   nUnitFailed += zoomSnapTest();
   nUnitFailed += currentPageTest();
