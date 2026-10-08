@@ -111,6 +111,9 @@ static Element* shapeElement(const Noteful::Shape& shape)
   svgPath->setAttr<float>("stroke-width", float(shape.width*NOTEFUL_SCALE));
   svgPath->setAttr<int>("stroke-linecap", Painter::RoundCap);
   svgPath->setAttr<int>("stroke-linejoin", Painter::RoundJoin);
+  // and it multiplies, as Sumi's marker does (StrokeBuilder::create())
+  if(shape.highlighter)
+    svgPath->setAttr<int>("comp-op", Painter::CompOp_Multiply);
   // no pen class, as for Sumi's own shapes: a pen class would have toPenPoints() reinterpret the path
   //  as variable-width pen geometry
   return new Element(svgPath);

@@ -351,6 +351,14 @@ void Page::generateRuleLayer(Color pageColor, Dim w, Dim h)
   }
 }
 
+// Multiply against dark paper hides a highlight entirely: in night mode (a light page mapped dark) and on a
+//  document authored with dark paper.  Screen is multiply mirrored, so it reads the same way there.
+bool Page::drawsDark(const Painter* painter, Color paper)
+{
+  const ColorMap* map = painter->colorMap();
+  return (map ? map->map(paper) : paper).luma() < 128;
+}
+
 void Page::draw(Painter* painter, const Rect& dirty, bool rulelines)
 {
   // draw red border around page if it failed to load
@@ -385,7 +393,10 @@ void Page::draw(Painter* painter, const Rect& dirty, bool rulelines)
   if(!ruleNode)
     painter->fillRect(svgDoc->bounds(), Color::WHITE);
 
+  painter->save();
+  painter->setDarkBackdrop(drawsDark(painter, ruleNode ? props.color : Color(Color::WHITE)));
   SvgPainter(painter).drawNode(svgDoc.get(), dirty);
+  painter->restore();
 
   if(isSelected && !Element::FORCE_NORMAL_DRAW)  //docElement()->selection())
     painter->fillRect(rect(), Color(props.color.luma() > 127 ? Color::BLUE : Color::YELLOW).setAlphaF(0.4f));

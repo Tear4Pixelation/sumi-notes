@@ -76,10 +76,15 @@ void StrokeBuilder::finalize()
 
 StrokeBuilder* StrokeBuilder::create(const ScribblePen& pen)
 {
+  StrokeBuilder* builder;
   if(pen.hasVarWidth() || pen.hasFlag(ScribblePen::TIP_CHISEL))
-    return new FilledStrokeBuilder(pen);
+    builder = new FilledStrokeBuilder(pen);
   else
-    return new StrokedStrokeBuilder(pen);
+    builder = new StrokedStrokeBuilder(pen);
+  // a marker multiplies, so the text under it stays as dark as it was - see pen-and-tools.md
+  if(pen.hasFlag(ScribblePen::DRAW_UNDER))
+    builder->element->node->setAttr<int>("comp-op", Painter::CompOp_Multiply);
+  return builder;
 }
 
 // builder for stroked (non-pressure sensitive) stroke

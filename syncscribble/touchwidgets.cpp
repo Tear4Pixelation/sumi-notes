@@ -5,6 +5,7 @@
 //#include "scribbleapp.h"
 #include "resources.h"
 #include "strokebuilder.h"
+#include "page.h"
 #include "ugui/textedit.h"
 #include "usvg/svgparser.h"
 #include "usvg/svgpainter.h"
@@ -49,7 +50,10 @@ void PenPreview::draw(SvgPainter* svgp) const
   const ScribblePen* pen = &mPen;
   Painter* p = svgp->p;
   const ColorMap* prevMap = p->colorMap();
+  bool prevDark = p->darkBackdrop();
   p->setColorMap(colorMap ? colorMap() : NULL);
+  // a marker multiplies; on a dark page it screens instead, as on the canvas (Page::draw())
+  p->setDarkBackdrop(Page::drawsDark(p, bgColor));
   int w = mBounds.width() - 4;
   int h = mBounds.height() - 4;
   p->translate(2, 2);
@@ -73,6 +77,7 @@ void PenPreview::draw(SvgPainter* svgp) const
   }
   SvgPainter(p).drawNode(sb->getElement()->node);
   p->setColorMap(prevMap);
+  p->setDarkBackdrop(prevDark);
 }
 
 // undo timeline

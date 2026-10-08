@@ -186,6 +186,10 @@ heading blue. See [night-mode.md](night-mode.md).
   reschedule of a periodic timer that has fallen behind, it fails. Background in
   [page-management.md](page-management.md#thumbnails).
 
+Marker multiply blending is tested by `ScribbleTest::markerBlendTest()` (unit-check count), rendered with
+the software painter: details and mutation checks in [pen-and-tools.md](pen-and-tools.md#marker-multiplies-text-stays-dark).
+`test15_ref.html` carries `comp-op="multiply"` on its marker strokes since then.
+
 Persistent undo is tested by `ScribbleTest::undoPersistTest()` (unit-check count): edits covering
 strokes, a layer, a layer move, a page, an outline entry and a page deletion undo back to each recorded
 state after save and reopen, redo survives, and a file appended to externally opens with no history and

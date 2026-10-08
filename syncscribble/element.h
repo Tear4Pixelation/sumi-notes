@@ -261,6 +261,8 @@ public:
   static bool DEBUG_DRAW_COM;
   static bool SVG_NO_TIMESTAMP;
   static bool FORCE_NORMAL_DRAW;
+  // a marker stroke saved before markers were written with comp-op multiply: drawn multiplied anyway
+  static bool isLegacyMarker(const SvgNode* node);
   static const char* STROKE_PEN_CLASS;
   static const char* FLAT_PEN_CLASS;
   static const char* ROUND_PEN_CLASS;

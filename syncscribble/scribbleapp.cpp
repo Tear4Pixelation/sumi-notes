@@ -3387,10 +3387,15 @@ void ScribbleApp::writePDF(std::ostream& strm, const std::vector<int>& pages)
     *pgnum = int(it - pagenums.begin());
     return target;
   };
+  // what Element::applyStyle() does when drawing; PdfWriter does not run it
+  pdf.defaultCompOp = [](const SvgNode* node) {
+    return Element::isLegacyMarker(node) ? int(Painter::CompOp_Multiply) : -1;
+  };
   for(int pagenum : pagenums) {
     Page* page = doc->pages[pagenum];
     page->ensureLoaded();
     pdf.newPage(page->width(), page->height(), ptsPerDim);
+    pdf.darkBackdrop = page->color().luma() < 128;  // as on screen (Page::drawsDark()), minus night mode
     pdf.drawNode(page->svgDoc.get());
   }
   pdf.write(strm);
