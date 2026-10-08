@@ -70,5 +70,11 @@ std::vector<Button*> createLayoutGrid(Widget* container, const ScribbleConfig* c
 
 // the button itself, popup and all; scanPageAction supplies the "scan as page" item
 Button* createAddPageButton(Action* scanPageAction);
+// opens the popup of the Add Page button most recently created (no-op if there is none)
+void showAddPagePopup();
+
+// The "+" beside Add Page: a menu of things to add to this page, one entry per action given (Paper, Patch,
+//  Insert Document, Insert Photo - docs/agent/paper.md)
+Button* createAddMenuButton(const std::vector<Action*>& actions);
 
 }  // namespace AddPageMenu

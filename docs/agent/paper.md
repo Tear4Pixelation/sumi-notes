@@ -50,3 +50,23 @@ is saved as a new custom layout.
   that conveys the size of a square. Lined pages without vertical rules start at the margin instead.
 - `RulingDialog` puts the preview **beside** the controls (it sat above them and was squeezed), with a
   magnifier lens at 1:1, except in the scrolling phone layout, where it stays on top.
+
+# The "+" menu beside Add Page
+
+`AddPageMenu::createAddMenuButton()` (`addpagemenu.cpp`): a `ic_menu_plus` toolbutton right after Add Page
+in both places Add Page lives (the vertical toolbar's `addPage` entry and the floating file-ops panel),
+opening an arrow popup of "add things to this page", exactly four entries in this order. They are their own
+`MainWindow` actions (`actionAddPaper/Patch/Document/Photo`, `addMenuActions()`) because the wording differs
+from the overflow menu's; each forwards to an existing flow:
+
+- **Paper** shows the Add Page popup (`showAddPagePopup()`, via a static closure set by the most recent
+  `createAddPageButton()`), so a layout picked there is applied as it always is: a new page after the current
+  one, remembered in the recents. Chosen over "change this page's ruling" because that is Page Setup, and
+  the layouts popup only knows how to add pages.
+- **Patch** triggers `actionRulingRegion` (Paper Patch, ruling-regions.md).
+- **Insert Document** is `scanDocument(false)`, the scan-and-place flow (document-scanning.md) - not the old
+  overflow "Insert Document...", which splices another document's pages in.
+- **Insert Photo** is `insertImage()` (file picker / Android image chooser).
+
+Like Add Page, the popup opens on press (a popup shown on release is closed by that release). The Paper
+entry works because menu items close the menus before their action runs. No coordinate-system patch.
