@@ -67,7 +67,7 @@ selection in `RegionSelector` (`selection.cpp`), the UI in `ScribbleArea` and th
   Delete). `RegionPanel::calcOffset()` picks the side at *layout* time - right, left, below, above, else over
   the region at the right edge - because only then is the panel's own size known; `syncRegionRow()` (from
   every `refreshUI`, which pan and zoom also reach) hands it the region's and view's window rects and marks
-  it `BOUNDS_DIRTY`. The kind is derived, not stored: dots if `dotRadius > 0`, squared if `xRuling > 0`.
+  it `BOUNDS_DIRTY`. The kind is derived, not stored: music if `staff` (its `yRuling` is a staff band, see paper.md), dots if `dotRadius > 0`, squared if `xRuling > 0`.
   Squared and dotted keep `xRuling == yRuling`, so the one slider sets both. The slider is logarithmic
   (10-120) and **previews** a drag through `previewSelRegionParams()` (no undo item), then on the handle's
   `SDL_FINGERUP` puts the old parameters back and commits the result with `setSelRegionParams()` - the

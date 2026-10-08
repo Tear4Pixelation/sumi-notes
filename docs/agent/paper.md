@@ -27,11 +27,39 @@ config default, a `dotradius` attribute on `<pagechanged>` (sync), and an option
 index 7 of `predefRulings` because the document list indexes that table by its own 1-7; radii live in
 the parallel `predefDotRadii` since the table is `unsigned int`.
 
+# Music staves
+
+`PageProperties::staff` (and `RulingFrame::staff`, `RulingRegionParams::staff`, `PageLayout::staff`) turns
+the y ruling into music paper. **`yRuling` is then the height of one staff band, not a line pitch**: a band
+is `STAFF_BAND_SPACES` (9) staff spaces tall, the staff of `STAFF_LINES` (5) lines sits centred in it
+(`staffLineOffset()`, `rulingregion.h`, shared by page, region and previews), so the staff space is
+`yRuling/9` and a band is one "line of writing" for every ruled tool (insert lines, ruled select, reflow). The
+presets use 144 (space 16 = 2.7 mm at 150 units/inch, 12 staves on A4, 11 on Letter). A staff has no x
+ruling, no dots (`sanitize()` and the page loader force both to 0) and no margin line in the presets.
+- Storage: `staff="1"` on the page's `contentNode` and `__rrstaff` on a region, **written only when set**, so
+  other pages are byte-identical and an older build just shows plain lines at the band height. Also on
+  `<pagechanged>`/`<regionchanged>` (sync) and in the undo persistence items, the `staffRuling` config
+  default, and an optional 7th field of a saved layout string (`customPageLayouts`, `recentPageLayouts`).
+- `Page::generateRuleLayer()` draws all staves as **one** path (class `staffrule`) in the ordinary rule group,
+  so night mode (render-time `ColorMap`), PDF/SVG export and page thumbnails need nothing of their own.
+  Regions use `RulingRegionParams::linesPath()` (clipped staff lines, phased from the region's top-left like
+  its other lines; unlike plain lines a line on the outline's extreme edge is dropped, not kept).
+- UI: Page Setup's ruling combo has "Music staves" (`RulingDialog::STAFF_PRESET`; the flag lives in
+  `staffPreset` since the presets are numbers and survives editing Y Ruling), the Add Page grid has a "Music"
+  tile under Special, and the Paper Patch panel's kind dropdown has Music (switching converts the number
+  between a line pitch and a band by `9/2.5`; its slider has its own 63-270 range).
+- Previews (`rulingSVG`): a thumbnail whose staff space is under `MIN_LINE_SEP` draws only each staff's
+  middle line, since five lines a pixel apart are a smear; the 1:1 window and lens draw all five.
+- Known gaps: the centre-on-line marker and snap to grid still snap to band boundaries (the gap between
+  staves), not to a staff line - they follow `yRuling` like everything ruled. Page Setup has no spinner for the
+  staff space itself, only the band height. The strings are not in `strings.xml` (neither are the other
+  layout names), so they are English until translated.
+
 # Page layouts (Add Page popup)
 
 `addpagemenu.cpp`. The popup opens on a short row - document default, the last two layouts used
-(`recentPageLayouts`), and a "+". The "+" switches the same popup to the full grid: 12 built-in
-layouts (three each of Lined, Squared, Dotted, Special), then the user's custom layouts
+(`recentPageLayouts`), and a "+". The "+" switches the same popup to the full grid: 13 built-in
+layouts (three each of Lined, Squared, Dotted, then Special's four - Plain, Dotted lines, Wide margin, Music), then the user's custom layouts
 (`customPageLayouts`) and a "New layout" tile. Both views are built on open and only toggled visible
 afterwards - rebuilding from the "+" handler would free the widget being dispatched to.
 Right-click / long press edits a tile in `RulingDialog` layout mode; a built-in is fixed, so its edit

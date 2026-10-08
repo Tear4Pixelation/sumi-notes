@@ -34,12 +34,14 @@ struct RulingFrame
   Dim xRuling = 0;
   Dim yRuling = 0;
   Dim dotRadius = 0;
+  // music staves (see staffLineOffsets): yRuling is then the height of one staff band, not a line pitch
+  bool staff = false;
   // the region this frame belongs to (an Element*, opaque here); NULL for the page's own ruling
   const void* region = NULL;
 
   RulingFrame() {}
-  RulingFrame(Point o, Dim a, Dim xr, Dim yr, Dim dr = 0, const void* rg = NULL)
-      : origin(o), angle(a), xRuling(xr), yRuling(yr), dotRadius(dr), region(rg) {}
+  RulingFrame(Point o, Dim a, Dim xr, Dim yr, Dim dr = 0, const void* rg = NULL, bool st = false)
+      : origin(o), angle(a), xRuling(xr), yRuling(yr), dotRadius(dr), staff(st), region(rg) {}
 
   Point toLocal(Point p) const;
   Point toPage(Point local) const;
@@ -90,6 +92,17 @@ InsertLinesStart insertLinesStart(Dim localY, Dim yr, bool skipLines, const std:
 //  two pitches would be a line height that exists nowhere.  `fallback` stands in for an unruled frame.
 Dim selectionLineHeight(const std::vector<Point>& centres, const std::function<RulingFrame(Point)>& frameAt, Dim fallback);
 
+// Music paper ("staff" ruling).  The y ruling is the height of one band, which holds one staff of
+//  STAFF_LINES lines; the staff spacing is yRuling/STAFF_BAND_SPACES and the staff sits centred in its
+//  band, so a band is one "line of writing" for every ruled tool.  Lines of band k, as local y offsets
+//  from k*yRuling.  A music ruling has no x ruling and no dots.
+constexpr int STAFF_LINES = 5;
+constexpr Dim STAFF_BAND_SPACES = 9;  // 4 spaces of staff + 5 of gap, so ~11 staves on A4 at yRuling 72
+inline Dim staffLineOffset(int lineInStaff, Dim yRuling)
+{
+  return (STAFF_BAND_SPACES - (STAFF_LINES - 1))/2*yRuling/STAFF_BAND_SPACES + lineInStaff*yRuling/STAFF_BAND_SPACES;
+}
+
 struct RulingRegionParams
 {
   std::vector<Point> corners;  // outline, in order around it; normally 4
@@ -98,6 +111,7 @@ struct RulingRegionParams
   Dim xRuling = 0;
   Dim yRuling = 0;
   Dim dotRadius = 0;
+  bool staff = false;          // music staves instead of lines (see staffLineOffset)
   bool opaque = true;          // paper-colored fill hides the page's ruling (or scan) behind it
   bool outline = false;        // a border in the rule color, a little heavier than a rule line
 
@@ -108,7 +122,7 @@ struct RulingRegionParams
   void sanitize();
   static constexpr Dim MIN_PITCH = 2;
   RulingFrame frame(const void* region = NULL) const
-      { return RulingFrame(origin, angle, xRuling, yRuling, dotRadius, region); }
+      { return RulingFrame(origin, angle, xRuling, yRuling, dotRadius, region, staff); }
   bool contains(Point p) const;
   // p itself when inside the outline, else the nearest point on it - what keeps a stroke begun in the
   //  region from leaving it
@@ -128,7 +142,7 @@ struct RulingRegionParams
 
   // an axis-aligned region over `r` with the given ruling, lines phased from r's top-left corner; new
   //  regions are outlined, so they can be told apart from the page
-  static RulingRegionParams fromRect(const Rect& r, Dim xr, Dim yr, Dim dotr = 0);
+  static RulingRegionParams fromRect(const Rect& r, Dim xr, Dim yr, Dim dotr = 0, bool staff = false);
 };
 
 // serialization helpers for the __rr* attributes

@@ -25,6 +25,8 @@ public:
   static unsigned int predefRulings[][3];
   // dot radius for each predefRulings entry (0 = lines); kept apart because radii are fractional
   static Dim predefDotRadii[];
+  // index of the "Music staves" preset in predefRulings
+  static const int STAFF_PRESET;
 
 private:
   void setPaperType(int index);
@@ -33,6 +35,7 @@ private:
   // redraws the page thumbnail from the current control values; the numbers in this dialog are
   //  meaningless without it - nobody knows what "Y Ruling 40" looks like until they see it
   void updatePreview();
+  bool staffActive() const;
 
   ScribbleDoc* scribbleDoc;
   bool newPageMode;
@@ -56,4 +59,6 @@ private:
   ScrollWidget* scrollWidget = NULL;
 
   PageProperties props;
+  bool initialStaff = false;
+  bool staffPreset = false;
 };

@@ -802,6 +802,7 @@ void Element::updateFromNode()
     params.xRuling = std::max(Dim(0), toReal(node->getStringAttr("__rrxruling"), 0));
     params.yRuling = std::max(Dim(0), toReal(node->getStringAttr("__rryruling"), 0));
     params.dotRadius = std::max(Dim(0), toReal(node->getStringAttr("__rrdotradius"), 0));
+    params.staff = toReal(node->getStringAttr("__rrstaff"), 0) != 0;
     params.opaque = toReal(node->getStringAttr("__rropaque"), 1) != 0;
     params.outline = toReal(node->getStringAttr("__rroutline"), 0) != 0;
     // a build that saw only a plain <g> may have moved it with a transform attribute; fold that into the
@@ -1108,6 +1109,11 @@ void Element::serializeAttr(SvgWriter* writer)
       node->setAttr<Dim>("__rrdotradius", m_region.dotRadius);
     else
       node->removeAttr("__rrdotradius");
+    // written only when on, so a region without it is byte-identical to before and older builds show lines
+    if(m_region.staff)
+      node->setAttr("__rrstaff", "1");
+    else
+      node->removeAttr("__rrstaff");
     node->setAttr("__rropaque", m_region.opaque ? "1" : "0");
     // written only when on, so a region without one is byte-identical to before
     if(m_region.outline)

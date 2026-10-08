@@ -255,6 +255,8 @@ void ScribbleConfig::init()
   cfg["maxMemoryMB"] = 1024;  // start unloading pages when memory usage hits 1GB
   // the Choose Layout checkbox: 0 drops the red margin line from the built-in layouts (AddPageMenu)
   cfg["layoutMarginLine"] = 1;
+  // 1 makes the default page music paper (see PageProperties::staff)
+  cfg["staffRuling"] = 0;
 
   // floats
   // page defaults - initial values are determined from screen size on first run

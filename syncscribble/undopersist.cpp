@@ -254,6 +254,7 @@ void RegionChangedItem::persist(UndoPersistWriter& out)
   node.append_attribute("dotradius") = realStr(params.dotRadius).c_str();
   node.append_attribute("opaque") = params.opaque ? 1 : 0;
   node.append_attribute("outline") = params.outline ? 1 : 0;
+  node.append_attribute("staff") = params.staff ? 1 : 0;
 }
 
 void StrokeLayerItem::persist(UndoPersistWriter& out)
@@ -294,6 +295,7 @@ void PageChangedItem::persist(UndoPersistWriter& out)
   node.append_attribute("marginLeft") = realStr(props.marginLeft).c_str();
   node.append_attribute("rulecolor") = fstring("%u", props.ruleColor.argb()).c_str();
   node.append_attribute("dotradius") = realStr(props.dotRadius).c_str();
+  node.append_attribute("staff") = props.staff ? 1 : 0;
 }
 
 void PageOutlineItem::persist(UndoPersistWriter& out)
@@ -503,6 +505,7 @@ UndoHistoryItem* UndoPersist::readItem(const pugi::xml_node& node, ScribbleDoc* 
     params.dotRadius = node.attribute("dotradius").as_double();
     params.opaque = node.attribute("opaque").as_int(1) != 0;
     params.outline = node.attribute("outline").as_int(0) != 0;
+    params.staff = node.attribute("staff").as_int(0) != 0;
     params.sanitize();
     return new RegionChangedItem(s, pg, params);
   }
@@ -535,7 +538,8 @@ UndoHistoryItem* UndoPersist::readItem(const pugi::xml_node& node, ScribbleDoc* 
     PageProperties props(node.attribute("width").as_double(), node.attribute("height").as_double(),
         node.attribute("xruling").as_double(), node.attribute("yruling").as_double(),
         node.attribute("marginLeft").as_double(), Color::fromArgb(node.attribute("color").as_uint()),
-        Color::fromArgb(node.attribute("rulecolor").as_uint()), node.attribute("dotradius").as_double());
+        Color::fromArgb(node.attribute("rulecolor").as_uint()), node.attribute("dotradius").as_double(),
+        node.attribute("staff").as_int(0) != 0);
     return new PageChangedItem(pg, props);
   }
   if(name == "outlinechanged")

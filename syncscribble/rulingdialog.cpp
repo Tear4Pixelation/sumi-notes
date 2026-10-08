@@ -55,6 +55,8 @@ RulingDialog::RulingDialog(ScribbleDoc* doc, const PageProperties* initProps, bo
   predefRulings[0][0] = xruling;  predefRulings[0][1] = yruling;
   predefRulings[0][2] = marginLeft;
   predefDotRadii[0] = props.dotRadius;
+  initialStaff = props.staff;
+  staffPreset = initialStaff;
 
   clipWarning = new Widget(createTextNode(_("This page size will clip content!")));
   clipWarning->setVisible(false);
@@ -73,7 +75,7 @@ RulingDialog::RulingDialog(ScribbleDoc* doc, const PageProperties* initProps, bo
   else {
     comboRuling = createComboBox({_("Current"), _("Plain"), _("Wide ruled"), _("Medium ruled"),
         _("Narrow ruled"), _("Coarse grid"), _("Medium grid"), _("Fine grid"), _("Dotted ruled"),
-        _("Coarse dot grid"), _("Medium dot grid"), _("Fine dot grid")});
+        _("Coarse dot grid"), _("Medium dot grid"), _("Fine dot grid"), _("Music staves")});
     comboRuling->onChanged = [this](const char* s){ setRuleType(comboRuling->index()); };
   }
 
@@ -195,6 +197,7 @@ void RulingDialog::updatePreview()
   preview.yRuling = spinYRuling->value();
   preview.marginLeft = spinLeftMargin->value();
   preview.dotRadius = spinDotRadius->value();
+  preview.staff = staffActive();
   preview.color = pageColorPicker->color();
   preview.ruleColor = ruleColorPicker->color();
   gui->deleteContents(rulePreview);
@@ -227,6 +230,11 @@ void RulingDialog::accept()
   props.yRuling = spinYRuling->value();
   props.marginLeft = spinLeftMargin->value();
   props.dotRadius = spinDotRadius->value();
+  props.staff = staffActive();
+  if(props.staff) {
+    props.xRuling = 0;
+    props.dotRadius = 0;
+  }
   props.ruleColor = ruleColorPicker->color();
   // in new page mode props is the whole result; the page it describes does not exist yet
   if(newPageMode)
@@ -279,14 +287,25 @@ unsigned int RulingDialog::predefRulings[][3] = {
   {0, 40, 100},  // dotted ruled
   {35, 35, 0},  // coarse dot grid
   {30, 30, 0},  // medium dot grid
-  {20, 20, 0}  // fine dot grid
+  {20, 20, 0},  // fine dot grid
+  // music paper: the Y ruling is the height of one staff band (see rulingregion.h), 144 = 12 staves on A4
+  {0, 144, 0}  // music staves
 };
 
-Dim RulingDialog::predefDotRadii[] = {0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 1.5, 1.5};
+Dim RulingDialog::predefDotRadii[] = {0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 1.5, 1.5, 0};
+const int RulingDialog::STAFF_PRESET = 12;
+
+// music paper is a preset, but it also needs a flag the numbers cannot carry; it stays until another
+//  preset is chosen, and gives way when a dot radius or an X ruling is entered, which staves have none of
+bool RulingDialog::staffActive() const
+{
+  return staffPreset && spinXRuling->value() <= 0 && spinDotRadius->value() <= 0 && spinYRuling->value() > 0;
+}
 
 void RulingDialog::setRuleType(int index)
 {
   // maybe we should show input fields for x,y offset if clipboard options are selected?
+  staffPreset = index == STAFF_PRESET || (index == 0 && initialStaff);
   spinXRuling->setValue(predefRulings[index][0]);
   spinYRuling->setValue(predefRulings[index][1]);
   spinLeftMargin->setValue(predefRulings[index][2]);

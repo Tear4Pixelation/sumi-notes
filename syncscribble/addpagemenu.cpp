@@ -59,6 +59,13 @@ static PageLayout makeLayout(const char* name, Dim xr, Dim yr, Dim margin, Dim d
   return layout;
 }
 
+static PageLayout makeStaffLayout(const char* name, Dim band)
+{
+  PageLayout layout = makeLayout(name, 0, band, 0, 0);
+  layout.staff = true;
+  return layout;
+}
+
 // The lined and squared spacings are the ones the ruling dialog has always offered.  Dot grids carry
 //  no margin: a red line through a dot grid is what that layout exists to avoid.
 static const std::vector<BuiltinLayout>& builtinLayouts()
@@ -75,7 +82,9 @@ static const std::vector<BuiltinLayout>& builtinLayouts()
     {DOTTED, makeLayout(_("Fine"), 20, 20, 0, 1.25)},
     {SPECIAL, makeLayout(_("Plain"), 0, 0, 0, 0)},
     {SPECIAL, makeLayout(_("Dotted lines"), 0, 40, 100, 1)},
-    {SPECIAL, makeLayout(_("Wide margin"), 0, 40, 300, 0), true}
+    {SPECIAL, makeLayout(_("Wide margin"), 0, 40, 300, 0), true},
+    // music paper: yRuling is a staff band, 144 = 12 staves on A4; no margin line, which staves do not have
+    {SPECIAL, makeStaffLayout(_("Music"), 144)}
   };
   return layouts;
 }
@@ -93,6 +102,7 @@ static const char* categoryName(LayoutCategory category)
 PageLayout layoutFromProps(const PageProperties& props)
 {
   PageLayout layout = makeLayout("", props.xRuling, props.yRuling, props.marginLeft, props.dotRadius);
+  layout.staff = props.staff;
   layout.width = props.width;
   layout.height = props.height;
   return layout;
@@ -103,11 +113,13 @@ PageProperties layoutToProps(const PageLayout& layout, const ScribbleConfig* cfg
   return PageProperties(layout.width > 0 ? layout.width : cfg->Float("pageWidth"),
       layout.height > 0 ? layout.height : cfg->Float("pageHeight"), layout.xRuling, layout.yRuling,
       layout.marginLeft, Color::fromRgb(cfg->Int("pageColor")), Color::fromArgb(cfg->Int("ruleColor")),
-      layout.dotRadius);
+      layout.dotRadius, layout.staff);
 }
 
 std::string layoutDescription(const PageLayout& layout)
 {
+  if(layout.staff && layout.yRuling > 0)
+    return fstring(_("Music staves, %g"), layout.yRuling);
   if(layout.dotRadius > 0) {
     if(layout.xRuling > 0 && layout.yRuling > 0)
       return fstring(_("Dot grid, %g x %g"), layout.xRuling, layout.yRuling);
@@ -131,23 +143,26 @@ static std::string shortDescription(const PageLayout& layout)
   Dim spacing = layout.yRuling > 0 ? layout.yRuling : layout.xRuling;
   if(spacing <= 0)
     return _("Plain");
+  if(layout.staff)
+    return fstring("%s %g", _("Staves"), spacing);
   const char* kind = layout.dotRadius > 0 ? _("Dots") :
       (layout.xRuling > 0 && layout.yRuling > 0 ? _("Grid") : _("Lines"));
   return fstring("%s %g", kind, spacing);
 }
 
-// layouts as config strings: "xruling,yruling,margin,dotradius,width,height;..."
+// layouts as config strings: "xruling,yruling,margin,dotradius,width,height[,staff];..."
 static std::vector<PageLayout> parseLayouts(const char* saved)
 {
   std::vector<PageLayout> layouts;
   for(const StringRef& str : splitStringRef(StringRef(saved ? saved : ""), ";", true)) {
     std::vector<StringRef> fields = splitStringRef(str, ',');
-    if(fields.size() != 6)
+    if(fields.size() != 6 && fields.size() != 7)  // the 7th, staff, is newer than the others
       continue;
     auto field = [&fields](int i){ return Dim(atof(fields[i].toString().c_str())); };
     PageLayout layout = makeLayout("", field(0), field(1), field(2), field(3));
     layout.width = field(4);
     layout.height = field(5);
+    layout.staff = fields.size() == 7 && field(6) != 0;
     layouts.push_back(layout);
   }
   return layouts;
@@ -157,8 +172,11 @@ static std::string serializeLayouts(const std::vector<PageLayout>& layouts)
 {
   std::vector<std::string> strs;
   for(const PageLayout& layout : layouts)
-    strs.push_back(fstring("%g,%g,%g,%g,%g,%g", layout.xRuling, layout.yRuling, layout.marginLeft,
-        layout.dotRadius, layout.width, layout.height));
+    strs.push_back(layout.staff ?  // only when set, so a layout without it reads in an older build
+        fstring("%g,%g,%g,%g,%g,%g,1", layout.xRuling, layout.yRuling, layout.marginLeft,
+            layout.dotRadius, layout.width, layout.height) :
+        fstring("%g,%g,%g,%g,%g,%g", layout.xRuling, layout.yRuling, layout.marginLeft,
+            layout.dotRadius, layout.width, layout.height));
   return joinStr(strs, ";");
 }
 
@@ -271,7 +289,30 @@ static std::string rulingSVG(const PageProperties& props, const PageMap& map, co
   const Rect& area = clip.bounds;
   std::string svg;
 
-  if(props.dotRadius > 0 && (props.xRuling > 0 || props.yRuling > 0)) {
+  if(props.staff && props.yRuling > 0) {
+    // Staves, five lines to a band - as Page::generateRuleLayer.  A thumbnail cannot show five lines a
+    //  pixel or two apart (they would be one smear), so it draws just the middle line of each staff,
+    //  which still reads as "staves"; the 1:1 views are exact.
+    Dim band = props.yRuling*scale;
+    bool full = props.yRuling/STAFF_BAND_SPACES*scale >= minsep;
+    std::string lines;
+    Dim start, end;
+    int firstband = std::max(0, int(std::floor((area.top - pageTop)/band)));
+    for(int k = firstband; pageTop + k*band < std::min(area.bottom, pageBottom - 0.5); ++k) {
+      for(int ii = 0; ii < STAFF_LINES; ++ii) {
+        if(!full && ii != STAFF_LINES/2)
+          continue;
+        Dim y = pageTop + (k*props.yRuling + staffLineOffset(ii, props.yRuling))*scale;
+        if(y > pageTop + 0.5 && y < pageBottom - 0.5 && clip.hspan(y, &start, &end)
+            && std::min(end, pageRight) > std::max(start, pageLeft))
+          lines += fstring("M%.2f %.2fH%.2f", std::max(start, pageLeft), y, std::min(end, pageRight));
+      }
+    }
+    if(!lines.empty())
+      svg += fstring("<path class=\"page-preview-rules\" d=\"%s\" fill=\"none\"%s stroke-width=\"%.2f\"/>",
+          lines.c_str(), colorAttrs("stroke", props.ruleColor).c_str(), linewidth);
+  }
+  else if(props.dotRadius > 0 && (props.xRuling > 0 || props.yRuling > 0)) {
     Dim dotr = std::max(props.dotRadius*scale, mindotr);
     // must match Page::generateRuleLayer(), which spaces a dotted line's dots max(4r, 4) apart
     Dim pitch = std::max(std::max(std::max(4*props.dotRadius, Dim(4))*scale, 4*dotr), minsep);
@@ -452,7 +493,9 @@ static std::string tileHalvesSVG(const PageProperties& props, Dim x, Dim y, Dim 
   //  rules is phased as whole cells, and the rows so a line runs through the middle
   Dim originx = props.xRuling > 0 ? cellPhase(props.xRuling, rightw, onetoone) :
       (props.marginLeft > 0 ? std::max(Dim(0), props.marginLeft - 8/onetoone) : 0);
-  Dim originy = centeredLinePhase(props.yRuling, h, onetoone);
+  // a staff is the thing to see, so the window is centred on one (its middle line is the band's middle)
+  Dim originy = props.staff ? std::max(Dim(0), props.yRuling/2 - h/(2*onetoone)) :
+      centeredLinePhase(props.yRuling, h, onetoone);
   PageMap map = {onetoone, Point(right - originx*onetoone, y - originy*onetoone), pagew, pageh};
   Clip clip;
   clip.bounds = Rect::ltwh(right, y, rightw, h);
@@ -663,14 +706,16 @@ std::vector<Button*> createLayoutGrid(Widget* container, const ScribbleConfig* c
 
 PageLayout defaultLayout(const ScribbleConfig* cfg)
 {
-  return makeLayout("", cfg->Float("xRuling"), cfg->Float("yRuling"), cfg->Float("marginLeft"),
+  PageLayout layout = makeLayout("", cfg->Float("xRuling"), cfg->Float("yRuling"), cfg->Float("marginLeft"),
       cfg->Float("dotRadius"));
+  layout.staff = cfg->Int("staffRuling") != 0;
+  return layout;
 }
 
 bool sameLayout(const PageLayout& a, const PageLayout& b)
 {
   return a.xRuling == b.xRuling && a.yRuling == b.yRuling && a.marginLeft == b.marginLeft
-      && a.dotRadius == b.dotRadius && a.width == b.width && a.height == b.height;
+      && a.dotRadius == b.dotRadius && a.staff == b.staff && a.width == b.width && a.height == b.height;
 }
 
 std::string layoutToString(const PageLayout& layout)

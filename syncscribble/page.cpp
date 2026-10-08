@@ -9,9 +9,9 @@ Dim Page::BLANK_Y_RULING = 40;
 bool Page::enableDropShadow = true;
 
 // for legacy support (esp. ScribbleTest); note that we force paper to be opaque
-PageProperties::PageProperties(Dim w, Dim h, Dim xr, Dim yr, Dim ml, Color c, Color rc, Dim dr)
+PageProperties::PageProperties(Dim w, Dim h, Dim xr, Dim yr, Dim ml, Color c, Color rc, Dim dr, bool st)
     : width(w), height(h), color(c.opaque()), xRuling(xr), yRuling(yr), marginLeft(ml), ruleColor(rc),
-      dotRadius(dr) {}
+      dotRadius(dr), staff(st) {}
 
 void Page::initDoc()
 {
@@ -112,7 +112,7 @@ Dim Page::yruling(bool usedefault) const
 
 RulingFrame Page::pageFrame() const
 {
-  return RulingFrame(Point(0, yRuleOffset), 0, props.xRuling, props.yRuling, props.dotRadius);
+  return RulingFrame(Point(0, yRuleOffset), 0, props.xRuling, props.yRuling, props.dotRadius, NULL, props.staff);
 }
 
 std::vector<Element*> Page::regions() const
@@ -233,6 +233,11 @@ void Page::onPageSizeChange()
     contentNode->setAttr<float>("dotradius", props.dotRadius);
   else
     contentNode->removeAttr("dotradius");
+  // likewise only when set: an older build shows the staves as plain lines at the band height
+  if(props.staff)
+    contentNode->setAttr("staff", "1");
+  else
+    contentNode->removeAttr("staff");
   //contentNode->setAttr<color_t>("papercolor", props.color.color);
   // write colors as strings to simplify reading back when pasting pages
   contentNode->setAttr("papercolor", fstring("#%06X", props.color.rgb()).c_str());
@@ -284,7 +289,21 @@ void Page::generateRuleLayer(Color pageColor, Dim w, Dim h)
   s->addClass("pagerect");
   ruleNode->addChild(s);
 
-  if(props.dotRadius > 0 && (props.xRuling > 0 || props.yRuling > 0)) {
+  if(props.staff && props.yRuling > 0) {
+    // one path for all the staves (11 or so per page, 5 lines each), like the dots below
+    Path2D lines;
+    for(Dim bandy = 0; bandy < h; bandy += props.yRuling) {
+      for(int ii = 0; ii < STAFF_LINES; ++ii) {
+        Dim ruley = bandy + staffLineOffset(ii, props.yRuling);
+        if(ruley < h)
+          lines.addLine(Point(0, ruley), Point(w, ruley));
+      }
+    }
+    s = new SvgPath(lines);
+    s->addClass("staffrule");
+    ruleNode->addChild(s);
+  }
+  else if(props.dotRadius > 0 && (props.xRuling > 0 || props.yRuling > 0)) {
     // All dots are one filled path: a node per dot would be thousands of nodes on a fine grid.  With one
     //  ruling set, the dots run along its lines at a pitch of a few radii, reading as a dotted line.
     Dim r = props.dotRadius;
@@ -647,6 +666,11 @@ bool Page::loadSVG(SvgDocument* doc)
   props.yRuling = yr;
   props.marginLeft = margin;
   props.dotRadius = contentNode->getFloatAttr("dotradius", atof(contentNode->getStringAttr("dotradius", "0")));
+  props.staff = atof(contentNode->getStringAttr("staff", "0")) != 0;
+  if(props.staff) {
+    props.xRuling = 0;
+    props.dotRadius = 0;
+  }
   props.ruleColor = rulecolor;
   props.color.setAlphaF(1);
 

@@ -538,18 +538,19 @@ void RegionChangedItem::serialize(IOStream& strm)
   // numbers only, so fstring is safe (no user string goes on the wire here)
   const RulingRegionParams& curr = s->regionParams();
   strm << fstring("<regionchanged strokeuuid='%llu' pts='%s' origin='%s' angle='%.17g' xruling='%.9g'"
-      " yruling='%.9g' dotradius='%.9g' opaque='%d' outline='%d'/>", s->uuid,
+      " yruling='%.9g' dotradius='%.9g' opaque='%d' outline='%d' staff='%d'/>", s->uuid,
       serializeRegionPoints(curr.corners).c_str(), serializeRegionPoints({curr.origin}).c_str(), double(curr.angle),
-      double(curr.xRuling), double(curr.yRuling), double(curr.dotRadius), curr.opaque ? 1 : 0, curr.outline ? 1 : 0);
+      double(curr.xRuling), double(curr.yRuling), double(curr.dotRadius), curr.opaque ? 1 : 0, curr.outline ? 1 : 0,
+      curr.staff ? 1 : 0);
 }
 
 void PageChangedItem::serialize(IOStream& strm)
 {
   // lots of parameters - just use fstring
   strm << fstring("<pagechanged pagenum='%d' width='%.3f' height='%.3f' color='%u' xruling='%.3f'"
-      " yruling='%.3f' marginLeft='%.3f' rulecolor='%u' dotradius='%.3f'>", p->getPageNum(), p->props.width,
+      " yruling='%.3f' marginLeft='%.3f' rulecolor='%u' dotradius='%.3f' staff='%d'>", p->getPageNum(), p->props.width,
       p->props.height, p->props.color.argb(), p->props.xRuling, p->props.yRuling, p->props.marginLeft,
-      p->props.ruleColor.argb(), p->props.dotRadius);
+      p->props.ruleColor.argb(), p->props.dotRadius, p->props.staff ? 1 : 0);
   //if(props.ruleLayer)
   //  props.ruleLayer->saveSVG(strm);
   strm << "</pagechanged>";
