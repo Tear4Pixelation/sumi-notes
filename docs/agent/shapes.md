@@ -206,6 +206,14 @@ were all refused. 240 Hz sampling by itself cost nothing.
   `recognizeScribble(liftParams(level))` as the pen lifts, over every stroke written: 6 or 8 passes, turns
   0.2, long rule from 24 - 0.07% / 0 false erases. Short scratch-outs are left to the hold on purpose.
   The lift path needs `shapeSnapDelay` > 0, since that is what collects `snapSamples`.
+- **A lift scratch-out keeps its scribble in the history.** The detection can be wrong, so the ink is not
+  thrown away: `scratchOutOnLift(Selection&)` only *selects* what is under the scribble (before the
+  scribble is on the page, so it cannot select itself), the scribble is committed as an ordinary stroke
+  (undo step 1), then the action is ended and a second one deletes the selection (undo step 2). One undo
+  after a false detection brings the writing back with the scribble over it; a second removes the
+  scribble. Both are plain history items, so sync and saved undo steps need nothing special. A scribble
+  over nothing erases nothing and so simply stays ink. The *held* scratch-out (`snapStroke`) is unchanged:
+  one step, no ink. Tested in `shapeSnapTest()` (fails against the old drop-the-ink code).
 - **Long scratch-outs are judged more loosely.** Real ones over a line of text (25-45 reversals, loops,
   arches, spikes) always have a short pass or a turn over the gap limit: pass length and gap ignore
   their worst 20-25%, and long strokes get a wider turn limit. On lift, don't start that rule below 24

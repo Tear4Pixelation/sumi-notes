@@ -393,7 +393,7 @@ protected:
   // returns false once there is nothing left to wait for, which stops the timer
   bool checkShapeSnap(Timestamp now);
   bool snapStroke();
-  bool scratchOutOnLift();
+  bool scratchOutOnLift(Selection& erased);
   void discardStrokeBuilder();
   void scaleSnapShape(Point pos);
   void commitSnapShape();
