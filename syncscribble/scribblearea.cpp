@@ -2895,7 +2895,7 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
   // what ruled insert space moves: the line it starts on and the local x it starts at (MIN_DIM: that whole
   //  line); the press's own line and x for Right and the combined tool
   insSpaceSelLine = initialLine;
-  insSpaceSelX = lx;
+  insSpaceSelX = insSpaceColX = lx;
   const bool skipLines = currMode == MODE_INSSPACERULED && scribbleDoc->scribbleMode->insSpaceSkipLines;
   if(currMode == MODE_INSSPACERULED && insSpaceAxis == MODE_INSSPACEDOWN) {
     // Insert Lines: near a rule line moves the block below it, mid-line splits the line at the pen, and with
@@ -3220,15 +3220,20 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
     addRegionsToInsertSpace(tempSelection, [&](const Rect& r) { return r.left >= pos.x; });
     break;
   case MODE_INSSPACERULED:
-    tempSelection = new Selection(selsource);
-    tempSelection->ruling = gestureFrame;
   {
-    // a whole line moves whatever columns it has (as a press in the margin does); a region has no margin
-    //  to make findStops() stand down, so the selector is told directly
-    const RuledSelector::ColMode colMode = insSpaceSelX == MIN_DIM ? RuledSelector::COL_NONE : selColMode;
+    // Insert Lines moving whole lines keeps to the pen's side of a vertical line that crosses the rule it
+    //  opens (ruled select's column stops, found from the pen and the line above the moved block, so a
+    //  vertical line starting on the moved line itself moves with it).  Any other whole-line start moves
+    //  whatever columns the line has, as a press in the margin does; a region has no margin to make
+    //  findStops() stand down, so the selector is told directly
+    const bool wholeLine = insSpaceSelX == MIN_DIM;
+    const bool wholeLineCols = wholeLine && insSpaceAxis == MODE_INSSPACEDOWN && selColMode != RuledSelector::COL_NONE;
+    const RuledSelector::ColMode colMode = wholeLine && !wholeLineCols ? RuledSelector::COL_NONE : selColMode;
     tempSelection = new Selection(selsource);
     tempSelection->ruling = gestureFrame;
     ruledSelector = new RuledSelector(tempSelection, colMode);
+    if(wholeLineCols)
+      ruledSelector->findStops(insSpaceColX, insSpaceSelLine - 1);
     ruledSelector->selectRuledAfter(insSpaceSelX, insSpaceSelLine);
     // if cursor down past left margin, we sort strokes, but we'll only
     //  enable inserting horz space if there are strokes on the first line
@@ -3615,7 +3620,11 @@ void ScribbleArea::doMoveEvent(const InputEvent& event)
       //  it lands on runs from insSpaceEraseX on its new first line to where it started
       int target = insSpaceSelLine + (line - initialLine);
       if(target < insSpaceSelLine) {
-        insSpaceEraseSelector->findStops(insSpaceSelX, target);  // columns found from the pen, as always
+        // columns found from the pen, as always; for whole lines the same stops the move found
+        if(insSpaceSelX == MIN_DIM)
+          insSpaceEraseSelector->findStops(insSpaceColX, insSpaceSelLine - 1);
+        else
+          insSpaceEraseSelector->findStops(insSpaceSelX, target);
         insSpaceEraseSelector->selectRuled(insSpaceEraseX, target, insSpaceSelX, insSpaceSelLine);
       }
       else
