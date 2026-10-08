@@ -141,7 +141,8 @@ public:
   // first element that sorts above `layer` in z-order, i.e. where a new element on `layer` goes
   Element* layerInsertPos(int layer) const;
   // first element at or above `layer` - where a DRAW_UNDER pen puts its stroke, which must mean
-  //  "under everything on my layer", not under the whole page
+  //  "under all the ink on my layer", not under the whole page.  Images on the layer (scans) are
+  //  skipped: the stroke goes above the last one, or a marker would vanish behind the picture
   Element* layerFirstElement(int layer) const;
   // Move an element to another layer, restacking it into that layer's run (at `next` if given).
   //  Returns the element it used to precede (NULL = it was last), which is exactly what an undo item

@@ -716,11 +716,22 @@ Element* Page::layerFirstElement(int layer) const
   if(!document)
     return NULL;
   int z = document->layers.zIndexOf(layer);
+  // An image on the layer (a scan, a placed photo) is opaque, so a stroke put under it is invisible:
+  //  "under the ink" must mean above the last image of the run, i.e. between the picture and the
+  //  writing, so the scan's dark text still shows through the highlight.
+  Element* first = NULL;
   for(Element* s : children()) {
-    if(document->layers.zIndexOf(s->layer()) >= z)
-      return s;
+    int sz = document->layers.zIndexOf(s->layer());
+    if(sz < z)
+      continue;
+    if(sz == z && s->node->type() == SvgNode::IMAGE) {
+      first = NULL;
+      continue;
+    }
+    if(!first)
+      first = s;
   }
-  return NULL;
+  return first;
 }
 
 Element* Page::moveToLayer(Element* s, int layer, Element* next)
