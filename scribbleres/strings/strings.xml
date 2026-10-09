@@ -13,6 +13,7 @@
   <string name="screenshot_add_to_page">Add to page</string>
   <string name="screenshot_background">PDF / image background</string>
   <string name="screenshot_annotations">Annotations</string>
+  <string name="screenshot_keep_white">Keep white</string>
   <string name="menu_select_pages">Select Pages</string>
   <string name="menu_split_tb">Split T/B</string>
   <string name="menu_split_bt">Split B/T</string>

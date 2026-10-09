@@ -2494,9 +2494,14 @@ void ScribbleArea::captureScreenshot()
   if(!region.isValid() || region.width() < 1 || region.height() < 1)
     return;
   Dim scale = screenshotScale(region);
+  bool hasBackground = false;
+  if(srcPage->ruleNode) {
+    for(SvgNode* child : srcPage->ruleNode->children())
+      hasBackground = hasBackground || child->type() == SvgNode::IMAGE;
+  }
   ScreenshotDialog dialog([srcPage, region, scale](int layers){
     return renderPageRegion(srcPage, region, scale, layers);
-  });
+  }, hasBackground);
   if(Application::execDialog(&dialog) != Dialog::ACCEPTED)
     return;
   Rect crop = dialog.cropRect();

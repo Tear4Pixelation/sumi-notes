@@ -10,7 +10,8 @@
 class Page;
 
 // what a capture includes; the paper itself never is - it belongs to the page copied from
-enum ScreenshotLayers { SHOT_RULING = 1, SHOT_BACKGROUND = 2, SHOT_INK = 4,
+// SHOT_KEEP_WHITE (only with SHOT_BACKGROUND) skips the white-to-alpha step, so the PDF page keeps its white
+enum ScreenshotLayers { SHOT_RULING = 1, SHOT_BACKGROUND = 2, SHOT_INK = 4, SHOT_KEEP_WHITE = 8,
     SHOT_DEFAULT = SHOT_BACKGROUND | SHOT_INK };
 
 // Renders `region` (page units) of `page` at `scale` pixels per unit, in the document's own colors
@@ -36,7 +37,8 @@ public:
   //  at the same size, so the crop carries over
   typedef std::function<Image(int layers)> RenderFn;
 
-  explicit ScreenshotDialog(RenderFn render);
+  // hasBackground: the page has a PDF or scan image, so the keep-white option is offered
+  ScreenshotDialog(RenderFn render, bool hasBackground);
   // the crop in image pixels, and the cropped image; meaningful once finished with ACCEPTED
   Rect cropRect() const;
   Image takeCropped() const;
@@ -52,4 +54,5 @@ private:
   CheckBox* cbRuling;
   CheckBox* cbBackground;
   CheckBox* cbInk;
+  CheckBox* cbKeepWhite;
 };

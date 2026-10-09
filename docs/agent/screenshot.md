@@ -20,7 +20,7 @@ an image. Made for copying an exercise off a worksheet onto the page you are wor
    the popup dialog's own button row and title are hidden, and its vertical padding trimmed to
    `HEADER_PADDING`). The pushbuttons get `box-anchor="vfill"`: `#pushbutton` is `fill`, which in a row
    makes them share the free width with the stretch and look over-padded. Enter = Add to page, Esc = cancel. Checkboxes below: **Ruling** (off), **PDF / image
-   background** (on), **Annotations** (on); each change re-renders through the dialog's `RenderFn` at the same
+   background** (on), **Annotations** (on), and **Keep white** (off; only offered when the page has a PDF/scan image); each change re-renders through the dialog's `RenderFn` at the same
    size, so the crop (in pixels) carries over.
 5. **Copy** -> app clipboard as one `SvgImage` element at its real size and original position, so Paste in
    another page lands where it was. **Add to page** -> pasted at the middle of the view, selected.
@@ -37,6 +37,8 @@ an image. Made for copying an exercise off a worksheet onto the page you are wor
 - Rendered on white, then **`whiteToAlpha()`**: color-to-alpha against white, so the clip looks identical
   on white paper, sits cleanly on tinted paper, and night mode's image detection sees it as mostly
   transparent - a document - and flips it.
+- **Keep white** (`SHOT_KEEP_WHITE`, effective only with the background layer) skips `whiteToAlpha()`, so the
+  PDF page keeps its opaque white (and the area outside the image is white too).
 
 ## Traps
 

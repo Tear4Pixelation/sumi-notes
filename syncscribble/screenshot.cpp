@@ -89,7 +89,8 @@ Image renderPageRegion(Page* page, const Rect& region, Dim scale, int layers)
     Element::FORCE_NORMAL_DRAW = forceNormal;
     painter.endFrame();
   }
-  whiteToAlpha(image.bytes(), image.width, image.height);
+  if(!((layers & SHOT_BACKGROUND) && (layers & SHOT_KEEP_WHITE)))
+    whiteToAlpha(image.bytes(), image.width, image.height);
   return image;
 }
 
@@ -231,7 +232,7 @@ void ScreenshotCropWidget::draw(SvgPainter* svgp) const
   painter->restore();
 }
 
-ScreenshotDialog::ScreenshotDialog(RenderFn render) : PopupDialog(createPopupDialogNode()),
+ScreenshotDialog::ScreenshotDialog(RenderFn render, bool hasBackground) : PopupDialog(createPopupDialogNode()),
     renderFn(render), source(render(SHOT_DEFAULT))
 {
   cropWidget = new ScreenshotCropWidget(&source);
@@ -269,11 +270,14 @@ ScreenshotDialog::ScreenshotDialog(RenderFn render) : PopupDialog(createPopupDia
   cbRuling = createCheckBox(_("Ruling"), false);
   cbBackground = createCheckBox(_("PDF / image background"), true);
   cbInk = createCheckBox(_("Annotations"), true);
-  for(CheckBox* cb : {cbRuling, cbBackground, cbInk}) {
+  cbKeepWhite = createCheckBox(_("Keep white"), false);
+  for(CheckBox* cb : {cbRuling, cbBackground, cbInk, cbKeepWhite}) {
     cb->onToggled = [this](bool){ rerender(); };
     cb->setMargins(0, 10);
   }
   Widget* optionsRow = createRow({cbRuling, cbBackground, cbInk});
+  if(hasBackground)
+    optionsRow->addWidget(cbKeepWhite);
   optionsRow->setMargins(6, 0);
 
   column->addWidget(header);
@@ -302,7 +306,7 @@ Image ScreenshotDialog::takeCropped() const
 void ScreenshotDialog::rerender()
 {
   int layers = (cbRuling->isChecked() ? SHOT_RULING : 0) | (cbBackground->isChecked() ? SHOT_BACKGROUND : 0)
-      | (cbInk->isChecked() ? SHOT_INK : 0);
+      | (cbInk->isChecked() ? SHOT_INK : 0) | (cbKeepWhite->isChecked() ? SHOT_KEEP_WHITE : 0);
   // same region and scale, so the same size: the crop, which is in pixels, stays where it was
   source = renderFn(layers);
   cropWidget->node->invalidate(true);
