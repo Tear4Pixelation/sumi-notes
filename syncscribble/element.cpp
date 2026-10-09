@@ -3,6 +3,7 @@
 #include "selection.h"
 #include "usvg/svgparser.h"  // for toReal
 #include "strokebuilder.h"  // for rebuilding stroke when scaling width
+#include "erasegeom.h"
 
 
 bool Element::ERASE_IMAGES = true;
@@ -452,22 +453,37 @@ bool Element::freeErase(const Point& prevpos, const Point& pos, Dim radius)
       touched = s->freeErase(prevpos, pos, radius) || touched;
   }
   else if(isPathElement()) {
-    Path2D eraser;
-    Point dr = pos == prevpos ? Point(1, 0) : (pos - prevpos).normalize();
-    Point n = normal(dr);
-    eraser.moveTo(prevpos + radius*(-dr + n));
-    eraser.lineTo(prevpos + radius*(-dr - n));
-    eraser.lineTo(pos + radius*(dr - n));
-    eraser.lineTo(pos + radius*(dr + n));
-    eraser.closeSubpath();
-    eraser.transform(node->getTransform().inverse());
-    if(polygonArea(eraser.points) > 0)
-      std::reverse(eraser.points.begin(), eraser.points.end());
-
+    // The eraser is the capsule swept from prevpos to pos (round ends - this was a rectangle reaching
+    //  radius past both ends, so its corners erased ink up to 1.41 radius away), clipped against the
+    //  stroke's centre line (the pen points).  The ink reaches half the stroke width past that line, so the
+    //  capsule is widened by the half width: the eraser cuts as soon as its edge touches the ink, and what
+    //  is left - centre line plus half width, i.e. a round cap at each cut - ends flush with the eraser.
+    //  Without this a wide stroke only erased once the eraser reached its middle.
+    const Transform2D inv = node->getTransform().inverse();
+    const Point a = inv.map(prevpos), b = inv.map(pos);
+    const Dim localRadius = radius*inv.avgScale();
     if(penPoints.empty())
       penPoints = toPenPoints();
+    // the width of the ink where the eraser is: the widest pen segment within reach (pressure varies it)
+    Dim halfWidth = 0;
+    if(node->hasClass(STROKE_PEN_CLASS))
+      halfWidth = node->getFloatAttr("stroke-width", 0)/2;
+    else {
+      for(size_t ii = 1; ii < penPoints.size(); ++ii) {
+        if(penPoints[ii].moveTo())
+          continue;
+        Dim segHalf = std::max(penPoints[ii-1].dr.dist(), penPoints[ii].dr.dist())/2;
+        if(segHalf > halfWidth && segmentDist2(a, b, penPoints[ii-1].p, penPoints[ii].p)
+            < (localRadius + segHalf)*(localRadius + segHalf))
+          halfWidth = segHalf;
+      }
+    }
+    std::vector<Point> eraser = capsulePolygon(a, b, localRadius + halfWidth);
+    if(polygonArea(eraser) > 0)
+      std::reverse(eraser.begin(), eraser.end());
+
     if(!penPoints.empty())
-      touched = erasePenPoints(penPoints, eraser.points);
+      touched = erasePenPoints(penPoints, eraser);
     if(touched) {
       fromPenPoints(penPoints);
       // for wide stroke, dirty area may be larger than eraser bbox, so we just have to dirty whole stroke
@@ -805,6 +821,7 @@ void Element::updateFromNode()
     params.staff = toReal(node->getStringAttr("__rrstaff"), 0) != 0;
     params.opaque = toReal(node->getStringAttr("__rropaque"), 1) != 0;
     params.outline = toReal(node->getStringAttr("__rroutline"), 0) != 0;
+    params.axes = toReal(node->getStringAttr("__rraxes"), 0) != 0;
     // a build that saw only a plain <g> may have moved it with a transform attribute; fold that into the
     //  parameters, which are otherwise always in page coordinates
     if(node->hasTransform()) {
@@ -878,8 +895,12 @@ void Element::rebuildRegion(Color paper, Color rule)
   SvgPath* paperNode = NULL;
   SvgPath* rulesNode = NULL;
   SvgPath* outlineNode = NULL;
+  SvgPath* axesNode = NULL;
+  SvgG* labelsNode = NULL;
   for(SvgNode* child : g->children()) {
+    if(child->type() == SvgNode::G && child->hasClass("rr-labels")) labelsNode = static_cast<SvgG*>(child);
     if(child->type() != SvgNode::PATH) continue;
+    if(child->hasClass("rr-axes")) axesNode = static_cast<SvgPath*>(child);
     if(child->hasClass("rr-paper")) paperNode = static_cast<SvgPath*>(child);
     else if(child->hasClass("rr-rules")) rulesNode = static_cast<SvgPath*>(child);
     else if(child->hasClass("rr-outline")) outlineNode = static_cast<SvgPath*>(child);
@@ -943,6 +964,55 @@ void Element::rebuildRegion(Color paper, Color rule)
     outlineNode->setAttribute("vector-effect", "non-scaling-stroke");
     outlineNode->setAttribute("stroke-linejoin", "round");
     outlineNode->invalidate(false);
+  }
+
+  // coordinate system: axes, arrowheads and ticks (rr-axes), then the tick numbers (rr-labels), both in the
+  //  rule color made opaque - the page's rule color is translucent, and the axes must read above the grid
+  //  they sit on.  Like the outline, created on first need and emptied (not removed) when turned off.
+  if(m_region.axes && !axesNode) {
+    axesNode = new SvgPath;
+    axesNode->addClass("rr-axes");
+    g->addChild(axesNode);
+  }
+  if(axesNode) {
+    *axesNode->path() = m_region.axes ? m_region.axesPath() : Path2D();
+    setSvgFillColor(axesNode, Color::NONE);
+    setSvgStrokeColor(axesNode, rule.opaque());
+    axesNode->setAttr<float>("stroke-width", 3.0f);  // twice the outline, 3x a rule line
+    axesNode->setAttribute("vector-effect", "non-scaling-stroke");
+    axesNode->setAttribute("stroke-linejoin", "round");
+    axesNode->setAttribute("stroke-linecap", "round");
+    axesNode->invalidate(false);
+  }
+  if(m_region.axes && !labelsNode) {
+    labelsNode = new SvgG;
+    labelsNode->addClass("rr-labels");
+    g->addChild(labelsNode);
+  }
+  if(labelsNode) {
+    // removeChild() returns the next sibling, not the node it removed
+    while(SvgNode* oldLabel = labelsNode->firstChild()) {
+      labelsNode->removeChild(oldLabel);
+      delete oldLabel;
+    }
+    if(m_region.axes) {
+      RulingFrame frame = m_region.frame();
+      Dim cosAngle = std::cos(frame.angle), sinAngle = std::sin(frame.angle);
+      setSvgFillColor(labelsNode, rule.opaque());
+      labelsNode->setAttribute("font-family", "satoshi, ui-sans, sans-serif");
+      labelsNode->setAttribute("font-size", fstring("%g", double(m_region.axisLabelFontSize())).c_str());
+      for(const AxisLabel& label : m_region.axisLabels()) {
+        SvgText* text = new SvgText();
+        text->setAttribute("text-anchor", label.alignEnd ? "end" : "middle");
+        // a minus sign, not a hyphen, as a plotted axis is printed
+        text->addText(label.value < 0 ? fstring("\xE2\x88\x92%d", -label.value).c_str() : fstring("%d", label.value).c_str());
+        // upright in the region's frame, so the numbers turn with a tilted patch
+        Point anchor = frame.toPage(label.local);
+        text->setTransform(Transform2D(cosAngle, sinAngle, -sinAngle, cosAngle, anchor.x, anchor.y));
+        labelsNode->addChild(text);
+      }
+    }
+    labelsNode->invalidate(true);
   }
   // rule lines fade when zoomed out, exactly as the page's do (see applyStyle)
   node->addClass("write-scale-down");
@@ -1120,6 +1190,10 @@ void Element::serializeAttr(SvgWriter* writer)
       node->setAttr("__rroutline", "1");
     else
       node->removeAttr("__rroutline");
+    if(m_region.axes)
+      node->setAttr("__rraxes", "1");
+    else
+      node->removeAttr("__rraxes");
   }
   // written only when non-default, so an unlayered document gains no attributes at all; a region's
   //  REGION_LAYER is never written - the class is what identifies it

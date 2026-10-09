@@ -1762,7 +1762,7 @@ void ScribbleApp::gotoSelectedPage()
 {
   int pagenum = tagDocList ? tagDocList->selectedPage : -1;
   if(pagenum >= 0 && pagenum < activeDoc()->document->numPages()) {
-    activeDoc()->gotoPage(pagenum);
+    activeDoc()->jumpToPage(pagenum);
     activeArea()->flashPageTags(tagDocList->selectedPageTags);
   }
 }
@@ -2968,6 +2968,54 @@ bool ScribbleApp::insertPdfPages(const std::string& pdfPath)
   }
   progress.close();
   reportReducedPages(budget, _("Insert PDF"));
+  return true;
+}
+
+// Insert Document ("+" menu): one page of a PDF as an image on the current page - content, not a page of its
+//  own (Insert PDF adds pages).  A PDF of several pages asks which one, first page suggested.  Rendered like
+//  Import PDF (pdfImportDPI, JPEG when pdfImportLossy) and placed by ScribbleArea::insertImage at the PDF
+//  page's real size, shrunk to fit the page, so it is one undoable paste that selects it for moving.
+void ScribbleApp::insertPdfAsImage()
+{
+  if(!PdfImport::isAvailable()) {
+    messageBox(Warning, _("Insert Document"), _("This build of Sumi does not include PDF support."));
+    return;
+  }
+  FilePicker::openFile(_("Insert Document"), "pdf", [this](const std::string& filename){
+    if(!filename.empty())
+      insertPdfPageAsImage(filename);
+  });
+}
+
+bool ScribbleApp::insertPdfPageAsImage(const std::string& pdfPath)
+{
+  std::string fileName = FSPath(pdfPath).fileName();
+  PdfImport::MemoryBudget budget(importMemoryLimit());
+  PdfImport::Renderer renderer;
+  if(!renderer.open(pdfPath.c_str(), NULL, &budget) || renderer.numPages() <= 0) {
+    messageBox(Warning, _("Insert Document"),
+        fstring(_("Error importing %s: %s"), fileName.c_str(), renderer.error()));
+    return false;
+  }
+  int pageCount = renderer.numPages();
+  int pageIndex = 0;
+  if(pageCount > 1) {
+    TagNameDialog dialog(fstring(_("Insert page (1-%d)"), pageCount).c_str(), "1");
+    if(Application::execDialog(&dialog) != Dialog::ACCEPTED)
+      return false;
+    pageIndex = std::min(std::max(atoi(dialog.getName().c_str()), 1), pageCount) - 1;
+  }
+  Dim widthPt = 0, heightPt = 0;
+  Image pageImage = renderer.render(pageIndex, std::max(72, cfg->Int("pdfImportDPI")),
+      cfg->Bool("pdfImportLossy") ? Image::JPEG : Image::PNG, &widthPt, &heightPt);
+  if(pageImage.isNull()) {
+    messageBox(Warning, _("Insert Document"),
+        fstring(_("Error importing %s: %s"), fileName.c_str(), renderer.error()));
+    return false;
+  }
+  activeArea()->insertImage(std::move(pageImage), Rect(), widthPt*PdfImport::UNITS_PER_POINT,
+      heightPt*PdfImport::UNITS_PER_POINT);
+  reportReducedPages(budget, _("Insert Document"));
   return true;
 }
 

@@ -240,6 +240,39 @@ since without the double tap it would have had no way to stick at all.
   on it) but is **not** read back; all three flags are read from tokens appended at the end of the string
   instead, so upgrading does not silently make everyone's eraser sticky.
 
+# Eraser hit test (stroke and free eraser)
+
+Both erasers test the **ink**, swept as a **capsule** from the previous pointer position to this one
+(`syncscribble/erasegeom.*`, pure geometry). Before, three things made the hitbox disagree with what is
+drawn, and the user saw them as "must go past the line before it erases", "erases before it gets there"
+and "scribbling over a long horizontal line sometimes leaves it":
+
+- **Stroke eraser** (`PathSelector`, `isNearSegment()` in `selection.cpp`): was a point test against the
+  path's centre line (`Path2D::distToPoint`), sampled every radius/2 along the eraser's motion. It ignored
+  the stroke width, so a wide stroked line was only hit within r of its *centre*, and the file's own header
+  said the test looked at the path's points, not its segments - a long two-point line (a ruler line, a shape)
+  could be crossed without a hit. Now: one capsule per event, against every flattened segment (curves via
+  `toFlat()`), widened by half the `stroke-width` for a stroked path (times the transform's `avgScale`),
+  and anywhere inside a filled outline (filled pen strokes are outlines; per-subpath nonzero winding, since
+  the round pen is one overlapping subpath per segment). Images still only hit on their frame.
+- **Free eraser** (`Element::freeErase(prevpos, pos, radius)`): the eraser polygon was a *rectangle*
+  reaching r past both ends, so its corners erased up to 1.41 r away diagonally; it is now
+  `capsulePolygon()` (round ends, 16 edges per cap, vertices on the outline). It clips the stroke's
+  centre line (pen points), so it is widened by the local half width (the widest pen segment within reach;
+  `stroke-width`/2 for a stroked pen): the cut lands r + w/2 from the eraser's centre and the round cap
+  left there ends flush with the eraser's edge. A flat-pen end is square, so it is left w/2 short of the
+  eraser - the price of cutting the centre line rather than the outline.
+- **Culling**: `ScribbleArea::freeErase()` pads its bbox cull by the stroke half width
+  (`strokeHalfWidth()`), and `isNearSegment()` pads both rects, since `bounds()` may be the geometry
+  alone and a tap or a horizontal line has a zero-area rect.
+
+Not changed: the ruled free eraser (`freeErase(const Rect&)`/band polygon) still clips the centre line
+against the row band, without widening. Tested by `ScribbleTest::eraserHitTest()` (both erasers, at the
+real radius: crossing a 600-long two-point line in one move, touching only a wide line's edge, clear of the
+edge, ink diagonally past the eraser's end, and where the free eraser's cut lands) and standalone by
+`scribbletest/erasetest.cpp` (`runEraseTests()`). Against the old code the edge checks of both erasers,
+the diagonal check of the free eraser and the cut position fail.
+
 # Select touching
 
 A toggle on the select options row (`ScribbleMode::selectTouching`, appended at the end of `toolModes`,
@@ -254,22 +287,44 @@ lasso only changes inside the triangle it tests. Tested by `ScribbleTest::select
 
 # Reflow (ruled insert space)
 
-**Ruled insert space is two tools, one per direction** (first-day report: "split it into moving down and
-moving to the side"). The options row offers **Insert Lines** (`MODE_INSSPACEDOWN`, the existing ruled icon,
-action `actionRuled_Insert_Space`) and **Insert Space in Line** (`MODE_INSSPACERIGHT`,
-`ic_menu_insert_space_ruled_right.svg`, `actionRuled_Insert_Space_Right`). The combined tool moved the text
-down a line whenever the pen drifted while pushing it right, and pushed it sideways while dragging it down;
-nothing it did needs both at once, so it is no longer offered. Both new modes run as the old
-`MODE_INSSPACERULED` gesture - `doPressEvent()` records the tool in `ScribbleArea::insSpaceAxis` and swaps
-`currMode` before anything else looks at it, so selection, Skip Lines, region slop, the negative-space erase
-and page growth are unchanged - and `doMoveEvent()` only cuts the drag to one axis: Right pins `line` to
-`initialLine`, Down pins `lx` to the press and `ldx` to 0 (so with reflow on it is `reflowStrokes(0, dline)`,
-exactly what a straight-down drag of the old tool did). Down pressed inside a line moves the rest of it to a
-new line (a line break); Right pressed in the margin or on an empty line does nothing. `MODE_INSSPACERULED`
-still exists for the tests and as the internal mode; a config that saved it as the insert space mode loads
-as Down. Tested by `ScribbleTest::insSpaceAxisTest()` (the same diagonal drag with each tool), mutation-
-checked: running both as the combined tool fails three of its checks. The new strings are untranslated, and
-the Right icon is hand-made in the style of the ruled one (not from the reicon set).
+**Ruled insert space is one tool whose drag picks the direction** (`MODE_INSSPACEAUTO`, action
+`actionRuled_Insert_Space`, "Ruled Insert Space", the ruled icon). History: the original combined tool moved
+the text down a line whenever the pen drifted while pushing it right, and sideways while dragging it down
+(first-day report), so it was split into **Insert Lines** (`MODE_INSSPACEDOWN`) and **Insert Space in Line**
+(`MODE_INSSPACERIGHT`, commit 424d519). Two picks for one job was the next complaint, so they are merged
+again, with a dead zone instead of a second tool (constants above `ruledInsSpaceEngage()` in
+`scribblearea.cpp`, all in **screen units**, so the hand gets the same dead zone at any zoom):
+
+- **Nothing moves until the pen is `INSSPACE_AXIS_START` (6) from the press.** The axis it is further
+  along then engages: down = Insert Lines, right = Insert Space in Line.
+- **The other axis is ignored until the drag along it exceeds both `INSSPACE_MINOR_MIN` (16) and
+  `INSSPACE_MINOR_RATIO` (0.5) x the drag along the first** - roughly 27 degrees off the first axis. Then it
+  engages and **stays engaged** for the rest of the gesture, and takes the whole drag along it at once (the
+  text jumps to the pen rather than lagging by the threshold). So pushing text right across a rule never
+  changes its line, dragging lines down with a wobble never pushes them sideways, and a deliberate diagonal
+  does both. The ratio does most of the work: on a long drag the minor axis needs half the major's length,
+  the 16 only matters for short ones.
+- **The press zones need to know it is Down, which the press does not.** The press sets up as Right (the
+  press's own line and x, which is what the combined tool did too); when Down engages first,
+  `ruledInsSpaceEngage()` throws that selection away (nothing has moved yet) and reruns
+  `ruledInsSpaceStart()` + `ruledInsSpaceSelect()` as Insert Lines from `insSpacePressFrame` (the frame
+  before Skip Lines doubled it). That is why the press-time start and selection are functions now.
+- Down first and then Right: a whole-line start (near a rule, in the margin) has nothing to push sideways
+  (`insertSpaceX` is false), so it stays Insert Lines; a mid-line split also reflows, and erases like the
+  combined tool (Insert Lines' own erase only applies while Right is not engaged).
+
+`doMoveEvent()` cuts the drag to the engaged axes: not Down pins `line` to `initialLine`, not Right pins `lx`
+to the press. `ldx` is taken from `insSpaceAppliedX`, the x last applied, so a late Right is not lost.
+`MODE_INSSPACEDOWN`/`MODE_INSSPACERIGHT` (fixed axes) and `MODE_INSSPACERULED` (both, no dead zone) remain
+for the tests and as internal starts; a config saved with any of the three loads as the one tool. All run
+as the `MODE_INSSPACERULED` gesture (`doPressEvent()` swaps `currMode` before anything looks at it, so
+selection, Skip Lines, region slop, erase and page growth are shared). Tested by
+`ScribbleTest::insSpaceAxisTest()`: the fixed-axis diagonal, then the one tool's down-with-drift,
+right-with-drift (across the rule below) and diagonal, and every press-zone check below runs through the
+one tool. Mutation-checked: no dead zone (the combined tool) fails 9 checks, a minor axis that never engages
+fails the diagonal. Verified in agent-display on lined paper (right with a drift across the rule, down with a
+drift, diagonal). `ic_menu_insert_space_ruled_right.svg` is no longer used by the UI but is still embedded.
+The help text and tooltip are new and untranslated.
 
 Where wrapped words go and how far apart they sit are measured from the writing, not the page
 (`Selection::measureReflowInk()`, once per gesture, from the ink before it moved):
@@ -307,7 +362,7 @@ whose centre lies in the blank line above a pressed text line stays behind - pre
 instead. Pinned by the "pressed on a blank line" checks in `skippedLinesTest()` (fails against the old
 origin; letters there sit on the rule, the zigzag letters of the other checks are centred high enough to
 pass either way).
-Only ruled insert space (Insert Lines, Insert Space in Line) uses it (the toggle is disabled for vertical insert space); ruled select, ruled
+Only ruled insert space uses it (the toggle is disabled for vertical insert space); ruled select, ruled
 erase and ruled move still step single lines.
 
 **It is a toggle, not detected, on purpose.** Detection by counting strokes per line parity was built and
@@ -318,22 +373,22 @@ so descenders stay on their line.) Tested by `ScribbleTest::skippedLinesTest()`,
 the toggle and forcing it on each fail it.
 
 **Insert Lines has three press zones** (second-day report; `insertLinesStart()` in `rulingregion.cpp`,
-applied in `doPressEvent()`). They hold for Insert Lines only. Insert Space in Line and the internal combined
-`MODE_INSSPACERULED`, which the tests use, still take the press's own line and x. Lines are the gesture's
+applied in `ruledInsSpaceStart()`). "Insert Lines" is now the one tool once its drag engages Down first
+(see above); `MODE_INSSPACEDOWN` is the same start with the axis fixed. A drag that engages Right first, and
+the internal combined `MODE_INSSPACERULED`, still take the press's own line and x. Lines are the gesture's
 frame (`rulingAt()`, so a Paper Patch's pitch and tilt), at single pitch even with Skip Lines:
 
-- **Within `INSERT_LINES_SNAP` (0.2) x pitch of a rule line**, on either side of it: the whole block from the
-  line below that rule moves, whatever x the pen is at. A pen resting on the rule a line's text sits on
-  therefore moves the lines *below* that text ("very close to the line, you move the entire part that is
-  below it").
-- **Mid-line** (the middle 60%): the line splits at the pen. Its part right of the pen, and everything
-  below, moves (the line break the tool already made).
-- **With Skip Lines, a mid-line press on a line with no ink** is on the blank line above a text line, and
-  moves that text line as a block. It used to split it at the pen. You had to put the pen on the text line
-  *above* to move a block ("two lines above"), which is the report's complaint. "Has ink" means a stroke
-  centre in that single-pitch line, on the same ruling, right of the margin (bookmarks don't count). This
-  checks where the pen is, not which lines are text lines, so the toggle stays a toggle. An underline in a
-  blank line makes that line count as text, which gives the old split.
+- **Within `INSERT_LINES_SNAP` (1/8) of a line height of a rule line**, on either side of it: the WHOLE line
+  below that rule and everything under it moves, whatever x the pen is at - never part of that line, never the
+  line above. A pen resting on the rule a line's text sits on therefore moves the lines *below* that text.
+- **Otherwise (mid-line)**: the line splits at the pen. Its part right of the pen, and everything below, moves.
+
+This is ONE rule, `insertLinesStart(localY, yr)`, with no Skip Lines special case and no look at the ink. It
+used to treat a mid-line press on a blank line with Skip Lines as a whole-line press and the zone was 0.2, so
+the same press gave a different selection with the toggle on; do not reintroduce a parameter for it. Skip
+Lines only changes the *frame* the gesture then runs in (doubled pitch from the chosen line's top), i.e. the
+step size, not what is picked. Known residue: in that doubled frame a mid-line split of a band still covers
+two bands (the pressed one and the next), and the column-stop line above the block is a double line.
 
 A whole-line start is `insSpaceSelX = MIN_DIM`, like a press in the margin: no sideways move, no reflow,
 and column stops only as described under "A vertical line is a boundary" below. For a split,
@@ -352,9 +407,9 @@ dragging a block up over lines is how lines get deleted. Column stops are still 
 (`findStops()` is called explicitly before `selectRuled()`, which would otherwise use the erase's start).
 Each gesture is one undo step. Insert Space in Line pulled back left rejoins as it always has.
 
-Tested standalone by `regiontest` (the zones; with the zones removed, 5 checks fail) and in-app by the end of
-`ScribbleTest::insSpaceAxisTest()`: near-rule block, split then rejoin without erasing, and Skip Lines on a
-blank line versus a text line. With the press zones and the erase change reverted, 4 checks fail. Verified
+Tested standalone by `regiontest` (the zones, now incl. exactly 1/8 and just past it; with the zones removed, 5 checks fail) and in-app by the end of
+`ScribbleTest::insSpaceAxisTest()`: near-rule block, split then rejoin without erasing, and the near-rule whole line / past-1/8 split
+run with Skip Lines off and on (identical results, both sides of the rule). With the press zones and the erase change reverted, 4 checks fail. Verified
 in agent-display on lined paper: near-rule block, mid-line split, rejoin from left of the rest, and one
 Ctrl+Z back to the split.
 

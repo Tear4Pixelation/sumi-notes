@@ -103,6 +103,32 @@ selection in `RegionSelector` (`selection.cpp`), the UI in `ScribbleArea` and th
   persistent meaning. The standalone regiontest does not cover it (selector needs the app); checked with
   agent-display. The grip is black-on-white/bgStroke like the rotate grip, no new colors.
 
+- **Spacing changes scale about the red handle** (`RulingRegionParams::setPitchesAbout()`, the slider and
+  the kind menu's pitch conversions): the origin is moved so the handle keeps its local position *in
+  pitches*, i.e. the lines keep their phase at the handle - a line through it stays through it, a handle
+  mid-band stays mid-band. Before, origin stayed put, so the lines scaled about the region's top edge and
+  slid off whatever the handle had been lined up with. Two traps: the slider computes every step from
+  `regionSlideStart`, never from the previous step (the integer-rounded pitches would creep the phase), and
+  `ScribbleArea::pinSelRegionHandle()` pins a *default* handle at its current spot before the first step -
+  the default sits on "the first line", which a finer pitch replaces with a new first line above, so
+  unpinned it would hop. Exactness limits: an axis whose old pitch is 0 (lined -> squared) has no phase,
+  so x stays as it is; the outline does not scale (the size handle still only makes more paper, above).
+  Mutation-checked in `regiontest.cpp`.
+- **Coordinate System** (`RulingRegionParams::axes`, `__rraxes`, `axes` on `<regionchanged>` and in undo
+  persistence): a squared grid plus x and y axes through `origin`, which is the plot's (0, 0). Made from the
+  "+" menu's Coordinate System entry (same drag tool as Patch, `ScribbleMode::drawAxes`; origin starts at
+  the box's centre) or the kind dropdown (origin moved to the centre on switching to it). Cell = the grid
+  pitch (the slider); ticks and numbers every `AXIS_TICK_CELLS` = 2 cells, so grid 21 ticks every 42. Math
+  orientation: y grows *up* the page (local -y), negative numbers use U+2212. The red handle *is* the origin
+  (`defaultOriginHandlePos` returns it, clamped inside), so dragging it moves the axes; the relocation grip
+  is hidden and `handleMoved` ignored for axes - a handle that was not the origin would plot nothing. Drawn
+  as two more children: `rr-axes` (path: axes, open arrowheads, ticks; 3 px non-scaling, 3x a grid line) and `rr-labels`
+  (a `<g>` of `<text>`, upright in the frame so they tilt with the patch, `satoshi` like page tags), both
+  in the page's rule color made opaque - the theme's rule color, never a literal, and opaque so the axes
+  read above the translucent grid. Numbers whose anchor falls outside the outline, and ticks within an
+  arrowhead's length of the tip, are dropped. `sanitize()` keeps it squared and dotless and a staff never
+  has axes. Geometry (tick step, y up, clipping, sanitize) tested in `regiontest.cpp`, mutation-checked.
+
 Known gaps: page-level ruled insert space does not move regions below it (vertical/horizontal insert space
 do); content pushed past a region's edge by ruled insert space leaves it; a corner drag can make a
 self-intersecting outline; the hover cursor for a relative-width marker uses the page's line height; regions

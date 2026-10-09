@@ -181,6 +181,12 @@ void MainWindow::refreshScribbleWidget(ScribbleWidget* w, const UIState* uiState
   }
   if(w->prevPage)
     w->prevPage->setEnabled(uiState->pageNum > 1);
+  if(w->lastPage)
+    w->lastPage->setEnabled(uiState->pageNum < uiState->totalPages);
+  if(w->jumpBack)
+    w->jumpBack->setEnabled(uiState->prevView);
+  if(w->jumpForward)
+    w->jumpForward->setEnabled(uiState->nextView);
   if(w->nextPage) {
     bool lastpage = uiState->pageNum == uiState->totalPages;
     w->nextPage->setIcon(lastpage ? appendPageIcon : nextPageIcon);
@@ -362,8 +368,9 @@ Action* MainWindow::modeToAction(int mode)
     case MODE_SELECTPATH:  return actionPath_Select;
     case MODE_INSSPACE:  return actionInsert_Space;
     case MODE_INSSPACERULED:
-    case MODE_INSSPACEDOWN:  return actionRuled_Insert_Space;
-    case MODE_INSSPACERIGHT:  return actionRuled_Insert_Space_Right;
+    case MODE_INSSPACEDOWN:
+    case MODE_INSSPACERIGHT:
+    case MODE_INSSPACEAUTO:  return actionRuled_Insert_Space;
     case MODE_INSSPACEVERT:  return actionInsert_Space_Vert;
     case MODE_PAGESEL:  return actionSelect_Pages;
     default: return NULL;
@@ -433,8 +440,8 @@ void MainWindow::updateMode()
   // only ruled insert space works in lines
   insSpaceSkipLinesToggle->setChecked(app->scribbleMode->insSpaceSkipLines);
   int insSpaceMode = app->scribbleMode->insSpaceMode;
-  insSpaceSkipLinesToggle->setEnabled(insSpaceMode == MODE_INSSPACEDOWN || insSpaceMode == MODE_INSSPACERIGHT
-      || insSpaceMode == MODE_INSSPACERULED);
+  insSpaceSkipLinesToggle->setEnabled(insSpaceMode == MODE_INSSPACEAUTO || insSpaceMode == MODE_INSSPACEDOWN
+      || insSpaceMode == MODE_INSSPACERIGHT || insSpaceMode == MODE_INSSPACERULED);
   // an options row left open follows a mode change made outside the tools toolbar
   int modeType = ScribbleMode::getModeType(mode);
   if(openOptionsRow && openOptionsRow != modeType)
@@ -552,16 +559,31 @@ public:
   }
 };
 
-enum { REGION_LINED = 0, REGION_SQUARED, REGION_DOTTED, REGION_STAFF };
+enum { REGION_LINED = 0, REGION_SQUARED, REGION_DOTTED, REGION_STAFF, REGION_AXES };
 
 static int regionKind(const RulingRegionParams& params)
 {
-  return params.staff ? REGION_STAFF : params.dotRadius > 0 ? REGION_DOTTED : params.xRuling > 0 ? REGION_SQUARED : REGION_LINED;
+  return params.axes ? REGION_AXES : params.staff ? REGION_STAFF : params.dotRadius > 0 ? REGION_DOTTED
+      : params.xRuling > 0 ? REGION_SQUARED : REGION_LINED;
 }
 
 static const char* regionKindTitle(int kind)
 {
-  return kind == REGION_STAFF ? _("Music") : kind == REGION_DOTTED ? _("Dotted") : kind == REGION_SQUARED ? _("Squared") : _("Lined");
+  return kind == REGION_AXES ? _("Coordinate System") : kind == REGION_STAFF ? _("Music")
+      : kind == REGION_DOTTED ? _("Dotted") : kind == REGION_SQUARED ? _("Squared") : _("Lined");
+}
+
+// a coordinate system patch's icon (region kind menu and the "+" menu), on the same 24 unit grid as below
+const SvgNode* MainWindow::axesPatchIcon()
+{
+  static const char* axesSVG = R"(<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+    <g class="icon" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M2.5 14H21.5M19 11.5L21.5 14L19 16.5M10 21.5V2.5M7.5 5L10 2.5L12.5 5"/>
+      <path d="M5.5 13V15M14.5 13V15M9 18.5H11M9 9.5H11"/>
+    </g></svg>)";
+  static const SvgDocument* axes =
+      SvgGui::useFile("region-kind-axes", std::unique_ptr<SvgDocument>(SvgParser().parseString(axesSVG)));
+  return axes;
 }
 
 // lined reuses the ruled icon; there is no squared or dotted glyph among the icons, so those two are
@@ -588,6 +610,8 @@ static const SvgNode* regionKindIcon(int kind)
       SvgGui::useFile("region-kind-dotted", std::unique_ptr<SvgDocument>(SvgParser().parseString(dottedSVG)));
   static const SvgDocument* staff =
       SvgGui::useFile("region-kind-staff", std::unique_ptr<SvgDocument>(SvgParser().parseString(staffSVG)));
+  if(kind == REGION_AXES)
+    return MainWindow::axesPatchIcon();
   if(kind == REGION_STAFF)
     return staff;
   if(kind == REGION_SQUARED)
@@ -703,9 +727,12 @@ void MainWindow::buildRegionPanel()
   chevron->addClass("icon");
   regionKindBtn->selectFirst(".title")->node->parent()->asContainerNode()->addChild(chevron);
   ArrowPopup* kindMenu = createArrowPopup(Menu::VERT_LEFT);
-  for(int kind : {REGION_LINED, REGION_SQUARED, REGION_DOTTED, REGION_STAFF}) {
+  for(int kind : {REGION_LINED, REGION_SQUARED, REGION_DOTTED, REGION_STAFF, REGION_AXES}) {
     kindMenu->addItem(regionKindTitle(kind), regionKindIcon(kind), [this, kind](){
-      editSelRegion([kind](RulingRegionParams& p){
+      ScribbleArea* area = app->activeArea();
+      // a pitch the conversion changes is scaled about the red handle, as the spacing slider does
+      Point handle = area ? area->pinSelRegionHandle() : Point(NaN, NaN);
+      editSelRegion([kind, handle](RulingRegionParams& p){
         // a staff's yRuling is a whole band, a line pitch's multiple, so switching to or from music
         //  converts rather than keeping the number
         bool wasStaff = p.staff;
@@ -715,8 +742,23 @@ void MainWindow::buildRegionPanel()
         else if(kind != REGION_STAFF && wasStaff)
           pitch = std::round(std::min(std::max(pitch*2.5/STAFF_BAND_SPACES, regionMinSpacing), regionMaxSpacing));
         p.staff = kind == REGION_STAFF;
-        p.yRuling = pitch;
-        p.xRuling = kind == REGION_LINED || kind == REGION_STAFF ? 0 : pitch;
+        Dim newXRuling = kind == REGION_LINED || kind == REGION_STAFF ? 0 : pitch;
+        if(std::isfinite(handle.x))
+          p.setPitchesAbout(handle, newXRuling, pitch);
+        else {
+          p.yRuling = pitch;
+          p.xRuling = newXRuling;
+        }
+        // a coordinate system starts with its (0, 0) in the middle of the patch, so all four quadrants
+        //  show; the red handle then moves it
+        if(kind == REGION_AXES && !p.axes) {
+          RulingFrame frame = p.frame();
+          Rect localBounds;
+          for(const Point& corner : p.corners)
+            localBounds.rectUnion(frame.toLocal(corner));
+          p.origin = frame.toPage(localBounds.center());
+        }
+        p.axes = kind == REGION_AXES;
         if(kind != REGION_DOTTED)
           p.dotRadius = 0;
         else if(p.dotRadius <= 0)
@@ -754,13 +796,15 @@ void MainWindow::buildRegionPanel()
     Element* region = area ? area->selectedRegion() : NULL;
     if(!region)
       return;
-    if(!regionSlideStart)
+    if(!regionSlideStart) {
       regionSlideStart.reset(new RulingRegionParams(region->regionParams()));
+      regionSlideHandle = area->pinSelRegionHandle();
+    }
     Dim spacing = regionSliderToSpacing(pos, region->regionParams().staff);
-    RulingRegionParams params = region->regionParams();
-    params.yRuling = spacing;
-    if(params.xRuling > 0)
-      params.xRuling = spacing;
+    // always from the drag's start, so the rounding of each step does not creep into the phase; scaled
+    //  about the red handle, which therefore keeps its place among the lines (setPitchesAbout)
+    RulingRegionParams params = *regionSlideStart;
+    params.setPitchesAbout(regionSlideHandle, params.xRuling > 0 ? spacing : 0, spacing);
     params.sanitize();
     area->previewSelRegionParams(params);
     regionSpacingText->setText(fstring("%.0f", spacing).c_str());
@@ -1186,6 +1230,18 @@ ScribbleWidget* MainWindow::createScribbleAreaWidget(Widget* container, Scribble
   setupTooltip(areaWidget->prevPage, _("Previous Page"), Tooltips::LEFT | Tooltips::BOTTOM | Tooltips::ABOVE);
   setupTooltip(areaWidget->nextPage, _("Next Page"), Tooltips::LEFT | Tooltips::BOTTOM | Tooltips::ABOVE);
 
+  // last page, and back / forward over jumps (outline, bookmarks, pages view, last page: a jump is anything
+  //  that skips two or more pages - see jumphistory.h)
+  areaWidget->lastPage = createToolbutton(SvgGui::useFile(":/icons/ic_menu_last_page.svg"), _("Last Page"));
+  areaWidget->lastPage->onClicked = SLOT(doCommand(ID_LASTPAGE));
+  areaWidget->jumpBack = createToolbutton(SvgGui::useFile(":/icons/ic_menu_back.svg"), _("Back to Previous Location"));
+  areaWidget->jumpBack->onClicked = SLOT(doCommand(ID_PREVVIEW));
+  areaWidget->jumpForward = createToolbutton(SvgGui::useFile(":/icons/ic_menu_forward.svg"), _("Forward to Next Location"));
+  areaWidget->jumpForward->onClicked = SLOT(doCommand(ID_NEXTVIEW));
+  setupTooltip(areaWidget->lastPage, _("Last Page"), Tooltips::LEFT | Tooltips::BOTTOM | Tooltips::ABOVE);
+  setupTooltip(areaWidget->jumpBack, _("Back to Previous Location"), Tooltips::LEFT | Tooltips::BOTTOM | Tooltips::ABOVE);
+  setupTooltip(areaWidget->jumpForward, _("Forward to Next Location"), Tooltips::LEFT | Tooltips::BOTTOM | Tooltips::ABOVE);
+
   Button* timeRangeBtn = createToolbutton(SvgGui::useFile(":/icons/ic_menu_clock.svg"));
   timeRangeBtn->onClicked = [this](){
     ScribbleApp::cfg->set("displayTimeRange",  // should do right click/long press, but I'm lazy
@@ -1210,9 +1266,13 @@ ScribbleWidget* MainWindow::createScribbleAreaWidget(Widget* container, Scribble
   statusbar->selectFirst(".child-container")->setMargins(0, floatPad/floatUIScale, 0, floatPad/floatUIScale);
   //statusbar->node->setAttr<float>("font-size", 18);  -- set by CSS
 
+  statusbar->addWidget(areaWidget->jumpBack);
+  statusbar->addWidget(areaWidget->jumpForward);
+  statusbar->addSeparator();
   statusbar->addWidget(areaWidget->prevPage);
   statusbar->addWidget(areaWidget->pageNumLabel);
   statusbar->addWidget(areaWidget->nextPage);
+  statusbar->addWidget(areaWidget->lastPage);
   statusbar->addSeparator();
   statusbar->addWidget(zoomBtn);
   statusbar->addWidget(areaWidget->zoomLabel);
@@ -1849,7 +1909,6 @@ void MainWindow::createToolBars()
   insSpaceRow->addWidget(createStretch());
   insSpaceRow->addAction(actionInsert_Space_Vert);
   insSpaceRow->addAction(actionRuled_Insert_Space);
-  insSpaceRow->addAction(actionRuled_Insert_Space_Right);
   insSpaceSkipLinesToggle = createToolbutton(
       SvgGui::useFile(":/icons/ic_menu_toggle_skip_lines.svg"), _("Skip Lines"));
   insSpaceSkipLinesToggle->setChecked(app->scribbleMode->insSpaceSkipLines);
@@ -1870,9 +1929,8 @@ void MainWindow::createToolBars()
   insSpaceRow->addWidget(insSpaceSwitchBackToggle);
   insSpaceRow->addWidget(smallFloatBtn(createHelpButton({
     {"ic_menu_insert_space.svg", "Insert Space", "Drags everything below the line you draw up or down."},
-    {"ic_menu_insert_space_ruled.svg", "Insert Lines", "Moves everything after where you press down by whole lines. Pressed in the margin it moves whole lines; pressed inside a line, the rest of that line starts a new one."},
-    {"ic_menu_insert_space_ruled_right.svg", "Insert Space in Line", "Pushes the rest of the line right (or pulls it left) and reflows handwritten text onto the following lines. It never moves anything to another line by itself."},
-    {"ic_menu_toggle_skip_lines.svg", "Skip Lines", "For text written on every second line: the line you press on and every second line from it are text lines, so Insert Lines and Insert Space in Line move and reflow two lines at a time. Nothing above the line you press on moves."},
+    {"ic_menu_insert_space_ruled.svg", "Ruled Insert Space", "Drag down to move everything after where you press down by whole lines: pressed near a rule line or in the margin it moves whole lines, pressed inside a line the rest of that line starts a new one. Drag right to push the rest of the line right (or left to pull it back) and reflow handwritten text. A drag that is mostly one way only goes that way; drag diagonally to do both."},
+    {"ic_menu_toggle_skip_lines.svg", "Skip Lines", "For text written on every second line: the line you press on and every second line from it are text lines, so Ruled Insert Space moves and reflows two lines at a time. Nothing above the line you press on moves."},
     {"ic_menu_switch_back.svg", "Switch Back", "Returns to the previous tool after inserting space once."} })));
   insSpaceRow->addWidget(createStretch());
   insSpaceRow->addWidget(smallFloatBtn(createToolSettingsButton("Insert Space Settings",
@@ -2246,12 +2304,17 @@ void MainWindow::setupActions()
 
   // the "+" beside Add Page: things to add to this page (docs/agent/paper.md).  Own actions, since the
   //  menu words them differently from the overflow menu's.
-  actionAddPaper = createAction("actionAddPaper", "Paper", ":/icons/ic_menu_document.svg", "",
-      [](){ AddPageMenu::showAddPagePopup(); });
   actionAddPatch = createAction("actionAddPatch", "Patch", ":/icons/ic_menu_toggle_ruled.svg", "",
       [this](){ actionRulingRegion->onTriggered(); });
-  actionAddDocument = createAction("actionAddDocument", "Insert Document", ":/icons/ic_menu_add_doc.svg", "",
+  // the same drag tool, drawing a coordinate system (docs/agent/ruling-regions.md)
+  actionAddAxesPatch = createAction("actionAddAxesPatch", "Coordinate System", "", "",
+      [this](){ actionRulingRegion->onTriggered(); app->scribbleMode->drawAxes = true; });
+  actionAddAxesPatch->setIcon(axesPatchIcon());
+  actionAddScan = createAction("actionAddScan", "Scan Document", ":/icons/ic_menu_add_doc.svg", "",
       [this](){ app->scanDocument(false); });
+  // a page of a PDF as content on this page (ScribbleApp::insertPdfAsImage)
+  actionAddDocument = createAction("actionAddDocument", "Insert Document", ":/icons/ic_menu_file_plus.svg", "",
+      [this](){ app->insertPdfAsImage(); });
   actionAddPhoto = createAction("actionAddPhoto", "Insert Photo", ":/icons/ic_menu_add_pic.svg", "",
       [this](){ app->insertImage(); });
 
@@ -2347,6 +2410,7 @@ void MainWindow::setupActions()
   actionRulingRegion = createAction("actionRulingRegion", "Paper Patch", ":/icons/ic_menu_toggle_ruled.svg", "",
       [this](){
         app->scribbleMode->drawRegion = true;
+        app->scribbleMode->drawAxes = false;
         app->setMode(MODE_DRAWSHAPE);
         showOptionsRow(MODE_DRAWSHAPE);
       });
@@ -2401,16 +2465,14 @@ void MainWindow::setupActions()
       "Insert Space", ":/icons/ic_menu_insert_space.svg", "", SLOT(setMode(MODE_INSSPACEVERT)));
   actionInsert_Space_Vert->setCheckable(true);
   actionInsert_Space_Vert->tooltip = _("Insert vertical space");
-  // ruled insert space is two tools, one per direction: a drag that did both at once moved text down a line
-  //  whenever the pen drifted while pushing it right, and the reverse
+  // ruled insert space is one tool whose drag picks the direction: down inserts lines, right inserts space
+  //  in the line, and a drift along the other axis is ignored until it is clearly meant (MODE_INSSPACEAUTO,
+  //  see ScribbleArea::doMoveEvent) - the old combined tool moved text down a line whenever the pen drifted
+  //  while pushing it right, and the split into two tools that followed made both directions two picks
   actionRuled_Insert_Space = createAction("actionRuled_Insert_Space",
-      "Insert Lines", ":/icons/ic_menu_insert_space_ruled.svg", "", SLOT(setMode(MODE_INSSPACEDOWN)));
+      "Ruled Insert Space", ":/icons/ic_menu_insert_space_ruled.svg", "", SLOT(setMode(MODE_INSSPACEAUTO)));
   actionRuled_Insert_Space->setCheckable(true);
-  actionRuled_Insert_Space->tooltip = _("Insert whole lines\nMove everything after the pen down");
-  actionRuled_Insert_Space_Right = createAction("actionRuled_Insert_Space_Right",
-      "Insert Space in Line", ":/icons/ic_menu_insert_space_ruled_right.svg", "", SLOT(setMode(MODE_INSSPACERIGHT)));
-  actionRuled_Insert_Space_Right->setCheckable(true);
-  actionRuled_Insert_Space_Right->tooltip = _("Push the rest of the line right\nReflow handwritten text");
+  actionRuled_Insert_Space->tooltip = _("Drag down to insert lines, right to insert space\nReflow handwritten text");
 
   // tools have priority over other toolbar items (except overflow menu); pan should hide before tools
   actionPan->setPriority(Action::NormalPriority + 1);

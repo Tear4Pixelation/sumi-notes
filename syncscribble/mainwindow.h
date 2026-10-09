@@ -110,8 +110,7 @@ public:
   Action* actionRect_Select;
   Action* actionRuled_Select;
   Action* actionInsert_Space_Vert;
-  Action* actionRuled_Insert_Space;  // Down: whole lines
-  Action* actionRuled_Insert_Space_Right;
+  Action* actionRuled_Insert_Space;  // down and/or right, picked by the drag (MODE_INSSPACEAUTO)
   Action* actionCustom_Pen;
   Action* actionAdd_Bookmark;
   Action* actionDraw;
@@ -126,11 +125,13 @@ public:
   Action* actionShape[SHAPE_COUNT];
   Action* actionRulingRegion;
   // the "+" beside Add Page (AddPageMenu::createAddMenuButton)
-  Action* actionAddPaper;
   Action* actionAddPatch;
+  Action* actionAddAxesPatch;  // a coordinate system patch (RulingRegionParams::axes)
+  Action* actionAddScan;
   Action* actionAddDocument;
   Action* actionAddPhoto;
-  std::vector<Action*> addMenuActions() const { return {actionAddPaper, actionAddPatch, actionAddDocument, actionAddPhoto}; }
+  std::vector<Action*> addMenuActions() const { return {actionAddPatch, actionAddAxesPatch, actionAddScan, actionAddDocument, actionAddPhoto}; }
+  static const SvgNode* axesPatchIcon();
   Action* actionExport_PDF;
   Action* actionImport_PDF;
   Action* actionPreferences;
@@ -202,6 +203,7 @@ public:
   Button* regionStraightenBtn = NULL;
   // parameters from before a spacing slider drag, which is previewed and committed as one step on release
   std::unique_ptr<RulingRegionParams> regionSlideStart;
+  Point regionSlideHandle;  // what the drag scales about: the red handle when it began
   void buildRegionPanel();
   void syncRegionRow();
   void editSelRegion(const std::function<void(RulingRegionParams&)>& change);

@@ -161,6 +161,7 @@ private:
   Path2D path;
 
   Point selPos = Point(NaN, NaN);
+  Point selPrev = Point(NaN, NaN);
   Dim selRadius;
 };
 

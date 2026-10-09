@@ -36,7 +36,6 @@ std::unique_ptr<SDL_Cursor, SDL_Cursor_Deleter> ScribbleArea::eraseCursor;
 ScribbleArea::ScribbleArea() : ScribbleView()
 {
   currMode = MODE_NONE;
-  posHistoryPos = posHistory.begin();
   // always need hover events to check for mouse motion so we can reset cursor to default
   scribbleInput->enableHoverEvents = true;
 }
@@ -130,8 +129,6 @@ void ScribbleArea::reset()
 {
   doCancelAction();
   recentStrokes.clear();  // occasionally saw crashes ... document being opened while still in MODE_STROKE?
-  posHistory.clear();
-  posHistoryPos = posHistory.begin();
   if(currSelection)
     clearSelection();
   // tags picked for the old notebook must not land in the one being opened; not cancelTagPlacement(), whose
@@ -253,18 +250,20 @@ bool ScribbleArea::snapsToFitWidth(Dim zoom, Dim wzoom) const
   return zoomSteps[nearestZoomStep(zoom)] != 1;
 }
 
-bool ScribbleArea::nearFitWidth(Dim px, Dim py) const
+// the toast judges the same page the snap will fit: the one at the middle of the view (see roundZoom())
+bool ScribbleArea::nearFitWidth() const
 {
-  int pagenum = dimToPageNum(screenToDim(Point(px, py)));
-  return snapsToFitWidth(mZoom, fitWidthZoom(pagenum));
+  if(numPages() < 1)
+    return false;
+  return snapsToFitWidth(mZoom, fitWidthZoom(dominantPageNum()));
 }
 
 // line the page up with the view after a fit snap, but only across the scroll direction (horizontally in
 //  the usual vertical layout) - never along it, so the reading position never jumps
 void ScribbleArea::alignFitPage(int pagenum, bool fitWidth)
 {
-  // align the page under the center of the gesture, but do not make it current: the pan below (or the
-  //  zoom before it) leaves that to dominantPageNum(), the page taking up most of the view
+  // this does not make the page current: the pan below leaves that to dominantPageNum(), the page at the
+  //  middle of the view (keepPageAtMiddle() makes sure that is still the snapped page)
   if(numPages() < 1)
     return;
   pagenum = std::max(0, std::min(pagenum, numPages() - 1));
@@ -279,24 +278,54 @@ void ScribbleArea::alignFitPage(int pagenum, bool fitWidth)
     doPan(shift.x*mScale, shift.y*mScale);
 }
 
+// After a zoom snap: if the snap carried the middle of the view off `pagenum` (the page the user was on),
+//  scroll just far enough along the scroll direction to bring it back to that page's edge, so the page
+//  stays current.  A snap zooms about the gesture point, not the middle, so a step or fit rounding of up
+//  to ~12% moves the middle by that fraction of its distance from the fingers - enough to cross a page
+//  boundary, which made the neighbour current ("sent to another page").  Nothing moves when the middle is
+//  still on the page, so the reading position only changes when it would otherwise have left the page
+void ScribbleArea::keepPageAtMiddle(int pagenum)
+{
+  if(viewMode == VIEWMODE_SINGLE || pagenum < 0 || pagenum >= numPages() || dominantPageNum() == pagenum)
+    return;
+  const bool horz = viewMode == VIEWMODE_HORZ;
+  Point middle = screenToDim(screenRect).center();
+  Point origin = getPageOrigin(pagenum);
+  // the page owns the gap after it (dimToPageNum()); stay a pixel inside, as the limits are floating point
+  Dim inset = 1/mScale;
+  Dim start = (horz ? origin.x : origin.y) + inset;
+  Dim end = (horz ? origin.x + page(pagenum)->width() : origin.y + page(pagenum)->height()) + pageSpacing - inset;
+  Dim pos = horz ? middle.x : middle.y;
+  Dim target = std::max(start, std::min(pos, end));
+  // panning by +d moves the content by d on screen, so the document point at the middle moves by -d
+  Dim d = (pos - target)*mScale;
+  doPan(horz ? d : 0, horz ? 0 : d);
+}
+
 void ScribbleArea::roundZoom(Dim px, Dim py)
 {
   // should we still snap to width, height if continuous zoom enabled? use continuousZoom > 1?
   if(cfg->Bool("continuousZoom"))
     return;
-  // use page under center of gesture for snapping to width, height
-  int pagenum = dimToPageNum(screenToDim(Point(px, py)));
+  if(numPages() < 1) {
+    ScribbleView::roundZoom(px, py);
+    return;
+  }
+  // Snap for the page the user is on when the gesture ends: the one at the middle of the view, which the
+  //  pans during the gesture have already made current.  This used to be the page under the gesture point,
+  //  a neighbour whenever the fingers were over one (and NULL past the last page: a crash)
+  int pagenum = dominantPageNum();
   Dim wzoom = fitWidthZoom(pagenum);
   Dim hzoom = getViewHeight()/page(pagenum)->height()/preScale;
   Dim zoom = mZoom;
   bool fitWidth = snapsToFitWidth(zoom, wzoom);
   ScribbleView::roundZoom(px, py);
-  // zoom = 100% always has priority
-  if(mZoom == 1)
-    return;
   bool fitHeight = !fitWidth && hzoom < 1.1*zoom && zoom < 1.1*hzoom && (hzoom > 1.05 || hzoom < 0.95);
-  if(!fitWidth && !fitHeight)
+  // zoom = 100% always has priority
+  if(mZoom == 1 || (!fitWidth && !fitHeight)) {
+    keepPageAtMiddle(pagenum);
     return;
+  }
   Dim fitZoom = fitWidth ? wzoom : hzoom;
   // like a zoom step, the fit zoom is taken about the gesture point, so the content under the fingers stays
   //  put. Aligning the page to the view is then done only across the scroll direction (horizontally in the
@@ -305,22 +334,23 @@ void ScribbleArea::roundZoom(Dim px, Dim py)
   //  the page with no visible zoom snap (see docs/agent/navigation.md).  At or below fit width the
   //  horizontal pan is locked anyway (updateContentDim()), so a fit width page is flush regardless
   zoomTo(fitZoom, px, py);
-  if(std::abs(fitZoom/zoom - 1) < ZOOM_SNAP_ALIGN_MIN)
-    return;
-  alignFitPage(pagenum, fitWidth);
+  if(std::abs(fitZoom/zoom - 1) >= ZOOM_SNAP_ALIGN_MIN)
+    alignFitPage(pagenum, fitWidth);
+  keepPageAtMiddle(pagenum);
 }
 
 // Ctrl+wheel: no step rounding (the wheel is continuous), only the snap to fit width the toast promised
 void ScribbleArea::wheelZoomFinish(Dim px, Dim py)
 {
-  bool snap = nearFitWidth(px, py);
+  bool snap = nearFitWidth();
   showFitHint(false);
   if(!snap)
     return;
-  int pagenum = dimToPageNum(screenToDim(Point(px, py)));
+  int pagenum = dominantPageNum();  // the page the toast judged; see roundZoom()
   zoomTo(fitWidthZoom(pagenum), px, py);
   zoomStepsIdx = nearestZoomStep(mZoom);
   alignFitPage(pagenum, true);
+  keepPageAtMiddle(pagenum);
   uiChanged(UIState::Zoom);
 }
 
@@ -427,7 +457,7 @@ void ScribbleArea::pageCountChanged(int pagenum, int prevpages)
   int currpages = numPages();
   if(prevpages >= 0 && pagenum >= 0 && prevpages != currpages && pagenum <= prevpagenum)
     prevpagenum += prevpages < currpages ? 1 : -1;
-  // TODO: update items in posHistory!
+  // (jumpHistory entries are clamped to the page count when they are restored)
   // don't jump if first or last page removed
   if(prevpagenum < 0)
     gotoPage(-1);  // go to beginning of first page
@@ -1133,6 +1163,20 @@ void ScribbleArea::setSelRegionParams(const RulingRegionParams& params)
   doRefresh();  // edits come from the region panel, not from input on the canvas, which would refresh
 }
 
+// The point a spacing change scales the selected region's ruling about: its red handle.  A default
+//  handle sits on the first line, which a finer pitch would replace with a new first line above it, so it
+//  is pinned where it is first - the user sees it stay put and the lines scale around it.  A coordinate
+//  system's handle is its origin and is never pinned (it follows the origin anyway).
+Point ScribbleArea::pinSelRegionHandle()
+{
+  if(!regionSelector || !selectedRegion())
+    return Point(NaN, NaN);
+  Point handle = regionSelector->originHandlePos();
+  if(!regionSelector->region->regionParams().axes)
+    regionSelector->setHandlePos(handle);
+  return handle;
+}
+
 void ScribbleArea::previewSelRegionParams(const RulingRegionParams& params)
 {
   Element* region = selectedRegion();
@@ -1618,11 +1662,11 @@ void ScribbleArea::discardStrokeBuilder()
   }
 }
 
-// The scratch-out test alone over a stroke just finished.  If it is one and there is something under it,
-//  returns true with what it was drawn over in `erased` - selected, not yet deleted.  The scribble itself
-//  is left alone: the caller commits it as an ordinary stroke first and only then deletes `erased` as a
-//  second undo step, so a detection that was wrong costs one undo to get the writing back, with the
-//  scribble still on the page as the ink it really was.
+// The scratch-out test alone over a stroke just finished.  If it is one, returns true with what it was
+//  drawn over in `erased` - selected, not yet deleted, and possibly nothing.  The scribble itself
+//  is left alone: the caller commits it as an ordinary stroke first and only then deletes `erased` and the
+//  scribble as a second undo step, so a detection that was wrong costs one undo to get the writing back,
+//  with the scribble on the page as the ink it really was.
 bool ScribbleArea::scratchOutOnLift(Selection& erased)
 {
   std::vector<shaperec::Vec2> stroke;
@@ -1641,7 +1685,9 @@ bool ScribbleArea::scratchOutOnLift(Selection& erased)
   //  page yet, so it cannot select itself
   ScratchOutSelector selector(&erased, area);
   erased.doSelect();
-  return erased.count() > 0;
+  // a scratch-out over nothing is still a scratch-out: the caller records it (and removes the scribble)
+  //  the same way, so it is always an undo step and a wrong detection always costs exactly one undo
+  return true;
 }
 
 // Runs the recognizer over the stroke so far and, if it is a shape, swaps the ink for it.  Returns false
@@ -1987,7 +2033,7 @@ struct HoldPageNum
 void ScribbleArea::viewPos(int pagenum, Point pos)
 {
   HoldPageNum hold(holdPageNum);
-  saveCurrPos(pagenum, pos);
+  recordJumpTo(pagenum);
   setPageNum(pagenum);
   setVisiblePos(pageDimToDim(pos));
 }
@@ -1996,7 +2042,7 @@ void ScribbleArea::gotoPos(int pagenum, Point pos, bool savepos)
 {
   HoldPageNum hold(holdPageNum);
   if(savepos)
-    saveCurrPos(pagenum, pos);
+    recordJumpTo(pagenum);
   setPageNum(pagenum);
   setCornerPos(pageDimToDim(pos));
 }
@@ -2072,55 +2118,50 @@ void ScribbleArea::viewSelection()
     viewRect(currSelPageNum, currSelection->getBGBBox());
 }
 
-// save current position to history if major change
-// posHistoryPos points to "current" pos / next avail slot to insert new pos
-bool ScribbleArea::saveCurrPos(int newpagenum, Point newpos)
+// the jump history is per document (ScribbleDoc::jumpHistory); only jumps over MIN_JUMP_PAGES or more pages
+//  are recorded, so scrolling, paging and the like never end up in it
+JumpLocation ScribbleArea::currentLocation() const
 {
-  Point origin = getPageOrigin(newpagenum);
-  newpos.x += origin.x;
-  newpos.y += origin.y;
-  Point currpos = screenToDim(Point(0,0));
-  Point lastpos = newpos;
-  // this is to avoid creating sequential history entries near the same position
-  if(posHistoryPos != posHistory.begin()) {
-    DocPosition lastdocpos = *(posHistoryPos - 1);
-    origin = getPageOrigin(lastdocpos.pagenum);
-    lastpos.x = lastdocpos.pos.x + origin.x;
-    lastpos.y = lastdocpos.pos.y + origin.y;
-  }
-  Dim mindx = getViewWidth()/2;
-  Dim mindy = getViewHeight()/2;
-  if((ABS(newpos.x - currpos.x) > mindx || ABS(newpos.y - currpos.y) > mindy)
-      && (ABS(currpos.x - lastpos.x) > mindx || ABS(currpos.y - lastpos.y) > mindy)) {
-    posHistory.erase(posHistoryPos, posHistory.end());
-    posHistory.push_back(getPos());
-    posHistoryPos = posHistory.end();
-    return true;
-  }
-  return false;
+  DocPosition pos = getPos();
+  JumpLocation location;
+  location.pagenum = pos.pagenum;
+  location.x = pos.pos.x;
+  location.y = pos.pos.y;
+  return location;
+}
+
+// call before the view moves
+void ScribbleArea::recordJumpTo(int destPage)
+{
+  if(scribbleDoc && numPages() > 0 && currPageNum >= 0 && currPageNum < numPages())
+    scribbleDoc->jumpHistory.recordJump(currentLocation(), destPage);
+}
+
+void ScribbleArea::jumpToPage(int pagenum)
+{
+  recordJumpTo(std::min(pagenum, numPages() - 1));
+  gotoPage(pagenum);
+}
+
+// the document may have gained or lost pages since the location was recorded
+void ScribbleArea::restoreLocation(const JumpLocation& location)
+{
+  gotoPos(std::max(0, std::min(location.pagenum, numPages() - 1)), Point(location.x, location.y), false);
+  uiChanged(UIState::PageNumChange);
 }
 
 void ScribbleArea::prevView()
 {
-  if(posHistoryPos != posHistory.begin()) {
-    DocPosition docpos = *(posHistoryPos - 1);
-    if(posHistoryPos == posHistory.end()) {
-      if(saveCurrPos(docpos.pagenum, docpos.pos))
-        posHistoryPos--;
-    }
-    posHistoryPos--;
-    gotoPos(docpos.pagenum, docpos.pos, false);
-  }
+  JumpLocation target;
+  if(scribbleDoc && scribbleDoc->jumpHistory.back(currentLocation(), &target))
+    restoreLocation(target);
 }
 
 void ScribbleArea::nextView()
 {
-  if(posHistoryPos != posHistory.end())
-    posHistoryPos++;
-  if(posHistoryPos != posHistory.end()) {
-    DocPosition docpos = *posHistoryPos;
-    gotoPos(docpos.pagenum, docpos.pos, false);
-  }
+  JumpLocation target;
+  if(scribbleDoc && scribbleDoc->jumpHistory.forward(currentLocation(), &target))
+    restoreLocation(target);
 }
 
 DocPosition ScribbleArea::getPos() const
@@ -2132,7 +2173,10 @@ DocPosition ScribbleArea::getPos() const
 void ScribbleArea::doDblClickAction(Point pos)
 {
   //scribbleDoc->setActiveArea(this);
-  int pagenum = dimToPageNum(screenToDim(pos));
+  if(numPages() < 1)
+    return;
+  // the tapped page (clamped: past the last page dimToPageNum() gives the ghost page, which has no Page)
+  int pagenum = std::min(dimToPageNum(screenToDim(pos)), numPages() - 1);
   Dim wzoom = fitWidthZoom(pagenum);
   if(std::abs(mZoom/wzoom - 1) < 1E-3) {
     zoomTo(1, pos.x, pos.y);
@@ -2446,14 +2490,21 @@ void ScribbleArea::ungroupSelection()
   scribbleDoc->endAction();
 }
 
-Rect ScribbleArea::insertImage(Image image, const Rect& below)
+Rect ScribbleArea::insertImage(Image image, const Rect& below, Dim fitWidth, Dim fitHeight)
 {
   static constexpr Dim STACK_GAP = 20;
 
   doCancelAction();
   Clipboard clip;
   Dim imgw = image.getWidth()*unitsPerPx, imgh = image.getHeight()*unitsPerPx;
-  Dim s = std::min(Dim(1), std::min(currPage->width()/2/imgw, currPage->height()/2/imgh));
+  // a PDF page comes with its own size in page units and may fill the page; a photo is at most half of it
+  Dim maxFraction = 0.5;
+  if(fitWidth > 0 && fitHeight > 0) {
+    imgw = fitWidth;
+    imgh = fitHeight;
+    maxFraction = 1.0;
+  }
+  Dim s = std::min(Dim(1), std::min(currPage->width()*maxFraction/imgw, currPage->height()*maxFraction/imgh));
   // doPasteAt pulls an image that would hang off the page back onto it, so a stack that runs out of
   //  room overlaps at the bottom of the page rather than disappearing
   Point center = below.isValid() ? Point(below.center().x, below.bottom + STACK_GAP + imgh*s/2)
@@ -2529,6 +2580,21 @@ void ScribbleArea::captureScreenshot()
   doRefresh();
 }
 
+// half the stroke width of a stroked path (page units), the widest for a group: how far its ink reaches
+//  past the geometry bounds() may describe, so the free eraser's bbox cull cannot skip ink it touches
+static Dim strokeHalfWidth(SvgNode* node)
+{
+  if(node->asContainerNode()) {
+    Dim halfWidth = 0;
+    for(SvgNode* child : node->asContainerNode()->children())
+      halfWidth = std::max(halfWidth, strokeHalfWidth(child));
+    return halfWidth*(node->hasTransform() ? node->getTransform().avgScale() : 1);
+  }
+  if(node->type() != SvgNode::PATH || node->getColorAttr("stroke", Color::NONE) == Color::NONE)
+    return 0;
+  return node->getFloatAttr("stroke-width", 1)*(node->hasTransform() ? node->getTransform().avgScale() : 1)/2;
+}
+
 void ScribbleArea::freeErase(Point prevpos, Point pos)
 {
   // for now, let's fix the eraser size in screen space so that user can zoom to adjust how much is erased
@@ -2543,7 +2609,7 @@ void ScribbleArea::freeErase(Point prevpos, Point pos)
     //  the stroke and ruled erasers in Selection::doSelect does not reach it
     if(!currPage->isEditable(s))
       continue;
-    if(!s->isSelected(tempSelection) && erasebox.intersects(s->bbox())) {
+    if(!s->isSelected(tempSelection) && Rect(erasebox).pad(strokeHalfWidth(s->node)).intersects(s->bbox())) {
       if(s->isSelected(freeErasePieces)) {
         //Rect oldbbox = s->bbox();
         touched = s->freeErase(prevpos, pos, radius) || touched;
@@ -2653,8 +2719,9 @@ void ScribbleArea::doCommand(int itemid)
   case ID_NEXTSCREEN:  doPan(0, -screenRect.height());  break;
   case ID_SCROLLUP:  doPan(0, 20);  break;
   case ID_SCROLLDOWN:  doPan(0, -20);  break;
-  case ID_STARTOFDOC:  gotoPage(0);  break;
-  case ID_ENDOFDOC:  gotoPage(numPages());  break;  // >=numPages() takes us to end of last page
+  case ID_STARTOFDOC:  jumpToPage(0);  break;
+  case ID_ENDOFDOC:  jumpToPage(numPages());  break;
+  case ID_LASTPAGE:  jumpToPage(numPages() - 1);  break;  // >=numPages() takes us to end of last page
   case ID_UNGROUP:  ungroupSelection();  break;
   default:  return;
   }
@@ -2687,8 +2754,8 @@ void ScribbleArea::updateUIState(UIState* state)
   state->zoom = mZoom;
   state->currPageStrokes = currPage->strokeCount();
   state->currSelStrokes = currSelection ? currSelection->count() : 0;
-  state->prevView = posHistoryPos != posHistory.begin();
-  state->nextView = posHistoryPos != posHistory.end() && (posHistoryPos + 1) != posHistory.end();
+  state->prevView = scribbleDoc && scribbleDoc->jumpHistory.canBack();
+  state->nextView = scribbleDoc && scribbleDoc->jumpHistory.canForward();
   state->pageWidth = currPage->width();
   state->pageHeight = currPage->height();
 
@@ -2745,6 +2812,9 @@ int ScribbleArea::selectionHit(Point pos, bool touch)
     // bottom right corner scales with fixed aspect ratio; others scale freely.  A region never gets here:
     //  its size handle is a shape handle (RegionSelector::resized).
     scaleLockRatio = scaleOrigin.x < pos.x && scaleOrigin.y < pos.y;
+    // a page tag (pill + text) is never stretched: every handle keeps the aspect ratio (page-tags.md)
+    if(currSelection->getFirstElement([](Element* s) { return s->isPageTag(); }))
+      scaleLockRatio = true;
     prevXScale = 1;
     prevYScale = 1;
     return MODEMOD_SCALESEL;
@@ -2771,6 +2841,121 @@ int ScribbleArea::selectionHit(Point pos, bool touch)
 }
 
 // For handling touch events, see the touch/fingerpaint example
+// Ruled insert space, one tool (MODE_INSSPACEAUTO): the drag picks the axis.  Nothing moves until the pen
+//  is INSSPACE_AXIS_START screen units from the press; the axis it is further along then engages.  The other
+//  axis stays out (so pushing text right never also moves it down a line, and dragging lines down never
+//  pushes them sideways) until the drag along it is past INSSPACE_MINOR_MIN screen units *and* past
+//  INSSPACE_MINOR_RATIO of the drag along the first, about 27 degrees off it; then it engages too, for the
+//  rest of the gesture (a deliberate diagonal does both).  Screen units, so the dead zone is the same for the
+//  hand at any zoom.
+static constexpr Dim INSSPACE_AXIS_START = 6;
+static constexpr Dim INSSPACE_MINOR_MIN = 16;
+static constexpr Dim INSSPACE_MINOR_RATIO = 0.5;
+
+bool ScribbleArea::ruledInsSpaceEngage(Point pos)
+{
+  const Point pressLocal = insSpacePressFrame.toLocal(initialPos);
+  const Point nowLocal = insSpacePressFrame.toLocal(pos);
+  const Dim alongLine = std::abs(nowLocal.x - pressLocal.x)*mScale;
+  const Dim acrossLines = std::abs(nowLocal.y - pressLocal.y)*mScale;
+  if(!insSpaceDownEngaged && !insSpaceRightEngaged) {
+    if(std::max(alongLine, acrossLines) < INSSPACE_AXIS_START)
+      return false;
+    if(acrossLines > alongLine) {
+      // Down sets up as Insert Lines (press zones, its erase) - redone now that the drag says so
+      insSpaceDownEngaged = true;
+      insSpaceAxis = MODE_INSSPACEDOWN;
+      clearTempSelection();
+      ruledInsSpaceStart(initialPos);
+      ruledInsSpaceSelect();
+    }
+    else {
+      // the press already set up as Right: the press's own line and x
+      insSpaceRightEngaged = true;
+      insSpaceAxis = MODE_INSSPACERIGHT;
+    }
+  }
+  if(!insSpaceRightEngaged && alongLine > std::max(INSSPACE_MINOR_MIN, INSSPACE_MINOR_RATIO*acrossLines))
+    insSpaceRightEngaged = true;
+  if(!insSpaceDownEngaged && acrossLines > std::max(INSSPACE_MINOR_MIN, INSSPACE_MINOR_RATIO*alongLine))
+    insSpaceDownEngaged = true;
+  return true;
+}
+
+void ScribbleArea::ruledInsSpaceStart(Point pos)
+{
+  // what ruled insert space moves: the line it starts on and the local x it starts at (MIN_DIM: that whole
+  //  line); the press's own line and x for Right and the combined tool
+  gestureFrame = insSpacePressFrame;
+  const Dim marginLeft = gestureFrame.region ? MIN_DIM : currPage->marginLeft();
+  prevLine = initialLine = gestureFrame.line(pos, Page::BLANK_Y_RULING);
+  insSpaceSelLine = initialLine;
+  insSpaceSelX = insSpaceColX = insSpaceAppliedX = gestureFrame.toLocal(pos).x;
+  const bool skipLines = scribbleDoc->scribbleMode->insSpaceSkipLines;
+  if(insSpaceAxis == MODE_INSSPACEDOWN) {
+    // Insert Lines: within 1/8 line of a rule moves the whole line below it and all under, otherwise the
+    //  line splits at the pen - one rule, with Skip Lines or not (see insertLinesStart())
+    const RulingFrame lineFrame = gestureFrame;
+    const Dim yr = lineFrame.yrulingOr(Page::BLANK_Y_RULING);
+    InsertLinesStart start = insertLinesStart(lineFrame.toLocal(pos).y, yr);
+    if(skipLines)
+      gestureFrame = skippedLineFrame(lineFrame, start.line);
+    prevLine = initialLine = gestureFrame.line(pos, Page::BLANK_Y_RULING);
+    insSpaceSelLine = skipLines ? 0 : start.line;
+    if(start.wholeLine)
+      insSpaceSelX = MIN_DIM;
+  }
+  // text written on every second line: insert space and reflow work in text lines (see skippedLineFrame)
+  else if(skipLines) {
+    gestureFrame = skippedLineFrame(gestureFrame, pos);
+    prevLine = initialLine = insSpaceSelLine = gestureFrame.line(pos, Page::BLANK_Y_RULING);
+  }
+}
+
+void ScribbleArea::ruledInsSpaceSelect()
+{
+  Page* selsource = currPage;
+  const Dim marginLeft = insSpacePressFrame.region ? MIN_DIM : currPage->marginLeft();
+  // Insert Lines moving whole lines keeps to the pen's side of a vertical line that crosses the rule it
+  //  opens (ruled select's column stops, found from the pen and the line above the moved block, so a
+  //  vertical line starting on the moved line itself moves with it).  Any other whole-line start moves
+  //  whatever columns the line has, as a press in the margin does; a region has no margin to make
+  //  findStops() stand down, so the selector is told directly
+  const bool wholeLine = insSpaceSelX == MIN_DIM;
+  const bool wholeLineCols = wholeLine && insSpaceAxis == MODE_INSSPACEDOWN && selColMode != RuledSelector::COL_NONE;
+  const RuledSelector::ColMode colMode = wholeLine && !wholeLineCols ? RuledSelector::COL_NONE : selColMode;
+  tempSelection = new Selection(selsource);
+  tempSelection->ruling = gestureFrame;
+  ruledSelector = new RuledSelector(tempSelection, colMode);
+  if(wholeLineCols)
+    ruledSelector->findStops(insSpaceColX, insSpaceSelLine - 1);
+  ruledSelector->selectRuledAfter(insSpaceSelX, insSpaceSelLine);
+  // if cursor down past left margin, we sort strokes, but we'll only
+  //  enable inserting horz space if there are strokes on the first line
+  int firstLine = tempSelection->sortRuled();
+  if(insSpaceSelX > marginLeft && firstLine == insSpaceSelLine)
+    insertSpaceX = true;
+  else
+    insertSpaceX = false;
+  // Insert Lines dragged back up erases the ink the moved text lands on, from where that text starts
+  //  rather than from the pen: pressed anywhere left of a line's rest that an earlier Insert Lines split
+  //  off, the drag up rejoins it without eating the start of the line it rejoins (which ends left of the
+  //  split, so short of the rest)
+  insSpaceEraseX = insSpaceSelX;
+  if(insSpaceAxis == MODE_INSSPACEDOWN && insSpaceSelX > marginLeft) {
+    insSpaceEraseX = MAX_DIM;
+    if(firstLine == insSpaceSelLine)
+      insSpaceEraseX = std::max(insSpaceSelX, gestureFrame.localBBox(tempSelection->strokes.front()->bbox()).left);
+  }
+  // erase strokes convered by negative ruled insert space
+  if(cfg->Bool("insSpaceErase")) {
+    // second ruled selector for erasing strokes covered by negative insert space
+    insSpaceEraseSelection = new Selection(selsource, Selection::STROKEDRAW_NONE);
+    insSpaceEraseSelection->ruling = gestureFrame;
+    insSpaceEraseSelector = new RuledSelector(insSpaceEraseSelection, colMode);
+  }
+}
+
 void ScribbleArea::doPressEvent(const InputEvent& event)
 {
   // an area marked with nothing selected is only there for its popup; any press on the canvas moves on
@@ -2880,9 +3065,12 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
   currMode = scribbleDoc->getScribbleMode(modemod);
   // Down and Right are ruled insert space held to one axis: everything about the gesture - selection, Skip
   //  Lines, region slop, erase, page growth - is ruled insert space's, only the drag is cut to one direction
+  //  The one offered tool, MODE_INSSPACEAUTO, picks Down, Right or both from the drag (see doMoveEvent)
   insSpaceAxis = MODE_INSSPACERULED;
-  if(currMode == MODE_INSSPACEDOWN || currMode == MODE_INSSPACERIGHT) {
+  insSpaceAutoAxes = insSpaceDownEngaged = insSpaceRightEngaged = false;
+  if(currMode == MODE_INSSPACEDOWN || currMode == MODE_INSSPACERIGHT || currMode == MODE_INSSPACEAUTO) {
     insSpaceAxis = currMode;
+    insSpaceAutoAxes = currMode == MODE_INSSPACEAUTO;
     currMode = MODE_INSSPACERULED;
   }
   // do pan-from-edge through ScribbleInput to avoid inappropriately reverting to sticky tool after panning
@@ -2904,38 +3092,9 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
       marginLeft = MIN_DIM;
     }
   }
-  // what ruled insert space moves: the line it starts on and the local x it starts at (MIN_DIM: that whole
-  //  line); the press's own line and x for Right and the combined tool
-  insSpaceSelLine = initialLine;
-  insSpaceSelX = insSpaceColX = lx;
-  const bool skipLines = currMode == MODE_INSSPACERULED && scribbleDoc->scribbleMode->insSpaceSkipLines;
-  if(currMode == MODE_INSSPACERULED && insSpaceAxis == MODE_INSSPACEDOWN) {
-    // Insert Lines: near a rule line moves the block below it, mid-line splits the line at the pen, and with
-    //  Skip Lines a press on a blank line moves the text line below it as a block (see insertLinesStart())
-    const RulingFrame lineFrame = gestureFrame;
-    const Dim yr = lineFrame.yrulingOr(Page::BLANK_Y_RULING);
-    auto lineHasInk = [&](int line) {
-      for(Element* s : currPage->children()) {
-        if(s->isRulingRegion() || currPage->regionAt(s->com()) != lineFrame.region)
-          continue;
-        Point local = lineFrame.toLocal(s->com());
-        if(int(std::floor(local.y/yr)) == line && local.x >= marginLeft)  // not a bookmark in the margin
-          return true;
-      }
-      return false;
-    };
-    InsertLinesStart start = insertLinesStart(lineFrame.toLocal(pos).y, yr, skipLines, lineHasInk);
-    if(skipLines)
-      gestureFrame = skippedLineFrame(lineFrame, start.line);
-    prevLine = initialLine = gestureFrame.line(pos, Page::BLANK_Y_RULING);
-    insSpaceSelLine = skipLines ? 0 : start.line;
-    if(start.wholeLine)
-      insSpaceSelX = MIN_DIM;
-  }
-  // text written on every second line: insert space and reflow work in text lines (see skippedLineFrame)
-  else if(skipLines) {
-    gestureFrame = skippedLineFrame(gestureFrame, pos);
-    prevLine = initialLine = insSpaceSelLine = gestureFrame.line(pos, Page::BLANK_Y_RULING);
+  if(currMode == MODE_INSSPACERULED) {
+    insSpacePressFrame = gestureFrame;
+    ruledInsSpaceStart(pos);
   }
   if(currSelection) {
     // clear selection depending on mode
@@ -3045,6 +3204,13 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
       Dim yr = currPage->yruling() > 0 ? currPage->yruling() : Page::BLANK_Y_RULING;
       RulingRegionParams params = RulingRegionParams::fromRect(Rect::corners(pos, pos), currPage->xruling(),
           yr, currPage->props.dotRadius, currPage->props.staff);
+      if(scribbleDoc->scribbleMode->drawAxes) {
+        // a coordinate system: the page's line height as the grid cell, squared, no dots or staves
+        params.axes = true;
+        params.staff = false;
+        params.xRuling = yr;
+        params.sanitize();
+      }
       regionInProgress = Element::createRulingRegion(params, currPage->props.color, currPage->props.ruleColor);
       break;
     }
@@ -3233,46 +3399,7 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
     addRegionsToInsertSpace(tempSelection, [&](const Rect& r) { return r.left >= pos.x; });
     break;
   case MODE_INSSPACERULED:
-  {
-    // Insert Lines moving whole lines keeps to the pen's side of a vertical line that crosses the rule it
-    //  opens (ruled select's column stops, found from the pen and the line above the moved block, so a
-    //  vertical line starting on the moved line itself moves with it).  Any other whole-line start moves
-    //  whatever columns the line has, as a press in the margin does; a region has no margin to make
-    //  findStops() stand down, so the selector is told directly
-    const bool wholeLine = insSpaceSelX == MIN_DIM;
-    const bool wholeLineCols = wholeLine && insSpaceAxis == MODE_INSSPACEDOWN && selColMode != RuledSelector::COL_NONE;
-    const RuledSelector::ColMode colMode = wholeLine && !wholeLineCols ? RuledSelector::COL_NONE : selColMode;
-    tempSelection = new Selection(selsource);
-    tempSelection->ruling = gestureFrame;
-    ruledSelector = new RuledSelector(tempSelection, colMode);
-    if(wholeLineCols)
-      ruledSelector->findStops(insSpaceColX, insSpaceSelLine - 1);
-    ruledSelector->selectRuledAfter(insSpaceSelX, insSpaceSelLine);
-    // if cursor down past left margin, we sort strokes, but we'll only
-    //  enable inserting horz space if there are strokes on the first line
-    int firstLine = tempSelection->sortRuled();
-    if(insSpaceSelX > marginLeft && firstLine == insSpaceSelLine)
-      insertSpaceX = true;
-    else
-      insertSpaceX = false;
-    // Insert Lines dragged back up erases the ink the moved text lands on, from where that text starts
-    //  rather than from the pen: pressed anywhere left of a line's rest that an earlier Insert Lines split
-    //  off, the drag up rejoins it without eating the start of the line it rejoins (which ends left of the
-    //  split, so short of the rest)
-    insSpaceEraseX = insSpaceSelX;
-    if(insSpaceAxis == MODE_INSSPACEDOWN && insSpaceSelX > marginLeft) {
-      insSpaceEraseX = MAX_DIM;
-      if(firstLine == insSpaceSelLine)
-        insSpaceEraseX = std::max(insSpaceSelX, gestureFrame.localBBox(tempSelection->strokes.front()->bbox()).left);
-    }
-    // erase strokes convered by negative ruled insert space
-    if(cfg->Bool("insSpaceErase")) {
-      // second ruled selector for erasing strokes covered by negative insert space
-      insSpaceEraseSelection = new Selection(selsource, Selection::STROKEDRAW_NONE);
-      insSpaceEraseSelection->ruling = gestureFrame;
-      insSpaceEraseSelector = new RuledSelector(insSpaceEraseSelection, colMode);
-    }
-  }
+    ruledInsSpaceSelect();
   default:
     break;
   }
@@ -3300,12 +3427,27 @@ void ScribbleArea::doMoveEvent(const InputEvent& event)
   int line = gestureFrame.line(pos, Page::BLANK_Y_RULING);
   Dim lx = gestureFrame.toLocal(pos).x;
   Dim ldx = lx - gestureFrame.toLocal(prevPos).x;
-  // ruled insert space held to one axis: Right never leaves the pressed line, Down never moves along it
-  if(currMode == MODE_INSSPACERULED && insSpaceAxis == MODE_INSSPACERIGHT)
-    line = initialLine;
-  else if(currMode == MODE_INSSPACERULED && insSpaceAxis == MODE_INSSPACEDOWN) {
-    lx = gestureFrame.toLocal(initialPos).x;
-    ldx = 0;
+  // ruled insert space held to its axes: an axis not engaged leaves the line (Right only) or the x along it
+  //  (Down only) where the press was.  The one offered tool engages them from the drag, with a dead zone
+  //  (ruledInsSpaceEngage(), which can restart the gesture as Insert Lines, so the frame is read after it)
+  if(currMode == MODE_INSSPACERULED) {
+    bool moveDown = insSpaceAxis != MODE_INSSPACERIGHT;
+    bool moveRight = insSpaceAxis != MODE_INSSPACEDOWN;
+    if(insSpaceAutoAxes) {
+      if(!ruledInsSpaceEngage(pos))
+        return;  // in the dead zone: nothing moves yet (prevPos stays the press, which nothing here needs)
+      moveDown = insSpaceDownEngaged;
+      moveRight = insSpaceRightEngaged;
+      line = gestureFrame.line(pos, Page::BLANK_Y_RULING);
+      lx = gestureFrame.toLocal(pos).x;
+    }
+    if(!moveDown)
+      line = initialLine;
+    if(!moveRight)
+      lx = gestureFrame.toLocal(initialPos).x;
+    // incremental from the last applied x, so an axis engaging late takes the whole drag along it at once
+    ldx = lx - insSpaceAppliedX;
+    insSpaceAppliedX = lx;
   }
   const Dim marginLeft = gestureFrame.region ? MIN_DIM : currPage->marginLeft();
   switch(currMode) {
@@ -3479,8 +3621,9 @@ void ScribbleArea::doMoveEvent(const InputEvent& event)
       RulingRegionParams params = regionInProgress->regionParams();
       Rect r = Rect::corners(initialPos, pos);
       params.corners = { Point(r.left, r.top), Point(r.right, r.top), Point(r.right, r.bottom), Point(r.left, r.bottom) };
-      // lines are phased from the top edge, so the first line sits one pitch below it
-      params.origin = Point(r.left, r.top);
+      // lines are phased from the top edge, so the first line sits one pitch below it; a coordinate
+      //  system's (0, 0) starts in the middle, so all four quadrants show
+      params.origin = params.axes ? r.center() : Point(r.left, r.top);
       regionInProgress->setRegionParams(params);
       scribbleDoc->updateCurrStroke(regionInProgress->bbox());
       break;
@@ -3644,7 +3787,9 @@ void ScribbleArea::doMoveEvent(const InputEvent& event)
     else
       setPageDims(-1, initialPageSize.height() + gestureFrame.yrulingOr(Page::BLANK_Y_RULING) * (line - initialLine), true);
     // erase for negative insert space
-    if(insSpaceEraseSelection && insSpaceAxis == MODE_INSSPACEDOWN) {
+    //  (a drag that started as Insert Lines and then engaged Right as well moves along the line too, so it
+    //  erases as the combined tool does)
+    if(insSpaceEraseSelection && insSpaceAxis == MODE_INSSPACEDOWN && !(insSpaceRightEngaged && insertSpaceX)) {
       // Insert Lines moves what it selected (from insSpaceSelX on insSpaceSelLine) by whole lines; the ink
       //  it lands on runs from insSpaceEraseX on its new first line to where it started
       int target = insSpaceSelLine + (line - initialLine);
@@ -3754,6 +3899,7 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
       // the region tool is single use - a second region is rare, and the next press is almost always
       //  writing in the one just made
       scribbleDoc->scribbleMode->drawRegion = false;
+      scribbleDoc->scribbleMode->drawAxes = false;
       break;
     }
     // the multi-point gesture deliberately survives the release; only drag gestures commit here
@@ -3824,11 +3970,12 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
   case MODE_STROKE:
   {
     // a scratch-out needs no hold: it erases as the pen lifts.  The scribble is committed as ink below and
-    //  the erase follows as its own undo step, so undoing the erase after a false detection gives the
-    //  writing back with the scribble over it
+    //  the erase - of the scribble too - follows as its own undo step, so undoing the erase after a false
+    //  detection gives the writing back with the scribble over it
     Selection scratchedOut(currPage, Selection::STROKEDRAW_NONE);
+    bool scratchOutDetected = false;
     if(!snapActive && snapSamples.size() > 2 && cfg->Bool("liftScratchOut"))
-      scratchOutOnLift(scratchedOut);
+      scratchOutDetected = scratchOutOnLift(scratchedOut);
     stopShapeSnap();
     if(snapActive) {
       commitSnapShape();
@@ -3874,14 +4021,21 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
       currPage->clearDirty();
     }
     currStroke->node->m_renderedBounds = r;
-    // if this is the first stroke created since last call to groupStrokes(), record it
-    groupStrokes(currStroke);
-    currStroke = NULL;
-    if(scratchedOut.count() > 0) {
+    if(scratchOutDetected) {
+      // The erase step takes the scribble away with what it was drawn over, so nothing of it is left on
+      //  the page; undoing the erase brings both back.  The scribble is not handwriting to group, and the
+      //  open group may hold strokes about to be erased, so end the group now while they are all alive.
+      groupStrokes(NULL);
+      scratchedOut.addStroke(currStroke);
+      currStroke = NULL;
       scribbleDoc->endAction();
       scribbleDoc->startAction(currPageNum);  // closed by the end of this release
       scratchedOut.deleteStrokes();
+      break;
     }
+    // if this is the first stroke created since last call to groupStrokes(), record it
+    groupStrokes(currStroke);
+    currStroke = NULL;
     break;
   }
   case MODE_ERASEFREE:

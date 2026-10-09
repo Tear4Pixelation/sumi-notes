@@ -33,9 +33,10 @@
   <string name="menu_movepage">Move Page...</string>
   <string name="menu_saveas">Save As...</string>
   <string name="menu_insertdoc">Insert Document...</string>
-  <string name="menu_add_paper">Paper</string>
   <string name="menu_add_patch">Patch</string>
+  <string name="menu_add_scan">Scan Document</string>
   <string name="menu_add_document">Insert Document</string>
+  <string name="insert_pdf_page_prompt">Insert page (1-%d)</string>
   <string name="menu_add_photo">Insert Photo</string>
   <string name="menu_add_to_page">Add to Page</string>
   <string name="menu_add_to_page_tip">Add paper, a patch, a document or a photo to this page</string>
@@ -420,12 +421,9 @@
   <string name="about_summary">About Sumi</string>
   <string name="about_text">Created by: Stylus Labs\nWeb: http://www.styluslabs.com\nEmail: support@styluslabs.com\n\nWrite is a word processor for handwriting.\nAlso available for Windows tablet PCs.</string>
 
-  <string name="menu_insspacelines">Insert Lines</string>
-  <string name="menu_insspaceinline">Insert Space in Line</string>
   <string name="menu_skiplines">Skip Lines</string>
   <string name="tt_skiplines">Text is written on every second line: move and reflow by text lines</string>
-  <string name="tt_insspacedown">Insert whole lines\nMove everything after the pen down</string>
-  <string name="tt_insspaceright">Push the rest of the line right\nReflow handwritten text</string>
+  <string name="tt_ruledinsspace">Drag down to insert lines, right to insert space\nReflow handwritten text</string>
   <string name="tt_insspace_switchback">Return to previous tool after inserting space</string>
   <string name="scan_title">Scan Document</string>
   <string name="scan_rotate">Rotate</string>

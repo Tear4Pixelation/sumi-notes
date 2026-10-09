@@ -84,13 +84,12 @@ Point RulingFrame::snapToGrid(Point p, Dim fallback) const
   return toPage(Point(std::floor(local.x/xr + 0.5)*xr, std::floor(local.y/yr + 0.5)*yr));
 }
 
-InsertLinesStart insertLinesStart(Dim localY, Dim yr, bool skipLines, const std::function<bool(int)>& lineHasInk)
+InsertLinesStart insertLinesStart(Dim localY, Dim yr)
 {
   int rule = int(std::floor(localY/yr + 0.5));
   if(std::abs(localY - rule*yr) <= INSERT_LINES_SNAP*yr)
     return {rule, true};
-  int line = int(std::floor(localY/yr));
-  return {line, skipLines && !lineHasInk(line)};
+  return {int(std::floor(localY/yr)), false};
 }
 
 // RulingRegionParams
@@ -304,6 +303,17 @@ void RulingRegionParams::sanitize()
     // a staff is horizontal lines only
     xRuling = 0;
     dotRadius = 0;
+    axes = false;
+  }
+  if(axes) {
+    // a coordinate system is a squared grid: plotted points need both pitches, and no dots
+    if(xRuling <= 0)
+      xRuling = yRuling;
+    if(yRuling <= 0)
+      yRuling = xRuling;
+    dotRadius = 0;
+    if(xRuling <= 0)
+      axes = false;
   }
 }
 
@@ -327,6 +337,128 @@ void RulingRegionParams::transform(const Transform2D& tf)
   xRuling *= ux.dist();
   yRuling *= uy.dist();
   dotRadius *= std::sqrt(ux.dist()*uy.dist());
+}
+
+void RulingRegionParams::setPitchesAbout(Point fixedPoint, Dim newXRuling, Dim newYRuling)
+{
+  // the fixed point's local position, in pitches, is kept: new local = old local scaled per axis, and the
+  //  origin follows from that.  The angle does not change, so the old frame's directions still hold.
+  RulingFrame oldFrame = frame();
+  Point fixedLocal = oldFrame.toLocal(fixedPoint);
+  Dim scaleX = xRuling > 0 && newXRuling > 0 ? newXRuling/xRuling : 1;
+  Dim scaleY = yRuling > 0 && newYRuling > 0 ? newYRuling/yRuling : 1;
+  origin = fixedPoint - oldFrame.toPageDir(Point(fixedLocal.x*scaleX, fixedLocal.y*scaleY));
+  xRuling = newXRuling;
+  yRuling = newYRuling;
+}
+
+// a coordinate system's marks, in grid cells
+static constexpr Dim AXIS_ARROW_CELLS = 0.6;      // arrowhead length (its half width is half that)
+static constexpr Dim AXIS_TICK_HALF_CELLS = 0.2;  // a tick reaches this far either side of its axis
+static constexpr Dim AXIS_LABEL_CELLS = 0.55;     // number height
+static constexpr Dim AXIS_LABEL_MAX = 18;         // ... but no larger than body text, however coarse the grid
+
+// The ticks of one axis, as multiples k of the tick step: the axis lies along local y = 0 of `local`
+//  (crossings `xs`, sorted), and its positive end, where the arrowhead goes, is at the larger x when
+//  positiveDir > 0, else at the smaller.  0 (the origin) is no tick, and none crowds the arrowhead.
+static std::vector<int> axisTickIndices(const std::vector<Dim>& xs, Dim tickStep, Dim arrowLen, Dim positiveDir)
+{
+  std::vector<int> ticks;
+  if(xs.size() < 2 || tickStep <= 0)
+    return ticks;
+  Dim tip = positiveDir > 0 ? xs.back() : xs.front();
+  int kmin = int(std::ceil(xs.front()/tickStep)), kmax = int(std::floor(xs.back()/tickStep));
+  if(kmax - kmin > MAX_REGION_LINES)
+    return ticks;
+  for(int k = kmin; k <= kmax; ++k) {
+    Dim pos = k*tickStep;
+    if(k == 0 || std::abs(pos - tip) < arrowLen)
+      continue;
+    // only on the axis itself: a concave outline can split it into several spans
+    bool onAxis = false;
+    for(size_t ii = 0; ii + 1 < xs.size(); ii += 2)
+      onAxis = onAxis || (pos >= xs[ii] && pos <= xs[ii+1]);
+    if(onAxis)
+      ticks.push_back(k);
+  }
+  return ticks;
+}
+
+// One axis, in a frame where it is horizontal at y = 0: its line clipped to the outline, an open arrowhead
+//  at its positive end and a tick every tickStep.
+template<typename ToPage>
+static void addAxis(Path2D& path, const std::vector<Point>& local, Dim cell, Dim positiveDir, ToPage toPage)
+{
+  std::vector<Dim> xs = spanCrossings(local, 0);
+  if(xs.size() < 2)
+    return;
+  for(size_t ii = 0; ii + 1 < xs.size(); ii += 2)
+    path.addLine(toPage(Point(xs[ii], 0)), toPage(Point(xs[ii+1], 0)));
+  Dim arrowLen = AXIS_ARROW_CELLS*cell;
+  Dim tip = positiveDir > 0 ? xs.back() : xs.front();
+  Point arrowBack(tip - positiveDir*arrowLen, 0);
+  path.moveTo(toPage(arrowBack + Point(0, arrowLen/2)));
+  path.lineTo(toPage(Point(tip, 0)));
+  path.lineTo(toPage(arrowBack - Point(0, arrowLen/2)));
+  Dim tickHalf = AXIS_TICK_HALF_CELLS*cell;
+  for(int k : axisTickIndices(xs, AXIS_TICK_CELLS*cell, arrowLen, positiveDir))
+    path.addLine(toPage(Point(k*AXIS_TICK_CELLS*cell, -tickHalf)), toPage(Point(k*AXIS_TICK_CELLS*cell, tickHalf)));
+}
+
+Path2D RulingRegionParams::axesPath() const
+{
+  Path2D path;
+  Dim cell = axisCell();
+  if(!isValid() || !axes || cell <= 0)
+    return path;
+  RulingFrame frame = this->frame();
+  std::vector<Point> local = localCorners(*this);
+  // x axis: local y = 0, positive to the right
+  addAxis(path, local, cell, 1, [&](Point p){ return frame.toPage(p); });
+  // y axis: local x = 0, made horizontal by swapping the axes as linesPath does; math y grows up the page,
+  //  which is local -y, so its positive end is the smaller swapped x
+  std::vector<Point> swapped;
+  for(const Point& p : local)
+    swapped.push_back(Point(p.y, p.x));
+  addAxis(path, swapped, cell, -1, [&](Point p){ return frame.toPage(Point(p.y, p.x)); });
+  return path;
+}
+
+Dim RulingRegionParams::axisLabelFontSize() const
+{
+  return std::min(AXIS_LABEL_CELLS*axisCell(), AXIS_LABEL_MAX);
+}
+
+std::vector<AxisLabel> RulingRegionParams::axisLabels() const
+{
+  std::vector<AxisLabel> labels;
+  Dim cell = axisCell();
+  if(!isValid() || !axes || cell <= 0)
+    return labels;
+  std::vector<Point> local = localCorners(*this);
+  std::vector<Point> swapped;
+  for(const Point& p : local)
+    swapped.push_back(Point(p.y, p.x));
+  Dim fontSize = axisLabelFontSize();
+  Dim tickStep = AXIS_TICK_CELLS*cell;
+  Dim arrowLen = AXIS_ARROW_CELLS*cell;
+  // clear of the tick, by a quarter of the number's height
+  Dim gap = AXIS_TICK_HALF_CELLS*cell + fontSize/4;
+  auto addLabel = [&](Point anchor, int value, bool alignEnd) {
+    if(pointInPolygon(local, anchor))
+      labels.push_back(AxisLabel{anchor, value, alignEnd});
+  };
+  // x axis numbers below it, centred on their ticks
+  for(int k : axisTickIndices(spanCrossings(local, 0), tickStep, arrowLen, 1))
+    addLabel(Point(k*tickStep, gap + 0.75*fontSize), k, false);
+  // y axis numbers left of it, against it, vertically centred on their ticks (0.35 em: half a digit's
+  //  height above the baseline); up the page is positive
+  for(int k : axisTickIndices(spanCrossings(swapped, 0), tickStep, arrowLen, -1))
+    addLabel(Point(-gap, k*tickStep + 0.35*fontSize), -k, true);
+  // one 0, below and left of the origin, where neither axis's numbers go
+  if(pointInPolygon(local, Point(0, 0)))
+    addLabel(Point(-gap, gap + 0.75*fontSize), 0, true);
+  return labels;
 }
 
 int RulingRegionParams::bottomRightCorner() const

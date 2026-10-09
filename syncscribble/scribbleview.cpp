@@ -384,7 +384,7 @@ void ScribbleView::panZoomMove(const InputEvent& event, int prevpoints, int next
       zoomBy(newPointerDist / prevPointerDist, com.x, com.y);
       prevPointerDist = newPointerDist;
       // while the fingers are still down: "Fit" if letting go here would snap to fit width
-      showFitHint(nearFitWidth(com.x, com.y));
+      showFitHint(nearFitWidth());
     }
   }
   // don't call this fn unless you want to pan!

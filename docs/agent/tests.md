@@ -10,8 +10,15 @@ clutter, shadows, low-contrast desks, noise, JPEG), the latter added because the
 while detection failed on real iPad photos. The old outermost-line detector fails 5 of the realistic
 checks; see [document-scanning.md](document-scanning.md) for the tuning env vars.
 
-The ruling-region geometry, music staves included (band of 5 lines, phase, sanitize, clipping, tilt), is
+The ruling-region geometry, music staves included (band of 5 lines, phase, sanitize, clipping, tilt), spacing
+changes keeping the red handle's phase (`setPitchesAbout`) and the coordinate system's ticks and numbers
+(step of 2 cells, y up, clipping; each mutation-checked), is
 tested the same way in `scribbletest/regiontest.cpp` (`runRegionTests()`; command in its header).
+
+The eraser geometry (segment distance, capsule against a path's segments / stroke width / filled inside,
+the capsule polygon's round ends) is tested the same way in `scribbletest/erasetest.cpp`
+(`runEraseTests()`; command in its header); both erasers end to end in `ScribbleTest::eraserHitTest()` -
+see [pen-and-tools.md](pen-and-tools.md#eraser-hit-test-stroke-and-free-eraser).
 
 The shape math is tested the same way in `scribbletest/shapetest.cpp` (`runShapeTests()`), which likewise
 builds and runs standalone - see the command in that file's header. On top of it,
@@ -94,6 +101,12 @@ and the serialization round trip including a name containing the separators.
   the middle one px either side of a page start, in a gap (page above stays), a sliver at the edge not taking
   over, `gotoPos` keeping its page where the next page is at the middle, and a page drawn on staying current
   until the view moves.
+
+- `ScribbleTest::fitSnapPageTest()` - a zoom snap (pinch `roundZoom` and Ctrl+wheel `wheelZoomFinish`, both
+  layouts) keeps the page at the middle current when the fingers are over the next page, scrolling under
+  3 px to do it, and a snap with the fingers past the last page fits the last page
+  ([navigation.md](navigation.md#a-snap-keeps-the-page-you-are-on)). Confirmed against the old code: the
+  page check fails in all four combinations, and the ghost-page case crashes (NULL `Page`).
 
 - `ScribbleTest::docStateSyncTest()` - the layer table and the theme as undo steps and on the sync
   wire. Each edit is checked three ways: it is one undo step, undo/redo restore it, and what it
@@ -195,3 +208,13 @@ strokes, a layer, a layer move, a page, an outline entry and a page deletion und
 state after save and reopen, redo survives, and a file appended to externally opens with no history and
 loses its sidecar. `runAll()` turns persistence off for everything else. Mutation-checked four ways; see
 [undo-persistence.md](undo-persistence.md#tests).
+
+## SpinBox typed numbers (`ScribbleTest::spinBoxTest`)
+
+In-app check (needs only the theme). Pins `SpinBox::updateValueFromText` in ugui: 0 in every form (`0`, `00`,
+`-0` shown as `0`), 0 clamped to a minimum above 0 (the pen width field) instead of silently refused, `.5`, `5.`,
+`-3.5`, a comma decimal separator, clamping past the limits, and refusal of `12abc`, `-` and empty text. Verified to
+fail (9 checks) against the old ugui widgets.cpp. Related behavior in ugui, not covered by a check: typed text is
+applied on focus loss (a numeric soft keyboard has no Return), and a press on the -/+ buttons must not focus the
+text field (iOS soft keyboard) - inside popups `pressedWidget` is the popup, so `SpinBox` checks `hoveredWidget`.
+Input boxes are rounded by `--input-radius` in ugui `theme.cpp`.

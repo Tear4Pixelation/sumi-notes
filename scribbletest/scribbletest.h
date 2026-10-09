@@ -60,9 +60,12 @@ public:
   // the current page is the one taking up the most of the view, with a margin against flicker; explicit
   //  navigation and a page drawn on keep their page until the view moves
   int currentPageTest();
+  int fitSnapPageTest();
   // an arrow popup opened from the selection popup keeps its content inside its background wherever the
   //  selection popup sits, including where either one has to be moved to stay on screen
   int arrowPopupTest();
+  // typed numbers in a SpinBox: zero in every form, negatives, decimals, junk refused
+  int spinBoxTest();
   int libraryResizeTest();
   // page tags: placing never leaves one off a page (gap, beside, below the last page), a pen placement is
   //  selected, a tag dragged to another page moves its count there and undoes, and opening another document
@@ -75,6 +78,7 @@ public:
   // hold-to-snap: a held stroke becomes a shape, the rest of the gesture scales it, and the shape as
   // recognized is its own undo step; a held scratch-out erases what it covers
   int shapeSnapTest();
+  int eraserHitTest();
   // ruling regions: the ruled tools follow a (tilted) region's lines, the region stays below all ink and
   // out of reach of ink selection and erasers, moves with its ink, and survives undo, reload and sync
   int rulingRegionTest();

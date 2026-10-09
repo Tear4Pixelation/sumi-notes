@@ -22,10 +22,12 @@
 #include "layertest.cpp"
 #include "tabstest.cpp"
 #include "regiontest.cpp"
+#include "erasetest.cpp"
 #include "librarytest.cpp"
 #include "notefultest.cpp"
 #include "pagetagtest.cpp"
 #include "widthpresettest.cpp"
+#include "jumphistorytest.cpp"
 #include "pentoolbar.h"
 
 // Ideally, these tests should be run under valgrind to help check for memory leaks
@@ -1342,8 +1344,12 @@ int ScribbleTest::shapeTapEditTest()
   // the document's config, so only after newDocument() - which frees the previous one
   ScribbleConfig* cfg = scribbleDoc->cfg;
   const bool wasEditAfterDraw = cfg->Bool("shapeEditAfterDraw"), wasClearSelOnly = cfg->Bool("clearSelOnly");
+  const bool wasDrawThrough = cfg->Bool("shapeDrawThrough");
+  check(wasDrawThrough, "drawing a shape through a selection is on by default");
   cfg->set("shapeEditAfterDraw", true);
   cfg->set("clearSelOnly", true);
+  // the "only deselects" behaviour below is the setting turned off; draw-through is checked after it
+  cfg->set("shapeDrawThrough", false);
   // after newDocument() too, which reloads the input config
   input->singleTouchMode = INPUTMODE_PAN;  // what detecting a pen sets
   input->multiTouchMode = INPUTMODE_PAN;
@@ -1375,6 +1381,30 @@ int ScribbleTest::shapeTapEditTest()
   penDrag(100, 500, 300, 500);
   check(scribbleArea->currPage->strokeCount() == 2, "the next shape drag draws");
   scribbleDoc->clearSelection();
+
+  // draw-through on: a shape drag outside a selected shape deselects it and draws the new shape at once ...
+  cfg->set("shapeDrawThrough", true);
+  fingerTap(150, 206);
+  check(selectedCount() == 1, "the line is selected again");
+  int beforeThrough = scribbleArea->currPage->strokeCount();
+  penDrag(100, 600, 300, 600);
+  check(scribbleArea->currPage->strokeCount() == beforeThrough + 1, "draw through: the drag draws a new shape");
+  scribbleDoc->clearSelection();
+  // ... but a press on one of the selected shape's handles still drags the handle: no new shape, and the
+  //  line's end moves (the first line is (100,200)-(300,200); pressed at its end, dragged down)
+  fingerTap(150, 206);
+  check(selectedCount() == 1 && scribbleArea->shapeSelector != NULL, "the line is selected with handles");
+  int beforeHandle = scribbleArea->currPage->strokeCount();
+  penDrag(300, 200, 300, 300);
+  check(scribbleArea->currPage->strokeCount() == beforeHandle, "a press on a handle does not draw a new shape");
+  check(selectedCount() == 1, "and the shape stays selected");
+  {
+    Element* handled = selectedCount() ? scribbleArea->currSelection->strokes.front() : NULL;
+    check(handled && handled->isShape() && handled->bbox().height() > 50, "the handle drag moved the line's end");
+  }
+  penDrag(300, 300, 300, 200);  // put the end back for the checks below
+  scribbleDoc->clearSelection();
+  cfg->set("shapeDrawThrough", wasDrawThrough);
 
   // with the pen tool: handwriting is not a tap target, and the tool stays the pen
   scribbleMode->setMode(MODE_STROKE);
@@ -1507,9 +1537,9 @@ int ScribbleTest::zoomSnapTest()
 
   // the "Fit" toast's predicate: near fit width, not far from it
   area->zoomTo(wzoom*1.06, center.x, center.y);
-  check(area->nearFitWidth(center.x, center.y), "6% off fit width shows the Fit toast");
+  check(area->nearFitWidth(), "6% off fit width shows the Fit toast");
   area->zoomTo(wzoom*1.3, center.x, center.y);
-  check(!area->nearFitWidth(center.x, center.y), "30% off fit width shows no Fit toast");
+  check(!area->nearFitWidth(), "30% off fit width shows no Fit toast");
 
   // a double tap zooms to the same gapless fit width, and a second one back to 100%
   area->zoomTo(2, center.x, center.y);
@@ -1600,6 +1630,136 @@ int ScribbleTest::currentPageTest()
   scribbleDoc->newDocument();
   area->pageSizeChanged();
   area->resetZoom();
+  return nbad;
+}
+
+// A zoom snap keeps the page the user is on - the one at the middle of the view when the gesture ends.  The
+//  snap zooms about the gesture point, so with the fingers far from the middle a 7% fit snap used to carry
+//  the middle across the next page boundary and the neighbour became current ("sent to another page").
+//  And with the fingers past the last page, the snap looked up the ghost page, which has no Page: a crash
+int ScribbleTest::fitSnapPageTest()
+{
+  int nbad = 0;
+  ScribbleArea* area = scribbleArea;
+  const Rect wasScreenRect = area->screenRect;
+  const bool wasContinuous = ScribbleApp::cfg->Bool("continuousZoom");
+  ScribbleApp::cfg->set("continuousZoom", false);
+  area->screenRect = Rect::ltwh(0, 0, 1180, 760);
+  for(ScribbleArea::viewmode_t mode : {ScribbleArea::VIEWMODE_VERT, ScribbleArea::VIEWMODE_HORZ}) {
+    const bool horz = mode == ScribbleArea::VIEWMODE_HORZ;
+    for(bool wheel : {false, true}) {
+      auto check = [&](bool ok, const char* what) {
+        if(!ok) {
+          ++nbad;
+          printf("FAIL: fit snap page (%s, %s): %s\n", horz ? "horizontal" : "vertical", wheel ? "wheel" : "pinch", what);
+        }
+      };
+      scribbleDoc->newDocument();
+      scribbleDoc->newPage();
+      scribbleDoc->newPage();
+      scribbleDoc->cfg->set("viewMode", int(mode));
+      area->loadConfig(scribbleDoc->cfg);
+      area->pageSizeChanged();
+      Point center(area->getViewWidth()/2, area->getViewHeight()/2);
+      const Dim viewLength = horz ? area->getViewWidth() : area->getViewHeight();
+      // the fit along the scroll direction (fit height, vertically) is the one whose snap scrolls the most;
+      //  the wheel only snaps to fit width
+      Dim fitZoom = (horz || wheel) ? area->fitWidthZoom(0) : area->getViewHeight()/area->page(0)->height()/area->preScale;
+      // the gesture ends 7% below the fit zoom, with the fingers near the far end of the view
+      Point gesture = horz ? Point(viewLength - 10, center.y) : Point(center.x, viewLength - 10);
+      auto snap = [&]() {
+        if(wheel)
+          area->wheelZoomFinish(gesture.x, gesture.y);
+        else
+          area->roundZoom(gesture.x, gesture.y);
+      };
+      auto placeBoundary = [&](int nextPage, Dim screenPos) {
+        Point onScreen = area->dimToScreen(area->getPageOrigin(nextPage));
+        area->doPan(horz ? screenPos - (onScreen.x) : 0, horz ? 0 : screenPos - onScreen.y);
+      };
+      area->zoomTo(fitZoom*0.93, center.x, center.y);
+      area->gotoPage(0);
+      // the middle of the view 12 px before the start of the second page: the first is current, the
+      //  fingers are over the second
+      placeBoundary(1, viewLength/2 + 12);
+      check(area->currPageNum == 0 && area->dimToPageNum(area->screenToDim(gesture)) == 1,
+          "(setup) the middle on the first page, the fingers on the second");
+      check(!wheel || area->nearFitWidth(), "(setup) the wheel zoom is near fit width");
+      snap();
+      check(std::abs(area->mZoom - fitZoom) < 1e-9, "the zoom snapped to fit");
+      check(area->currPageNum == 0, "the page at the middle when the gesture ended stays current");
+      // ...by scrolling no further than needed: the middle is back on the first page's last pixel
+      Point boundary = area->dimToScreen(area->getPageOrigin(1));
+      Dim past = (horz ? boundary.x : boundary.y) - viewLength/2;
+      check(past > 0 && past < 3, "the snap scrolls only as far as it has to");
+
+      // the fingers past the last page, over the ghost page: the snap fits the last page, without a crash
+      area->zoomTo(fitZoom*0.93, center.x, center.y);
+      area->doPan(horz ? -1E6 : 0, horz ? 0 : -1E6);  // to the end of the document
+      if(area->dimToPageNum(area->screenToDim(gesture)) == area->numPages()) {
+        area->nearFitWidth();
+        snap();
+        check(std::abs(area->mZoom - fitZoom) < 1e-9, "a snap with the fingers past the last page fits the last");
+        check(area->currPageNum == area->numPages() - 1, "...and the last page stays current");
+      }
+      else
+        check(false, "(setup) the fingers past the last page");
+    }
+  }
+  ScribbleApp::cfg->set("continuousZoom", wasContinuous);
+  area->screenRect = wasScreenRect;
+  scribbleDoc->newDocument();
+  area->pageSizeChanged();
+  area->resetZoom();
+  return nbad;
+}
+
+// Typed numbers in a SpinBox (ugui widgets.cpp, SpinBox::updateValueFromText): 0 in every form must be taken -
+//  clamped to the minimum when the minimum is above 0, not silently refused - along with negatives and decimals,
+//  and text that is not a number must leave the value alone.  Needs only the theme, no document.
+int ScribbleTest::spinBoxTest()
+{
+  int nbad = 0;
+  auto checkSpin = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: spin box: %s\n", what); }
+  };
+  auto typeInto = [](SpinBox* spin, const char* text) {
+    TextEdit* edit = static_cast<TextEdit*>(spin->selectFirst(".textbox"));
+    edit->setText(text);
+    return spin->updateValueFromText(edit->text().c_str());
+  };
+  auto shownText = [](SpinBox* spin) { return static_cast<TextEdit*>(spin->selectFirst(".textbox"))->text(); };
+
+  SpinBox* spinZeroMin = createTextSpinBox(5, 1, 0, 100, "%.0f");
+  checkSpin(typeInto(spinZeroMin, "0") && spinZeroMin->value() == 0, "typing 0 into a field whose minimum is 0 sets 0");
+  checkSpin(shownText(spinZeroMin) == "0", "and the field shows 0");
+  spinZeroMin->setValue(5);
+  checkSpin(typeInto(spinZeroMin, "00") && spinZeroMin->value() == 0 && shownText(spinZeroMin) == "0",
+      "00 is 0, shown as 0");
+  spinZeroMin->setValue(5);
+  checkSpin(typeInto(spinZeroMin, "-0") && spinZeroMin->value() == 0 && shownText(spinZeroMin) == "0",
+      "-0 is 0, not a negative zero shown as -0");
+
+  // a minimum above 0 (the pen width field): 0 is clamped to it rather than refused
+  SpinBox* spinPositiveMin = createTextSpinBox(3, 0.01, 0.01, 200, "%.3g");
+  checkSpin(typeInto(spinPositiveMin, "0") && std::abs(spinPositiveMin->value() - 0.01) < 1e-9,
+      "typing 0 where the minimum is 0.01 gives the minimum, not the old value");
+  checkSpin(shownText(spinPositiveMin) == "0.01", "and the field shows the clamped value");
+
+  // decimals and negatives
+  SpinBox* spinSigned = createTextSpinBox(1, 0.1, -50, 50, "%g");
+  checkSpin(typeInto(spinSigned, ".5") && spinSigned->value() == 0.5, ".5 is 0.5");
+  checkSpin(typeInto(spinSigned, "5.") && spinSigned->value() == 5, "5. is 5");
+  checkSpin(typeInto(spinSigned, "0.25") && spinSigned->value() == 0.25, "0.25 is 0.25");
+  checkSpin(typeInto(spinSigned, "-3.5") && spinSigned->value() == -3.5, "-3.5 is -3.5");
+  checkSpin(typeInto(spinSigned, "0,5") && spinSigned->value() == 0.5, "a comma decimal separator is read as a point");
+  checkSpin(typeInto(spinSigned, "-100") && spinSigned->value() == -50, "a value past the limit is clamped to it");
+
+  // not a number: refused, value untouched
+  spinSigned->setValue(7);
+  checkSpin(!typeInto(spinSigned, "12abc") && spinSigned->value() == 7, "12abc is refused");
+  checkSpin(!typeInto(spinSigned, "-") && spinSigned->value() == 7, "a lone minus is refused");
+  checkSpin(!typeInto(spinSigned, "") && spinSigned->value() == 7, "empty text is refused");
   return nbad;
 }
 
@@ -2997,21 +3157,24 @@ int ScribbleTest::shapeSnapTest()
   }
   ie(0, 0, 0, pen, release);
   check(!scribbleArea->snapHoldUsed, "no hold was involved");
-  // the target is gone and the scribble itself is now a stroke on the page, beside the untouched one
-  check(page->strokeCount() == 2, "a lift scratch-out erases the target and keeps its own scribble as a stroke");
+  // the target and the scribble are both gone; only the untouched stroke is left
+  check(page->strokeCount() == 1, "a lift scratch-out erases the target and leaves no scribble behind");
   size_t stepsAfterErase = scribbleDoc->history->undoSteps();
   undo();
-  check(page->strokeCount() == 3, "the first undo brings the erased stroke back and leaves the scribble");
+  check(page->strokeCount() == 3, "the first undo brings the erased stroke back with the scribble over it");
   undo();
   check(page->strokeCount() == 2 && scribbleDoc->history->undoSteps() == stepsAfterErase - 2,
       "the second undo removes the scribble");
   redo();
+  check(page->strokeCount() == 3, "the first redo puts the scribble back");
   redo();
-  check(page->strokeCount() == 2, "redo erases again");
-  // scribbling over nothing is not an erase, so it stays ink
+  check(page->strokeCount() == 1, "the second redo erases the target and the scribble again");
+  // a scratch-out over nothing is still recorded: the same two undo steps, the scribble gone after the second
+  //  (against the old code, which kept it as plain ink in one step, the count and step checks both fail)
   begin(0.8f);
   scribbleDoc->cfg->set("liftScratchOut", 1);
   scribbleDoc->cfg->set("liftScratchOutLevel", 2);
+  size_t stepsBeforeEmpty = scribbleDoc->history->undoSteps();
   for(int pass = 0; pass < 8; ++pass) {
     for(int i = 0; i <= 20; ++i) {
       Dim frac = i/Dim(20);
@@ -3020,7 +3183,117 @@ int ScribbleTest::shapeSnapTest()
     }
   }
   ie(0, 0, 0, pen, release);
-  check(page->strokeCount() == 1, "a scribble over nothing stays as ink");
+  check(page->strokeCount() == 0, "a lift scratch-out over nothing still takes the scribble away");
+  check(scribbleDoc->history->undoSteps() == stepsBeforeEmpty + 2,
+      "a lift scratch-out over nothing is recorded as the same two undo steps");
+  undo();
+  check(page->strokeCount() == 1, "undoing a scratch-out over nothing brings the scribble back as ink");
+  undo();
+  check(page->strokeCount() == 0, "a second undo removes the scribble");
+
+  scribbleDoc->newDocument();
+  return nbad;
+}
+
+// The eraser hit test is against the ink, swept as a capsule between events (erasegeom.h).  Every distance
+//  is relative to the eraser radius r and the line's half width, so the checks hold at any zoom.  Against
+//  the old code (centre line only, and a square-ended rectangle for the free eraser) the "edge" checks and
+//  the free eraser's "corner" check fail; the "not yet" checks guard against an eraser grown too eager.
+int ScribbleTest::eraserHitTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: eraser hit: %s\n", what); }
+  };
+  auto at = [&](Point pagept, int ev) {
+    Point scr = scribbleArea->dimToScreen(scribbleArea->pageDimToDim(pagept));
+    ie(scr.x, scr.y, 0, pen, ev);
+  };
+  // a plain stroked line (a stroked pen's stroke, or a shape's): exact geometry, no input filtering
+  Page* page = NULL;
+  auto line = [&](Point a, Point b, Dim width) {
+    SvgPath* node = new SvgPath();
+    node->path()->moveTo(a);
+    node->path()->lineTo(b);
+    node->setAttr<color_t>("fill", Color::NONE);
+    setSvgStrokeColor(node, Color::BLACK);
+    node->setAttr<float>("stroke-width", width);
+    node->setAttr<int>("stroke-linecap", Painter::RoundCap);
+    node->addClass(Element::STROKE_PEN_CLASS);
+    Element* s = new Element(node);
+    page->addStroke(s);
+    return s;
+  };
+  auto sweep = [&](int mode, Point from, Point to) {
+    scribbleMode->setMode(mode);
+    at(from, press);
+    at(to, INPUTEVENT_MOVE);
+    at(to, release);
+  };
+  auto fresh = [&]() {
+    scribbleDoc->newDocument();
+    page = scribbleArea->currPage;
+  };
+
+  const Dim halfWidth = 5;
+  const Point left(100, 300), right(700, 300);  // a long line: two points, 600 apart
+  for(int mode : {MODE_ERASESTROKE, MODE_ERASEFREE}) {
+    const char* name = mode == MODE_ERASESTROKE ? "stroke eraser" : "free eraser";
+    const Dim r = (mode == MODE_ERASESTROKE ? ScribbleArea::ERASESTROKE_RADIUS
+        : ScribbleArea::ERASEFREE_RADIUS)/scribbleArea->mZoom;
+    char what[160];
+
+    // crossing the middle of a long line in a single move, far from both of its points
+    fresh();
+    line(left, right, 2*halfWidth);
+    sweep(mode, Point(400, 300 - 4*r - halfWidth), Point(400, 300 + 4*r + halfWidth));
+    snprintf(what, sizeof(what), "%s: one move across the middle of a long line erases it", name);
+    check(mode == MODE_ERASESTROKE ? page->strokeCount() == 0 : page->strokeCount() == 2, what);
+
+    // running along the line's edge, the eraser's own edge inside the ink but nowhere near the centre line
+    fresh();
+    line(left, right, 2*halfWidth);
+    Dim edgeY = 300 - halfWidth - 0.6*r;
+    sweep(mode, Point(380, edgeY), Point(420, edgeY));
+    snprintf(what, sizeof(what), "%s: touching only the edge of a wide line erases it", name);
+    check(mode == MODE_ERASESTROKE ? page->strokeCount() == 0 : page->strokeCount() == 2, what);
+
+    // the same, but with the eraser's edge still clear of the ink
+    fresh();
+    line(left, right, 2*halfWidth);
+    Dim clearY = 300 - halfWidth - 1.2*r;
+    sweep(mode, Point(380, clearY), Point(420, clearY));
+    snprintf(what, sizeof(what), "%s: an eraser clear of a wide line does not erase it", name);
+    check(page->strokeCount() == 1, what);
+
+    // a thin line diagonally ahead of where the eraser stops: 1.13 r from its centre, so not reached - the
+    //  old free eraser's square end reached r along both axes and erased it
+    fresh();
+    line(Point(400 + 0.8*r, 300 + 0.8*r), Point(400 + 0.8*r, 300 + 20*r), 0.2);
+    sweep(mode, Point(300, 300), Point(400, 300));
+    snprintf(what, sizeof(what), "%s: ink diagonally past the end of the eraser is not erased", name);
+    check(page->strokeCount() == 1, what);
+  }
+
+  // what the free eraser leaves ends where the eraser's edge was: the cut is r + half width from the
+  //  eraser's centre along the centre line, so the remaining round cap is flush with the eraser
+  fresh();
+  line(left, right, 2*halfWidth);
+  {
+    const Dim r = ScribbleArea::ERASEFREE_RADIUS/scribbleArea->mZoom;
+    sweep(MODE_ERASEFREE, Point(400, 300), Point(400, 301));
+    Dim gapLeft = MAX_DIM, gapRight = -MAX_DIM;
+    for(Element* s : page->children()) {
+      Rect bbox = static_cast<SvgPath*>(s->node)->path()->controlPointRect();
+      if(bbox.right < 400) gapLeft = std::min(gapLeft, 400 - bbox.right);
+      if(bbox.left > 400) gapRight = std::max(gapRight, bbox.left - 400);
+    }
+    check(page->strokeCount() == 2, "free eraser: a tap on a line cuts it in two");
+    // the polygon approximating the capsule is a hair inside it (0.5% of the radius)
+    check(std::abs(gapLeft - (r + halfWidth)) < 0.02*(r + halfWidth)
+        && std::abs(gapRight - (r + halfWidth)) < 0.02*(r + halfWidth),
+        "free eraser: the cut is r + half width either side of the eraser's centre");
+  }
 
   scribbleDoc->newDocument();
   return nbad;
@@ -3262,8 +3535,9 @@ int ScribbleTest::skippedLinesTest()
 // Ruled insert space split by direction (MODE_INSSPACEDOWN / MODE_INSSPACERIGHT): the same diagonal drag,
 //  from the gap after a line's first word, moves the rest of the line down by whole lines without moving it
 //  along the line with Down, and pushes it along the line without leaving it with Right.  The combined
-//  MODE_INSSPACERULED does both, so either check fails if the axis is not held.  Default test page: lined,
-//  40 pitch, margin 100.
+//  MODE_INSSPACERULED does both, so either check fails if the axis is not held.  Then the one offered tool,
+//  MODE_INSSPACEAUTO (dead zone: a drift is ignored, a diagonal does both), and Insert Lines' press zones
+//  through it.  Default test page: lined, 40 pitch, margin 100.
 int ScribbleTest::insSpaceAxisTest()
 {
   int nbad = 0;
@@ -3330,9 +3604,48 @@ int ScribbleTest::insSpaceAxisTest()
     }
   }
 
-  // Insert Lines' zones (second-day report, see insertLinesStart()): a drag straight down or up
+  // the one offered tool, MODE_INSSPACEAUTO: the drag picks the axis, a drift along the other is ignored
+  //  inside the dead zone, a clear diagonal does both.  Each drag in 8 steps from the gap after a word.
+  auto autoDrag = [&](Point from, Dim dx, Dim dy) {
+    scribbleMode->setMode(MODE_INSSPACEAUTO);
+    at(from, press);
+    for(int ii = 1; ii <= 8; ++ii) at(Point(from.x + dx*ii/8, from.y + dy*ii/8), INPUTEVENT_MOVE);
+    at(Point(from.x + dx, from.y + dy), release);
+  };
+  for(int drag = 0; drag < 3; ++drag) {
+    scribbleDoc->newDocument();
+    doCommand(ID_RESETZOOM);
+    scribbleDoc->app->setPen(ScribblePen(Color::BLACK, 2, ScribblePen::TIP_ROUND));
+    std::vector<Element*> first = word(textLeft, 3);
+    std::vector<Element*> second = word(textLeft + 4*14 + 16, 3);
+    std::vector<Element*> below = word(textLeft, 5);
+    const Dim secondLeft = leftOf(second);
+    const Point from(textLeft + 4*14 + 8, 3.5*pitch);
+    if(drag == 0) {
+      // two lines down, drifting 15 right: only down
+      autoDrag(from, 15, 2*pitch);
+      check(allOn(second, 5) && allOn(below, 7), "auto, down with a drift right: the rest of the line moves down");
+      check(std::abs(leftOf(second) - secondLeft) < 0.5, "auto, down with a drift right: it does not move along the line");
+    }
+    else if(drag == 1) {
+      // 80 right, drifting 0.6 of a line down (across the rule below): only right
+      autoDrag(from, 80, 0.6*pitch);
+      check(allOn(second, 3) && allOn(below, 5), "auto, right with a drift down: nothing changes line");
+      check(leftOf(second) > secondLeft + 40, "auto, right with a drift down: the rest of the line is pushed right");
+    }
+    else {
+      // 60 right and two lines down: a diagonal does both
+      autoDrag(from, 60, 2*pitch);
+      check(allOn(second, 5) && allOn(below, 7), "auto, diagonal: the rest of the line moves down");
+      check(leftOf(second) > secondLeft + 30, "auto, diagonal: and along the line");
+    }
+    check(allOn(first, 3), "auto: the word before the press stays where it is");
+  }
+
+  // Insert Lines' zones (second-day report, see insertLinesStart()): a drag straight down or up, with the one
+  //  offered tool, which sets up as Insert Lines once the drag is clearly down
   auto downDrag = [&](Point from, Dim dy) {
-    scribbleMode->setMode(MODE_INSSPACEDOWN);
+    scribbleMode->setMode(MODE_INSSPACEAUTO);
     at(from, press);
     for(int ii = 1; ii <= 8; ++ii) at(Point(from.x, from.y + dy*ii/8), INPUTEVENT_MOVE);
     at(Point(from.x, from.y + dy), release);
@@ -3376,20 +3689,38 @@ int ScribbleTest::insSpaceAxisTest()
   {
     // Skip Lines, text on lines 3, 5 and 7: pressed between the words but on the blank line 4, the whole
     //  of line 5 moves down a text line - it used to split line 5 at the pen
+    // One rule with Skip Lines or without: text on lines 3, 5 and 7, pressed between the words within 1/8
+    //  line above or below the rule over line 5 - the whole of line 5 moves down two lines with everything
+    //  under it, line 3 stays.  Both toggles, both sides of the rule.
+    for(bool skip : { false, true }) {
+      for(Dim offset : { -0.1*pitch, 0.1*pitch }) {
+        scribbleMode->insSpaceSkipLines = skip;
+        fresh();
+        std::vector<Element*> above = word(textLeft, 3);
+        word(textLeft + 4*14 + 16, 3);
+        std::vector<Element*> first = word(textLeft, 5), second = word(textLeft + 4*14 + 16, 5);
+        std::vector<Element*> last = word(textLeft, 7);
+        downDrag(Point(gapX, 5*pitch + offset), 2*pitch);
+        std::string which = std::string(skip ? "skip lines" : "no skip") + (offset < 0 ? ", above rule: " : ", below rule: ");
+        check(allOn(above, 3), (which + "the line above stays").c_str());
+        check(allOn(first, 7) && allOn(second, 7), (which + "the whole line below moves").c_str());
+        check(allOn(last, 9), (which + "everything under it moves").c_str());
+      }
+    }
+    // just past 1/8 line below the rule (the zone used to be 0.2): a split, again the same either way
+    for(bool skip : { false, true }) {
+      scribbleMode->insSpaceSkipLines = skip;
+      fresh();
+      std::vector<Element*> left = word(textLeft, 5), right = word(textLeft + 4*14 + 16, 5);
+      downDrag(Point(gapX, 5*pitch + 0.18*pitch), 2*pitch);
+      check(allOn(left, 5) && allOn(right, 7), skip ? "skip lines, past 1/8 below a rule: split at the pen"
+                                                    : "no skip, past 1/8 below a rule: split at the pen");
+    }
     scribbleMode->insSpaceSkipLines = true;
+    // inside a text line it splits there
     fresh();
-    std::vector<Element*> above = word(textLeft, 3);
-    word(textLeft + 4*14 + 16, 3);
-    std::vector<Element*> first = word(textLeft, 5), second = word(textLeft + 4*14 + 16, 5);
-    std::vector<Element*> last = word(textLeft, 7);
-    downDrag(Point(gapX, 4.5*pitch), 2*pitch);
-    check(allOn(above, 3), "skip lines, pressed on a blank line: the text line above stays");
-    check(allOn(first, 7) && allOn(second, 7), "skip lines, pressed on a blank line: the text line below moves whole");
-    check(allOn(last, 9), "skip lines, pressed on a blank line: the text below moves with it");
-    // inside a text line it still splits there
-    fresh();
-    first = word(textLeft, 5);
-    second = word(textLeft + 4*14 + 16, 5);
+    std::vector<Element*> first = word(textLeft, 5);
+    std::vector<Element*> second = word(textLeft + 4*14 + 16, 5);
     downDrag(Point(gapX, 5.5*pitch), 2*pitch);
     check(allOn(first, 5) && allOn(second, 7), "skip lines, pressed inside a text line: split at the pen");
     scribbleMode->insSpaceSkipLines = false;
@@ -3712,7 +4043,8 @@ void ScribbleTest::runAll(bool runsynctest)
   UndoPersist::enabled = false;
   int nThumbsFailed = 0;
   int nUnitFailed = runScanTests() + runShapeTests() + runColorTests() + runLayerTests() + runLibraryTests()
-      + runRegionTests() + runNotefulTests() + runPageTagTests() + runWidthPresetTests() + runTabTests();
+      + runRegionTests() + runNotefulTests() + runPageTagTests() + runWidthPresetTests() + runTabTests()
+      + runJumpHistoryTests() + runEraseTests();
   std::vector<std::string> slFailed;
   void (ScribbleTest::*tests[])() = {
     &ScribbleTest::test0,
@@ -3884,12 +4216,15 @@ void ScribbleTest::runAll(bool runsynctest)
   nUnitFailed += shapeTapEditTest();
   nUnitFailed += zoomSnapTest();
   nUnitFailed += currentPageTest();
+  nUnitFailed += fitSnapPageTest();
   nUnitFailed += arrowPopupTest();
+  nUnitFailed += spinBoxTest();
   nUnitFailed += libraryResizeTest();
   nUnitFailed += pageTagTest();
   nUnitFailed += docStateSyncTest();
   nUnitFailed += curveFitTest();
   nUnitFailed += shapeSnapTest();
+  nUnitFailed += eraserHitTest();
   nUnitFailed += rulingRegionTest();
   nUnitFailed += reflowIndentTest();
   nUnitFailed += skippedLinesTest();

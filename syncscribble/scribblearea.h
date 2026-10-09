@@ -2,6 +2,7 @@
 
 #include "scribbleview.h"
 #include "document.h"
+#include "jumphistory.h"
 #include "selection.h"
 #include "nightmode.h"
 
@@ -62,7 +63,7 @@ public:
       Element* bkmktarget = NULL, const char* idstr = NULL, bool forcenormal = false);
   // returns where the image went, in document coordinates; passing that back as `below` places the next
   //  image underneath it rather than on top of it (scanning several pages with Add more)
-  Rect insertImage(Image image, const Rect& below = Rect()); //, bool lossy = false);
+  Rect insertImage(Image image, const Rect& below = Rect(), Dim fitWidth = 0, Dim fitHeight = 0); //, bool lossy = false);
   // Screenshot (docs/agent/screenshot.md): the area the last selection gesture covered stays marked,
   //  dashed, until the selection is cleared - even when the gesture caught no ink
   bool hasShotRegion() const { return !shotRegion.empty(); }
@@ -140,6 +141,7 @@ protected:
   void expandRight();
   void prevView();
   void nextView();
+  void jumpToPage(int pagenum);  // gotoPage() that is recorded in the jump history (see jumphistory.h)
   void viewPos(int pagenum, Point pos);
   void gotoPos(int pagenum, Point pos, bool savepos = true);
   void gotoPage(int pagenum);
@@ -161,9 +163,10 @@ protected:
   // fit width: the page exactly as wide as the view, no margin (see docs/agent/navigation.md)
   Dim fitWidthZoom(int pagenum) const;
   bool snapsToFitWidth(Dim zoom, Dim wzoom) const;
-  bool nearFitWidth(Dim px, Dim py) const override;
+  bool nearFitWidth() const override;
   void wheelZoomFinish(Dim px, Dim py) override;
   void alignFitPage(int pagenum, bool fitWidth);
+  void keepPageAtMiddle(int pagenum);
   void doPan(Dim dx, Dim dy) override;
   void doRefresh() override;
   void pageSizeChanged() override;
@@ -182,12 +185,19 @@ protected:
   //  region is not ink, so doSelect() never takes it, and without this the ink would slide out from
   //  under its lines.  Adds every region whose bbox satisfies `past` to `sel`.
   void addRegionsToInsertSpace(Selection* sel, const std::function<bool(const Rect&)>& past);
+  // ruled insert space's start, run at the press for a fixed axis and again once the drag of
+  //  MODE_INSSPACEAUTO has picked Down: the line and x it moves from (Insert Lines' press zones, Skip Lines'
+  //  frame), from insSpacePressFrame; then the selection of what it moves
+  void ruledInsSpaceStart(Point pos);
+  void ruledInsSpaceSelect();
+  // MODE_INSSPACEAUTO: engages the axes the drag from the press to pos has clearly taken; false while
+  //  neither has (the dead zone), true once one has
+  bool ruledInsSpaceEngage(Point pos);
   int selectionHit(Point pos, bool touch);
 
   void viewSelection();
   void freeErase(Point prevpos, Point pos);
   void freeEraseRuled(Dim xmin, Dim xmax, int line);
-  bool saveCurrPos(int newpagenum, Point newpos);
 
   Point getPageOrigin(int pagenum) const;
   int dimToPageNum(const Point& pos) const;
@@ -243,9 +253,19 @@ protected:
   Dim eraseXmin;
   // for insert space
   bool insertSpaceX;
-  // which ruled insert space tool started the gesture: MODE_INSSPACEDOWN (lines only), MODE_INSSPACERIGHT
-  //  (along the line only) or MODE_INSSPACERULED (both); the gesture itself runs as MODE_INSSPACERULED
+  // which ruled insert space start the gesture uses: MODE_INSSPACEDOWN (Insert Lines' press zones, lines
+  //  only), MODE_INSSPACERIGHT (the press's line and x, along the line only) or MODE_INSSPACERULED (the
+  //  press's, both); the gesture itself runs as MODE_INSSPACERULED.  MODE_INSSPACEAUTO while the drag of
+  //  that tool has not left the dead zone; it then becomes the axis it engaged first (Down or Right)
   int insSpaceAxis = MODE_INSSPACERULED;
+  // MODE_INSSPACEAUTO only: the axes engaged so far (each stays engaged for the rest of the gesture)
+  bool insSpaceAutoAxes = false;
+  bool insSpaceDownEngaged = false;
+  bool insSpaceRightEngaged = false;
+  // the gesture frame at the press before Insert Lines or Skip Lines changed it (for a restart as Down)
+  RulingFrame insSpacePressFrame;
+  // local x the drag was last applied at, after the axis filter (for the incremental insertSpace())
+  Dim insSpaceAppliedX = 0;
   // what ruled insert space moves, in gestureFrame: everything after local x insSpaceSelX on line
   //  insSpaceSelLine (MIN_DIM: the whole line).  The press's own line and x, except where Insert Lines picks
   //  another start (insertLinesStart()); insSpaceEraseX is where Insert Lines dragged up starts erasing on
@@ -313,6 +333,8 @@ public:
   // show `params` on the selected region without recording anything - for a slider drag, which is
   //  committed with setSelRegionParams once it ends
   void previewSelRegionParams(const RulingRegionParams& params);
+  // the selected region's red handle, pinned in place: what a spacing change scales about (NaN if none)
+  Point pinSelRegionHandle();
   // the selected region's outline and this view, in window coordinates, to place the region panel
   Rect selRegionGlobalRect() const;
   Rect globalViewRect() const;
@@ -407,9 +429,10 @@ protected:
   Dim strokeGroupYCenter = 0;
   typedef std::vector<Element*>::iterator RecentStrokesIter;
 
-  // for back/fwd navigation
-  std::vector<DocPosition> posHistory;
-  std::vector<DocPosition>::iterator posHistoryPos;
+  // back/fwd navigation lives in ScribbleDoc::jumpHistory; these two feed and use it
+  JumpLocation currentLocation() const;
+  void recordJumpTo(int destPage);
+  void restoreLocation(const JumpLocation& location);
 
   // experimental feature to select N most recent strokes
   int recentStrokeSelPos = -1;

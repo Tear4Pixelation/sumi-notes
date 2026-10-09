@@ -9,9 +9,10 @@ enum { MODE_NONE = 10, MODE_PAN, MODE_STROKE, MODE_ERASE, MODE_ERASESTROKE, MODE
     MODE_MOVESELRULED, MODE_INSSPACE, MODE_INSSPACEVERT, MODE_INSSPACEHORZ, MODE_INSSPACERULED,
     MODE_BOOKMARK, MODE_SCALESEL, MODE_SCALESELW, MODE_ROTATESEL, MODE_ROTATESELW, MODE_TOOLMENU,
     MODE_SELECTPATH, MODE_CROPSEL, MODE_PAGESEL, MODE_ERASEFREERULED, MODE_DRAWSHAPE, MODE_SHAPEHANDLE,
-    // ruled insert space held to one axis: whole lines down, or along the line (reflow) - the two tools the
-    //  insert space options row offers; MODE_INSSPACERULED, both at once, is what ScribbleArea runs them as
-    MODE_INSSPACEDOWN, MODE_INSSPACERIGHT,
+    // ruled insert space held to one axis: whole lines down, or along the line (reflow); MODE_INSSPACERULED,
+    //  both at once, is what ScribbleArea runs them as.  No longer offered (tests use them): the options row
+    //  offers MODE_INSSPACEAUTO, whose drag picks the axis - or both - with a dead zone (see doMoveEvent)
+    MODE_INSSPACEDOWN, MODE_INSSPACERIGHT, MODE_INSSPACEAUTO,
     MODE_LAST};
 
 constexpr int MODEMOD_NONE = 0;
@@ -41,7 +42,7 @@ enum {ID_UNDO = 100, ID_REDO, ID_SELALL, ID_SELSIMILAR, ID_INVSEL, ID_DELSEL, ID
     ID_PASTE, ID_CANCEL, ID_EXPANDDOWN, ID_EXPANDRIGHT, ID_ZOOMIN, ID_ZOOMOUT, ID_RESETZOOM, ID_PREVPAGE,
     ID_NEXTPAGE, ID_PAGEAFTER, ID_PAGEBEFORE, ID_DELPAGE, ID_NEWDOC, ID_ZOOMALL, ID_ZOOMWIDTH, ID_DUPSEL,
     ID_LINKBOOKMARK, ID_PREVVIEW, ID_NEXTVIEW, ID_SELRECENT, ID_DESELRECENT, ID_SAVESEL, ID_NEXTPAGENEW,
-    ID_PREVSCREEN, ID_NEXTSCREEN, ID_STARTOFDOC, ID_ENDOFDOC, ID_SCROLLUP, ID_SCROLLDOWN, ID_UNGROUP};
+    ID_PREVSCREEN, ID_NEXTSCREEN, ID_STARTOFDOC, ID_ENDOFDOC, ID_SCROLLUP, ID_SCROLLDOWN, ID_UNGROUP, ID_LASTPAGE};
 
 constexpr int ID_EMULATEPENBTN = 3000;
 
@@ -69,6 +70,8 @@ public:
   // the shape row's Paper Patch tool (a ruling region): MODE_DRAWSHAPE draws a ruling region instead of shapeId.  Not
   //  saved - it is a one-off, not a tool anyone keeps in hand
   bool drawRegion = false;
+  // with drawRegion: the region drawn is a coordinate system (the "+" menu's Coordinate System)
+  bool drawAxes = false;
   // active shape for MODE_DRAWSHAPE; one of ShapeId (see shape.h)
   int shapeId;
   // SHAPEFLAG_HEADSTART/HEADEND from the head toggles on the shape options row; applied to new shapes

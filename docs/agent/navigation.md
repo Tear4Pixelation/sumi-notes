@@ -100,7 +100,8 @@ page" and everything else that says "current page". In the scrolling layouts (ve
   for example to the end of a page. The page asked for stays current until the user scrolls.
 - **`alignFitPage()` no longer makes the page under the gesture current.** It aligns that page's rect, and
   the pan or zoom picks the page at the middle as usual. Otherwise a fit snap with no shift left the gesture
-  page current with nothing to correct it.
+  page current with nothing to correct it. A zoom snap also keeps the page at the middle (see "A snap
+  keeps the page you are on" below).
 - The doPan gate on `currMode` (only `MODE_NONE`/`MODE_PAN`) is unchanged, so edge auto-scroll while dragging
   a selection does not switch pages mid-drag.
 
@@ -123,6 +124,38 @@ Now a fit snap zooms about the gesture point, like a step snap, and only then al
   both in single-page view) - never along it, so the reading position never jumps.
 
 Pinned by `zoomSnapTest` (a 1180x760 view, so fit width and fit height are far enough apart to snap separately).
+
+### A snap keeps the page you are on
+
+"Fit snapping sometimes sends me to another page" had two causes, both fixed in `roundZoom()` and
+`wheelZoomFinish()`:
+- **The snap zooms about the gesture point, not the middle.** A step rounding plus a fit snap changes the
+  zoom by up to ~12%, which moves the document point at the middle of the view by that fraction of its
+  distance from the fingers. With the middle a little above a page boundary and the fingers lower down,
+  that carried the middle onto the next page, and `doPan()` duly made the neighbour current. Reproduced
+  in agent-display with Ctrl+wheel: page 2 started at y=436 (middle at 360). One notch at y=700 put it at
+  ~370, and the fit-width snap moved it to 351, so the indicator went from 1/3 to 2/3.
+  Now **`keepPageAtMiddle()`** runs after every snap: if the middle is no longer on the page that was
+  current when the gesture ended, it scrolls along the scroll axis just far enough to bring the middle
+  back to that page's edge, one px inside (the gap after a page belongs to it). If the middle did not
+  leave the page, nothing moves, so the "never scroll along the reading direction" rule above still holds
+  in every other case.
+- **The snap judged the page under the gesture point.** That is a neighbour whenever the fingers are
+  over one, and past the last page it is the ghost page, which has no `Page`: `fitWidthZoom()`
+  dereferenced NULL. Every Ctrl+wheel notch over the ghost page crashed, because the toast predicate
+  calls it too. The snap, the toast (`nearFitWidth()`, which no longer takes a point) and the wheel snap
+  now all use `dominantPageNum()`, the page at the middle, so the toast and the snap still agree. A double
+  tap still fits the tapped page (clamped to the last real page).
+- Not changed: `ScribbleView::zoomTo()` goes through `setZoom()` -> `pageSizeChanged()` -> `doPan(0,0)`
+  while the view is zoomed about the top-left corner. For that one call the current page can flip to
+  whatever is at that intermediate middle. The compensating pan straight after picks the right page
+  again, so only the side effects of `setPageNum()` (stroke grouping, `finishShape()`) see it.
+
+Pinned by `fitSnapPageTest`, in both layouts, for pinch (`roundZoom`) and Ctrl+wheel (`wheelZoomFinish`).
+The middle is 12 px before the second page, the fingers are over it, and the zoom is 7% off fit; the test
+checks that the first page stays current and the scroll is under 3 px. A second case puts the fingers
+past the last page. Against the old code the page check fails in all four combinations and the
+ghost-page case crashes.
 
 ### Fit width: gapless, a "Fit" toast, and no sideways pan at or below it
 
@@ -162,6 +195,34 @@ Pinned by `zoomSnapTest` (a 1180x760 view, so fit width and fit height are far e
   only by reading the code and by the shared predicate. Ctrl+wheel, double click (Pan tool) and
   Shift/horizontal wheel at fit were checked in agent-display. Pass `--wheelZoomSpeed=0.5` there: one
   injected notch arrives as two steps (1.25^2), which jumps straight past the 10% window.
+
+## Jump history (back / forward) and the last page button
+
+The bottom-left bar reads `<- -> | < 3 / 12 > >| | zoom ...`: back and forward over *jumps*, the page
+stepper, and **Last Page** (`ID_LASTPAGE`, icon `ic_menu_last_page.svg`, hand drawn in reicon's style and
+therefore not in `reicon_import.py`'s MAPPING; disabled on the last page).
+
+- **What is a jump**: a programmatic move that skips `JumpHistory::MIN_JUMP_PAGES` (2) or more pages -
+  outline entry, bookmark (`bookmarkHit` -> `viewPos`), Last Page, Home/End, a Pages-view cell, a page card
+  in the document browser. Scrolling, zooming, next/prev page, tab switches and page moves are **not**
+  recorded. They route through `ScribbleArea::jumpToPage()` / `ScribbleDoc::jumpToPage()` (which also
+  refreshes the UI) or `gotoPos(..., savepos=true)` / `viewPos()`, all of which call `recordJumpTo()`
+  *before* the view moves. A new moving-code path that should be a jump must do the same - plain
+  `gotoPage()` never records.
+- **Logic is `syncscribble/jumphistory.h`**, pure (no document, no GL): `backStack` / `forwardStack`
+  like a browser, a recorded jump empties the forward stack, `back(current, &target)` pushes `current`
+  onto forward. It lives in `ScribbleDoc::jumpHistory` - per document, so it follows a tab and is cleared
+  in `closeDocument()`; not persisted. Locations are `(page, corner position in page units)`; on
+  restore the page is clamped to the current page count (pages may have been added or removed since).
+- This **replaces the old `posHistory`** in `ScribbleArea`, which only existed behind the Previous/Next
+  View menu items (Backspace / Shift+Backspace, still wired to `ID_PREVVIEW` / `ID_NEXTVIEW`) and
+  recorded any move of half a screen, which is not what a "jump" means to a user. The buttons enable
+  from `UIState::prevView` / `nextView`.
+- Tests: `scribbletest/jumphistorytest.cpp` (standalone command in its header; also in `runAll`).
+  Mutation-checked: not clearing the forward stack on a new jump fails it. The real view (buttons
+  dim/enable, position restored) was checked in agent-display: Last Page from 7/12 -> back enabled,
+  Back -> 7/12 with Forward enabled, Forward -> 12/12. Note a Debug (ASAN) build is slow enough that
+  queued clicks arrive many seconds late - wait and re-screenshot before concluding a click was lost.
 
 ## Testing this (agent-display)
 
