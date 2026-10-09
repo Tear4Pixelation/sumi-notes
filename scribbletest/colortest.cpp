@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "ulib/palettegen.h"
+#include "syncscribble/markercolor.h"
 
 static int nColorChecksFailed = 0;
 
@@ -241,6 +242,42 @@ static void testSnapIdempotent()
   if(nMoved > 0) {
     ++nColorChecksFailed;
     printf("FAIL: %d palette entries do not snap to themselves\n", nMoved);
+  }
+}
+
+// The marker's swatches are vividMarker() of each family's `hl`, off the palette on purpose.  The pen
+//  toolbar snaps every color it is given (updateColor()), and snapping a marker swatch moved the pen off
+//  it: the swatch then showed no ring and a second tap did not open its editor (pen-and-tools.md, "Marker:
+//  vivid colour and alpha").  Every shipped theme, light and dark, since which families the chroma
+//  boost actually changes depends on the recipe.
+static void testMarkerSwatchesKeptBySnap()
+{
+  int nMoved = 0, nChecked = 0, nOffPalette = 0;
+  for(int tt = 0; tt < paletteThemeCount(); ++tt) {
+    for(int dark = 0; dark < 2; ++dark) {
+      Palette pal;
+      generatePalette(paletteThemeRecipe(*paletteThemeByIndex(tt), dark != 0), &pal);
+      for(const PaletteFamily& family : pal.families) {
+        Color swatch = vividMarker(family.hl, pal.recipe.vividness);
+        ++nChecked;
+        if(!(pal.nearest(swatch).opaque() == swatch.opaque()))
+          ++nOffPalette;
+        if(!(snapThemedPenColor(pal, swatch, true) == swatch))
+          ++nMoved;
+      }
+      // an ink pen still snaps: a vivid marker color is not a member for it
+      Color vivid0 = vividMarker(pal.families[0].hl, pal.recipe.vividness);
+      Color expected = pal.nearest(vivid0);
+      expected.setAlpha(vivid0.alpha());
+      if(!(snapThemedPenColor(pal, vivid0, false) == expected))
+        ++nMoved;
+    }
+  }
+  // the bug needs swatches the palette does not hold; if none were, this test would test nothing
+  colorCheckTrue(nOffPalette > 0, "some marker swatches are off the palette (else the snap check is vacuous)");
+  if(nMoved > 0) {
+    ++nColorChecksFailed;
+    printf("FAIL: %d of %d marker swatches are moved by the theme's snap\n", nMoved, nChecked);
   }
 }
 
@@ -523,6 +560,7 @@ int runColorTests()
   testGamut();
   testDeterminism();
   testSnapIdempotent();
+  testMarkerSwatchesKeptBySnap();
   testRestyleRoundTrip();
   testUnknownGenerator();
   testBeatsNaive();

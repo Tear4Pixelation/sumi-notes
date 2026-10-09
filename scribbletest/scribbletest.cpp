@@ -884,6 +884,83 @@ int ScribbleTest::penWidthPresetTest()
   return nbad;
 }
 
+// The pen and a selection share the pen toolbar.  With ink selected and the pen back in hand (Switch Back
+//  after a selection), the toolbar used to stay the selection's: the pen row showed the selection's
+//  absolute width without the Relative size toggle and edited the selection.  And "Use as Pen" handed the
+//  draw pen the selection's flagless absolute pen, so a relative pen became absolute for good.
+int ScribbleTest::penSelectionTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: pen and selection: %s\n", what); }
+  };
+  auto near = [](Dim a, Dim b) { return std::abs(a - b) < 1E-3*std::max(Dim(1), std::abs(b)); };
+  ScribbleApp* app = scribbleDoc->app;
+  PenToolbar* toolbar = app ? app->penToolbar : NULL;
+  if(!toolbar) {
+    check(false, "no pen toolbar");
+    return nbad;
+  }
+  scribbleDoc->newDocument();
+  int oldDrawTool = scribbleMode->drawTool;
+  ScribblePen oldPen = *app->getPen();
+  scribbleMode->drawTool = ScribbleMode::DRAWTOOL_PEN;
+
+  // a stroke 3 units wide, selected
+  scribbleDoc->app->setPen(ScribblePen(Color::BLUE, 3));
+  scribbleMode->setMode(MODE_STROKE);
+  ie(120, 160, 0, pen, press);  ie(300, 160, 0, pen);  ie(0, 0, 0, pen, release);
+  scribbleArea->selectAll();
+  check(scribbleArea->hasSelection(), "the stroke is selected");
+  Element* stroke = scribbleArea->currPage->strokeCount() == 1 ? *scribbleArea->currPage->children().begin() : NULL;
+  Dim strokeWidth = stroke ? stroke->node->getFloatAttr("stroke-width", 0) : 0;
+
+  // whose toolbar it is: the select tool's, the selection's; the pen's, the pen's - unless the selection
+  //  popup is open on it
+  check(ScribbleApp::penToolbarEditsSelection(scribbleArea, MODE_SELECTLASSO, false),
+      "with the select tool in hand the toolbar edits the selection");
+  check(!ScribbleApp::penToolbarEditsSelection(scribbleArea, MODE_STROKE, false),
+      "with the pen back in hand the toolbar edits the pen, though ink is still selected");
+  check(ScribbleApp::penToolbarEditsSelection(scribbleArea, MODE_STROKE, true),
+      "the selection popup's items edit the selection whatever the tool");
+  check(!ScribbleApp::penToolbarEditsSelection(NULL, MODE_SELECTLASSO, true), "no area, no selection");
+
+  // the pen row in the pen's hands: a relative pen keeps its unit and its toggle, and a width edit goes
+  //  to the pen and leaves the stroke alone
+  ScribblePen relPen(Color::BLACK, 0.1, ScribblePen::TIP_ROUND | ScribblePen::WIDTH_RELATIVE);
+  app->setPen(relPen);
+  bool selMode = ScribbleApp::penToolbarEditsSelection(scribbleArea, MODE_STROKE, false);
+  int dashStyle;
+  toolbar->setPen(selMode ? scribbleArea->getPenForSelection(&dashStyle) : *app->getPen(),
+      selMode ? PenToolbar::SELECTION_MODE : PenToolbar::PEN_MODE);
+  check(toolbar->relativeWidths(), "the pen row shows the relative pen, not the selection's absolute width");
+  check(toolbar->relWidthRow->isVisible(), "...with its Relative size toggle");
+  toolbar->spinWidth->setValue(0.2);
+  toolbar->updateWidth();
+  check(near(app->getPen()->width, 0.2) && app->getPen()->hasFlag(ScribblePen::WIDTH_RELATIVE),
+      "a width edit on the pen row sets the pen");
+  if(stroke)
+    check(near(stroke->node->getFloatAttr("stroke-width", 0), strokeWidth), "...and not the selected stroke");
+
+  // "Use as Pen" from the selection popup: color and width are taken, in the pen's own unit, and the pen
+  //  stays relative
+  toolbar->setPen(ScribblePen(Color::RED, 3.2), PenToolbar::SELECTION_MODE);
+  Dim lineHeight = toolbar->lineHeight();
+  toolbar->onChanged(PenToolbar::PEN_CHANGED);
+  const ScribblePen* drawPen = app->getPen();
+  check(drawPen->hasFlag(ScribblePen::WIDTH_RELATIVE), "Use as Pen keeps a relative pen relative");
+  check(drawPen->hasFlag(ScribblePen::TIP_ROUND), "...and keeps its other flags");
+  check(near(drawPen->width, 3.2/lineHeight), "...and converts the selection's width to line heights");
+  check(drawPen->color.opaque() == Color(Color::RED).opaque(), "...and takes the selection's color");
+
+  scribbleDoc->clearSelection();
+  scribbleMode->drawTool = oldDrawTool;
+  app->setPen(oldPen);
+  app->updatePenToolbar();
+  scribbleDoc->newDocument();
+  return nbad;
+}
+
 int ScribbleTest::outlineTest()
 {
   int nbad = 0;
@@ -4202,6 +4279,7 @@ void ScribbleTest::runAll(bool runsynctest)
   nUnitFailed += restyleTest();
   nUnitFailed += dashStyleTest();
   nUnitFailed += penWidthPresetTest();
+  nUnitFailed += penSelectionTest();
   nUnitFailed += outlineTest();
   nUnitFailed += outlineNestTest();
   nUnitFailed += pageMoveTest();

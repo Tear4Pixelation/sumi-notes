@@ -9,6 +9,7 @@
 #include "configdialog.h"
 #include "ugui/textedit.h"
 #include "usvg/svgparser.h" // for parseNumbersList
+#include "markercolor.h"
 
 // or have spinbox buttons step by 1.25x or 0.8x of current value?
 const Dim PenToolbar::PEN_WIDTHS[] = {
@@ -1286,9 +1287,10 @@ void PenToolbar::updateColor() {
   if (themed && !offPaletteAllowed()) {
     const Palette *pal = docPalette();
     if (pal) {
-      Color snapped = pal->nearest(pen.color);
-      // alpha is the marker's business, not the palette's, so it is carried across
-      snapped.setAlpha(pen.color.alpha());
+      // alpha is the marker's business, not the palette's, so it is carried across; and the marker's
+      //  vivid swatch colors count as members, or a tap on one would snap it off its own swatch
+      Color snapped = snapThemedPenColor(*pal, pen.color,
+          mode == PEN_MODE && widthsTool == ScribbleMode::DRAWTOOL_HIGHLIGHT);
       if (!(snapped == pen.color)) {
         pen.color = snapped;
         colorPicker->setColor(snapped);
@@ -1395,20 +1397,7 @@ bool PenToolbar::prepareWidths() {
 //  splitting into three lists that drift apart.
 // Off-palette colors are passed through untouched apart from the marker's alpha - the point of the
 //  escape hatch is that the color asked for is the color drawn.
-// The generator's `hl` is deliberately timid (chroma capped at 0.13, alpha 97): it was tuned to sit under
-//  text, and on white paper it read as a pale wash.  cusp-walk-1 is frozen, so the marker is made vivid
-//  here instead - the same hue and lightness with the chroma cap lifted (still never out of gamut) and
-//  a heavier alpha.  The marker is drawn *under* the ink (DRAW_UNDER), so more alpha does not cost
-//  legibility.  It only changes the pen's colour, so strokes already in a document are untouched.
-static const int MARKER_ALPHA = 165;
-static const double MARKER_MAX_CHROMA = 0.19;
-
-static Color vividMarker(Color hl, double vividness) {
-  ColorOkLch lch = oklchFromColor(Color(hl.red(), hl.green(), hl.blue()));
-  lch.C = std::min(oklchMaxChroma(lch.L, lch.h), real(MARKER_MAX_CHROMA))*vividness;
-  return oklchToColor(lch, MARKER_ALPHA);
-}
-
+// The vivid marker colors themselves (vividMarker(), MARKER_ALPHA) are in markercolor.h.
 Color PenToolbar::toolColor(Color c) const {
   if (widthsTool != ScribbleMode::DRAWTOOL_HIGHLIGHT)
     return c;

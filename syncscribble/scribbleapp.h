@@ -239,7 +239,10 @@ public:
   bool storeClipboard();
   void setClipboardToImage(Image img, bool lossy = false);
   void penChanged(int changed);
-  void updatePenToolbar();
+  // forSelPopup: the selection popup is about to open, so its color and width items need the selection
+  void updatePenToolbar(bool forSelPopup = false);
+  // whether the pen toolbar edits `area`'s selection rather than the pen, with the tool `mode` in hand
+  static bool penToolbarEditsSelection(const ScribbleArea* area, int mode, bool selPopupOpen);
   void setPen(const ScribblePen& pen);
   void setDrawTool(int tool);
   const ScribblePen* getPen() const { return &currPen; }

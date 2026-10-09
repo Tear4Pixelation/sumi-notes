@@ -176,7 +176,7 @@ public:
   Button* titleButton;
   Button* iapButton = NULL;  // iOS IAP
   Widget* toolBarStretch;
-  Widget* selPopup;
+  Widget* selPopup = NULL;
   // "Move to Layer" on the selection popup, and its list of layers, rebuilt each time the popup opens
   Button* moveLayerBtn = NULL;
   // selection popup buttons that act on ink, hidden when the gesture caught none (Screenshot remains)

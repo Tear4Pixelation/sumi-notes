@@ -27,6 +27,7 @@ public:
   // a selection shows a relative pen's thickness presets in document units, and a width edited there
   //  goes back into the pen's list in line heights (docs/agent/pen-and-tools.md, relative pen width)
   int penWidthPresetTest();
+  int penSelectionTest();
   int outlineTest();
   int outlineNestTest();
   // the sidebar's Pages view: moving pages after a target (or to the front) keeps the moved pages' order,
