@@ -22,8 +22,9 @@ void ScribbleConfig::init()
   cfg["eraseOnImage"] = 1;
   // leave a freshly drawn shape selected with its parameter handles up
   cfg["shapeEditAfterDraw"] = 1;
-  // a shape-tool press outside the selection clears it and starts the shape (off: it only clears, as clearSelOnly)
-  cfg["shapeDrawThrough"] = 0;
+  // a shape-tool press outside the selection clears it and starts the shape (off: it only clears, as clearSelOnly);
+  //  a press on one of the selected shape's handles still drags the handle
+  cfg["shapeDrawThrough"] = 1;
   // hint shown in the history panel until the user has actually scrubbed once; cleared by using the
   //  feature rather than by dismissing it, so it cannot be waved away without being understood
   cfg["historyHintDone"] = 0;

@@ -1342,8 +1342,12 @@ int ScribbleTest::shapeTapEditTest()
   // the document's config, so only after newDocument() - which frees the previous one
   ScribbleConfig* cfg = scribbleDoc->cfg;
   const bool wasEditAfterDraw = cfg->Bool("shapeEditAfterDraw"), wasClearSelOnly = cfg->Bool("clearSelOnly");
+  const bool wasDrawThrough = cfg->Bool("shapeDrawThrough");
+  check(wasDrawThrough, "drawing a shape through a selection is on by default");
   cfg->set("shapeEditAfterDraw", true);
   cfg->set("clearSelOnly", true);
+  // the "only deselects" behaviour below is the setting turned off; draw-through is checked after it
+  cfg->set("shapeDrawThrough", false);
   // after newDocument() too, which reloads the input config
   input->singleTouchMode = INPUTMODE_PAN;  // what detecting a pen sets
   input->multiTouchMode = INPUTMODE_PAN;
@@ -1375,6 +1379,30 @@ int ScribbleTest::shapeTapEditTest()
   penDrag(100, 500, 300, 500);
   check(scribbleArea->currPage->strokeCount() == 2, "the next shape drag draws");
   scribbleDoc->clearSelection();
+
+  // draw-through on: a shape drag outside a selected shape deselects it and draws the new shape at once ...
+  cfg->set("shapeDrawThrough", true);
+  fingerTap(150, 206);
+  check(selectedCount() == 1, "the line is selected again");
+  int beforeThrough = scribbleArea->currPage->strokeCount();
+  penDrag(100, 600, 300, 600);
+  check(scribbleArea->currPage->strokeCount() == beforeThrough + 1, "draw through: the drag draws a new shape");
+  scribbleDoc->clearSelection();
+  // ... but a press on one of the selected shape's handles still drags the handle: no new shape, and the
+  //  line's end moves (the first line is (100,200)-(300,200); pressed at its end, dragged down)
+  fingerTap(150, 206);
+  check(selectedCount() == 1 && scribbleArea->shapeSelector != NULL, "the line is selected with handles");
+  int beforeHandle = scribbleArea->currPage->strokeCount();
+  penDrag(300, 200, 300, 300);
+  check(scribbleArea->currPage->strokeCount() == beforeHandle, "a press on a handle does not draw a new shape");
+  check(selectedCount() == 1, "and the shape stays selected");
+  {
+    Element* handled = selectedCount() ? scribbleArea->currSelection->strokes.front() : NULL;
+    check(handled && handled->isShape() && handled->bbox().height() > 50, "the handle drag moved the line's end");
+  }
+  penDrag(300, 300, 300, 200);  // put the end back for the checks below
+  scribbleDoc->clearSelection();
+  cfg->set("shapeDrawThrough", wasDrawThrough);
 
   // with the pen tool: handwriting is not a tap target, and the tool stays the pen
   scribbleMode->setMode(MODE_STROKE);
