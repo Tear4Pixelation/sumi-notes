@@ -2790,6 +2790,9 @@ int ScribbleArea::selectionHit(Point pos, bool touch)
     // bottom right corner scales with fixed aspect ratio; others scale freely.  A region never gets here:
     //  its size handle is a shape handle (RegionSelector::resized).
     scaleLockRatio = scaleOrigin.x < pos.x && scaleOrigin.y < pos.y;
+    // a page tag (pill + text) is never stretched: every handle keeps the aspect ratio (page-tags.md)
+    if(currSelection->getFirstElement([](Element* s) { return s->isPageTag(); }))
+      scaleLockRatio = true;
     prevXScale = 1;
     prevYScale = 1;
     return MODEMOD_SCALESEL;

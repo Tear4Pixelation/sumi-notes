@@ -122,7 +122,7 @@ selection in `RegionSelector` (`selection.cpp`), the UI in `ScribbleArea` and th
   orientation: y grows *up* the page (local -y), negative numbers use U+2212. The red handle *is* the origin
   (`defaultOriginHandlePos` returns it, clamped inside), so dragging it moves the axes; the relocation grip
   is hidden and `handleMoved` ignored for axes - a handle that was not the origin would plot nothing. Drawn
-  as two more children: `rr-axes` (path: axes, open arrowheads, ticks; 1.5 px non-scaling) and `rr-labels`
+  as two more children: `rr-axes` (path: axes, open arrowheads, ticks; 3 px non-scaling, 3x a grid line) and `rr-labels`
   (a `<g>` of `<text>`, upright in the frame so they tilt with the patch, `satoshi` like page tags), both
   in the page's rule color made opaque - the theme's rule color, never a literal, and opaque so the axes
   read above the translucent grid. Numbers whose anchor falls outside the outline, and ticks within an

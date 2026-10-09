@@ -962,7 +962,7 @@ void Element::rebuildRegion(Color paper, Color rule)
     *axesNode->path() = m_region.axes ? m_region.axesPath() : Path2D();
     setSvgFillColor(axesNode, Color::NONE);
     setSvgStrokeColor(axesNode, rule.opaque());
-    axesNode->setAttr<float>("stroke-width", 1.5f);
+    axesNode->setAttr<float>("stroke-width", 3.0f);  // twice the outline, 3x a rule line
     axesNode->setAttribute("vector-effect", "non-scaling-stroke");
     axesNode->setAttribute("stroke-linejoin", "round");
     axesNode->setAttribute("stroke-linecap", "round");
