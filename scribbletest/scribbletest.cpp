@@ -1684,6 +1684,55 @@ int ScribbleTest::fitSnapPageTest()
   return nbad;
 }
 
+// Typed numbers in a SpinBox (ugui widgets.cpp, SpinBox::updateValueFromText): 0 in every form must be taken -
+//  clamped to the minimum when the minimum is above 0, not silently refused - along with negatives and decimals,
+//  and text that is not a number must leave the value alone.  Needs only the theme, no document.
+int ScribbleTest::spinBoxTest()
+{
+  int nbad = 0;
+  auto checkSpin = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: spin box: %s\n", what); }
+  };
+  auto typeInto = [](SpinBox* spin, const char* text) {
+    TextEdit* edit = static_cast<TextEdit*>(spin->selectFirst(".textbox"));
+    edit->setText(text);
+    return spin->updateValueFromText(edit->text().c_str());
+  };
+  auto shownText = [](SpinBox* spin) { return static_cast<TextEdit*>(spin->selectFirst(".textbox"))->text(); };
+
+  SpinBox* spinZeroMin = createTextSpinBox(5, 1, 0, 100, "%.0f");
+  checkSpin(typeInto(spinZeroMin, "0") && spinZeroMin->value() == 0, "typing 0 into a field whose minimum is 0 sets 0");
+  checkSpin(shownText(spinZeroMin) == "0", "and the field shows 0");
+  spinZeroMin->setValue(5);
+  checkSpin(typeInto(spinZeroMin, "00") && spinZeroMin->value() == 0 && shownText(spinZeroMin) == "0",
+      "00 is 0, shown as 0");
+  spinZeroMin->setValue(5);
+  checkSpin(typeInto(spinZeroMin, "-0") && spinZeroMin->value() == 0 && shownText(spinZeroMin) == "0",
+      "-0 is 0, not a negative zero shown as -0");
+
+  // a minimum above 0 (the pen width field): 0 is clamped to it rather than refused
+  SpinBox* spinPositiveMin = createTextSpinBox(3, 0.01, 0.01, 200, "%.3g");
+  checkSpin(typeInto(spinPositiveMin, "0") && std::abs(spinPositiveMin->value() - 0.01) < 1e-9,
+      "typing 0 where the minimum is 0.01 gives the minimum, not the old value");
+  checkSpin(shownText(spinPositiveMin) == "0.01", "and the field shows the clamped value");
+
+  // decimals and negatives
+  SpinBox* spinSigned = createTextSpinBox(1, 0.1, -50, 50, "%g");
+  checkSpin(typeInto(spinSigned, ".5") && spinSigned->value() == 0.5, ".5 is 0.5");
+  checkSpin(typeInto(spinSigned, "5.") && spinSigned->value() == 5, "5. is 5");
+  checkSpin(typeInto(spinSigned, "0.25") && spinSigned->value() == 0.25, "0.25 is 0.25");
+  checkSpin(typeInto(spinSigned, "-3.5") && spinSigned->value() == -3.5, "-3.5 is -3.5");
+  checkSpin(typeInto(spinSigned, "0,5") && spinSigned->value() == 0.5, "a comma decimal separator is read as a point");
+  checkSpin(typeInto(spinSigned, "-100") && spinSigned->value() == -50, "a value past the limit is clamped to it");
+
+  // not a number: refused, value untouched
+  spinSigned->setValue(7);
+  checkSpin(!typeInto(spinSigned, "12abc") && spinSigned->value() == 7, "12abc is refused");
+  checkSpin(!typeInto(spinSigned, "-") && spinSigned->value() == 7, "a lone minus is refused");
+  checkSpin(!typeInto(spinSigned, "") && spinSigned->value() == 7, "empty text is refused");
+  return nbad;
+}
+
 int ScribbleTest::arrowPopupTest()
 {
   int nbad = 0;
@@ -3967,6 +4016,7 @@ void ScribbleTest::runAll(bool runsynctest)
   nUnitFailed += currentPageTest();
   nUnitFailed += fitSnapPageTest();
   nUnitFailed += arrowPopupTest();
+  nUnitFailed += spinBoxTest();
   nUnitFailed += libraryResizeTest();
   nUnitFailed += pageTagTest();
   nUnitFailed += docStateSyncTest();
