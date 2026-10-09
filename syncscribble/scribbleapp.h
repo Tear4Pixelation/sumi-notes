@@ -99,6 +99,8 @@ public:
   bool doImportPdf(const std::string& pdfPath);
   void insertPDF();
   bool insertPdfPages(const std::string& pdfPath);
+  void insertPdfAsImage();
+  bool insertPdfPageAsImage(const std::string& pdfPath);
   std::string importPdfToDocFile(const std::string& pdfPath, std::string* errorOut = NULL);
   // the document browser's import FAB: pick a file of the format and import it into the library;
   //  returns a document to open (one PDF or notebook), empty for an archive, a cancel or a failure

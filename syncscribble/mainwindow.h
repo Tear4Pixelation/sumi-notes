@@ -126,11 +126,11 @@ public:
   Action* actionShape[SHAPE_COUNT];
   Action* actionRulingRegion;
   // the "+" beside Add Page (AddPageMenu::createAddMenuButton)
-  Action* actionAddPaper;
   Action* actionAddPatch;
+  Action* actionAddScan;
   Action* actionAddDocument;
   Action* actionAddPhoto;
-  std::vector<Action*> addMenuActions() const { return {actionAddPaper, actionAddPatch, actionAddDocument, actionAddPhoto}; }
+  std::vector<Action*> addMenuActions() const { return {actionAddPatch, actionAddScan, actionAddDocument, actionAddPhoto}; }
   Action* actionExport_PDF;
   Action* actionImport_PDF;
   Action* actionPreferences;
