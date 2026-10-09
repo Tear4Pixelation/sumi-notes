@@ -345,18 +345,17 @@ applied in `ruledInsSpaceStart()`). "Insert Lines" is now the one tool once its 
 the internal combined `MODE_INSSPACERULED`, still take the press's own line and x. Lines are the gesture's
 frame (`rulingAt()`, so a Paper Patch's pitch and tilt), at single pitch even with Skip Lines:
 
-- **Within `INSERT_LINES_SNAP` (0.2) x pitch of a rule line**, on either side of it: the whole block from the
-  line below that rule moves, whatever x the pen is at. A pen resting on the rule a line's text sits on
-  therefore moves the lines *below* that text ("very close to the line, you move the entire part that is
-  below it").
-- **Mid-line** (the middle 60%): the line splits at the pen. Its part right of the pen, and everything
-  below, moves (the line break the tool already made).
-- **With Skip Lines, a mid-line press on a line with no ink** is on the blank line above a text line, and
-  moves that text line as a block. It used to split it at the pen. You had to put the pen on the text line
-  *above* to move a block ("two lines above"), which is the report's complaint. "Has ink" means a stroke
-  centre in that single-pitch line, on the same ruling, right of the margin (bookmarks don't count). This
-  checks where the pen is, not which lines are text lines, so the toggle stays a toggle. An underline in a
-  blank line makes that line count as text, which gives the old split.
+- **Within `INSERT_LINES_SNAP` (1/8) of a line height of a rule line**, on either side of it: the WHOLE line
+  below that rule and everything under it moves, whatever x the pen is at - never part of that line, never the
+  line above. A pen resting on the rule a line's text sits on therefore moves the lines *below* that text.
+- **Otherwise (mid-line)**: the line splits at the pen. Its part right of the pen, and everything below, moves.
+
+This is ONE rule, `insertLinesStart(localY, yr)`, with no Skip Lines special case and no look at the ink. It
+used to treat a mid-line press on a blank line with Skip Lines as a whole-line press and the zone was 0.2, so
+the same press gave a different selection with the toggle on; do not reintroduce a parameter for it. Skip
+Lines only changes the *frame* the gesture then runs in (doubled pitch from the chosen line's top), i.e. the
+step size, not what is picked. Known residue: in that doubled frame a mid-line split of a band still covers
+two bands (the pressed one and the next), and the column-stop line above the block is a double line.
 
 A whole-line start is `insSpaceSelX = MIN_DIM`, like a press in the margin: no sideways move, no reflow,
 and column stops only as described under "A vertical line is a boundary" below. For a split,
@@ -375,9 +374,9 @@ dragging a block up over lines is how lines get deleted. Column stops are still 
 (`findStops()` is called explicitly before `selectRuled()`, which would otherwise use the erase's start).
 Each gesture is one undo step. Insert Space in Line pulled back left rejoins as it always has.
 
-Tested standalone by `regiontest` (the zones; with the zones removed, 5 checks fail) and in-app by the end of
-`ScribbleTest::insSpaceAxisTest()`: near-rule block, split then rejoin without erasing, and Skip Lines on a
-blank line versus a text line. With the press zones and the erase change reverted, 4 checks fail. Verified
+Tested standalone by `regiontest` (the zones, now incl. exactly 1/8 and just past it; with the zones removed, 5 checks fail) and in-app by the end of
+`ScribbleTest::insSpaceAxisTest()`: near-rule block, split then rejoin without erasing, and the near-rule whole line / past-1/8 split
+run with Skip Lines off and on (identical results, both sides of the rule). With the press zones and the erase change reverted, 4 checks fail. Verified
 in agent-display on lined paper: near-rule block, mid-line split, rejoin from left of the rest, and one
 Ctrl+Z back to the split.
 

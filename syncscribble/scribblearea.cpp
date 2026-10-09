@@ -2868,21 +2868,11 @@ void ScribbleArea::ruledInsSpaceStart(Point pos)
   insSpaceSelX = insSpaceColX = insSpaceAppliedX = gestureFrame.toLocal(pos).x;
   const bool skipLines = scribbleDoc->scribbleMode->insSpaceSkipLines;
   if(insSpaceAxis == MODE_INSSPACEDOWN) {
-    // Insert Lines: near a rule line moves the block below it, mid-line splits the line at the pen, and with
-    //  Skip Lines a press on a blank line moves the text line below it as a block (see insertLinesStart())
+    // Insert Lines: within 1/8 line of a rule moves the whole line below it and all under, otherwise the
+    //  line splits at the pen - one rule, with Skip Lines or not (see insertLinesStart())
     const RulingFrame lineFrame = gestureFrame;
     const Dim yr = lineFrame.yrulingOr(Page::BLANK_Y_RULING);
-    auto lineHasInk = [&](int line) {
-      for(Element* s : currPage->children()) {
-        if(s->isRulingRegion() || currPage->regionAt(s->com()) != lineFrame.region)
-          continue;
-        Point local = lineFrame.toLocal(s->com());
-        if(int(std::floor(local.y/yr)) == line && local.x >= marginLeft)  // not a bookmark in the margin
-          return true;
-      }
-      return false;
-    };
-    InsertLinesStart start = insertLinesStart(lineFrame.toLocal(pos).y, yr, skipLines, lineHasInk);
+    InsertLinesStart start = insertLinesStart(lineFrame.toLocal(pos).y, yr);
     if(skipLines)
       gestureFrame = skippedLineFrame(lineFrame, start.line);
     prevLine = initialLine = gestureFrame.line(pos, Page::BLANK_Y_RULING);

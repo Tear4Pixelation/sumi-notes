@@ -68,22 +68,20 @@ struct RulingFrame
   Point snapToGrid(Point p, Dim fallback) const;
 };
 
-// Where Insert Lines (ruled insert space held to Down) takes the text from (second-day report).  `localY`
-//  is the press in a frame of single pitch `yr`; the result is the line (band) the moved text starts on,
-//  in that frame, and whether that whole line moves (a block) or only its part right of the pen (a split).
-//  - within INSERT_LINES_SNAP*yr of a rule line: the whole block from the line below that rule - pressed
-//    on a rule you mean "everything from here down", whichever side of it the pen landed
-//  - otherwise the line the pen is in, split at the pen; with Skip Lines (text on every second line) a
-//    press on a line without ink is in the blank line above a text line, which moves that text line as a
-//    block - it used to split it, so a block move needed the pen on the text line above, two lines up
-//  `lineHasInk(line)` answers for a line of the same single-pitch frame; only asked with skipLines.
+// Where Insert Lines (ruled insert space held to Down) takes the text from.  `localY` is the press in a frame
+//  of single pitch `yr`; the result is the line (band) the moved text starts on, in that frame, and whether
+//  that whole line moves (a block) or only its part right of the pen (a split).  ONE rule, the same with or
+//  without Skip Lines and whatever is on the lines:
+//  - within INSERT_LINES_SNAP (1/8) of a line height of a rule line, above or below it: the WHOLE line below
+//    that rule, and everything under it - never part of that line, never the line above
+//  - otherwise the line the pen is in, split at the pen
 struct InsertLinesStart
 {
   int line;
   bool wholeLine;
 };
-constexpr Dim INSERT_LINES_SNAP = 0.2;
-InsertLinesStart insertLinesStart(Dim localY, Dim yr, bool skipLines, const std::function<bool(int)>& lineHasInk);
+constexpr Dim INSERT_LINES_SNAP = 0.125;
+InsertLinesStart insertLinesStart(Dim localY, Dim yr);
 
 // The line height a selection's relative width is measured in: the ruling of the region most of its
 //  strokes' centres lie in (frameAt answers per centre, as Page::rulingAt does), the page's own when that
