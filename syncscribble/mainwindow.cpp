@@ -2304,16 +2304,17 @@ void MainWindow::setupActions()
 
   // the "+" beside Add Page: things to add to this page (docs/agent/paper.md).  Own actions, since the
   //  menu words them differently from the overflow menu's.
-  actionAddPaper = createAction("actionAddPaper", "Paper", ":/icons/ic_menu_document.svg", "",
-      [](){ AddPageMenu::showAddPagePopup(); });
   actionAddPatch = createAction("actionAddPatch", "Patch", ":/icons/ic_menu_toggle_ruled.svg", "",
       [this](){ actionRulingRegion->onTriggered(); });
   // the same drag tool, drawing a coordinate system (docs/agent/ruling-regions.md)
   actionAddAxesPatch = createAction("actionAddAxesPatch", "Coordinate System", "", "",
       [this](){ actionRulingRegion->onTriggered(); app->scribbleMode->drawAxes = true; });
   actionAddAxesPatch->setIcon(axesPatchIcon());
-  actionAddDocument = createAction("actionAddDocument", "Insert Document", ":/icons/ic_menu_add_doc.svg", "",
+  actionAddScan = createAction("actionAddScan", "Scan Document", ":/icons/ic_menu_add_doc.svg", "",
       [this](){ app->scanDocument(false); });
+  // a page of a PDF as content on this page (ScribbleApp::insertPdfAsImage)
+  actionAddDocument = createAction("actionAddDocument", "Insert Document", ":/icons/ic_menu_file_plus.svg", "",
+      [this](){ app->insertPdfAsImage(); });
   actionAddPhoto = createAction("actionAddPhoto", "Insert Photo", ":/icons/ic_menu_add_pic.svg", "",
       [this](){ app->insertImage(); });
 

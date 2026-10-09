@@ -2488,14 +2488,21 @@ void ScribbleArea::ungroupSelection()
   scribbleDoc->endAction();
 }
 
-Rect ScribbleArea::insertImage(Image image, const Rect& below)
+Rect ScribbleArea::insertImage(Image image, const Rect& below, Dim fitWidth, Dim fitHeight)
 {
   static constexpr Dim STACK_GAP = 20;
 
   doCancelAction();
   Clipboard clip;
   Dim imgw = image.getWidth()*unitsPerPx, imgh = image.getHeight()*unitsPerPx;
-  Dim s = std::min(Dim(1), std::min(currPage->width()/2/imgw, currPage->height()/2/imgh));
+  // a PDF page comes with its own size in page units and may fill the page; a photo is at most half of it
+  Dim maxFraction = 0.5;
+  if(fitWidth > 0 && fitHeight > 0) {
+    imgw = fitWidth;
+    imgh = fitHeight;
+    maxFraction = 1.0;
+  }
+  Dim s = std::min(Dim(1), std::min(currPage->width()*maxFraction/imgw, currPage->height()*maxFraction/imgh));
   // doPasteAt pulls an image that would hang off the page back onto it, so a stack that runs out of
   //  room overlaps at the bottom of the page rather than disappearing
   Point center = below.isValid() ? Point(below.center().x, below.bottom + STACK_GAP + imgh*s/2)

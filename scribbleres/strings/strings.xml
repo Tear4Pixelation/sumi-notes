@@ -32,9 +32,10 @@
   <string name="menu_movepage">Move Page...</string>
   <string name="menu_saveas">Save As...</string>
   <string name="menu_insertdoc">Insert Document...</string>
-  <string name="menu_add_paper">Paper</string>
   <string name="menu_add_patch">Patch</string>
+  <string name="menu_add_scan">Scan Document</string>
   <string name="menu_add_document">Insert Document</string>
+  <string name="insert_pdf_page_prompt">Insert page (1-%d)</string>
   <string name="menu_add_photo">Insert Photo</string>
   <string name="menu_add_to_page">Add to Page</string>
   <string name="menu_add_to_page_tip">Add paper, a patch, a document or a photo to this page</string>

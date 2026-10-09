@@ -83,18 +83,22 @@ is saved as a new custom layout.
 
 `AddPageMenu::createAddMenuButton()` (`addpagemenu.cpp`): a `ic_menu_plus` toolbutton right after Add Page
 in both places Add Page lives (the vertical toolbar's `addPage` entry and the floating file-ops panel),
-opening an arrow popup of "add things to this page", exactly four entries in this order. They are their own
-`MainWindow` actions (`actionAddPaper/Patch/Document/Photo`, `addMenuActions()`) because the wording differs
-from the overflow menu's; each forwards to an existing flow:
+opening an arrow popup of "add things to this page": Patch, Scan Document, Insert Document, Insert Photo. They are
+their own `MainWindow` actions (`actionAddPatch/Scan/Document/Photo`, `addMenuActions()`) because the wording
+differs from the overflow menu's; each forwards to an existing flow:
 
-- **Paper** shows the Add Page popup (`showAddPagePopup()`, via a static closure set by the most recent
-  `createAddPageButton()`), so a layout picked there is applied as it always is: a new page after the current
-  one, remembered in the recents. Chosen over "change this page's ruling" because that is Page Setup, and
-  the layouts popup only knows how to add pages.
 - **Patch** triggers `actionRulingRegion` (Paper Patch, ruling-regions.md).
-- **Insert Document** is `scanDocument(false)`, the scan-and-place flow (document-scanning.md) - not the old
-  overflow "Insert Document...", which splices another document's pages in.
+- **Scan Document** is `scanDocument(false)`, the scan-and-place flow (document-scanning.md).
+- **Insert Document** is `ScribbleApp::insertPdfAsImage()`: system file picker for a PDF, then ONE page of it
+  becomes an image on the current page (content, unlike Insert PDF in the overflow menu, which adds pages).
+  A multi-page PDF asks which page (a `TagNameDialog` with a page number, 1 suggested, clamped to the range);
+  a single page goes straight in. Rendered with `PdfImport::Renderer` at `pdfImportDPI`, placed through
+  `ScribbleArea::insertImage(image, below, fitWidth, fitHeight)` at the PDF page's real size
+  (points * `UNITS_PER_POINT`) shrunk to fit the page - a photo is capped at half the page, a PDF page may
+  fill it. One undoable paste, selected afterwards so it can be moved.
 - **Insert Photo** is `insertImage()` (file picker / Android image chooser).
 
-Like Add Page, the popup opens on press (a popup shown on release is closed by that release). The Paper
-entry works because menu items close the menus before their action runs. No coordinate-system patch.
+There is no Paper entry any more (it opened the Add Page popup, which the Add Page button already does);
+`AddPageMenu::showAddPagePopup()` and its closure are now unused.
+
+Like Add Page, the popup opens on press (a popup shown on release is closed by that release). 

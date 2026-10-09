@@ -125,12 +125,12 @@ public:
   Action* actionShape[SHAPE_COUNT];
   Action* actionRulingRegion;
   // the "+" beside Add Page (AddPageMenu::createAddMenuButton)
-  Action* actionAddPaper;
   Action* actionAddPatch;
   Action* actionAddAxesPatch;  // a coordinate system patch (RulingRegionParams::axes)
+  Action* actionAddScan;
   Action* actionAddDocument;
   Action* actionAddPhoto;
-  std::vector<Action*> addMenuActions() const { return {actionAddPaper, actionAddPatch, actionAddAxesPatch, actionAddDocument, actionAddPhoto}; }
+  std::vector<Action*> addMenuActions() const { return {actionAddPatch, actionAddAxesPatch, actionAddScan, actionAddDocument, actionAddPhoto}; }
   static const SvgNode* axesPatchIcon();
   Action* actionExport_PDF;
   Action* actionImport_PDF;
