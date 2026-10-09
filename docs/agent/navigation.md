@@ -5,7 +5,9 @@ record of why they did not work.
 
 **No fling, stiff scrolling and slow page switches together** were not a navigation bug: the fling runs on
 an ugui timer, and a slow periodic timer (the Pages view's thumbnails) used to starve every other timer.
-See the timer trap in [page-management.md](page-management.md#thumbnails).
+It came back once more from a different cause - the sidebar leaving extra thumbnail renderers running
+after each close - and dangling `Timer*` handles could remove the fling's timer outright. Both are in
+the timer traps in [page-management.md](page-management.md#thumbnails); check those first if it recurs.
 
 | gesture | what it does |
 |---|---|

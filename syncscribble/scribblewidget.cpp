@@ -289,7 +289,12 @@ void ScribbleWidget::showScroller()
       scroller->setVisible(false);
       scrollIndicator->setVisible(false);
     }
-    return opacity > finalopacity ? 50 : 0;
+    if(opacity > finalopacity)
+      return 50;
+    // returning 0 frees the timer: a handle kept past that is passed to setTimer() by the next scroll,
+    //  which then removes whichever timer has reused its memory - the fling, a deferred action...
+    scrollerFadeTimer = NULL;
+    return 0;
   });
 }
 

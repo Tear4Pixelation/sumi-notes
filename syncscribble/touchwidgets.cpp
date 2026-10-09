@@ -269,7 +269,11 @@ void ButtonDragTimeline::updateEdgeRepeat(Dim x)
   if(dir && mGui) {
     edgeTimer = mGui->setTimer(TIMELINE_EDGE_MS, this, [this](){
       // stop at the end of the history rather than ticking silently against it
-      return !edgeDir || !popup->isVisible() || applySteps(edgeDir) ? 0 : TIMELINE_EDGE_MS;
+      if(!edgeDir || !popup->isVisible() || applySteps(edgeDir)) {
+        edgeTimer = NULL;  // returning 0 frees the timer; endGesture() must not remove a stale handle
+        return 0;
+      }
+      return TIMELINE_EDGE_MS;
     });
   }
 }

@@ -4209,6 +4209,7 @@ void ScribbleApp::showNotify(const std::string& msg, int level)
   // we might want to see notifications longer when testing
 #ifndef SCRIBBLE_TEST
   notifyTimer = gui->setTimer(5000, win, notifyTimer, [this]() {
+    notifyTimer = NULL;  // a callback returning 0 frees its timer; a stale handle would remove another one
     dismissNotify();
     return 0;
   });
