@@ -3422,8 +3422,9 @@ int ScribbleTest::skippedLinesTest()
 // Ruled insert space split by direction (MODE_INSSPACEDOWN / MODE_INSSPACERIGHT): the same diagonal drag,
 //  from the gap after a line's first word, moves the rest of the line down by whole lines without moving it
 //  along the line with Down, and pushes it along the line without leaving it with Right.  The combined
-//  MODE_INSSPACERULED does both, so either check fails if the axis is not held.  Default test page: lined,
-//  40 pitch, margin 100.
+//  MODE_INSSPACERULED does both, so either check fails if the axis is not held.  Then the one offered tool,
+//  MODE_INSSPACEAUTO (dead zone: a drift is ignored, a diagonal does both), and Insert Lines' press zones
+//  through it.  Default test page: lined, 40 pitch, margin 100.
 int ScribbleTest::insSpaceAxisTest()
 {
   int nbad = 0;
@@ -3490,9 +3491,48 @@ int ScribbleTest::insSpaceAxisTest()
     }
   }
 
-  // Insert Lines' zones (second-day report, see insertLinesStart()): a drag straight down or up
+  // the one offered tool, MODE_INSSPACEAUTO: the drag picks the axis, a drift along the other is ignored
+  //  inside the dead zone, a clear diagonal does both.  Each drag in 8 steps from the gap after a word.
+  auto autoDrag = [&](Point from, Dim dx, Dim dy) {
+    scribbleMode->setMode(MODE_INSSPACEAUTO);
+    at(from, press);
+    for(int ii = 1; ii <= 8; ++ii) at(Point(from.x + dx*ii/8, from.y + dy*ii/8), INPUTEVENT_MOVE);
+    at(Point(from.x + dx, from.y + dy), release);
+  };
+  for(int drag = 0; drag < 3; ++drag) {
+    scribbleDoc->newDocument();
+    doCommand(ID_RESETZOOM);
+    scribbleDoc->app->setPen(ScribblePen(Color::BLACK, 2, ScribblePen::TIP_ROUND));
+    std::vector<Element*> first = word(textLeft, 3);
+    std::vector<Element*> second = word(textLeft + 4*14 + 16, 3);
+    std::vector<Element*> below = word(textLeft, 5);
+    const Dim secondLeft = leftOf(second);
+    const Point from(textLeft + 4*14 + 8, 3.5*pitch);
+    if(drag == 0) {
+      // two lines down, drifting 15 right: only down
+      autoDrag(from, 15, 2*pitch);
+      check(allOn(second, 5) && allOn(below, 7), "auto, down with a drift right: the rest of the line moves down");
+      check(std::abs(leftOf(second) - secondLeft) < 0.5, "auto, down with a drift right: it does not move along the line");
+    }
+    else if(drag == 1) {
+      // 80 right, drifting 0.6 of a line down (across the rule below): only right
+      autoDrag(from, 80, 0.6*pitch);
+      check(allOn(second, 3) && allOn(below, 5), "auto, right with a drift down: nothing changes line");
+      check(leftOf(second) > secondLeft + 40, "auto, right with a drift down: the rest of the line is pushed right");
+    }
+    else {
+      // 60 right and two lines down: a diagonal does both
+      autoDrag(from, 60, 2*pitch);
+      check(allOn(second, 5) && allOn(below, 7), "auto, diagonal: the rest of the line moves down");
+      check(leftOf(second) > secondLeft + 30, "auto, diagonal: and along the line");
+    }
+    check(allOn(first, 3), "auto: the word before the press stays where it is");
+  }
+
+  // Insert Lines' zones (second-day report, see insertLinesStart()): a drag straight down or up, with the one
+  //  offered tool, which sets up as Insert Lines once the drag is clearly down
   auto downDrag = [&](Point from, Dim dy) {
-    scribbleMode->setMode(MODE_INSSPACEDOWN);
+    scribbleMode->setMode(MODE_INSSPACEAUTO);
     at(from, press);
     for(int ii = 1; ii <= 8; ++ii) at(Point(from.x, from.y + dy*ii/8), INPUTEVENT_MOVE);
     at(Point(from.x, from.y + dy), release);

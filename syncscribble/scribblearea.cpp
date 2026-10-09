@@ -2795,6 +2795,131 @@ int ScribbleArea::selectionHit(Point pos, bool touch)
 }
 
 // For handling touch events, see the touch/fingerpaint example
+// Ruled insert space, one tool (MODE_INSSPACEAUTO): the drag picks the axis.  Nothing moves until the pen
+//  is INSSPACE_AXIS_START screen units from the press; the axis it is further along then engages.  The other
+//  axis stays out (so pushing text right never also moves it down a line, and dragging lines down never
+//  pushes them sideways) until the drag along it is past INSSPACE_MINOR_MIN screen units *and* past
+//  INSSPACE_MINOR_RATIO of the drag along the first, about 27 degrees off it; then it engages too, for the
+//  rest of the gesture (a deliberate diagonal does both).  Screen units, so the dead zone is the same for the
+//  hand at any zoom.
+static constexpr Dim INSSPACE_AXIS_START = 6;
+static constexpr Dim INSSPACE_MINOR_MIN = 16;
+static constexpr Dim INSSPACE_MINOR_RATIO = 0.5;
+
+bool ScribbleArea::ruledInsSpaceEngage(Point pos)
+{
+  const Point pressLocal = insSpacePressFrame.toLocal(initialPos);
+  const Point nowLocal = insSpacePressFrame.toLocal(pos);
+  const Dim alongLine = std::abs(nowLocal.x - pressLocal.x)*mScale;
+  const Dim acrossLines = std::abs(nowLocal.y - pressLocal.y)*mScale;
+  if(!insSpaceDownEngaged && !insSpaceRightEngaged) {
+    if(std::max(alongLine, acrossLines) < INSSPACE_AXIS_START)
+      return false;
+    if(acrossLines > alongLine) {
+      // Down sets up as Insert Lines (press zones, its erase) - redone now that the drag says so
+      insSpaceDownEngaged = true;
+      insSpaceAxis = MODE_INSSPACEDOWN;
+      clearTempSelection();
+      ruledInsSpaceStart(initialPos);
+      ruledInsSpaceSelect();
+    }
+    else {
+      // the press already set up as Right: the press's own line and x
+      insSpaceRightEngaged = true;
+      insSpaceAxis = MODE_INSSPACERIGHT;
+    }
+  }
+  if(!insSpaceRightEngaged && alongLine > std::max(INSSPACE_MINOR_MIN, INSSPACE_MINOR_RATIO*acrossLines))
+    insSpaceRightEngaged = true;
+  if(!insSpaceDownEngaged && acrossLines > std::max(INSSPACE_MINOR_MIN, INSSPACE_MINOR_RATIO*alongLine))
+    insSpaceDownEngaged = true;
+  return true;
+}
+
+void ScribbleArea::ruledInsSpaceStart(Point pos)
+{
+  // what ruled insert space moves: the line it starts on and the local x it starts at (MIN_DIM: that whole
+  //  line); the press's own line and x for Right and the combined tool
+  gestureFrame = insSpacePressFrame;
+  const Dim marginLeft = gestureFrame.region ? MIN_DIM : currPage->marginLeft();
+  prevLine = initialLine = gestureFrame.line(pos, Page::BLANK_Y_RULING);
+  insSpaceSelLine = initialLine;
+  insSpaceSelX = insSpaceColX = insSpaceAppliedX = gestureFrame.toLocal(pos).x;
+  const bool skipLines = scribbleDoc->scribbleMode->insSpaceSkipLines;
+  if(insSpaceAxis == MODE_INSSPACEDOWN) {
+    // Insert Lines: near a rule line moves the block below it, mid-line splits the line at the pen, and with
+    //  Skip Lines a press on a blank line moves the text line below it as a block (see insertLinesStart())
+    const RulingFrame lineFrame = gestureFrame;
+    const Dim yr = lineFrame.yrulingOr(Page::BLANK_Y_RULING);
+    auto lineHasInk = [&](int line) {
+      for(Element* s : currPage->children()) {
+        if(s->isRulingRegion() || currPage->regionAt(s->com()) != lineFrame.region)
+          continue;
+        Point local = lineFrame.toLocal(s->com());
+        if(int(std::floor(local.y/yr)) == line && local.x >= marginLeft)  // not a bookmark in the margin
+          return true;
+      }
+      return false;
+    };
+    InsertLinesStart start = insertLinesStart(lineFrame.toLocal(pos).y, yr, skipLines, lineHasInk);
+    if(skipLines)
+      gestureFrame = skippedLineFrame(lineFrame, start.line);
+    prevLine = initialLine = gestureFrame.line(pos, Page::BLANK_Y_RULING);
+    insSpaceSelLine = skipLines ? 0 : start.line;
+    if(start.wholeLine)
+      insSpaceSelX = MIN_DIM;
+  }
+  // text written on every second line: insert space and reflow work in text lines (see skippedLineFrame)
+  else if(skipLines) {
+    gestureFrame = skippedLineFrame(gestureFrame, pos);
+    prevLine = initialLine = insSpaceSelLine = gestureFrame.line(pos, Page::BLANK_Y_RULING);
+  }
+}
+
+void ScribbleArea::ruledInsSpaceSelect()
+{
+  Page* selsource = currPage;
+  const Dim marginLeft = insSpacePressFrame.region ? MIN_DIM : currPage->marginLeft();
+  // Insert Lines moving whole lines keeps to the pen's side of a vertical line that crosses the rule it
+  //  opens (ruled select's column stops, found from the pen and the line above the moved block, so a
+  //  vertical line starting on the moved line itself moves with it).  Any other whole-line start moves
+  //  whatever columns the line has, as a press in the margin does; a region has no margin to make
+  //  findStops() stand down, so the selector is told directly
+  const bool wholeLine = insSpaceSelX == MIN_DIM;
+  const bool wholeLineCols = wholeLine && insSpaceAxis == MODE_INSSPACEDOWN && selColMode != RuledSelector::COL_NONE;
+  const RuledSelector::ColMode colMode = wholeLine && !wholeLineCols ? RuledSelector::COL_NONE : selColMode;
+  tempSelection = new Selection(selsource);
+  tempSelection->ruling = gestureFrame;
+  ruledSelector = new RuledSelector(tempSelection, colMode);
+  if(wholeLineCols)
+    ruledSelector->findStops(insSpaceColX, insSpaceSelLine - 1);
+  ruledSelector->selectRuledAfter(insSpaceSelX, insSpaceSelLine);
+  // if cursor down past left margin, we sort strokes, but we'll only
+  //  enable inserting horz space if there are strokes on the first line
+  int firstLine = tempSelection->sortRuled();
+  if(insSpaceSelX > marginLeft && firstLine == insSpaceSelLine)
+    insertSpaceX = true;
+  else
+    insertSpaceX = false;
+  // Insert Lines dragged back up erases the ink the moved text lands on, from where that text starts
+  //  rather than from the pen: pressed anywhere left of a line's rest that an earlier Insert Lines split
+  //  off, the drag up rejoins it without eating the start of the line it rejoins (which ends left of the
+  //  split, so short of the rest)
+  insSpaceEraseX = insSpaceSelX;
+  if(insSpaceAxis == MODE_INSSPACEDOWN && insSpaceSelX > marginLeft) {
+    insSpaceEraseX = MAX_DIM;
+    if(firstLine == insSpaceSelLine)
+      insSpaceEraseX = std::max(insSpaceSelX, gestureFrame.localBBox(tempSelection->strokes.front()->bbox()).left);
+  }
+  // erase strokes convered by negative ruled insert space
+  if(cfg->Bool("insSpaceErase")) {
+    // second ruled selector for erasing strokes covered by negative insert space
+    insSpaceEraseSelection = new Selection(selsource, Selection::STROKEDRAW_NONE);
+    insSpaceEraseSelection->ruling = gestureFrame;
+    insSpaceEraseSelector = new RuledSelector(insSpaceEraseSelection, colMode);
+  }
+}
+
 void ScribbleArea::doPressEvent(const InputEvent& event)
 {
   // an area marked with nothing selected is only there for its popup; any press on the canvas moves on
@@ -2904,9 +3029,12 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
   currMode = scribbleDoc->getScribbleMode(modemod);
   // Down and Right are ruled insert space held to one axis: everything about the gesture - selection, Skip
   //  Lines, region slop, erase, page growth - is ruled insert space's, only the drag is cut to one direction
+  //  The one offered tool, MODE_INSSPACEAUTO, picks Down, Right or both from the drag (see doMoveEvent)
   insSpaceAxis = MODE_INSSPACERULED;
-  if(currMode == MODE_INSSPACEDOWN || currMode == MODE_INSSPACERIGHT) {
+  insSpaceAutoAxes = insSpaceDownEngaged = insSpaceRightEngaged = false;
+  if(currMode == MODE_INSSPACEDOWN || currMode == MODE_INSSPACERIGHT || currMode == MODE_INSSPACEAUTO) {
     insSpaceAxis = currMode;
+    insSpaceAutoAxes = currMode == MODE_INSSPACEAUTO;
     currMode = MODE_INSSPACERULED;
   }
   // do pan-from-edge through ScribbleInput to avoid inappropriately reverting to sticky tool after panning
@@ -2928,38 +3056,9 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
       marginLeft = MIN_DIM;
     }
   }
-  // what ruled insert space moves: the line it starts on and the local x it starts at (MIN_DIM: that whole
-  //  line); the press's own line and x for Right and the combined tool
-  insSpaceSelLine = initialLine;
-  insSpaceSelX = insSpaceColX = lx;
-  const bool skipLines = currMode == MODE_INSSPACERULED && scribbleDoc->scribbleMode->insSpaceSkipLines;
-  if(currMode == MODE_INSSPACERULED && insSpaceAxis == MODE_INSSPACEDOWN) {
-    // Insert Lines: near a rule line moves the block below it, mid-line splits the line at the pen, and with
-    //  Skip Lines a press on a blank line moves the text line below it as a block (see insertLinesStart())
-    const RulingFrame lineFrame = gestureFrame;
-    const Dim yr = lineFrame.yrulingOr(Page::BLANK_Y_RULING);
-    auto lineHasInk = [&](int line) {
-      for(Element* s : currPage->children()) {
-        if(s->isRulingRegion() || currPage->regionAt(s->com()) != lineFrame.region)
-          continue;
-        Point local = lineFrame.toLocal(s->com());
-        if(int(std::floor(local.y/yr)) == line && local.x >= marginLeft)  // not a bookmark in the margin
-          return true;
-      }
-      return false;
-    };
-    InsertLinesStart start = insertLinesStart(lineFrame.toLocal(pos).y, yr, skipLines, lineHasInk);
-    if(skipLines)
-      gestureFrame = skippedLineFrame(lineFrame, start.line);
-    prevLine = initialLine = gestureFrame.line(pos, Page::BLANK_Y_RULING);
-    insSpaceSelLine = skipLines ? 0 : start.line;
-    if(start.wholeLine)
-      insSpaceSelX = MIN_DIM;
-  }
-  // text written on every second line: insert space and reflow work in text lines (see skippedLineFrame)
-  else if(skipLines) {
-    gestureFrame = skippedLineFrame(gestureFrame, pos);
-    prevLine = initialLine = insSpaceSelLine = gestureFrame.line(pos, Page::BLANK_Y_RULING);
+  if(currMode == MODE_INSSPACERULED) {
+    insSpacePressFrame = gestureFrame;
+    ruledInsSpaceStart(pos);
   }
   if(currSelection) {
     // clear selection depending on mode
@@ -3257,46 +3356,7 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
     addRegionsToInsertSpace(tempSelection, [&](const Rect& r) { return r.left >= pos.x; });
     break;
   case MODE_INSSPACERULED:
-  {
-    // Insert Lines moving whole lines keeps to the pen's side of a vertical line that crosses the rule it
-    //  opens (ruled select's column stops, found from the pen and the line above the moved block, so a
-    //  vertical line starting on the moved line itself moves with it).  Any other whole-line start moves
-    //  whatever columns the line has, as a press in the margin does; a region has no margin to make
-    //  findStops() stand down, so the selector is told directly
-    const bool wholeLine = insSpaceSelX == MIN_DIM;
-    const bool wholeLineCols = wholeLine && insSpaceAxis == MODE_INSSPACEDOWN && selColMode != RuledSelector::COL_NONE;
-    const RuledSelector::ColMode colMode = wholeLine && !wholeLineCols ? RuledSelector::COL_NONE : selColMode;
-    tempSelection = new Selection(selsource);
-    tempSelection->ruling = gestureFrame;
-    ruledSelector = new RuledSelector(tempSelection, colMode);
-    if(wholeLineCols)
-      ruledSelector->findStops(insSpaceColX, insSpaceSelLine - 1);
-    ruledSelector->selectRuledAfter(insSpaceSelX, insSpaceSelLine);
-    // if cursor down past left margin, we sort strokes, but we'll only
-    //  enable inserting horz space if there are strokes on the first line
-    int firstLine = tempSelection->sortRuled();
-    if(insSpaceSelX > marginLeft && firstLine == insSpaceSelLine)
-      insertSpaceX = true;
-    else
-      insertSpaceX = false;
-    // Insert Lines dragged back up erases the ink the moved text lands on, from where that text starts
-    //  rather than from the pen: pressed anywhere left of a line's rest that an earlier Insert Lines split
-    //  off, the drag up rejoins it without eating the start of the line it rejoins (which ends left of the
-    //  split, so short of the rest)
-    insSpaceEraseX = insSpaceSelX;
-    if(insSpaceAxis == MODE_INSSPACEDOWN && insSpaceSelX > marginLeft) {
-      insSpaceEraseX = MAX_DIM;
-      if(firstLine == insSpaceSelLine)
-        insSpaceEraseX = std::max(insSpaceSelX, gestureFrame.localBBox(tempSelection->strokes.front()->bbox()).left);
-    }
-    // erase strokes convered by negative ruled insert space
-    if(cfg->Bool("insSpaceErase")) {
-      // second ruled selector for erasing strokes covered by negative insert space
-      insSpaceEraseSelection = new Selection(selsource, Selection::STROKEDRAW_NONE);
-      insSpaceEraseSelection->ruling = gestureFrame;
-      insSpaceEraseSelector = new RuledSelector(insSpaceEraseSelection, colMode);
-    }
-  }
+    ruledInsSpaceSelect();
   default:
     break;
   }
@@ -3324,12 +3384,27 @@ void ScribbleArea::doMoveEvent(const InputEvent& event)
   int line = gestureFrame.line(pos, Page::BLANK_Y_RULING);
   Dim lx = gestureFrame.toLocal(pos).x;
   Dim ldx = lx - gestureFrame.toLocal(prevPos).x;
-  // ruled insert space held to one axis: Right never leaves the pressed line, Down never moves along it
-  if(currMode == MODE_INSSPACERULED && insSpaceAxis == MODE_INSSPACERIGHT)
-    line = initialLine;
-  else if(currMode == MODE_INSSPACERULED && insSpaceAxis == MODE_INSSPACEDOWN) {
-    lx = gestureFrame.toLocal(initialPos).x;
-    ldx = 0;
+  // ruled insert space held to its axes: an axis not engaged leaves the line (Right only) or the x along it
+  //  (Down only) where the press was.  The one offered tool engages them from the drag, with a dead zone
+  //  (ruledInsSpaceEngage(), which can restart the gesture as Insert Lines, so the frame is read after it)
+  if(currMode == MODE_INSSPACERULED) {
+    bool moveDown = insSpaceAxis != MODE_INSSPACERIGHT;
+    bool moveRight = insSpaceAxis != MODE_INSSPACEDOWN;
+    if(insSpaceAutoAxes) {
+      if(!ruledInsSpaceEngage(pos))
+        return;  // in the dead zone: nothing moves yet (prevPos stays the press, which nothing here needs)
+      moveDown = insSpaceDownEngaged;
+      moveRight = insSpaceRightEngaged;
+      line = gestureFrame.line(pos, Page::BLANK_Y_RULING);
+      lx = gestureFrame.toLocal(pos).x;
+    }
+    if(!moveDown)
+      line = initialLine;
+    if(!moveRight)
+      lx = gestureFrame.toLocal(initialPos).x;
+    // incremental from the last applied x, so an axis engaging late takes the whole drag along it at once
+    ldx = lx - insSpaceAppliedX;
+    insSpaceAppliedX = lx;
   }
   const Dim marginLeft = gestureFrame.region ? MIN_DIM : currPage->marginLeft();
   switch(currMode) {
@@ -3668,7 +3743,9 @@ void ScribbleArea::doMoveEvent(const InputEvent& event)
     else
       setPageDims(-1, initialPageSize.height() + gestureFrame.yrulingOr(Page::BLANK_Y_RULING) * (line - initialLine), true);
     // erase for negative insert space
-    if(insSpaceEraseSelection && insSpaceAxis == MODE_INSSPACEDOWN) {
+    //  (a drag that started as Insert Lines and then engaged Right as well moves along the line too, so it
+    //  erases as the combined tool does)
+    if(insSpaceEraseSelection && insSpaceAxis == MODE_INSSPACEDOWN && !(insSpaceRightEngaged && insertSpaceX)) {
       // Insert Lines moves what it selected (from insSpaceSelX on insSpaceSelLine) by whole lines; the ink
       //  it lands on runs from insSpaceEraseX on its new first line to where it started
       int target = insSpaceSelLine + (line - initialLine);

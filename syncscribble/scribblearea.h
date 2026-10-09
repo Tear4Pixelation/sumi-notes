@@ -185,6 +185,14 @@ protected:
   //  region is not ink, so doSelect() never takes it, and without this the ink would slide out from
   //  under its lines.  Adds every region whose bbox satisfies `past` to `sel`.
   void addRegionsToInsertSpace(Selection* sel, const std::function<bool(const Rect&)>& past);
+  // ruled insert space's start, run at the press for a fixed axis and again once the drag of
+  //  MODE_INSSPACEAUTO has picked Down: the line and x it moves from (Insert Lines' press zones, Skip Lines'
+  //  frame), from insSpacePressFrame; then the selection of what it moves
+  void ruledInsSpaceStart(Point pos);
+  void ruledInsSpaceSelect();
+  // MODE_INSSPACEAUTO: engages the axes the drag from the press to pos has clearly taken; false while
+  //  neither has (the dead zone), true once one has
+  bool ruledInsSpaceEngage(Point pos);
   int selectionHit(Point pos, bool touch);
 
   void viewSelection();
@@ -245,9 +253,19 @@ protected:
   Dim eraseXmin;
   // for insert space
   bool insertSpaceX;
-  // which ruled insert space tool started the gesture: MODE_INSSPACEDOWN (lines only), MODE_INSSPACERIGHT
-  //  (along the line only) or MODE_INSSPACERULED (both); the gesture itself runs as MODE_INSSPACERULED
+  // which ruled insert space start the gesture uses: MODE_INSSPACEDOWN (Insert Lines' press zones, lines
+  //  only), MODE_INSSPACERIGHT (the press's line and x, along the line only) or MODE_INSSPACERULED (the
+  //  press's, both); the gesture itself runs as MODE_INSSPACERULED.  MODE_INSSPACEAUTO while the drag of
+  //  that tool has not left the dead zone; it then becomes the axis it engaged first (Down or Right)
   int insSpaceAxis = MODE_INSSPACERULED;
+  // MODE_INSSPACEAUTO only: the axes engaged so far (each stays engaged for the rest of the gesture)
+  bool insSpaceAutoAxes = false;
+  bool insSpaceDownEngaged = false;
+  bool insSpaceRightEngaged = false;
+  // the gesture frame at the press before Insert Lines or Skip Lines changed it (for a restart as Down)
+  RulingFrame insSpacePressFrame;
+  // local x the drag was last applied at, after the axis filter (for the incremental insertSpace())
+  Dim insSpaceAppliedX = 0;
   // what ruled insert space moves, in gestureFrame: everything after local x insSpaceSelX on line
   //  insSpaceSelLine (MIN_DIM: the whole line).  The press's own line and x, except where Insert Lines picks
   //  another start (insertLinesStart()); insSpaceEraseX is where Insert Lines dragged up starts erasing on
