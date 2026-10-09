@@ -3576,20 +3576,38 @@ int ScribbleTest::insSpaceAxisTest()
   {
     // Skip Lines, text on lines 3, 5 and 7: pressed between the words but on the blank line 4, the whole
     //  of line 5 moves down a text line - it used to split line 5 at the pen
+    // One rule with Skip Lines or without: text on lines 3, 5 and 7, pressed between the words within 1/8
+    //  line above or below the rule over line 5 - the whole of line 5 moves down two lines with everything
+    //  under it, line 3 stays.  Both toggles, both sides of the rule.
+    for(bool skip : { false, true }) {
+      for(Dim offset : { -0.1*pitch, 0.1*pitch }) {
+        scribbleMode->insSpaceSkipLines = skip;
+        fresh();
+        std::vector<Element*> above = word(textLeft, 3);
+        word(textLeft + 4*14 + 16, 3);
+        std::vector<Element*> first = word(textLeft, 5), second = word(textLeft + 4*14 + 16, 5);
+        std::vector<Element*> last = word(textLeft, 7);
+        downDrag(Point(gapX, 5*pitch + offset), 2*pitch);
+        std::string which = std::string(skip ? "skip lines" : "no skip") + (offset < 0 ? ", above rule: " : ", below rule: ");
+        check(allOn(above, 3), (which + "the line above stays").c_str());
+        check(allOn(first, 7) && allOn(second, 7), (which + "the whole line below moves").c_str());
+        check(allOn(last, 9), (which + "everything under it moves").c_str());
+      }
+    }
+    // just past 1/8 line below the rule (the zone used to be 0.2): a split, again the same either way
+    for(bool skip : { false, true }) {
+      scribbleMode->insSpaceSkipLines = skip;
+      fresh();
+      std::vector<Element*> left = word(textLeft, 5), right = word(textLeft + 4*14 + 16, 5);
+      downDrag(Point(gapX, 5*pitch + 0.18*pitch), 2*pitch);
+      check(allOn(left, 5) && allOn(right, 7), skip ? "skip lines, past 1/8 below a rule: split at the pen"
+                                                    : "no skip, past 1/8 below a rule: split at the pen");
+    }
     scribbleMode->insSpaceSkipLines = true;
+    // inside a text line it splits there
     fresh();
-    std::vector<Element*> above = word(textLeft, 3);
-    word(textLeft + 4*14 + 16, 3);
-    std::vector<Element*> first = word(textLeft, 5), second = word(textLeft + 4*14 + 16, 5);
-    std::vector<Element*> last = word(textLeft, 7);
-    downDrag(Point(gapX, 4.5*pitch), 2*pitch);
-    check(allOn(above, 3), "skip lines, pressed on a blank line: the text line above stays");
-    check(allOn(first, 7) && allOn(second, 7), "skip lines, pressed on a blank line: the text line below moves whole");
-    check(allOn(last, 9), "skip lines, pressed on a blank line: the text below moves with it");
-    // inside a text line it still splits there
-    fresh();
-    first = word(textLeft, 5);
-    second = word(textLeft + 4*14 + 16, 5);
+    std::vector<Element*> first = word(textLeft, 5);
+    std::vector<Element*> second = word(textLeft + 4*14 + 16, 5);
     downDrag(Point(gapX, 5.5*pitch), 2*pitch);
     check(allOn(first, 5) && allOn(second, 7), "skip lines, pressed inside a text line: split at the pen");
     scribbleMode->insSpaceSkipLines = false;
