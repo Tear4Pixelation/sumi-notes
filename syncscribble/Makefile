@@ -15,6 +15,7 @@ SOURCES = \
   shape.cpp \
   shaperec.cpp \
   rulingregion.cpp \
+  erasegeom.cpp \
   element.cpp \
   layers.cpp \
   page.cpp \

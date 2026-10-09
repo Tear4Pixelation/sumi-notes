@@ -2,6 +2,7 @@
 #include "document.h"
 #include "basics.h"
 #include "usvg/svgxml.h"
+#include "erasegeom.h"
 
 // Selection:
 // Basic procedure:
@@ -11,10 +12,9 @@
 //  checks to see if the strokes are selected and alters style if so.
 
 // Erasing: - stoke and ruled erase are implemented as selections from which strokes cannot be removed
-// Stroke eraser: we use Selection::selectPath which for now uses only the end points of the path
-//  (so we should be breaking up long lines), which, in turn, calls Stroke::isNearPoint, which also only
-//  considers the stroke's points, so we need to avoid long lines here too; this will also make implementing
-//  free erase easier (we just delete the nearby segments instead of the whole stroke.
+// Stroke eraser: PathSelector::selectPath sweeps a capsule from the previous pointer position to the new
+//  one and takes every element whose ink it touches (isNearSegment, erasegeom.h) - every segment of the
+//  element's path, widened by its stroke width, or anywhere inside a filled outline.
 // Ruled eraser - currently, this works exactly like Ruled selection, but we may want an option to not jump
 //  lines
 // Free eraser: implementation is in ScribbleArea mostly
@@ -769,50 +769,51 @@ Selector::~Selector()
 // PathSelector class
 
 // no reason not to have reasonable behavior for all structure nodes
-static bool isNearPoint(Point p, Dim radius, SvgNode* node)
+// Hit test for the capsule swept by the eraser (or path selector) from a to b - see erasegeom.h.  The ink
+//  is what counts, not the centre line: a stroked path is reached at its edge (half its width out), a
+//  filled one anywhere inside its outline, and every segment counts, not just the vertices.
+static bool isNearSegment(Point a, Point b, Dim radius, SvgNode* node)
 {
-  if(!node->bounds().pad(radius).contains(p))
+  const Transform2D tf = node->totalTransform();
+  bool stroked = node->type() == SvgNode::PATH && node->getColorAttr("stroke", Color::NONE) != Color::NONE;
+  Dim halfWidth = stroked ? node->getFloatAttr("stroke-width", 1)*tf.avgScale()/2 : 0;
+  // bounds() is only a cull, so pad it by the half width in case it is the geometry's alone; both rects
+  //  are padded since either can have zero area (a tap, a horizontal line)
+  if(!node->bounds().pad(halfWidth + 1).intersects(Rect::corners(a, b).pad(radius)))
     return false;
   if(node->asContainerNode()) {
     for(SvgNode* child : node->asContainerNode()->children())
-      if(isNearPoint(p, radius, child))
+      if(isNearSegment(a, b, radius, child))
         return true;
     return false;
   }
-  if(node->type() == SvgNode::IMAGE) {  //&& !Element::ERASE_IMAGES)
-    Rect bbox = node->bounds();
-    return std::abs(p.x - bbox.left) < radius || std::abs(p.x - bbox.right) < radius
-        || std::abs(p.y - bbox.top) < radius || std::abs(p.y - bbox.bottom) < radius;
-  }
+  if(node->type() == SvgNode::IMAGE)  //&& !Element::ERASE_IMAGES)
+    return capsuleHitsPath(a, b, radius, Path2D().addRect(node->bounds()), 0, false);  // the frame only
   if(node->type() != SvgNode::PATH)
     return true;  // bbox hit for non-path node
 
   const Path2D& path = *static_cast<SvgPath*>(node)->path();
-  const Transform2D tf = node->totalTransform();
-  Dim dist = tf.isIdentity() ? path.distToPoint(p) : Path2D(path).transform(tf).distToPoint(p);
-  return dist < radius;
+  Path2D flat = path.isSimple() ? path : path.toFlat();
+  if(!tf.isIdentity())
+    flat.transform(tf);
+  bool filled = node->getColorAttr("fill", Color::NONE) != Color::NONE;
+  return capsuleHitsPath(a, b, radius, flat, halfWidth, filled);
 }
 
 bool PathSelector::selectHit(Element* s)
 {
-  return isNearPoint(selPos, selRadius, s->node);
+  return isNearSegment(selPrev, selPos, selRadius, s->node);
 }
 
 void PathSelector::selectPath(Point p, Dim radius)
 {
   selRadius = radius;
   path.addPoint(p);
-  // subdivide as necessary to get sufficient point density
-  if(selPos.isNaN())
-    selPos = p;
-  Point dr = p - selPos;
-  Dim d = dr.dist();
-  int nsteps = int(d/(radius/2)) + 1;
-  Point step = dr/nsteps;
-  for(int ii = 0; ii < nsteps; ++ii) {
-    selPos += step;
-    selection->doSelect();
-  }
+  // one capsule from the previous position to this one: sampling points along the way instead (as this
+  //  once did, radius/2 apart) tests circles, which is slower and still has gaps at their edges
+  selPrev = selPos.isNaN() ? p : selPos;
+  selPos = p;
+  selection->doSelect();
   bgDirty = true;
 }
 

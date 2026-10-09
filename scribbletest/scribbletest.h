@@ -78,6 +78,7 @@ public:
   // hold-to-snap: a held stroke becomes a shape, the rest of the gesture scales it, and the shape as
   // recognized is its own undo step; a held scratch-out erases what it covers
   int shapeSnapTest();
+  int eraserHitTest();
   // ruling regions: the ruled tools follow a (tilted) region's lines, the region stays below all ink and
   // out of reach of ink selection and erasers, moves with its ink, and survives undo, reload and sync
   int rulingRegionTest();

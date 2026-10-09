@@ -3,6 +3,7 @@
 #include "selection.h"
 #include "usvg/svgparser.h"  // for toReal
 #include "strokebuilder.h"  // for rebuilding stroke when scaling width
+#include "erasegeom.h"
 
 
 bool Element::ERASE_IMAGES = true;
@@ -452,22 +453,37 @@ bool Element::freeErase(const Point& prevpos, const Point& pos, Dim radius)
       touched = s->freeErase(prevpos, pos, radius) || touched;
   }
   else if(isPathElement()) {
-    Path2D eraser;
-    Point dr = pos == prevpos ? Point(1, 0) : (pos - prevpos).normalize();
-    Point n = normal(dr);
-    eraser.moveTo(prevpos + radius*(-dr + n));
-    eraser.lineTo(prevpos + radius*(-dr - n));
-    eraser.lineTo(pos + radius*(dr - n));
-    eraser.lineTo(pos + radius*(dr + n));
-    eraser.closeSubpath();
-    eraser.transform(node->getTransform().inverse());
-    if(polygonArea(eraser.points) > 0)
-      std::reverse(eraser.points.begin(), eraser.points.end());
-
+    // The eraser is the capsule swept from prevpos to pos (round ends - this was a rectangle reaching
+    //  radius past both ends, so its corners erased ink up to 1.41 radius away), clipped against the
+    //  stroke's centre line (the pen points).  The ink reaches half the stroke width past that line, so the
+    //  capsule is widened by the half width: the eraser cuts as soon as its edge touches the ink, and what
+    //  is left - centre line plus half width, i.e. a round cap at each cut - ends flush with the eraser.
+    //  Without this a wide stroke only erased once the eraser reached its middle.
+    const Transform2D inv = node->getTransform().inverse();
+    const Point a = inv.map(prevpos), b = inv.map(pos);
+    const Dim localRadius = radius*inv.avgScale();
     if(penPoints.empty())
       penPoints = toPenPoints();
+    // the width of the ink where the eraser is: the widest pen segment within reach (pressure varies it)
+    Dim halfWidth = 0;
+    if(node->hasClass(STROKE_PEN_CLASS))
+      halfWidth = node->getFloatAttr("stroke-width", 0)/2;
+    else {
+      for(size_t ii = 1; ii < penPoints.size(); ++ii) {
+        if(penPoints[ii].moveTo())
+          continue;
+        Dim segHalf = std::max(penPoints[ii-1].dr.dist(), penPoints[ii].dr.dist())/2;
+        if(segHalf > halfWidth && segmentDist2(a, b, penPoints[ii-1].p, penPoints[ii].p)
+            < (localRadius + segHalf)*(localRadius + segHalf))
+          halfWidth = segHalf;
+      }
+    }
+    std::vector<Point> eraser = capsulePolygon(a, b, localRadius + halfWidth);
+    if(polygonArea(eraser) > 0)
+      std::reverse(eraser.begin(), eraser.end());
+
     if(!penPoints.empty())
-      touched = erasePenPoints(penPoints, eraser.points);
+      touched = erasePenPoints(penPoints, eraser);
     if(touched) {
       fromPenPoints(penPoints);
       // for wide stroke, dirty area may be larger than eraser bbox, so we just have to dirty whole stroke

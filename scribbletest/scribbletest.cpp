@@ -22,6 +22,7 @@
 #include "layertest.cpp"
 #include "tabstest.cpp"
 #include "regiontest.cpp"
+#include "erasetest.cpp"
 #include "librarytest.cpp"
 #include "notefultest.cpp"
 #include "pagetagtest.cpp"
@@ -3168,10 +3169,12 @@ int ScribbleTest::shapeSnapTest()
   check(page->strokeCount() == 3, "the first redo puts the scribble back");
   redo();
   check(page->strokeCount() == 1, "the second redo erases the target and the scribble again");
-  // scribbling over nothing is not an erase, so it stays ink
+  // a scratch-out over nothing is still recorded: the same two undo steps, the scribble gone after the second
+  //  (against the old code, which kept it as plain ink in one step, the count and step checks both fail)
   begin(0.8f);
   scribbleDoc->cfg->set("liftScratchOut", 1);
   scribbleDoc->cfg->set("liftScratchOutLevel", 2);
+  size_t stepsBeforeEmpty = scribbleDoc->history->undoSteps();
   for(int pass = 0; pass < 8; ++pass) {
     for(int i = 0; i <= 20; ++i) {
       Dim frac = i/Dim(20);
@@ -3180,7 +3183,117 @@ int ScribbleTest::shapeSnapTest()
     }
   }
   ie(0, 0, 0, pen, release);
-  check(page->strokeCount() == 1, "a scribble over nothing stays as ink");
+  check(page->strokeCount() == 0, "a lift scratch-out over nothing still takes the scribble away");
+  check(scribbleDoc->history->undoSteps() == stepsBeforeEmpty + 2,
+      "a lift scratch-out over nothing is recorded as the same two undo steps");
+  undo();
+  check(page->strokeCount() == 1, "undoing a scratch-out over nothing brings the scribble back as ink");
+  undo();
+  check(page->strokeCount() == 0, "a second undo removes the scribble");
+
+  scribbleDoc->newDocument();
+  return nbad;
+}
+
+// The eraser hit test is against the ink, swept as a capsule between events (erasegeom.h).  Every distance
+//  is relative to the eraser radius r and the line's half width, so the checks hold at any zoom.  Against
+//  the old code (centre line only, and a square-ended rectangle for the free eraser) the "edge" checks and
+//  the free eraser's "corner" check fail; the "not yet" checks guard against an eraser grown too eager.
+int ScribbleTest::eraserHitTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: eraser hit: %s\n", what); }
+  };
+  auto at = [&](Point pagept, int ev) {
+    Point scr = scribbleArea->dimToScreen(scribbleArea->pageDimToDim(pagept));
+    ie(scr.x, scr.y, 0, pen, ev);
+  };
+  // a plain stroked line (a stroked pen's stroke, or a shape's): exact geometry, no input filtering
+  Page* page = NULL;
+  auto line = [&](Point a, Point b, Dim width) {
+    SvgPath* node = new SvgPath();
+    node->path()->moveTo(a);
+    node->path()->lineTo(b);
+    node->setAttr<color_t>("fill", Color::NONE);
+    setSvgStrokeColor(node, Color::BLACK);
+    node->setAttr<float>("stroke-width", width);
+    node->setAttr<int>("stroke-linecap", Painter::RoundCap);
+    node->addClass(Element::STROKE_PEN_CLASS);
+    Element* s = new Element(node);
+    page->addStroke(s);
+    return s;
+  };
+  auto sweep = [&](int mode, Point from, Point to) {
+    scribbleMode->setMode(mode);
+    at(from, press);
+    at(to, INPUTEVENT_MOVE);
+    at(to, release);
+  };
+  auto fresh = [&]() {
+    scribbleDoc->newDocument();
+    page = scribbleArea->currPage;
+  };
+
+  const Dim halfWidth = 5;
+  const Point left(100, 300), right(700, 300);  // a long line: two points, 600 apart
+  for(int mode : {MODE_ERASESTROKE, MODE_ERASEFREE}) {
+    const char* name = mode == MODE_ERASESTROKE ? "stroke eraser" : "free eraser";
+    const Dim r = (mode == MODE_ERASESTROKE ? ScribbleArea::ERASESTROKE_RADIUS
+        : ScribbleArea::ERASEFREE_RADIUS)/scribbleArea->mZoom;
+    char what[160];
+
+    // crossing the middle of a long line in a single move, far from both of its points
+    fresh();
+    line(left, right, 2*halfWidth);
+    sweep(mode, Point(400, 300 - 4*r - halfWidth), Point(400, 300 + 4*r + halfWidth));
+    snprintf(what, sizeof(what), "%s: one move across the middle of a long line erases it", name);
+    check(mode == MODE_ERASESTROKE ? page->strokeCount() == 0 : page->strokeCount() == 2, what);
+
+    // running along the line's edge, the eraser's own edge inside the ink but nowhere near the centre line
+    fresh();
+    line(left, right, 2*halfWidth);
+    Dim edgeY = 300 - halfWidth - 0.6*r;
+    sweep(mode, Point(380, edgeY), Point(420, edgeY));
+    snprintf(what, sizeof(what), "%s: touching only the edge of a wide line erases it", name);
+    check(mode == MODE_ERASESTROKE ? page->strokeCount() == 0 : page->strokeCount() == 2, what);
+
+    // the same, but with the eraser's edge still clear of the ink
+    fresh();
+    line(left, right, 2*halfWidth);
+    Dim clearY = 300 - halfWidth - 1.2*r;
+    sweep(mode, Point(380, clearY), Point(420, clearY));
+    snprintf(what, sizeof(what), "%s: an eraser clear of a wide line does not erase it", name);
+    check(page->strokeCount() == 1, what);
+
+    // a thin line diagonally ahead of where the eraser stops: 1.13 r from its centre, so not reached - the
+    //  old free eraser's square end reached r along both axes and erased it
+    fresh();
+    line(Point(400 + 0.8*r, 300 + 0.8*r), Point(400 + 0.8*r, 300 + 20*r), 0.2);
+    sweep(mode, Point(300, 300), Point(400, 300));
+    snprintf(what, sizeof(what), "%s: ink diagonally past the end of the eraser is not erased", name);
+    check(page->strokeCount() == 1, what);
+  }
+
+  // what the free eraser leaves ends where the eraser's edge was: the cut is r + half width from the
+  //  eraser's centre along the centre line, so the remaining round cap is flush with the eraser
+  fresh();
+  line(left, right, 2*halfWidth);
+  {
+    const Dim r = ScribbleArea::ERASEFREE_RADIUS/scribbleArea->mZoom;
+    sweep(MODE_ERASEFREE, Point(400, 300), Point(400, 301));
+    Dim gapLeft = MAX_DIM, gapRight = -MAX_DIM;
+    for(Element* s : page->children()) {
+      Rect bbox = static_cast<SvgPath*>(s->node)->path()->controlPointRect();
+      if(bbox.right < 400) gapLeft = std::min(gapLeft, 400 - bbox.right);
+      if(bbox.left > 400) gapRight = std::max(gapRight, bbox.left - 400);
+    }
+    check(page->strokeCount() == 2, "free eraser: a tap on a line cuts it in two");
+    // the polygon approximating the capsule is a hair inside it (0.5% of the radius)
+    check(std::abs(gapLeft - (r + halfWidth)) < 0.02*(r + halfWidth)
+        && std::abs(gapRight - (r + halfWidth)) < 0.02*(r + halfWidth),
+        "free eraser: the cut is r + half width either side of the eraser's centre");
+  }
 
   scribbleDoc->newDocument();
   return nbad;
@@ -3913,7 +4026,7 @@ void ScribbleTest::runAll(bool runsynctest)
   int nThumbsFailed = 0;
   int nUnitFailed = runScanTests() + runShapeTests() + runColorTests() + runLayerTests() + runLibraryTests()
       + runRegionTests() + runNotefulTests() + runPageTagTests() + runWidthPresetTests() + runTabTests()
-      + runJumpHistoryTests();
+      + runJumpHistoryTests() + runEraseTests();
   std::vector<std::string> slFailed;
   void (ScribbleTest::*tests[])() = {
     &ScribbleTest::test0,
@@ -4093,6 +4206,7 @@ void ScribbleTest::runAll(bool runsynctest)
   nUnitFailed += docStateSyncTest();
   nUnitFailed += curveFitTest();
   nUnitFailed += shapeSnapTest();
+  nUnitFailed += eraserHitTest();
   nUnitFailed += rulingRegionTest();
   nUnitFailed += reflowIndentTest();
   nUnitFailed += skippedLinesTest();
