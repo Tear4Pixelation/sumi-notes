@@ -26,6 +26,7 @@
 #include "notefultest.cpp"
 #include "pagetagtest.cpp"
 #include "widthpresettest.cpp"
+#include "jumphistorytest.cpp"
 #include "pentoolbar.h"
 
 // Ideally, these tests should be run under valgrind to help check for memory leaks
@@ -3793,7 +3794,8 @@ void ScribbleTest::runAll(bool runsynctest)
   UndoPersist::enabled = false;
   int nThumbsFailed = 0;
   int nUnitFailed = runScanTests() + runShapeTests() + runColorTests() + runLayerTests() + runLibraryTests()
-      + runRegionTests() + runNotefulTests() + runPageTagTests() + runWidthPresetTests() + runTabTests();
+      + runRegionTests() + runNotefulTests() + runPageTagTests() + runWidthPresetTests() + runTabTests()
+      + runJumpHistoryTests();
   std::vector<std::string> slFailed;
   void (ScribbleTest::*tests[])() = {
     &ScribbleTest::test0,

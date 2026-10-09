@@ -615,6 +615,17 @@ static const char* icons__ic_menu_insert_space_svg = R"~~~~(<?xml version="1.0" 
 </svg>
 )~~~~";
 
+static const char* icons__ic_menu_last_page_svg = R"~~~~(<?xml version="1.0" encoding="utf-8"?>
+<svg version="1.2" baseProfile="tiny" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+  x="0px" y="0px" viewBox="0 0 24 24" xml:space="preserve">
+<!-- hand drawn in the style of reicon (outline, 1.5 stroke): chevron-right plus an end bar; not in reicon_import.py's MAPPING -->
+<g class="icon">
+  <polyline points="6.6666 3.6667 15 12 6.6666 20.3333" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"></polyline>
+  <line x1="19.5" y1="4" x2="19.5" y2="20" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"></line>
+</g>
+</svg>
+)~~~~";
+
 static const char* icons__ic_menu_link_svg = R"~~~~(<?xml version="1.0" encoding="utf-8"?>
 <svg version="1.2" baseProfile="tiny" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
   x="0px" y="0px" viewBox="0 0 24 24" xml:space="preserve">
@@ -1406,6 +1417,7 @@ static void LOAD_RES_FN() { addStringResources({
   {"icons/ic_menu_insert_space_ruled_right.svg", icons__ic_menu_insert_space_ruled_right_svg},
   {"icons/ic_menu_insert_space_ruled.svg", icons__ic_menu_insert_space_ruled_svg},
   {"icons/ic_menu_insert_space.svg", icons__ic_menu_insert_space_svg},
+  {"icons/ic_menu_last_page.svg", icons__ic_menu_last_page_svg},
   {"icons/ic_menu_link.svg", icons__ic_menu_link_svg},
   {"icons/ic_menu_lock.svg", icons__ic_menu_lock_svg},
   {"icons/ic_menu_minus.svg", icons__ic_menu_minus_svg},

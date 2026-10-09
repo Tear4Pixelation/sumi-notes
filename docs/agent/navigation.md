@@ -196,6 +196,34 @@ ghost-page case crashes.
   Shift/horizontal wheel at fit were checked in agent-display. Pass `--wheelZoomSpeed=0.5` there: one
   injected notch arrives as two steps (1.25^2), which jumps straight past the 10% window.
 
+## Jump history (back / forward) and the last page button
+
+The bottom-left bar reads `<- -> | < 3 / 12 > >| | zoom ...`: back and forward over *jumps*, the page
+stepper, and **Last Page** (`ID_LASTPAGE`, icon `ic_menu_last_page.svg`, hand drawn in reicon's style and
+therefore not in `reicon_import.py`'s MAPPING; disabled on the last page).
+
+- **What is a jump**: a programmatic move that skips `JumpHistory::MIN_JUMP_PAGES` (2) or more pages -
+  outline entry, bookmark (`bookmarkHit` -> `viewPos`), Last Page, Home/End, a Pages-view cell, a page card
+  in the document browser. Scrolling, zooming, next/prev page, tab switches and page moves are **not**
+  recorded. They route through `ScribbleArea::jumpToPage()` / `ScribbleDoc::jumpToPage()` (which also
+  refreshes the UI) or `gotoPos(..., savepos=true)` / `viewPos()`, all of which call `recordJumpTo()`
+  *before* the view moves. A new moving-code path that should be a jump must do the same - plain
+  `gotoPage()` never records.
+- **Logic is `syncscribble/jumphistory.h`**, pure (no document, no GL): `backStack` / `forwardStack`
+  like a browser, a recorded jump empties the forward stack, `back(current, &target)` pushes `current`
+  onto forward. It lives in `ScribbleDoc::jumpHistory` - per document, so it follows a tab and is cleared
+  in `closeDocument()`; not persisted. Locations are `(page, corner position in page units)`; on
+  restore the page is clamped to the current page count (pages may have been added or removed since).
+- This **replaces the old `posHistory`** in `ScribbleArea`, which only existed behind the Previous/Next
+  View menu items (Backspace / Shift+Backspace, still wired to `ID_PREVVIEW` / `ID_NEXTVIEW`) and
+  recorded any move of half a screen, which is not what a "jump" means to a user. The buttons enable
+  from `UIState::prevView` / `nextView`.
+- Tests: `scribbletest/jumphistorytest.cpp` (standalone command in its header; also in `runAll`).
+  Mutation-checked: not clearing the forward stack on a new jump fails it. The real view (buttons
+  dim/enable, position restored) was checked in agent-display: Last Page from 7/12 -> back enabled,
+  Back -> 7/12 with Forward enabled, Forward -> 12/12. Note a Debug (ASAN) build is slow enough that
+  queued clicks arrive many seconds late - wait and re-screenshot before concluding a click was lost.
+
 ## Testing this (agent-display)
 
 Three gaps in `tools/agent-display.sh` had to be closed before any of the above could be checked, and

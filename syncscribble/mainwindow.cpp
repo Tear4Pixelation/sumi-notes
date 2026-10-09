@@ -181,6 +181,12 @@ void MainWindow::refreshScribbleWidget(ScribbleWidget* w, const UIState* uiState
   }
   if(w->prevPage)
     w->prevPage->setEnabled(uiState->pageNum > 1);
+  if(w->lastPage)
+    w->lastPage->setEnabled(uiState->pageNum < uiState->totalPages);
+  if(w->jumpBack)
+    w->jumpBack->setEnabled(uiState->prevView);
+  if(w->jumpForward)
+    w->jumpForward->setEnabled(uiState->nextView);
   if(w->nextPage) {
     bool lastpage = uiState->pageNum == uiState->totalPages;
     w->nextPage->setIcon(lastpage ? appendPageIcon : nextPageIcon);
@@ -1186,6 +1192,18 @@ ScribbleWidget* MainWindow::createScribbleAreaWidget(Widget* container, Scribble
   setupTooltip(areaWidget->prevPage, _("Previous Page"), Tooltips::LEFT | Tooltips::BOTTOM | Tooltips::ABOVE);
   setupTooltip(areaWidget->nextPage, _("Next Page"), Tooltips::LEFT | Tooltips::BOTTOM | Tooltips::ABOVE);
 
+  // last page, and back / forward over jumps (outline, bookmarks, pages view, last page: a jump is anything
+  //  that skips two or more pages - see jumphistory.h)
+  areaWidget->lastPage = createToolbutton(SvgGui::useFile(":/icons/ic_menu_last_page.svg"), _("Last Page"));
+  areaWidget->lastPage->onClicked = SLOT(doCommand(ID_LASTPAGE));
+  areaWidget->jumpBack = createToolbutton(SvgGui::useFile(":/icons/ic_menu_back.svg"), _("Back to Previous Location"));
+  areaWidget->jumpBack->onClicked = SLOT(doCommand(ID_PREVVIEW));
+  areaWidget->jumpForward = createToolbutton(SvgGui::useFile(":/icons/ic_menu_forward.svg"), _("Forward to Next Location"));
+  areaWidget->jumpForward->onClicked = SLOT(doCommand(ID_NEXTVIEW));
+  setupTooltip(areaWidget->lastPage, _("Last Page"), Tooltips::LEFT | Tooltips::BOTTOM | Tooltips::ABOVE);
+  setupTooltip(areaWidget->jumpBack, _("Back to Previous Location"), Tooltips::LEFT | Tooltips::BOTTOM | Tooltips::ABOVE);
+  setupTooltip(areaWidget->jumpForward, _("Forward to Next Location"), Tooltips::LEFT | Tooltips::BOTTOM | Tooltips::ABOVE);
+
   Button* timeRangeBtn = createToolbutton(SvgGui::useFile(":/icons/ic_menu_clock.svg"));
   timeRangeBtn->onClicked = [this](){
     ScribbleApp::cfg->set("displayTimeRange",  // should do right click/long press, but I'm lazy
@@ -1210,9 +1228,13 @@ ScribbleWidget* MainWindow::createScribbleAreaWidget(Widget* container, Scribble
   statusbar->selectFirst(".child-container")->setMargins(0, floatPad/floatUIScale, 0, floatPad/floatUIScale);
   //statusbar->node->setAttr<float>("font-size", 18);  -- set by CSS
 
+  statusbar->addWidget(areaWidget->jumpBack);
+  statusbar->addWidget(areaWidget->jumpForward);
+  statusbar->addSeparator();
   statusbar->addWidget(areaWidget->prevPage);
   statusbar->addWidget(areaWidget->pageNumLabel);
   statusbar->addWidget(areaWidget->nextPage);
+  statusbar->addWidget(areaWidget->lastPage);
   statusbar->addSeparator();
   statusbar->addWidget(zoomBtn);
   statusbar->addWidget(areaWidget->zoomLabel);

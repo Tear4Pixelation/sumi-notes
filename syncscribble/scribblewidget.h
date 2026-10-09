@@ -39,6 +39,9 @@ public:
   Timer* wheelSnapTimer = NULL;
   Button* nextPage = NULL;
   Button* prevPage = NULL;
+  Button* lastPage = NULL;
+  Button* jumpBack = NULL;
+  Button* jumpForward = NULL;
 
   // needed to access private members of ScribbleView
   static ScribbleWidget* create(Widget* container, ScribbleView* area);

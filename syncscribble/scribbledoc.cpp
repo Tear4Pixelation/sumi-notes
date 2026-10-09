@@ -375,6 +375,14 @@ void ScribbleDoc::gotoPage(int pagenum)
   doRefresh();
 }
 
+void ScribbleDoc::jumpToPage(int pagenum)
+{
+  if(!activeArea)
+    return;
+  activeArea->jumpToPage(pagenum);
+  doRefresh();
+}
+
 bool ScribbleDoc::removePageTags(int pagenum, const std::vector<std::string>& tagIds)
 {
   if(pagenum < 0 || pagenum >= document->numPages() || tagIds.empty())
@@ -481,6 +489,7 @@ void ScribbleDoc::closeDocument()
   // disconnectSync starts an event loop via waitForDisconnect, so we must disconnect before calling
   //  ScribbleArea::reset(), since ScribbleArea handling events when in an invalid state can cause crash
   exitPageSelMode();
+  jumpHistory.clear();  // its locations belong to the document being closed
   if(scribbleSync)
     delete scribbleSync;
   for(unsigned int ii = 0; ii < views.size(); ii++)
