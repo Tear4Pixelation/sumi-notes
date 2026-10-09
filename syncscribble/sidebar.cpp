@@ -571,9 +571,11 @@ void Sidebar::setOpen(bool open)
     return;
   }
   setVisible(open);
-  // hiding a widget drops its timers, the thumbnail renderer's included
+  // Hiding a widget does NOT drop its timers (ugui removes them only in deleteWidget/closeWindow).  This
+  //  used to just forget the handle, so the renderer kept running and the next open started a second
+  //  one beside it - a floating sidebar closes on every press outside it, so they piled up.
   if(!open)
-    thumbTimer = NULL;
+    stopThumbTimer();
   if(pageSelectBar)
     pageSelectBar->setVisible(open && pageSelectMode && currView == PAGES);
   if(open)
@@ -1276,12 +1278,25 @@ void Sidebar::ensureThumbTimer()
 {
   if(thumbTimer || currView != PAGES || !isVisible() || !gui())
     return;
-  thumbTimer = gui()->setTimer(1, this, [this](){
+  unsigned int generation = ++thumbTimerGen;
+  thumbTimer = gui()->setTimer(1, this, [this, generation](){
+    // superseded: its handle was dropped and a newer renderer may be running - two would each render a
+    //  thumbnail per turn, and this one finishing would clear the newer one's handle and let a third start
+    if(generation != thumbTimerGen)
+      return 0;
     int next = renderThumbnails();
     if(next <= 0)
       thumbTimer = NULL;
     return next;
   });
+}
+
+void Sidebar::stopThumbTimer()
+{
+  if(thumbTimer && gui())
+    gui()->removeTimer(thumbTimer);
+  thumbTimer = NULL;
+  ++thumbTimerGen;
 }
 
 // Visible-first and lazy: what is on screen, then a screen's worth either side so a short scroll finds
@@ -1290,7 +1305,8 @@ void Sidebar::ensureThumbTimer()
 //  page's revision, so it is rendered again only when the page changes.
 int Sidebar::renderThumbnails()
 {
-  if(currView != PAGES || !scribbleDoc || !gui() || pageCells.empty())
+  // nothing to render for a hidden sidebar; refresh() on the next open starts a renderer again
+  if(currView != PAGES || !scribbleDoc || !gui() || pageCells.empty() || !isVisible())
     return 0;
   Rect view = listScroll->node->bounds();
   Rect first = pageCells.front().cell->node->bounds();

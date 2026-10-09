@@ -193,7 +193,13 @@ private:
   std::unordered_map<unsigned int, Thumbnail> thumbnails;
   std::string shownThumbnailInputs;
   int thumbWidthPx = 0;
+  // There is never more than one thumbnail renderer: each one takes a thumbnail per event-loop turn, so
+  //  N of them multiply the time every turn - every fling step, every deferred action - waits (see the
+  //  orphaned renderer trap in docs/agent/page-management.md).  thumbTimerGen retires a renderer whose
+  //  handle was dropped; stopThumbTimer() removes it outright.
   Timer* thumbTimer = NULL;
+  unsigned int thumbTimerGen = 0;
+  void stopThumbTimer();
   int shownCurrPage = -1;
   // selection by Page::uid, so it survives renumbering; pruned to the document at every rebuild
   std::set<unsigned int> selectedPageUids;

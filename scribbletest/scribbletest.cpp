@@ -8,6 +8,7 @@
 #include "scribblesync.h"
 #include "scribbleapp.h"  // only for sync tests
 #include "mainwindow.h"  // arrowPopupTest
+#include "sidebar.h"  // thumbRendererTest
 #include "notefulimport.h"
 #include "undopersist.h"
 #include "pdfimport.h"
@@ -1394,6 +1395,46 @@ int ScribbleTest::timerBacklogTest()
     gui->removeTimer(quickTimer);
   if(!slowDone)
     gui->removeTimer(slowTimer);
+  return nbad;
+}
+
+// The Pages view renders thumbnails on a 1 ms timer, one thumbnail per event-loop turn.  Closing the sidebar
+//  used to forget the timer's handle without removing the timer (hiding a widget does not drop its timers),
+//  so every reopen started another renderer beside the old ones; a floating sidebar closes on every press
+//  outside it.  With N renderers each turn renders N thumbnails: no fling, deferred actions late, and a
+//  document switch (a whole new grid to render) of 15 s.  Pinned here by counting the sidebar's timers.
+int ScribbleTest::thumbRendererTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: thumbnail renderer: %s\n", what); }
+  };
+  SvgGui* gui = ScribbleApp::gui;
+  Sidebar* sidebar = ScribbleApp::win ? ScribbleApp::win->sidebar : NULL;
+  if(!gui || !sidebar) {
+    check(false, "no sidebar");
+    return nbad;
+  }
+  auto sidebarTimers = [&](){
+    return std::count_if(gui->timers.begin(), gui->timers.end(),
+        [&](const Timer& timer){ return timer.widget == sidebar; });
+  };
+  Sidebar::View oldView = sidebar->view();
+  bool wasOpen = sidebar->isOpen();
+  sidebar->setOpen(false);
+  size_t before = sidebarTimers();
+  sidebar->setView(Sidebar::PAGES);
+  sidebar->setOpen(true);
+  for(int round = 0; round < 4; ++round) {
+    sidebar->setOpen(false);
+    sidebar->setOpen(true);
+  }
+  // no processTimers() in between, so a renderer that was only forgotten is still in the list
+  check(sidebarTimers() <= before + 1, "at most one renderer after closing and reopening the Pages view");
+  sidebar->setOpen(false);
+  check(sidebarTimers() == before, "closing the sidebar stops its renderer");
+  sidebar->setView(oldView);
+  sidebar->setOpen(wasOpen);
   return nbad;
 }
 
@@ -4291,6 +4332,7 @@ void ScribbleTest::runAll(bool runsynctest)
   nUnitFailed += selectTouchingTest();
   nUnitFailed += twoFingerTapTest();
   nUnitFailed += timerBacklogTest();
+  nUnitFailed += thumbRendererTest();
   nUnitFailed += shapeTapEditTest();
   nUnitFailed += zoomSnapTest();
   nUnitFailed += currentPageTest();

@@ -198,6 +198,10 @@ heading blue. See [night-mode.md](night-mode.md).
   meanwhile; the quick one may wait for at most two of the slow one's ticks. Mutation-checked: without the
   reschedule of a periodic timer that has fallen behind, it fails. Background in
   [page-management.md](page-management.md#thumbnails).
+- `ScribbleTest::thumbRendererTest()` - the Pages view keeps one thumbnail renderer: opened, closed and
+  reopened four times, the sidebar owns at most one timer, and none once closed (counted in
+  `SvgGui::timers`, no `processTimers()` in between). Mutation-checked: with `setOpen(false)` only clearing
+  `thumbTimer` again, both checks fail. Background in [page-management.md](page-management.md#thumbnails).
 
 Marker multiply blending is tested by `ScribbleTest::markerBlendTest()` (unit-check count), rendered with
 the software painter: details and mutation checks in [pen-and-tools.md](pen-and-tools.md#marker-multiplies-text-stays-dark).

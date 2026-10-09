@@ -88,6 +88,29 @@ confirmation, since it is undoable (the browser's delete is not, which is why th
   the thumbnail code: any periodic timer whose callback can outlast its period (camera polling, a slow
   frame during a fling) would back up the same way. What remains is the cost of one thumbnail per turn,
   which input waits behind.
+- **Trap: orphaned renderers - the same three symptoms came back (no fling, sidebar actions late, a
+  document switch of ~15 s) after the ugui fix, and this was why.** "One thumbnail per turn" assumes one
+  renderer. `Sidebar::setOpen(false)` set `thumbTimer = NULL` on the belief that hiding a widget drops its
+  timers; it does not (ugui removes timers only in `deleteWidget`/`closeWindow`, see `onHideWidget`). The
+  renderer kept running without a handle, and the next open's `ensureThumbTimer()` started a second one
+  beside it. A floating sidebar closes on *every* press outside it, so in real use (unpinned, Pages view)
+  they piled up, and an orphan finishing cleared the live renderer's handle, letting yet another start.
+  With N renderers every `processTimers()` call renders N thumbnails, and every fling step, deferred
+  sidebar action and page switch waits for all of them; a document switch rebuilds the grid, so all N
+  render the new document's thumbnails at once - with image-heavy pages (scans, PDF imports) that is the
+  15 s. Measured in agent-display (ASan, a real 132-page image-heavy document, Pages view, sidebar closed
+  and reopened four times 2 s apart): **before**, the timer list grew 3 -> 7, one `processTimers()` fired up
+  to 5 renderers and an event-loop turn grew from 0.5 s to 2.4 s; **after**, the list stays at 4 and every
+  turn is one thumbnail (0.5-0.6 s in ASan). Fix: `setOpen(false)` calls `stopThumbTimer()` (removes the
+  timer), each renderer carries a generation and retires itself if a newer one has been started, and
+  `renderThumbnails()` stops for a hidden sidebar. Pinned by `ScribbleTest::thumbRendererTest()`.
+  **Rule: a `Timer*` you stop tracking must be removed with `removeTimer()`, and a handle must be cleared
+  in the callback that returns 0** - that return frees the timer, and the next `setTimer(..., handle, ...)`
+  or `removeTimer(handle)` then removes whichever timer reused its memory (`std::list` nodes are recycled
+  at once). The same pass fixed that in `ScribbleWidget::showScroller` (the scroller fade: every scroll
+  after a fade ended removed a random timer - the fling, a 1 ms action), `ScribbleApp::showNotify`,
+  `ButtonDragTimeline`'s edge timer, and in ugui the shared tooltip timer (every LEAVE after a tooltip
+  showed) and `longPressTimer` (the finger up after a long press).
 - **Cache keyed by `Page::uid` + `Page::revision`**, both new. `revision` is bumped wherever the undo system
   changes `dirtyCount` (and on a layer restack) and is never reset; `dirtyCount` is zeroed by a save and
   counted back down by undo, so it cannot tell two versions apart. `uid` is unique for the process; a
