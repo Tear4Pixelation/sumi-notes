@@ -30,6 +30,12 @@ portable builds still read `write.xml` beside the binary. Still pointing at Styl
 decision: the update check (`styluslabs.com/write/versions.xml`), Help and share URLs, the Play Store review
 link, the iOS IAP, and the Windows installer's `Manufacturer`/`UpgradeCode`.
 
+### App icon / logo
+
+The logo (quill in an inkwell) lives in `sumi-appicon/` (source `logo_v2.svg`, drafts, README). The in-app copy is
+`scribbleres/icons/sumi_logo.svg` (themed via `.icon`/`currentColor`, used by the toolbar title button); every
+platform icon and the iOS launch image are generated from it by `python3 sumi-appicon/make-icons.py`. See the README there.
+
 ## Repository layout
 
 The main application lives in `syncscribble/`. Everything else is a git submodule providing a layer of the stack:
