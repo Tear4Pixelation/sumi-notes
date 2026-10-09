@@ -9,9 +9,10 @@ enum { MODE_NONE = 10, MODE_PAN, MODE_STROKE, MODE_ERASE, MODE_ERASESTROKE, MODE
     MODE_MOVESELRULED, MODE_INSSPACE, MODE_INSSPACEVERT, MODE_INSSPACEHORZ, MODE_INSSPACERULED,
     MODE_BOOKMARK, MODE_SCALESEL, MODE_SCALESELW, MODE_ROTATESEL, MODE_ROTATESELW, MODE_TOOLMENU,
     MODE_SELECTPATH, MODE_CROPSEL, MODE_PAGESEL, MODE_ERASEFREERULED, MODE_DRAWSHAPE, MODE_SHAPEHANDLE,
-    // ruled insert space held to one axis: whole lines down, or along the line (reflow) - the two tools the
-    //  insert space options row offers; MODE_INSSPACERULED, both at once, is what ScribbleArea runs them as
-    MODE_INSSPACEDOWN, MODE_INSSPACERIGHT,
+    // ruled insert space held to one axis: whole lines down, or along the line (reflow); MODE_INSSPACERULED,
+    //  both at once, is what ScribbleArea runs them as.  No longer offered (tests use them): the options row
+    //  offers MODE_INSSPACEAUTO, whose drag picks the axis - or both - with a dead zone (see doMoveEvent)
+    MODE_INSSPACEDOWN, MODE_INSSPACERIGHT, MODE_INSSPACEAUTO,
     MODE_LAST};
 
 constexpr int MODEMOD_NONE = 0;

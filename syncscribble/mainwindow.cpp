@@ -362,8 +362,9 @@ Action* MainWindow::modeToAction(int mode)
     case MODE_SELECTPATH:  return actionPath_Select;
     case MODE_INSSPACE:  return actionInsert_Space;
     case MODE_INSSPACERULED:
-    case MODE_INSSPACEDOWN:  return actionRuled_Insert_Space;
-    case MODE_INSSPACERIGHT:  return actionRuled_Insert_Space_Right;
+    case MODE_INSSPACEDOWN:
+    case MODE_INSSPACERIGHT:
+    case MODE_INSSPACEAUTO:  return actionRuled_Insert_Space;
     case MODE_INSSPACEVERT:  return actionInsert_Space_Vert;
     case MODE_PAGESEL:  return actionSelect_Pages;
     default: return NULL;
@@ -433,8 +434,8 @@ void MainWindow::updateMode()
   // only ruled insert space works in lines
   insSpaceSkipLinesToggle->setChecked(app->scribbleMode->insSpaceSkipLines);
   int insSpaceMode = app->scribbleMode->insSpaceMode;
-  insSpaceSkipLinesToggle->setEnabled(insSpaceMode == MODE_INSSPACEDOWN || insSpaceMode == MODE_INSSPACERIGHT
-      || insSpaceMode == MODE_INSSPACERULED);
+  insSpaceSkipLinesToggle->setEnabled(insSpaceMode == MODE_INSSPACEAUTO || insSpaceMode == MODE_INSSPACEDOWN
+      || insSpaceMode == MODE_INSSPACERIGHT || insSpaceMode == MODE_INSSPACERULED);
   // an options row left open follows a mode change made outside the tools toolbar
   int modeType = ScribbleMode::getModeType(mode);
   if(openOptionsRow && openOptionsRow != modeType)
@@ -1849,7 +1850,6 @@ void MainWindow::createToolBars()
   insSpaceRow->addWidget(createStretch());
   insSpaceRow->addAction(actionInsert_Space_Vert);
   insSpaceRow->addAction(actionRuled_Insert_Space);
-  insSpaceRow->addAction(actionRuled_Insert_Space_Right);
   insSpaceSkipLinesToggle = createToolbutton(
       SvgGui::useFile(":/icons/ic_menu_toggle_skip_lines.svg"), _("Skip Lines"));
   insSpaceSkipLinesToggle->setChecked(app->scribbleMode->insSpaceSkipLines);
@@ -1870,9 +1870,8 @@ void MainWindow::createToolBars()
   insSpaceRow->addWidget(insSpaceSwitchBackToggle);
   insSpaceRow->addWidget(smallFloatBtn(createHelpButton({
     {"ic_menu_insert_space.svg", "Insert Space", "Drags everything below the line you draw up or down."},
-    {"ic_menu_insert_space_ruled.svg", "Insert Lines", "Moves everything after where you press down by whole lines. Pressed in the margin it moves whole lines; pressed inside a line, the rest of that line starts a new one."},
-    {"ic_menu_insert_space_ruled_right.svg", "Insert Space in Line", "Pushes the rest of the line right (or pulls it left) and reflows handwritten text onto the following lines. It never moves anything to another line by itself."},
-    {"ic_menu_toggle_skip_lines.svg", "Skip Lines", "For text written on every second line: the line you press on and every second line from it are text lines, so Insert Lines and Insert Space in Line move and reflow two lines at a time. Nothing above the line you press on moves."},
+    {"ic_menu_insert_space_ruled.svg", "Ruled Insert Space", "Drag down to move everything after where you press down by whole lines: pressed near a rule line or in the margin it moves whole lines, pressed inside a line the rest of that line starts a new one. Drag right to push the rest of the line right (or left to pull it back) and reflow handwritten text. A drag that is mostly one way only goes that way; drag diagonally to do both."},
+    {"ic_menu_toggle_skip_lines.svg", "Skip Lines", "For text written on every second line: the line you press on and every second line from it are text lines, so Ruled Insert Space moves and reflows two lines at a time. Nothing above the line you press on moves."},
     {"ic_menu_switch_back.svg", "Switch Back", "Returns to the previous tool after inserting space once."} })));
   insSpaceRow->addWidget(createStretch());
   insSpaceRow->addWidget(smallFloatBtn(createToolSettingsButton("Insert Space Settings",
@@ -2401,16 +2400,14 @@ void MainWindow::setupActions()
       "Insert Space", ":/icons/ic_menu_insert_space.svg", "", SLOT(setMode(MODE_INSSPACEVERT)));
   actionInsert_Space_Vert->setCheckable(true);
   actionInsert_Space_Vert->tooltip = _("Insert vertical space");
-  // ruled insert space is two tools, one per direction: a drag that did both at once moved text down a line
-  //  whenever the pen drifted while pushing it right, and the reverse
+  // ruled insert space is one tool whose drag picks the direction: down inserts lines, right inserts space
+  //  in the line, and a drift along the other axis is ignored until it is clearly meant (MODE_INSSPACEAUTO,
+  //  see ScribbleArea::doMoveEvent) - the old combined tool moved text down a line whenever the pen drifted
+  //  while pushing it right, and the split into two tools that followed made both directions two picks
   actionRuled_Insert_Space = createAction("actionRuled_Insert_Space",
-      "Insert Lines", ":/icons/ic_menu_insert_space_ruled.svg", "", SLOT(setMode(MODE_INSSPACEDOWN)));
+      "Ruled Insert Space", ":/icons/ic_menu_insert_space_ruled.svg", "", SLOT(setMode(MODE_INSSPACEAUTO)));
   actionRuled_Insert_Space->setCheckable(true);
-  actionRuled_Insert_Space->tooltip = _("Insert whole lines\nMove everything after the pen down");
-  actionRuled_Insert_Space_Right = createAction("actionRuled_Insert_Space_Right",
-      "Insert Space in Line", ":/icons/ic_menu_insert_space_ruled_right.svg", "", SLOT(setMode(MODE_INSSPACERIGHT)));
-  actionRuled_Insert_Space_Right->setCheckable(true);
-  actionRuled_Insert_Space_Right->tooltip = _("Push the rest of the line right\nReflow handwritten text");
+  actionRuled_Insert_Space->tooltip = _("Drag down to insert lines, right to insert space\nReflow handwritten text");
 
   // tools have priority over other toolbar items (except overflow menu); pan should hide before tools
   actionPan->setPriority(Action::NormalPriority + 1);
