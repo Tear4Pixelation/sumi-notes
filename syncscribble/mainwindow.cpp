@@ -559,16 +559,31 @@ public:
   }
 };
 
-enum { REGION_LINED = 0, REGION_SQUARED, REGION_DOTTED, REGION_STAFF };
+enum { REGION_LINED = 0, REGION_SQUARED, REGION_DOTTED, REGION_STAFF, REGION_AXES };
 
 static int regionKind(const RulingRegionParams& params)
 {
-  return params.staff ? REGION_STAFF : params.dotRadius > 0 ? REGION_DOTTED : params.xRuling > 0 ? REGION_SQUARED : REGION_LINED;
+  return params.axes ? REGION_AXES : params.staff ? REGION_STAFF : params.dotRadius > 0 ? REGION_DOTTED
+      : params.xRuling > 0 ? REGION_SQUARED : REGION_LINED;
 }
 
 static const char* regionKindTitle(int kind)
 {
-  return kind == REGION_STAFF ? _("Music") : kind == REGION_DOTTED ? _("Dotted") : kind == REGION_SQUARED ? _("Squared") : _("Lined");
+  return kind == REGION_AXES ? _("Coordinate System") : kind == REGION_STAFF ? _("Music")
+      : kind == REGION_DOTTED ? _("Dotted") : kind == REGION_SQUARED ? _("Squared") : _("Lined");
+}
+
+// a coordinate system patch's icon (region kind menu and the "+" menu), on the same 24 unit grid as below
+const SvgNode* MainWindow::axesPatchIcon()
+{
+  static const char* axesSVG = R"(<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+    <g class="icon" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M2.5 14H21.5M19 11.5L21.5 14L19 16.5M10 21.5V2.5M7.5 5L10 2.5L12.5 5"/>
+      <path d="M5.5 13V15M14.5 13V15M9 18.5H11M9 9.5H11"/>
+    </g></svg>)";
+  static const SvgDocument* axes =
+      SvgGui::useFile("region-kind-axes", std::unique_ptr<SvgDocument>(SvgParser().parseString(axesSVG)));
+  return axes;
 }
 
 // lined reuses the ruled icon; there is no squared or dotted glyph among the icons, so those two are
@@ -595,6 +610,8 @@ static const SvgNode* regionKindIcon(int kind)
       SvgGui::useFile("region-kind-dotted", std::unique_ptr<SvgDocument>(SvgParser().parseString(dottedSVG)));
   static const SvgDocument* staff =
       SvgGui::useFile("region-kind-staff", std::unique_ptr<SvgDocument>(SvgParser().parseString(staffSVG)));
+  if(kind == REGION_AXES)
+    return MainWindow::axesPatchIcon();
   if(kind == REGION_STAFF)
     return staff;
   if(kind == REGION_SQUARED)
@@ -710,9 +727,12 @@ void MainWindow::buildRegionPanel()
   chevron->addClass("icon");
   regionKindBtn->selectFirst(".title")->node->parent()->asContainerNode()->addChild(chevron);
   ArrowPopup* kindMenu = createArrowPopup(Menu::VERT_LEFT);
-  for(int kind : {REGION_LINED, REGION_SQUARED, REGION_DOTTED, REGION_STAFF}) {
+  for(int kind : {REGION_LINED, REGION_SQUARED, REGION_DOTTED, REGION_STAFF, REGION_AXES}) {
     kindMenu->addItem(regionKindTitle(kind), regionKindIcon(kind), [this, kind](){
-      editSelRegion([kind](RulingRegionParams& p){
+      ScribbleArea* area = app->activeArea();
+      // a pitch the conversion changes is scaled about the red handle, as the spacing slider does
+      Point handle = area ? area->pinSelRegionHandle() : Point(NaN, NaN);
+      editSelRegion([kind, handle](RulingRegionParams& p){
         // a staff's yRuling is a whole band, a line pitch's multiple, so switching to or from music
         //  converts rather than keeping the number
         bool wasStaff = p.staff;
@@ -722,8 +742,23 @@ void MainWindow::buildRegionPanel()
         else if(kind != REGION_STAFF && wasStaff)
           pitch = std::round(std::min(std::max(pitch*2.5/STAFF_BAND_SPACES, regionMinSpacing), regionMaxSpacing));
         p.staff = kind == REGION_STAFF;
-        p.yRuling = pitch;
-        p.xRuling = kind == REGION_LINED || kind == REGION_STAFF ? 0 : pitch;
+        Dim newXRuling = kind == REGION_LINED || kind == REGION_STAFF ? 0 : pitch;
+        if(std::isfinite(handle.x))
+          p.setPitchesAbout(handle, newXRuling, pitch);
+        else {
+          p.yRuling = pitch;
+          p.xRuling = newXRuling;
+        }
+        // a coordinate system starts with its (0, 0) in the middle of the patch, so all four quadrants
+        //  show; the red handle then moves it
+        if(kind == REGION_AXES && !p.axes) {
+          RulingFrame frame = p.frame();
+          Rect localBounds;
+          for(const Point& corner : p.corners)
+            localBounds.rectUnion(frame.toLocal(corner));
+          p.origin = frame.toPage(localBounds.center());
+        }
+        p.axes = kind == REGION_AXES;
         if(kind != REGION_DOTTED)
           p.dotRadius = 0;
         else if(p.dotRadius <= 0)
@@ -761,13 +796,15 @@ void MainWindow::buildRegionPanel()
     Element* region = area ? area->selectedRegion() : NULL;
     if(!region)
       return;
-    if(!regionSlideStart)
+    if(!regionSlideStart) {
       regionSlideStart.reset(new RulingRegionParams(region->regionParams()));
+      regionSlideHandle = area->pinSelRegionHandle();
+    }
     Dim spacing = regionSliderToSpacing(pos, region->regionParams().staff);
-    RulingRegionParams params = region->regionParams();
-    params.yRuling = spacing;
-    if(params.xRuling > 0)
-      params.xRuling = spacing;
+    // always from the drag's start, so the rounding of each step does not creep into the phase; scaled
+    //  about the red handle, which therefore keeps its place among the lines (setPitchesAbout)
+    RulingRegionParams params = *regionSlideStart;
+    params.setPitchesAbout(regionSlideHandle, params.xRuling > 0 ? spacing : 0, spacing);
     params.sanitize();
     area->previewSelRegionParams(params);
     regionSpacingText->setText(fstring("%.0f", spacing).c_str());
@@ -2271,6 +2308,10 @@ void MainWindow::setupActions()
       [](){ AddPageMenu::showAddPagePopup(); });
   actionAddPatch = createAction("actionAddPatch", "Patch", ":/icons/ic_menu_toggle_ruled.svg", "",
       [this](){ actionRulingRegion->onTriggered(); });
+  // the same drag tool, drawing a coordinate system (docs/agent/ruling-regions.md)
+  actionAddAxesPatch = createAction("actionAddAxesPatch", "Coordinate System", "", "",
+      [this](){ actionRulingRegion->onTriggered(); app->scribbleMode->drawAxes = true; });
+  actionAddAxesPatch->setIcon(axesPatchIcon());
   actionAddDocument = createAction("actionAddDocument", "Insert Document", ":/icons/ic_menu_add_doc.svg", "",
       [this](){ app->scanDocument(false); });
   actionAddPhoto = createAction("actionAddPhoto", "Insert Photo", ":/icons/ic_menu_add_pic.svg", "",
@@ -2368,6 +2409,7 @@ void MainWindow::setupActions()
   actionRulingRegion = createAction("actionRulingRegion", "Paper Patch", ":/icons/ic_menu_toggle_ruled.svg", "",
       [this](){
         app->scribbleMode->drawRegion = true;
+        app->scribbleMode->drawAxes = false;
         app->setMode(MODE_DRAWSHAPE);
         showOptionsRow(MODE_DRAWSHAPE);
       });

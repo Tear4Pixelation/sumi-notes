@@ -805,6 +805,7 @@ void Element::updateFromNode()
     params.staff = toReal(node->getStringAttr("__rrstaff"), 0) != 0;
     params.opaque = toReal(node->getStringAttr("__rropaque"), 1) != 0;
     params.outline = toReal(node->getStringAttr("__rroutline"), 0) != 0;
+    params.axes = toReal(node->getStringAttr("__rraxes"), 0) != 0;
     // a build that saw only a plain <g> may have moved it with a transform attribute; fold that into the
     //  parameters, which are otherwise always in page coordinates
     if(node->hasTransform()) {
@@ -878,8 +879,12 @@ void Element::rebuildRegion(Color paper, Color rule)
   SvgPath* paperNode = NULL;
   SvgPath* rulesNode = NULL;
   SvgPath* outlineNode = NULL;
+  SvgPath* axesNode = NULL;
+  SvgG* labelsNode = NULL;
   for(SvgNode* child : g->children()) {
+    if(child->type() == SvgNode::G && child->hasClass("rr-labels")) labelsNode = static_cast<SvgG*>(child);
     if(child->type() != SvgNode::PATH) continue;
+    if(child->hasClass("rr-axes")) axesNode = static_cast<SvgPath*>(child);
     if(child->hasClass("rr-paper")) paperNode = static_cast<SvgPath*>(child);
     else if(child->hasClass("rr-rules")) rulesNode = static_cast<SvgPath*>(child);
     else if(child->hasClass("rr-outline")) outlineNode = static_cast<SvgPath*>(child);
@@ -943,6 +948,55 @@ void Element::rebuildRegion(Color paper, Color rule)
     outlineNode->setAttribute("vector-effect", "non-scaling-stroke");
     outlineNode->setAttribute("stroke-linejoin", "round");
     outlineNode->invalidate(false);
+  }
+
+  // coordinate system: axes, arrowheads and ticks (rr-axes), then the tick numbers (rr-labels), both in the
+  //  rule color made opaque - the page's rule color is translucent, and the axes must read above the grid
+  //  they sit on.  Like the outline, created on first need and emptied (not removed) when turned off.
+  if(m_region.axes && !axesNode) {
+    axesNode = new SvgPath;
+    axesNode->addClass("rr-axes");
+    g->addChild(axesNode);
+  }
+  if(axesNode) {
+    *axesNode->path() = m_region.axes ? m_region.axesPath() : Path2D();
+    setSvgFillColor(axesNode, Color::NONE);
+    setSvgStrokeColor(axesNode, rule.opaque());
+    axesNode->setAttr<float>("stroke-width", 1.5f);
+    axesNode->setAttribute("vector-effect", "non-scaling-stroke");
+    axesNode->setAttribute("stroke-linejoin", "round");
+    axesNode->setAttribute("stroke-linecap", "round");
+    axesNode->invalidate(false);
+  }
+  if(m_region.axes && !labelsNode) {
+    labelsNode = new SvgG;
+    labelsNode->addClass("rr-labels");
+    g->addChild(labelsNode);
+  }
+  if(labelsNode) {
+    // removeChild() returns the next sibling, not the node it removed
+    while(SvgNode* oldLabel = labelsNode->firstChild()) {
+      labelsNode->removeChild(oldLabel);
+      delete oldLabel;
+    }
+    if(m_region.axes) {
+      RulingFrame frame = m_region.frame();
+      Dim cosAngle = std::cos(frame.angle), sinAngle = std::sin(frame.angle);
+      setSvgFillColor(labelsNode, rule.opaque());
+      labelsNode->setAttribute("font-family", "satoshi, ui-sans, sans-serif");
+      labelsNode->setAttribute("font-size", fstring("%g", double(m_region.axisLabelFontSize())).c_str());
+      for(const AxisLabel& label : m_region.axisLabels()) {
+        SvgText* text = new SvgText();
+        text->setAttribute("text-anchor", label.alignEnd ? "end" : "middle");
+        // a minus sign, not a hyphen, as a plotted axis is printed
+        text->addText(label.value < 0 ? fstring("\xE2\x88\x92%d", -label.value).c_str() : fstring("%d", label.value).c_str());
+        // upright in the region's frame, so the numbers turn with a tilted patch
+        Point anchor = frame.toPage(label.local);
+        text->setTransform(Transform2D(cosAngle, sinAngle, -sinAngle, cosAngle, anchor.x, anchor.y));
+        labelsNode->addChild(text);
+      }
+    }
+    labelsNode->invalidate(true);
   }
   // rule lines fade when zoomed out, exactly as the page's do (see applyStyle)
   node->addClass("write-scale-down");
@@ -1120,6 +1174,10 @@ void Element::serializeAttr(SvgWriter* writer)
       node->setAttr("__rroutline", "1");
     else
       node->removeAttr("__rroutline");
+    if(m_region.axes)
+      node->setAttr("__rraxes", "1");
+    else
+      node->removeAttr("__rraxes");
   }
   // written only when non-default, so an unlayered document gains no attributes at all; a region's
   //  REGION_LAYER is never written - the class is what identifies it

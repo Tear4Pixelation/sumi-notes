@@ -538,10 +538,10 @@ void RegionChangedItem::serialize(IOStream& strm)
   // numbers only, so fstring is safe (no user string goes on the wire here)
   const RulingRegionParams& curr = s->regionParams();
   strm << fstring("<regionchanged strokeuuid='%llu' pts='%s' origin='%s' angle='%.17g' xruling='%.9g'"
-      " yruling='%.9g' dotradius='%.9g' opaque='%d' outline='%d' staff='%d'/>", s->uuid,
+      " yruling='%.9g' dotradius='%.9g' opaque='%d' outline='%d' staff='%d' axes='%d'/>", s->uuid,
       serializeRegionPoints(curr.corners).c_str(), serializeRegionPoints({curr.origin}).c_str(), double(curr.angle),
       double(curr.xRuling), double(curr.yRuling), double(curr.dotRadius), curr.opaque ? 1 : 0, curr.outline ? 1 : 0,
-      curr.staff ? 1 : 0);
+      curr.staff ? 1 : 0, curr.axes ? 1 : 0);
 }
 
 void PageChangedItem::serialize(IOStream& strm)
