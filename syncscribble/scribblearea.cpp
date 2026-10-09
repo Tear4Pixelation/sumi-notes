@@ -1653,9 +1653,9 @@ void ScribbleArea::discardStrokeBuilder()
 
 // The scratch-out test alone over a stroke just finished.  If it is one and there is something under it,
 //  returns true with what it was drawn over in `erased` - selected, not yet deleted.  The scribble itself
-//  is left alone: the caller commits it as an ordinary stroke first and only then deletes `erased` as a
-//  second undo step, so a detection that was wrong costs one undo to get the writing back, with the
-//  scribble still on the page as the ink it really was.
+//  is left alone: the caller commits it as an ordinary stroke first and only then deletes `erased` and the
+//  scribble as a second undo step, so a detection that was wrong costs one undo to get the writing back,
+//  with the scribble on the page as the ink it really was.
 bool ScribbleArea::scratchOutOnLift(Selection& erased)
 {
   std::vector<shaperec::Vec2> stroke;
@@ -3855,8 +3855,8 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
   case MODE_STROKE:
   {
     // a scratch-out needs no hold: it erases as the pen lifts.  The scribble is committed as ink below and
-    //  the erase follows as its own undo step, so undoing the erase after a false detection gives the
-    //  writing back with the scribble over it
+    //  the erase - of the scribble too - follows as its own undo step, so undoing the erase after a false
+    //  detection gives the writing back with the scribble over it
     Selection scratchedOut(currPage, Selection::STROKEDRAW_NONE);
     if(!snapActive && snapSamples.size() > 2 && cfg->Bool("liftScratchOut"))
       scratchOutOnLift(scratchedOut);
@@ -3905,14 +3905,21 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
       currPage->clearDirty();
     }
     currStroke->node->m_renderedBounds = r;
-    // if this is the first stroke created since last call to groupStrokes(), record it
-    groupStrokes(currStroke);
-    currStroke = NULL;
     if(scratchedOut.count() > 0) {
+      // The erase step takes the scribble away with what it was drawn over, so nothing of it is left on
+      //  the page; undoing the erase brings both back.  The scribble is not handwriting to group, and the
+      //  open group may hold strokes about to be erased, so end the group now while they are all alive.
+      groupStrokes(NULL);
+      scratchedOut.addStroke(currStroke);
+      currStroke = NULL;
       scribbleDoc->endAction();
       scribbleDoc->startAction(currPageNum);  // closed by the end of this release
       scratchedOut.deleteStrokes();
+      break;
     }
+    // if this is the first stroke created since last call to groupStrokes(), record it
+    groupStrokes(currStroke);
+    currStroke = NULL;
     break;
   }
   case MODE_ERASEFREE:

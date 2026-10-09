@@ -3078,17 +3078,18 @@ int ScribbleTest::shapeSnapTest()
   }
   ie(0, 0, 0, pen, release);
   check(!scribbleArea->snapHoldUsed, "no hold was involved");
-  // the target is gone and the scribble itself is now a stroke on the page, beside the untouched one
-  check(page->strokeCount() == 2, "a lift scratch-out erases the target and keeps its own scribble as a stroke");
+  // the target and the scribble are both gone; only the untouched stroke is left
+  check(page->strokeCount() == 1, "a lift scratch-out erases the target and leaves no scribble behind");
   size_t stepsAfterErase = scribbleDoc->history->undoSteps();
   undo();
-  check(page->strokeCount() == 3, "the first undo brings the erased stroke back and leaves the scribble");
+  check(page->strokeCount() == 3, "the first undo brings the erased stroke back with the scribble over it");
   undo();
   check(page->strokeCount() == 2 && scribbleDoc->history->undoSteps() == stepsAfterErase - 2,
       "the second undo removes the scribble");
   redo();
+  check(page->strokeCount() == 3, "the first redo puts the scribble back");
   redo();
-  check(page->strokeCount() == 2, "redo erases again");
+  check(page->strokeCount() == 1, "the second redo erases the target and the scribble again");
   // scribbling over nothing is not an erase, so it stays ink
   begin(0.8f);
   scribbleDoc->cfg->set("liftScratchOut", 1);
