@@ -314,6 +314,8 @@ public:
   // show `params` on the selected region without recording anything - for a slider drag, which is
   //  committed with setSelRegionParams once it ends
   void previewSelRegionParams(const RulingRegionParams& params);
+  // the selected region's red handle, pinned in place: what a spacing change scales about (NaN if none)
+  Point pinSelRegionHandle();
   // the selected region's outline and this view, in window coordinates, to place the region panel
   Rect selRegionGlobalRect() const;
   Rect globalViewRect() const;

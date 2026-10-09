@@ -625,6 +625,7 @@ void ScribbleSync::processItem(pugi::xml_node& node)
       params.staff = node.attribute("staff").as_int(0) != 0;
       params.opaque = node.attribute("opaque").as_int(1) != 0;
       params.outline = node.attribute("outline").as_int(0) != 0;
+      params.axes = node.attribute("axes").as_int(0) != 0;
       params.sanitize();
       if(params.isValid()) {
         item = new RegionChangedItem(mstroke, mpage, params);

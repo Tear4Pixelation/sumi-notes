@@ -1766,8 +1766,11 @@ Point RegionSelector::scaleHandlePos() const
 }
 
 // the origin handle sits on the left edge, on the first line inside the region, and drags the lines
+//  - except on a coordinate system, where it is the plot's (0, 0) itself (kept inside the outline)
 static Point defaultOriginHandlePos(const RulingRegionParams& params)
 {
+  if(params.axes)
+    return params.clampInside(params.origin);
   RulingFrame f = params.frame();
   Rect r = regionLocalBBox(params);
   Dim yr = f.yrulingOr(Page::BLANK_Y_RULING);
@@ -1779,8 +1782,9 @@ Point RegionSelector::originHandlePos() const
 {
   const RulingRegionParams& params = region->regionParams();
   // a relocated handle stays where the user put it, but never outside the outline (a corner drag or a
-  //  peer's edit may have moved the outline away from it)
-  return handleMoved ? params.clampInside(handlePage) : defaultOriginHandlePos(params);
+  //  peer's edit may have moved the outline away from it).  A coordinate system's handle is its origin,
+  //  so it is never relocated (no grip either): a handle that was not the origin would plot nothing.
+  return handleMoved && !params.axes ? params.clampInside(handlePage) : defaultOriginHandlePos(params);
 }
 
 Point RegionSelector::moveGripPos() const
@@ -1808,7 +1812,7 @@ int RegionSelector::shapeHandleHit(Point pos, bool touch)
   //  dragging along its edges, the origin cannot
   if((pos - originHandlePos()).dist() <= a*1.2)
     return originHandleIndex();
-  if((pos - moveGripPos()).dist() <= a*1.2)
+  if(!params.axes && (pos - moveGripPos()).dist() <= a*1.2)
     return moveGripIndex();
   if((pos - scaleHandlePos()).dist() <= a*1.2)
     return resizeHandleIndex();
@@ -1878,12 +1882,14 @@ void RegionSelector::drawBG(Painter* painter)
   painter->setFillBrush(Color::RED);
   painter->drawPath(Path2D().addEllipse(o.x, o.y, a, a));
   // the grip that relocates it (no parameter changes): small hollow circle tied to the handle by a stem
-  Point grip = moveGripPos();
-  painter->setStroke(bgStroke, 1/mZoom);
-  painter->drawLine(o, grip);
-  painter->setFillBrush(Color::WHITE);
-  painter->setStroke(Color::BLACK, 1/mZoom);
-  painter->drawPath(Path2D().addEllipse(grip.x, grip.y, a, a));
+  if(!params.axes) {
+    Point grip = moveGripPos();
+    painter->setStroke(bgStroke, 1/mZoom);
+    painter->drawLine(o, grip);
+    painter->setFillBrush(Color::WHITE);
+    painter->setStroke(Color::BLACK, 1/mZoom);
+    painter->drawPath(Path2D().addEllipse(grip.x, grip.y, a, a));
+  }
   // rotate and scale: hollow circles, which RectSelector's handles also are
   painter->setFillBrush(Color::WHITE);
   painter->setStroke(Color::BLACK, 1/mZoom);

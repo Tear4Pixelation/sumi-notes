@@ -69,6 +69,8 @@ public:
   // the shape row's Paper Patch tool (a ruling region): MODE_DRAWSHAPE draws a ruling region instead of shapeId.  Not
   //  saved - it is a one-off, not a tool anyone keeps in hand
   bool drawRegion = false;
+  // with drawRegion: the region drawn is a coordinate system (the "+" menu's Coordinate System)
+  bool drawAxes = false;
   // active shape for MODE_DRAWSHAPE; one of ShapeId (see shape.h)
   int shapeId;
   // SHAPEFLAG_HEADSTART/HEADEND from the head toggles on the shape options row; applied to new shapes

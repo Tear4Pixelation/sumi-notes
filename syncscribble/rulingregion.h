@@ -103,6 +103,19 @@ inline Dim staffLineOffset(int lineInStaff, Dim yRuling)
   return (STAFF_BAND_SPACES - (STAFF_LINES - 1))/2*yRuling/STAFF_BAND_SPACES + lineInStaff*yRuling/STAFF_BAND_SPACES;
 }
 
+// Coordinate system patch ("axes"): a squared grid with an x and a y axis through `origin`, which is
+//  then the (0, 0) of the plot.  A tick (and its number) every AXIS_TICK_CELLS grid cells, so grid size
+//  21 puts the ticks 42 apart.  Math orientation: x grows right and y grows *up* the page (local -y).
+constexpr int AXIS_TICK_CELLS = 2;
+
+// a tick's number, placed in the region's local frame (font size `fontSize`, same units)
+struct AxisLabel
+{
+  Point local;     // the text's anchor point at its baseline
+  int value;
+  bool alignEnd;   // text-anchor: end (y axis numbers, right-aligned against the axis) vs middle
+};
+
 struct RulingRegionParams
 {
   std::vector<Point> corners;  // outline, in order around it; normally 4
@@ -114,6 +127,7 @@ struct RulingRegionParams
   bool staff = false;          // music staves instead of lines (see staffLineOffset)
   bool opaque = true;          // paper-colored fill hides the page's ruling (or scan) behind it
   bool outline = false;        // a border in the rule color, a little heavier than a rule line
+  bool axes = false;           // coordinate system: grid plus axes through origin (see AXIS_TICK_CELLS)
 
   bool isValid() const { return corners.size() >= 3; }
   // Clamp what came from a file or a peer to something drawable: finite numbers, and a pitch no finer
@@ -136,6 +150,21 @@ struct RulingRegionParams
   Path2D dotsPath() const;
   // apply a similarity transform (move/rotate/uniform scale) to outline and ruling alike
   void transform(const Transform2D& tf);
+  // Change the pitches to newXRuling/newYRuling, scaling the ruling about `fixedPoint` (the red handle):
+  //  the lines keep their phase there, so a line through it stays through it and the point stays the same
+  //  fraction of a band from its neighbours.  The outline is untouched.  An axis whose old pitch is 0 has
+  //  no phase to keep and stays as it is.  For a coordinate system the handle is the origin, so the axes
+  //  stay put and only the grid and ticks scale.
+  void setPitchesAbout(Point fixedPoint, Dim newXRuling, Dim newYRuling);
+  // the axes, arrowheads and ticks of a coordinate system, clipped to the outline, as a path to be
+  //  stroked; empty unless `axes`
+  Path2D axesPath() const;
+  // the tick numbers of a coordinate system (only those whose anchor falls inside the outline), and their
+  //  font size; empty unless `axes`
+  std::vector<AxisLabel> axisLabels() const;
+  Dim axisLabelFontSize() const;
+  // the grid cell of a coordinate system: its x pitch, else its y pitch
+  Dim axisCell() const { return xRuling > 0 ? xRuling : yRuling; }
   // corner index (0-3) of the outline's bottom-right corner as seen in the ruling's frame - where the
   //  region's "..." button sits
   int bottomRightCorner() const;

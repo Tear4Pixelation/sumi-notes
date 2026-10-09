@@ -1166,6 +1166,20 @@ void ScribbleArea::setSelRegionParams(const RulingRegionParams& params)
   doRefresh();  // edits come from the region panel, not from input on the canvas, which would refresh
 }
 
+// The point a spacing change scales the selected region's ruling about: its red handle.  A default
+//  handle sits on the first line, which a finer pitch would replace with a new first line above it, so it
+//  is pinned where it is first - the user sees it stay put and the lines scale around it.  A coordinate
+//  system's handle is its origin and is never pinned (it follows the origin anyway).
+Point ScribbleArea::pinSelRegionHandle()
+{
+  if(!regionSelector || !selectedRegion())
+    return Point(NaN, NaN);
+  Point handle = regionSelector->originHandlePos();
+  if(!regionSelector->region->regionParams().axes)
+    regionSelector->setHandlePos(handle);
+  return handle;
+}
+
 void ScribbleArea::previewSelRegionParams(const RulingRegionParams& params)
 {
   Element* region = selectedRegion();
@@ -3076,6 +3090,13 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
       Dim yr = currPage->yruling() > 0 ? currPage->yruling() : Page::BLANK_Y_RULING;
       RulingRegionParams params = RulingRegionParams::fromRect(Rect::corners(pos, pos), currPage->xruling(),
           yr, currPage->props.dotRadius, currPage->props.staff);
+      if(scribbleDoc->scribbleMode->drawAxes) {
+        // a coordinate system: the page's line height as the grid cell, squared, no dots or staves
+        params.axes = true;
+        params.staff = false;
+        params.xRuling = yr;
+        params.sanitize();
+      }
       regionInProgress = Element::createRulingRegion(params, currPage->props.color, currPage->props.ruleColor);
       break;
     }
@@ -3510,8 +3531,9 @@ void ScribbleArea::doMoveEvent(const InputEvent& event)
       RulingRegionParams params = regionInProgress->regionParams();
       Rect r = Rect::corners(initialPos, pos);
       params.corners = { Point(r.left, r.top), Point(r.right, r.top), Point(r.right, r.bottom), Point(r.left, r.bottom) };
-      // lines are phased from the top edge, so the first line sits one pitch below it
-      params.origin = Point(r.left, r.top);
+      // lines are phased from the top edge, so the first line sits one pitch below it; a coordinate
+      //  system's (0, 0) starts in the middle, so all four quadrants show
+      params.origin = params.axes ? r.center() : Point(r.left, r.top);
       regionInProgress->setRegionParams(params);
       scribbleDoc->updateCurrStroke(regionInProgress->bbox());
       break;
@@ -3785,6 +3807,7 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
       // the region tool is single use - a second region is rare, and the next press is almost always
       //  writing in the one just made
       scribbleDoc->scribbleMode->drawRegion = false;
+      scribbleDoc->scribbleMode->drawAxes = false;
       break;
     }
     // the multi-point gesture deliberately survives the release; only drag gestures commit here

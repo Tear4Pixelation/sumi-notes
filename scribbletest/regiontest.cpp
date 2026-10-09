@@ -240,6 +240,79 @@ int runRegionTests()
     regionCheck(segmentCount(tilted.linesPath()) >= 40, "a tilted staff region still draws its staves");
   }
 
+  // spacing changes scale about the red handle (setPitchesAbout): the handle keeps its phase among the lines
+  {
+    // phase of a point in a frame, in bands: local / pitch
+    auto phase = [](const RulingRegionParams& params, Point pt) {
+      Point local = params.frame().toLocal(pt);
+      return Point(params.xRuling > 0 ? local.x/params.xRuling : 0, local.y/params.yRuling);
+    };
+    RulingRegionParams squared = RulingRegionParams::fromRect(Rect::ltrb(0, 0, 300, 300), 20, 20);
+    Point midBand(50, 130);  // 2.5 cells right, 6.5 bands down
+    Point before = phase(squared, midBand);
+    RulingRegionParams scaled = squared;
+    scaled.setPitchesAbout(midBand, 30, 30);
+    regionCheck(nearPt(phase(scaled, midBand), before), "a pitch change keeps the handle's phase (mid band)");
+    regionCheck(scaled.xRuling == 30 && scaled.yRuling == 30 && scaled.corners == squared.corners,
+        "setPitchesAbout sets the pitches and leaves the outline");
+    // a handle on a line (the default one sits on the first line) stays on a line
+    Point onLine(0, 40);
+    RulingRegionParams finer = squared;
+    finer.setPitchesAbout(onLine, 25, 25);
+    Dim bands = finer.frame().toLocal(onLine).y/25;
+    regionCheck(std::abs(bands - std::round(bands)) < 1E-9, "a handle on a line is still on a line at pitch 25");
+    // tilted, and lined only (no x pitch: x is left alone)
+    RulingRegionParams tiltedLined = RulingRegionParams::fromRect(Rect::ltrb(10, 10, 210, 210), 0, 24);
+    tiltedLined.angle = 0.35;
+    Point handle(70, 95);
+    Point tiltedBefore = tiltedLined.frame().toLocal(handle);
+    tiltedLined.setPitchesAbout(handle, 0, 36);
+    Point tiltedAfter = tiltedLined.frame().toLocal(handle);
+    regionCheck(std::abs(tiltedAfter.y/36 - tiltedBefore.y/24) < 1E-9 && std::abs(tiltedAfter.x - tiltedBefore.x) < 1E-9,
+        "tilted: y phase kept, x (no x ruling) unchanged");
+  }
+
+  // coordinate system patch: grid cell 21 puts a tick (and number) every 42, x right, y up the page
+  {
+    RulingRegionParams plot = RulingRegionParams::fromRect(Rect::ltrb(-100, -100, 100, 100), 21, 21);
+    plot.origin = Point(0, 0);
+    regionCheck(plot.axesPath().empty() && plot.axisLabels().empty(), "no axes unless asked for");
+    plot.axes = true;
+    regionCheck(!plot.axesPath().empty(), "a coordinate system draws its axes");
+    std::vector<AxisLabel> labels = plot.axisLabels();
+    auto findLabel = [&](int value, bool yAxis) -> const AxisLabel* {
+      for(const AxisLabel& label : labels) {
+        if(label.value == value && label.alignEnd == yAxis && (value != 0 || yAxis))
+          return &label;
+      }
+      return NULL;
+    };
+    const AxisLabel* xOne = findLabel(1, false);
+    regionCheck(xOne && std::abs(xOne->local.x - 2*21) < 1E-9, "x = 1 is two grid cells (42) right of the origin");
+    const AxisLabel* xMinusTwo = findLabel(-2, false);
+    regionCheck(xMinusTwo && std::abs(xMinusTwo->local.x + 4*21) < 1E-9, "x = -2 is 84 left of the origin");
+    const AxisLabel* yOne = findLabel(1, true);
+    regionCheck(yOne && yOne->local.y < 0 && std::abs(yOne->local.y + 42) < plot.axisLabelFontSize(),
+        "y = 1 is 42 *up* the page from the origin (math orientation)");
+    regionCheck(!findLabel(3, false), "no tick at 126: past the edge (100)");
+    int xCount = 0, yCount = 0, zeroCount = 0;
+    for(const AxisLabel& label : labels)
+      (label.value == 0 ? zeroCount : label.alignEnd ? yCount : xCount)++;
+    regionCheck(xCount == 4 && yCount == 4 && zeroCount == 1, "ticks -2, -1, 1, 2 on each axis and a single 0");
+    // the origin moved off-centre: numbers follow it, and those outside the outline are dropped
+    RulingRegionParams shifted = plot;
+    shifted.origin = Point(-80, 80);
+    int positives = 0;
+    for(const AxisLabel& label : shifted.axisLabels())
+      positives += label.value > 0;
+    regionCheck(positives == 6, "origin near the bottom-left corner: x 1..3 and y 1..3, nothing negative fits");
+    // sanitize makes a coordinate system squared and dotless, and a staff is never one
+    RulingRegionParams lined = RulingRegionParams::fromRect(Rect::ltrb(0, 0, 100, 100), 0, 30, 2);
+    lined.axes = true;
+    lined.sanitize();
+    regionCheck(lined.xRuling == 30 && lined.dotRadius == 0, "sanitize: axes get a square grid and no dots");
+  }
+
   return nRegionChecksFailed;
 }
 

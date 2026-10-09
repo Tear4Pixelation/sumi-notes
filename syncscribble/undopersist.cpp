@@ -255,6 +255,7 @@ void RegionChangedItem::persist(UndoPersistWriter& out)
   node.append_attribute("opaque") = params.opaque ? 1 : 0;
   node.append_attribute("outline") = params.outline ? 1 : 0;
   node.append_attribute("staff") = params.staff ? 1 : 0;
+  node.append_attribute("axes") = params.axes ? 1 : 0;
 }
 
 void StrokeLayerItem::persist(UndoPersistWriter& out)
@@ -506,6 +507,7 @@ UndoHistoryItem* UndoPersist::readItem(const pugi::xml_node& node, ScribbleDoc* 
     params.opaque = node.attribute("opaque").as_int(1) != 0;
     params.outline = node.attribute("outline").as_int(0) != 0;
     params.staff = node.attribute("staff").as_int(0) != 0;
+    params.axes = node.attribute("axes").as_int(0) != 0;
     params.sanitize();
     return new RegionChangedItem(s, pg, params);
   }
