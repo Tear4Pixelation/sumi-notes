@@ -240,6 +240,39 @@ since without the double tap it would have had no way to stick at all.
   on it) but is **not** read back; all three flags are read from tokens appended at the end of the string
   instead, so upgrading does not silently make everyone's eraser sticky.
 
+# Eraser hit test (stroke and free eraser)
+
+Both erasers test the **ink**, swept as a **capsule** from the previous pointer position to this one
+(`syncscribble/erasegeom.*`, pure geometry). Before, three things made the hitbox disagree with what is
+drawn, and the user saw them as "must go past the line before it erases", "erases before it gets there"
+and "scribbling over a long horizontal line sometimes leaves it":
+
+- **Stroke eraser** (`PathSelector`, `isNearSegment()` in `selection.cpp`): was a point test against the
+  path's centre line (`Path2D::distToPoint`), sampled every radius/2 along the eraser's motion. It ignored
+  the stroke width, so a wide stroked line was only hit within r of its *centre*, and the file's own header
+  said the test looked at the path's points, not its segments - a long two-point line (a ruler line, a shape)
+  could be crossed without a hit. Now: one capsule per event, against every flattened segment (curves via
+  `toFlat()`), widened by half the `stroke-width` for a stroked path (times the transform's `avgScale`),
+  and anywhere inside a filled outline (filled pen strokes are outlines; per-subpath nonzero winding, since
+  the round pen is one overlapping subpath per segment). Images still only hit on their frame.
+- **Free eraser** (`Element::freeErase(prevpos, pos, radius)`): the eraser polygon was a *rectangle*
+  reaching r past both ends, so its corners erased up to 1.41 r away diagonally; it is now
+  `capsulePolygon()` (round ends, 16 edges per cap, vertices on the outline). It clips the stroke's
+  centre line (pen points), so it is widened by the local half width (the widest pen segment within reach;
+  `stroke-width`/2 for a stroked pen): the cut lands r + w/2 from the eraser's centre and the round cap
+  left there ends flush with the eraser's edge. A flat-pen end is square, so it is left w/2 short of the
+  eraser - the price of cutting the centre line rather than the outline.
+- **Culling**: `ScribbleArea::freeErase()` pads its bbox cull by the stroke half width
+  (`strokeHalfWidth()`), and `isNearSegment()` pads both rects, since `bounds()` may be the geometry
+  alone and a tap or a horizontal line has a zero-area rect.
+
+Not changed: the ruled free eraser (`freeErase(const Rect&)`/band polygon) still clips the centre line
+against the row band, without widening. Tested by `ScribbleTest::eraserHitTest()` (both erasers, at the
+real radius: crossing a 600-long two-point line in one move, touching only a wide line's edge, clear of the
+edge, ink diagonally past the eraser's end, and where the free eraser's cut lands) and standalone by
+`scribbletest/erasetest.cpp` (`runEraseTests()`). Against the old code the edge checks of both erasers,
+the diagonal check of the free eraser and the cut position fail.
+
 # Select touching
 
 A toggle on the select options row (`ScribbleMode::selectTouching`, appended at the end of `toolModes`,

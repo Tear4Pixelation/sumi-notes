@@ -1662,8 +1662,8 @@ void ScribbleArea::discardStrokeBuilder()
   }
 }
 
-// The scratch-out test alone over a stroke just finished.  If it is one and there is something under it,
-//  returns true with what it was drawn over in `erased` - selected, not yet deleted.  The scribble itself
+// The scratch-out test alone over a stroke just finished.  If it is one, returns true with what it was
+//  drawn over in `erased` - selected, not yet deleted, and possibly nothing.  The scribble itself
 //  is left alone: the caller commits it as an ordinary stroke first and only then deletes `erased` and the
 //  scribble as a second undo step, so a detection that was wrong costs one undo to get the writing back,
 //  with the scribble on the page as the ink it really was.
@@ -1685,7 +1685,9 @@ bool ScribbleArea::scratchOutOnLift(Selection& erased)
   //  page yet, so it cannot select itself
   ScratchOutSelector selector(&erased, area);
   erased.doSelect();
-  return erased.count() > 0;
+  // a scratch-out over nothing is still a scratch-out: the caller records it (and removes the scribble)
+  //  the same way, so it is always an undo step and a wrong detection always costs exactly one undo
+  return true;
 }
 
 // Runs the recognizer over the stroke so far and, if it is a shape, swaps the ink for it.  Returns false
@@ -2573,6 +2575,21 @@ void ScribbleArea::captureScreenshot()
   doRefresh();
 }
 
+// half the stroke width of a stroked path (page units), the widest for a group: how far its ink reaches
+//  past the geometry bounds() may describe, so the free eraser's bbox cull cannot skip ink it touches
+static Dim strokeHalfWidth(SvgNode* node)
+{
+  if(node->asContainerNode()) {
+    Dim halfWidth = 0;
+    for(SvgNode* child : node->asContainerNode()->children())
+      halfWidth = std::max(halfWidth, strokeHalfWidth(child));
+    return halfWidth*(node->hasTransform() ? node->getTransform().avgScale() : 1);
+  }
+  if(node->type() != SvgNode::PATH || node->getColorAttr("stroke", Color::NONE) == Color::NONE)
+    return 0;
+  return node->getFloatAttr("stroke-width", 1)*(node->hasTransform() ? node->getTransform().avgScale() : 1)/2;
+}
+
 void ScribbleArea::freeErase(Point prevpos, Point pos)
 {
   // for now, let's fix the eraser size in screen space so that user can zoom to adjust how much is erased
@@ -2587,7 +2604,7 @@ void ScribbleArea::freeErase(Point prevpos, Point pos)
     //  the stroke and ruled erasers in Selection::doSelect does not reach it
     if(!currPage->isEditable(s))
       continue;
-    if(!s->isSelected(tempSelection) && erasebox.intersects(s->bbox())) {
+    if(!s->isSelected(tempSelection) && Rect(erasebox).pad(strokeHalfWidth(s->node)).intersects(s->bbox())) {
       if(s->isSelected(freeErasePieces)) {
         //Rect oldbbox = s->bbox();
         touched = s->freeErase(prevpos, pos, radius) || touched;
@@ -3951,8 +3968,9 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
     //  the erase - of the scribble too - follows as its own undo step, so undoing the erase after a false
     //  detection gives the writing back with the scribble over it
     Selection scratchedOut(currPage, Selection::STROKEDRAW_NONE);
+    bool scratchOutDetected = false;
     if(!snapActive && snapSamples.size() > 2 && cfg->Bool("liftScratchOut"))
-      scratchOutOnLift(scratchedOut);
+      scratchOutDetected = scratchOutOnLift(scratchedOut);
     stopShapeSnap();
     if(snapActive) {
       commitSnapShape();
@@ -3998,7 +4016,7 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
       currPage->clearDirty();
     }
     currStroke->node->m_renderedBounds = r;
-    if(scratchedOut.count() > 0) {
+    if(scratchOutDetected) {
       // The erase step takes the scribble away with what it was drawn over, so nothing of it is left on
       //  the page; undoing the erase brings both back.  The scribble is not handwriting to group, and the
       //  open group may hold strokes about to be erased, so end the group now while they are all alive.

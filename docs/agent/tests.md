@@ -15,6 +15,11 @@ changes keeping the red handle's phase (`setPitchesAbout`) and the coordinate sy
 (step of 2 cells, y up, clipping; each mutation-checked), is
 tested the same way in `scribbletest/regiontest.cpp` (`runRegionTests()`; command in its header).
 
+The eraser geometry (segment distance, capsule against a path's segments / stroke width / filled inside,
+the capsule polygon's round ends) is tested the same way in `scribbletest/erasetest.cpp`
+(`runEraseTests()`; command in its header); both erasers end to end in `ScribbleTest::eraserHitTest()` -
+see [pen-and-tools.md](pen-and-tools.md#eraser-hit-test-stroke-and-free-eraser).
+
 The shape math is tested the same way in `scribbletest/shapetest.cpp` (`runShapeTests()`), which likewise
 builds and runs standalone - see the command in that file's header. On top of it,
 two checks that do need the application, both running after the `testN` loop and reporting through the
