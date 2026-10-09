@@ -209,11 +209,15 @@ were all refused. 240 Hz sampling by itself cost nothing.
 - **A lift scratch-out keeps its scribble in the history.** The detection can be wrong, so the ink is not
   thrown away: `scratchOutOnLift(Selection&)` only *selects* what is under the scribble (before the
   scribble is on the page, so it cannot select itself), the scribble is committed as an ordinary stroke
-  (undo step 1), then the action is ended and a second one deletes the selection (undo step 2). One undo
-  after a false detection brings the writing back with the scribble over it; a second removes the
-  scribble. Both are plain history items, so sync and saved undo steps need nothing special. A scribble
-  over nothing erases nothing and so simply stays ink. The *held* scratch-out (`snapStroke`) is unchanged:
-  one step, no ink. Tested in `shapeSnapTest()` (fails against the old drop-the-ink code).
+  (undo step 1), then the action is ended and a second one deletes the selection *plus the scribble*
+  (undo step 2) - so after the erase nothing of the scribble is on the page (an earlier round left it there
+  as ink; that was a bug). One undo after a false detection brings the writing back with the scribble over
+  it; a second removes the scribble. Both are plain history items, so sync and saved undo steps need
+  nothing special. The scribble is never passed to `groupStrokes()` (it would sit in `recentStrokes`
+  while deleted); `groupStrokes(NULL)` closes the open group first, while the strokes about to be erased
+  are still on the page. A scribble over nothing erases nothing and so simply stays ink. The *held*
+  scratch-out (`snapStroke`) is unchanged: one step, no ink. Tested in `shapeSnapTest()` (the
+  stroke-count checks fail both against the old drop-the-ink code and against the keep-the-scribble code).
 - **Long scratch-outs are judged more loosely.** Real ones over a line of text (25-45 reversals, loops,
   arches, spikes) always have a short pass or a turn over the gap limit: pass length and gap ignore
   their worst 20-25%, and long strokes get a wider turn limit. On lift, don't start that rule below 24
