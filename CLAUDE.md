@@ -80,7 +80,7 @@ Build/test entry point conventions: files under `SCRIBBLE_TEST` (`basics.h`) com
 
 ## Build
 
-Always build from `syncscribble/`. The Makefile auto-selects platform via `Makefile.unix`/`.mac`/`.msvc`/`.ios`/`.wasm`, all pulled in from the top-level `Makefile`.
+Always build from `syncscribble/`. **Agents run every build through `tools/build-gate.sh <cmd>`** (e.g. `../tools/build-gate.sh make USE_SYSTEM_SDL=1 DEBUG=1`), which caps all concurrent agents at 90% CPU / 80% RAM total and queues extra builds; never run bare `make`. The Makefile auto-selects platform via `Makefile.unix`/`.mac`/`.msvc`/`.ios`/`.wasm`, all pulled in from the top-level `Makefile`.
 
 - **Linux**: `cd syncscribble && make USE_SYSTEM_SDL=1` (needs `libsdl2-dev`); or build SDL from the vendored submodule first (`cd SDL && git switch write-linux && make -f ../scribbleres/SDL-Makefile.unix`) and `make` without `USE_SYSTEM_SDL`. Copy `scribbleres/fonts` into `syncscribble/Release` before running. Add `DEBUG=1` for a debug build (output goes to `Debug/` instead of `Release/`).
 - **macOS**: `cd syncscribble && make MACOS=1`

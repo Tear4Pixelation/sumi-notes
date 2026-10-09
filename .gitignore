@@ -21,3 +21,9 @@ __pycache__/
 .nimbalyst/
 # iOS signing key, certificate and profile - never commit
 sumi-signing/
+
+# local Noteful export output
+noteful-export/
+
+# nested agent worktrees
+.claude/worktrees/
