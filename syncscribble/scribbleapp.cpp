@@ -1436,8 +1436,23 @@ void ScribbleApp::penChanged(int changed)
   }
   if(changed == PenToolbar::YIELD_FOCUS)
     gui->setFocused(activeArea()->widget);
-  else if(penToolbar->mode == PenToolbar::PEN_MODE || changed == PenToolbar::PEN_CHANGED)
+  else if(penToolbar->mode == PenToolbar::PEN_MODE)
     setPen(pen);
+  else if(changed == PenToolbar::PEN_CHANGED && penToolbar->mode == PenToolbar::SELECTION_MODE) {
+    // "Use as Pen": the selection's color and width go to the draw pen, and nothing else does.  The
+    //  toolbar's pen here is the selection's - built from a color and an absolute width, no flags - and
+    //  taking it whole made the pen absolute, dropped the marker's tip and DRAW_UNDER, and converted the
+    //  tool's width presets to units on the next setPen() (pen-and-tools.md, "Pen and selection")
+    ScribblePen drawPen = currPen;
+    if(pen.color.alpha() > 0) {
+      int alpha = drawPen.color.alpha();  // keep the marker translucent, as the shape row does
+      drawPen.color = pen.color;
+      drawPen.color.setAlpha(alpha);
+    }
+    if(pen.width > 0)
+      drawPen.width = drawPen.hasFlag(ScribblePen::WIDTH_RELATIVE) ? pen.width/penToolbar->lineHeight() : pen.width;
+    setPen(drawPen);
+  }
   else if(penToolbar->mode == PenToolbar::BOOKMARK_MODE)
     bookmarkColor = pen.color;
   else if(penToolbar->mode == PenToolbar::SELECTION_MODE) {
@@ -1469,11 +1484,26 @@ void ScribbleApp::setDrawTool(int tool)
   setMode(MODE_STROKE);
 }
 
-void ScribbleApp::updatePenToolbar()
+// The pen and a selection share the one toolbar, so this decides whose it is.  It used to be the
+//  selection's whenever ink was selected, whatever the tool: select with Switch Back on (the default) and
+//  the pen comes back with the selection still up, and the pen row then showed the selection's absolute
+//  width with no Relative size toggle, and its color and width edited the selection.  A draw tool's row is
+//  the pen's; the selection popup's color and width items are how a selection is edited then, so the
+//  toolbar is the selection's only while that popup is open (or about to be).  Other tools (select, move,
+//  a shape with its handles) keep it on the selection, as before.
+bool ScribbleApp::penToolbarEditsSelection(const ScribbleArea* area, int mode, bool selPopupOpen)
 {
   // a selected ruling region is not ink: picking a color then must not recolor the region or the ink it
   //  carries, so the toolbar stays on the pen
-  if(activeArea()->hasSelection() && !activeArea()->selectedRegion()) {
+  if(!area || !area->hasSelection() || area->selectedRegion())
+    return false;
+  return selPopupOpen || ScribbleMode::getModeType(mode) != MODE_STROKE;
+}
+
+void ScribbleApp::updatePenToolbar(bool forSelPopup)
+{
+  bool selPopupOpen = forSelPopup || (win && win->selPopup && win->selPopup->isVisible());
+  if(penToolbarEditsSelection(activeArea(), scribbleMode->getMode(), selPopupOpen)) {
     int dashStyle;
     ScribblePen pen = activeArea()->getPenForSelection(&dashStyle);
     penToolbar->setPen(pen, PenToolbar::SELECTION_MODE, dashStyle);

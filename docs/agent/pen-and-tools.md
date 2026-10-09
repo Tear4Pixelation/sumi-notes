@@ -216,6 +216,35 @@ Known gaps: undoing a dotted style leaves the round cap it set; the width item's
 pattern clearly at thin widths. Tested by `ScribbleTest::dashStyleTest()` (mutation-checked: no
 conversion, no dash scaling).
 
+# Pen and selection
+
+The pen and a selection share the one `PenToolbar` (one `pen`, one `mode`), so something has to say
+whose it is: `ScribbleApp::penToolbarEditsSelection()`, used by `updatePenToolbar()`.
+
+- **A draw tool's row is the pen's**, even with ink still selected. It used to be the selection's
+  whenever ink was selected. Select with Switch Back on (the default) and the pen comes back with the
+  selection still up, so the pen row showed the selection's absolute width with no Relative size
+  toggle (`relWidthRow` is PEN_MODE only), and its colour and width edited the selection.
+- **The selection popup's colour and width items are how a selection is edited then**, so the toolbar
+  is the selection's while that popup is open: `refreshSelPopup()` passes `forSelPopup` (it runs before
+  the popup is visible), later refreshes see `selPopup->isVisible()`, and the popup's close paths
+  (outside press, outside modal, keys) call `updatePenToolbar()` to hand it back. The pen row cannot be
+  used while the popup is open: the outside press that would reach it closes the popup and is swallowed.
+- Other tools (select, move, a shape with its handles - the shape row edits the shape) keep the toolbar
+  on the selection, as before. A selected ruling region still never takes it.
+- **"Use as Pen" takes only colour and width.** It fired `PEN_CHANGED` with the toolbar's pen, which in
+  SELECTION_MODE is the selection's - `ScribblePen(color, absoluteWidth)`, no flags - and `penChanged()`
+  set it as the draw pen whole: a relative pen became absolute (and the next `setPen()` converted the
+  tool's presets to units to match), the marker lost its chisel tip and `DRAW_UNDER`. Now the draw pen
+  keeps its flags and alpha (as the shape row does) and the width is converted into its unit.
+
+Tested by `ScribbleTest::penSelectionTest()`. The test's document is not the app's active one, so
+`penToolbarEditsSelection()` takes the area as a parameter. Mutation-checked: the old "any ink selection"
+rule plus the old Use as Pen fail 7 checks. "...and not the selected stroke" passes either way (the
+toolbar edits the app's active area, not the test's), so it pins nothing on its own. Verified in
+agent-display: rect select with Switch Back, Esc closes the popup, the selection stays, the pen row
+shows the pen's settings button again, and picking a colour there recolours the pen, not the stroke.
+
 # Switch back (single-use tools)
 
 The eraser, the selection tool and insert space each have a **Switch Back** toggle on their options row
@@ -416,8 +445,19 @@ from 0.13 to **0.19** (OKLCH, same hue and lightness, still clamped to the gamut
 `vividness`). The unthemed default pen colour went from (255,127,255) to (255,64,224) - the old RGB was
 itself pale, so alpha alone could not make it vivid.
 
-- **`cusp-walk-1` is not touched** (frozen). The boost lives in `vividMarker()` / `PenToolbar::toolColor()`
-  in `pentoolbar.cpp`, so it is a property of the pen colour, not of the palette.
+- **`cusp-walk-1` is not touched** (frozen). The boost lives in `vividMarker()` (`markercolor.h`) /
+  `PenToolbar::toolColor()`, so it is a property of the pen colour, not of the palette.
+- **The theme's snap must leave the vivid colours alone.** `PenToolbar::updateColor()` snaps every pen
+  colour to the nearest palette member (the reluctance, COLORS_SPEC.md §6.1), and every swatch tap goes
+  through it. A vivid marker colour is off the palette by design, so it was snapped back to the nearest
+  `hl`/base: the pen no longer equalled `toolColor(swatch)`, so `updateSelected()` drew no ring and
+  `selectColor()`'s second tap (open the editor) never fired, while the colour still drew (the snapped,
+  paler one). It hit every family whose `hl` the boost actually changes - 240 of 288 swatches across the
+  shipped themes, light and dark - hence "some highlighter colours". `snapThemedPenColor()` treats each
+  family's vivid marker colour as a member for the marker (compared without alpha, as `Palette::indexOf()`
+  does). Tested by `testMarkerSwatchesKeptBySnap()` in `scribbletest/colortest.cpp` (standalone, no GL);
+  without the exemption it fails with 240 of 288 moved. Verified in agent-display: all five marker swatches
+  ring, and a second tap opens the editor.
 - **Existing strokes keep their colour**: a stroke stores its own RGBA, and nothing rewrites documents.
   Only strokes drawn from now on use the new values. A saved config's marker pen keeps its old alpha until
   a swatch is picked again.

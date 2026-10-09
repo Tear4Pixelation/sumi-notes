@@ -654,8 +654,9 @@ void MainWindow::refreshSelPopup()
   const Selection* sel = area ? area->selection() : NULL;
   if(!doc || !moveLayerPopup)
     return;
-  // a selected ruling region is not ink, so the pen toolbar stays on the pen and these would edit that
-  app->updatePenToolbar();
+  // a selected ruling region is not ink, so the pen toolbar stays on the pen and these would edit that.
+  //  The popup is about to open, so the toolbar is the selection's even with a draw tool in hand
+  app->updatePenToolbar(true);
   bool inkSel = app->penToolbar->mode == PenToolbar::SELECTION_MODE;
   // a selection gesture that caught nothing leaves only its area, and the only thing to do with that is
   //  capture it
@@ -1414,8 +1415,8 @@ void MainWindow::setupUI(ScribbleApp* a)
   setupTooltip(moveLayerBtn, _("Move the selection to another layer"));
   selToolbar->addWidget(moveLayerBtn);
   // color and width, as on the shape row: they edit the selection through the pen toolbar, which is in
-  //  SELECTION_MODE whenever ink is selected.  Their popups close only themselves, so a color and a
-  //  width can be picked in one visit.
+  //  SELECTION_MODE while this popup is open on selected ink (and, without a draw tool, whenever ink is
+  //  selected).  Their popups close only themselves, so a color and a width can be picked in one visit.
   PenToolbar* selPenToolbar = static_cast<PenToolbar*>(penToolbarAutoAdj->contents);
   selColorItem = selPenToolbar->createSingleSwatch();
   selWidthItem = selPenToolbar->createSingleWidth();
@@ -1440,14 +1441,20 @@ void MainWindow::setupUI(ScribbleApp* a)
     if(area && !area->selection())
       area->clearShotRegion();
   };
-  selPopup->addHandler([this, dropLoneRegion](SvgGui* gui, SDL_Event* event){
+  // with a draw tool in hand the pen toolbar is the selection's only while this popup is open, so closing
+  //  it hands the toolbar back to the pen (ScribbleApp::penToolbarEditsSelection)
+  auto closeSelPopup = [this](SvgGui* gui){
+    gui->closeMenus();
+    app->updatePenToolbar();
+  };
+  selPopup->addHandler([this, dropLoneRegion, closeSelPopup](SvgGui* gui, SDL_Event* event){
     if(event->type == SvgGui::OUTSIDE_PRESSED) {
-      gui->closeMenus();
+      closeSelPopup(gui);
       dropLoneRegion();
       return true;
     }
     if(event->type == SvgGui::OUTSIDE_MODAL) {
-      gui->closeMenus();
+      closeSelPopup(gui);
       return false;
     }
     // don't let repeat key events close popup (happens with Ctrl key held down for sel mode on Windows)
@@ -1456,7 +1463,7 @@ void MainWindow::setupUI(ScribbleApp* a)
       Widget* focused = selPopup->window() ? selPopup->window()->focusedWidget : NULL;
       if(focused && focused->isDescendantOf(selPopup) && event->key.keysym.sym != SDLK_ESCAPE)
         return false;
-      gui->closeMenus();
+      closeSelPopup(gui);
       dropLoneRegion();
       if(event->key.keysym.sym == SDLK_ESCAPE)  // only swallow Esc key
         return true;
