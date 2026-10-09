@@ -253,18 +253,20 @@ bool ScribbleArea::snapsToFitWidth(Dim zoom, Dim wzoom) const
   return zoomSteps[nearestZoomStep(zoom)] != 1;
 }
 
-bool ScribbleArea::nearFitWidth(Dim px, Dim py) const
+// the toast judges the same page the snap will fit: the one at the middle of the view (see roundZoom())
+bool ScribbleArea::nearFitWidth() const
 {
-  int pagenum = dimToPageNum(screenToDim(Point(px, py)));
-  return snapsToFitWidth(mZoom, fitWidthZoom(pagenum));
+  if(numPages() < 1)
+    return false;
+  return snapsToFitWidth(mZoom, fitWidthZoom(dominantPageNum()));
 }
 
 // line the page up with the view after a fit snap, but only across the scroll direction (horizontally in
 //  the usual vertical layout) - never along it, so the reading position never jumps
 void ScribbleArea::alignFitPage(int pagenum, bool fitWidth)
 {
-  // align the page under the center of the gesture, but do not make it current: the pan below (or the
-  //  zoom before it) leaves that to dominantPageNum(), the page taking up most of the view
+  // this does not make the page current: the pan below leaves that to dominantPageNum(), the page at the
+  //  middle of the view (keepPageAtMiddle() makes sure that is still the snapped page)
   if(numPages() < 1)
     return;
   pagenum = std::max(0, std::min(pagenum, numPages() - 1));
@@ -279,24 +281,54 @@ void ScribbleArea::alignFitPage(int pagenum, bool fitWidth)
     doPan(shift.x*mScale, shift.y*mScale);
 }
 
+// After a zoom snap: if the snap carried the middle of the view off `pagenum` (the page the user was on),
+//  scroll just far enough along the scroll direction to bring it back to that page's edge, so the page
+//  stays current.  A snap zooms about the gesture point, not the middle, so a step or fit rounding of up
+//  to ~12% moves the middle by that fraction of its distance from the fingers - enough to cross a page
+//  boundary, which made the neighbour current ("sent to another page").  Nothing moves when the middle is
+//  still on the page, so the reading position only changes when it would otherwise have left the page
+void ScribbleArea::keepPageAtMiddle(int pagenum)
+{
+  if(viewMode == VIEWMODE_SINGLE || pagenum < 0 || pagenum >= numPages() || dominantPageNum() == pagenum)
+    return;
+  const bool horz = viewMode == VIEWMODE_HORZ;
+  Point middle = screenToDim(screenRect).center();
+  Point origin = getPageOrigin(pagenum);
+  // the page owns the gap after it (dimToPageNum()); stay a pixel inside, as the limits are floating point
+  Dim inset = 1/mScale;
+  Dim start = (horz ? origin.x : origin.y) + inset;
+  Dim end = (horz ? origin.x + page(pagenum)->width() : origin.y + page(pagenum)->height()) + pageSpacing - inset;
+  Dim pos = horz ? middle.x : middle.y;
+  Dim target = std::max(start, std::min(pos, end));
+  // panning by +d moves the content by d on screen, so the document point at the middle moves by -d
+  Dim d = (pos - target)*mScale;
+  doPan(horz ? d : 0, horz ? 0 : d);
+}
+
 void ScribbleArea::roundZoom(Dim px, Dim py)
 {
   // should we still snap to width, height if continuous zoom enabled? use continuousZoom > 1?
   if(cfg->Bool("continuousZoom"))
     return;
-  // use page under center of gesture for snapping to width, height
-  int pagenum = dimToPageNum(screenToDim(Point(px, py)));
+  if(numPages() < 1) {
+    ScribbleView::roundZoom(px, py);
+    return;
+  }
+  // Snap for the page the user is on when the gesture ends: the one at the middle of the view, which the
+  //  pans during the gesture have already made current.  This used to be the page under the gesture point,
+  //  a neighbour whenever the fingers were over one (and NULL past the last page: a crash)
+  int pagenum = dominantPageNum();
   Dim wzoom = fitWidthZoom(pagenum);
   Dim hzoom = getViewHeight()/page(pagenum)->height()/preScale;
   Dim zoom = mZoom;
   bool fitWidth = snapsToFitWidth(zoom, wzoom);
   ScribbleView::roundZoom(px, py);
-  // zoom = 100% always has priority
-  if(mZoom == 1)
-    return;
   bool fitHeight = !fitWidth && hzoom < 1.1*zoom && zoom < 1.1*hzoom && (hzoom > 1.05 || hzoom < 0.95);
-  if(!fitWidth && !fitHeight)
+  // zoom = 100% always has priority
+  if(mZoom == 1 || (!fitWidth && !fitHeight)) {
+    keepPageAtMiddle(pagenum);
     return;
+  }
   Dim fitZoom = fitWidth ? wzoom : hzoom;
   // like a zoom step, the fit zoom is taken about the gesture point, so the content under the fingers stays
   //  put. Aligning the page to the view is then done only across the scroll direction (horizontally in the
@@ -305,22 +337,23 @@ void ScribbleArea::roundZoom(Dim px, Dim py)
   //  the page with no visible zoom snap (see docs/agent/navigation.md).  At or below fit width the
   //  horizontal pan is locked anyway (updateContentDim()), so a fit width page is flush regardless
   zoomTo(fitZoom, px, py);
-  if(std::abs(fitZoom/zoom - 1) < ZOOM_SNAP_ALIGN_MIN)
-    return;
-  alignFitPage(pagenum, fitWidth);
+  if(std::abs(fitZoom/zoom - 1) >= ZOOM_SNAP_ALIGN_MIN)
+    alignFitPage(pagenum, fitWidth);
+  keepPageAtMiddle(pagenum);
 }
 
 // Ctrl+wheel: no step rounding (the wheel is continuous), only the snap to fit width the toast promised
 void ScribbleArea::wheelZoomFinish(Dim px, Dim py)
 {
-  bool snap = nearFitWidth(px, py);
+  bool snap = nearFitWidth();
   showFitHint(false);
   if(!snap)
     return;
-  int pagenum = dimToPageNum(screenToDim(Point(px, py)));
+  int pagenum = dominantPageNum();  // the page the toast judged; see roundZoom()
   zoomTo(fitWidthZoom(pagenum), px, py);
   zoomStepsIdx = nearestZoomStep(mZoom);
   alignFitPage(pagenum, true);
+  keepPageAtMiddle(pagenum);
   uiChanged(UIState::Zoom);
 }
 
@@ -2132,7 +2165,10 @@ DocPosition ScribbleArea::getPos() const
 void ScribbleArea::doDblClickAction(Point pos)
 {
   //scribbleDoc->setActiveArea(this);
-  int pagenum = dimToPageNum(screenToDim(pos));
+  if(numPages() < 1)
+    return;
+  // the tapped page (clamped: past the last page dimToPageNum() gives the ghost page, which has no Page)
+  int pagenum = std::min(dimToPageNum(screenToDim(pos)), numPages() - 1);
   Dim wzoom = fitWidthZoom(pagenum);
   if(std::abs(mZoom/wzoom - 1) < 1E-3) {
     zoomTo(1, pos.x, pos.y);

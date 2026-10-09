@@ -133,7 +133,7 @@ Select tool and back, and edit mode should not be leavable only by drawing the n
   tapping there does not grab the box. An image is hit anywhere inside. Locked/hidden layers are skipped.
 - **A finger tap anywhere else clears the selection** (any selection, not only a shape's); a tap on the
   selection or one of its handles keeps it.
-- **The first shape-tool press outside a selection only deselects**, under the same `clearSelOnly` pref
+- **With `shapeDrawThrough` off, the first shape-tool press outside a selection only deselects** (it is on by default now, see below), under the same `clearSelOnly` pref
   (default on) that already made the first pen stroke do so. Before, `MODE_DRAWSHAPE` cleared the
   selection *and* drew, so after `shapeEditAfterDraw` the only exit was another shape. Cost: drawing
   several shapes in a row takes an extra press (or a finger tap) between them; turning `clearSelOnly` off
@@ -283,4 +283,4 @@ setting, via `snapRecognizedAngleAt()`, for the recognized line only: a recogniz
 intent, so an angle fits. Once snapped, dragging the end with the pen still down (`scaleSnapShape`) is
 editing and snaps by distance like the handles (user decision): it starts from the already snapped end,
 so jitter stays inside `SHAPE_ANGLE_SNAP_DIST` and only a deliberate move off the axis unsnaps.
-- **Draw through a selection (`shapeDrawThrough`, default off):** the shape tool's press outside a selection only clears it when `clearSelOnly` is on, like the pen; with this on it clears and starts the shape. Pen unchanged. In Pen and Shape Settings.
+- **Draw through a selection (`shapeDrawThrough`, default **on**):** the shape tool's press outside a selection only clears it when `clearSelOnly` is on, like the pen; with this on it clears and starts the shape. A press on one of the selected shape's handles is not "outside": `selectionHit()` makes it `MODE_SHAPEHANDLE` before this code runs, so the handle still drags (pinned by `shapeTapEditTest`). Pen unchanged. In Pen and Shape Settings.

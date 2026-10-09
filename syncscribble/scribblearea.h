@@ -161,9 +161,10 @@ protected:
   // fit width: the page exactly as wide as the view, no margin (see docs/agent/navigation.md)
   Dim fitWidthZoom(int pagenum) const;
   bool snapsToFitWidth(Dim zoom, Dim wzoom) const;
-  bool nearFitWidth(Dim px, Dim py) const override;
+  bool nearFitWidth() const override;
   void wheelZoomFinish(Dim px, Dim py) override;
   void alignFitPage(int pagenum, bool fitWidth);
+  void keepPageAtMiddle(int pagenum);
   void doPan(Dim dx, Dim dy) override;
   void doRefresh() override;
   void pageSizeChanged() override;
