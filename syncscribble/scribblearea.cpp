@@ -36,7 +36,6 @@ std::unique_ptr<SDL_Cursor, SDL_Cursor_Deleter> ScribbleArea::eraseCursor;
 ScribbleArea::ScribbleArea() : ScribbleView()
 {
   currMode = MODE_NONE;
-  posHistoryPos = posHistory.begin();
   // always need hover events to check for mouse motion so we can reset cursor to default
   scribbleInput->enableHoverEvents = true;
 }
@@ -130,8 +129,6 @@ void ScribbleArea::reset()
 {
   doCancelAction();
   recentStrokes.clear();  // occasionally saw crashes ... document being opened while still in MODE_STROKE?
-  posHistory.clear();
-  posHistoryPos = posHistory.begin();
   if(currSelection)
     clearSelection();
   // tags picked for the old notebook must not land in the one being opened; not cancelTagPlacement(), whose
@@ -460,7 +457,7 @@ void ScribbleArea::pageCountChanged(int pagenum, int prevpages)
   int currpages = numPages();
   if(prevpages >= 0 && pagenum >= 0 && prevpages != currpages && pagenum <= prevpagenum)
     prevpagenum += prevpages < currpages ? 1 : -1;
-  // TODO: update items in posHistory!
+  // (jumpHistory entries are clamped to the page count when they are restored)
   // don't jump if first or last page removed
   if(prevpagenum < 0)
     gotoPage(-1);  // go to beginning of first page
@@ -2020,7 +2017,7 @@ struct HoldPageNum
 void ScribbleArea::viewPos(int pagenum, Point pos)
 {
   HoldPageNum hold(holdPageNum);
-  saveCurrPos(pagenum, pos);
+  recordJumpTo(pagenum);
   setPageNum(pagenum);
   setVisiblePos(pageDimToDim(pos));
 }
@@ -2029,7 +2026,7 @@ void ScribbleArea::gotoPos(int pagenum, Point pos, bool savepos)
 {
   HoldPageNum hold(holdPageNum);
   if(savepos)
-    saveCurrPos(pagenum, pos);
+    recordJumpTo(pagenum);
   setPageNum(pagenum);
   setCornerPos(pageDimToDim(pos));
 }
@@ -2105,55 +2102,50 @@ void ScribbleArea::viewSelection()
     viewRect(currSelPageNum, currSelection->getBGBBox());
 }
 
-// save current position to history if major change
-// posHistoryPos points to "current" pos / next avail slot to insert new pos
-bool ScribbleArea::saveCurrPos(int newpagenum, Point newpos)
+// the jump history is per document (ScribbleDoc::jumpHistory); only jumps over MIN_JUMP_PAGES or more pages
+//  are recorded, so scrolling, paging and the like never end up in it
+JumpLocation ScribbleArea::currentLocation() const
 {
-  Point origin = getPageOrigin(newpagenum);
-  newpos.x += origin.x;
-  newpos.y += origin.y;
-  Point currpos = screenToDim(Point(0,0));
-  Point lastpos = newpos;
-  // this is to avoid creating sequential history entries near the same position
-  if(posHistoryPos != posHistory.begin()) {
-    DocPosition lastdocpos = *(posHistoryPos - 1);
-    origin = getPageOrigin(lastdocpos.pagenum);
-    lastpos.x = lastdocpos.pos.x + origin.x;
-    lastpos.y = lastdocpos.pos.y + origin.y;
-  }
-  Dim mindx = getViewWidth()/2;
-  Dim mindy = getViewHeight()/2;
-  if((ABS(newpos.x - currpos.x) > mindx || ABS(newpos.y - currpos.y) > mindy)
-      && (ABS(currpos.x - lastpos.x) > mindx || ABS(currpos.y - lastpos.y) > mindy)) {
-    posHistory.erase(posHistoryPos, posHistory.end());
-    posHistory.push_back(getPos());
-    posHistoryPos = posHistory.end();
-    return true;
-  }
-  return false;
+  DocPosition pos = getPos();
+  JumpLocation location;
+  location.pagenum = pos.pagenum;
+  location.x = pos.pos.x;
+  location.y = pos.pos.y;
+  return location;
+}
+
+// call before the view moves
+void ScribbleArea::recordJumpTo(int destPage)
+{
+  if(scribbleDoc && numPages() > 0 && currPageNum >= 0 && currPageNum < numPages())
+    scribbleDoc->jumpHistory.recordJump(currentLocation(), destPage);
+}
+
+void ScribbleArea::jumpToPage(int pagenum)
+{
+  recordJumpTo(std::min(pagenum, numPages() - 1));
+  gotoPage(pagenum);
+}
+
+// the document may have gained or lost pages since the location was recorded
+void ScribbleArea::restoreLocation(const JumpLocation& location)
+{
+  gotoPos(std::max(0, std::min(location.pagenum, numPages() - 1)), Point(location.x, location.y), false);
+  uiChanged(UIState::PageNumChange);
 }
 
 void ScribbleArea::prevView()
 {
-  if(posHistoryPos != posHistory.begin()) {
-    DocPosition docpos = *(posHistoryPos - 1);
-    if(posHistoryPos == posHistory.end()) {
-      if(saveCurrPos(docpos.pagenum, docpos.pos))
-        posHistoryPos--;
-    }
-    posHistoryPos--;
-    gotoPos(docpos.pagenum, docpos.pos, false);
-  }
+  JumpLocation target;
+  if(scribbleDoc && scribbleDoc->jumpHistory.back(currentLocation(), &target))
+    restoreLocation(target);
 }
 
 void ScribbleArea::nextView()
 {
-  if(posHistoryPos != posHistory.end())
-    posHistoryPos++;
-  if(posHistoryPos != posHistory.end()) {
-    DocPosition docpos = *posHistoryPos;
-    gotoPos(docpos.pagenum, docpos.pos, false);
-  }
+  JumpLocation target;
+  if(scribbleDoc && scribbleDoc->jumpHistory.forward(currentLocation(), &target))
+    restoreLocation(target);
 }
 
 DocPosition ScribbleArea::getPos() const
@@ -2684,8 +2676,9 @@ void ScribbleArea::doCommand(int itemid)
   case ID_NEXTSCREEN:  doPan(0, -screenRect.height());  break;
   case ID_SCROLLUP:  doPan(0, 20);  break;
   case ID_SCROLLDOWN:  doPan(0, -20);  break;
-  case ID_STARTOFDOC:  gotoPage(0);  break;
-  case ID_ENDOFDOC:  gotoPage(numPages());  break;  // >=numPages() takes us to end of last page
+  case ID_STARTOFDOC:  jumpToPage(0);  break;
+  case ID_ENDOFDOC:  jumpToPage(numPages());  break;
+  case ID_LASTPAGE:  jumpToPage(numPages() - 1);  break;  // >=numPages() takes us to end of last page
   case ID_UNGROUP:  ungroupSelection();  break;
   default:  return;
   }
@@ -2718,8 +2711,8 @@ void ScribbleArea::updateUIState(UIState* state)
   state->zoom = mZoom;
   state->currPageStrokes = currPage->strokeCount();
   state->currSelStrokes = currSelection ? currSelection->count() : 0;
-  state->prevView = posHistoryPos != posHistory.begin();
-  state->nextView = posHistoryPos != posHistory.end() && (posHistoryPos + 1) != posHistory.end();
+  state->prevView = scribbleDoc && scribbleDoc->jumpHistory.canBack();
+  state->nextView = scribbleDoc && scribbleDoc->jumpHistory.canForward();
   state->pageWidth = currPage->width();
   state->pageHeight = currPage->height();
 

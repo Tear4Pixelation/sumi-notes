@@ -2,6 +2,7 @@
 
 #include "scribbleview.h"
 #include "document.h"
+#include "jumphistory.h"
 #include "selection.h"
 #include "nightmode.h"
 
@@ -140,6 +141,7 @@ protected:
   void expandRight();
   void prevView();
   void nextView();
+  void jumpToPage(int pagenum);  // gotoPage() that is recorded in the jump history (see jumphistory.h)
   void viewPos(int pagenum, Point pos);
   void gotoPos(int pagenum, Point pos, bool savepos = true);
   void gotoPage(int pagenum);
@@ -188,7 +190,6 @@ protected:
   void viewSelection();
   void freeErase(Point prevpos, Point pos);
   void freeEraseRuled(Dim xmin, Dim xmax, int line);
-  bool saveCurrPos(int newpagenum, Point newpos);
 
   Point getPageOrigin(int pagenum) const;
   int dimToPageNum(const Point& pos) const;
@@ -408,9 +409,10 @@ protected:
   Dim strokeGroupYCenter = 0;
   typedef std::vector<Element*>::iterator RecentStrokesIter;
 
-  // for back/fwd navigation
-  std::vector<DocPosition> posHistory;
-  std::vector<DocPosition>::iterator posHistoryPos;
+  // back/fwd navigation lives in ScribbleDoc::jumpHistory; these two feed and use it
+  JumpLocation currentLocation() const;
+  void recordJumpTo(int destPage);
+  void restoreLocation(const JumpLocation& location);
 
   // experimental feature to select N most recent strokes
   int recentStrokeSelPos = -1;

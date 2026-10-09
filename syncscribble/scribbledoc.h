@@ -88,6 +88,7 @@ public:
   void bookmarkHit(int pagenum, Element* bookmark);
   // show the top of a page in the active view (a page card in the document browser)
   void gotoPage(int pagenum);
+  void jumpToPage(int pagenum);  // recorded in jumpHistory, for outline, pages view, page cards, last page
 
   // a lot of stuff needs to be moved up from ScribbleDoc to application level
   int getScribbleMode(int modemod);
@@ -233,6 +234,7 @@ public:
   std::vector<ScribbleArea*> views;
   Document* document = NULL;
   UndoHistory* history = NULL;
+  JumpHistory jumpHistory;  // back/forward over multi-page jumps; per document so it follows its tab
   std::unique_ptr<Page> ghostPage;
   Timestamp fileLastMod = 0;
   bool autoSaveReq = false;

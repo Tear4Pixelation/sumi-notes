@@ -1762,7 +1762,7 @@ void ScribbleApp::gotoSelectedPage()
 {
   int pagenum = tagDocList ? tagDocList->selectedPage : -1;
   if(pagenum >= 0 && pagenum < activeDoc()->document->numPages()) {
-    activeDoc()->gotoPage(pagenum);
+    activeDoc()->jumpToPage(pagenum);
     activeArea()->flashPageTags(tagDocList->selectedPageTags);
   }
 }

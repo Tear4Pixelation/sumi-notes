@@ -842,9 +842,9 @@ void Sidebar::buildOutlineRows(const std::vector<OutlineEntry>& entries)
 
     int pagenum = entry.pagenum;
     static_cast<Button*>(row)->onClicked = [this, pagenum](){
-      ScribbleArea* area = ScribbleApp::app ? ScribbleApp::app->activeArea() : NULL;
-      if(area)
-        area->gotoPage(pagenum);
+      ScribbleDoc* doc = ScribbleApp::app ? ScribbleApp::app->activeDoc() : NULL;
+      if(doc)
+        doc->jumpToPage(pagenum);
       // an unpinned sidebar is in the way of the page it just navigated to
       if(!pinned)
         setOpen(false);
@@ -1222,7 +1222,7 @@ void Sidebar::buildPageGrid()
       // through ScribbleDoc, which also refreshes the page number display - from a click in the sidebar
       //  nothing else would
       if(scribbleDoc)
-        scribbleDoc->gotoPage(pagenum);
+        scribbleDoc->jumpToPage(pagenum);
       updateCurrentPage();
       // an unpinned sidebar is in the way of the page it just navigated to
       if(!pinned)
