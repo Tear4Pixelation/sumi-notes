@@ -134,6 +134,7 @@ relevant file before changing that area.
 - [page-management.md](docs/agent/page-management.md) - the sidebar's Pages view: thumbnail grid, select mode and bar, drag to move after a page (front = left half of page 1), delete, PDF/SVGZ/PNG export of a page set, lazy thumbnails keyed by `Page::uid`/`revision`
 - [editor-tabs.md](docs/agent/editor-tabs.md) - open documents as tabs: one `ScribbleDoc` per loaded tab, `scribbleDocs` = shown only, save points, idle unload (`tabUnloadSecs`), Tabs view + temporary toolbar showing, drag a tab onto the canvas to split, `openTabs` persistence
 - [navigation.md](docs/agent/navigation.md) - wheel/zoom/pan, sdl2-compat `preciseX/Y`, `SDL_Event = {}`, modifier tracking, testing scroll in agent-display
+- [touch-input.md](docs/agent/touch-input.md) - finger path through SvgGui `MULTITOUCH` to `ScribbleInput`, `isTouchAccepted()` as the gate stuck states end at, pen cancel (fingers ignored until the pen returns), pinch vs two finger tap, unconfirmed pinch/palm hypotheses
 - [stroke-input.md](docs/agent/stroke-input.md) - `CurveFitFilter` (measurements, failed Bezier fit), experimental Linux sub-pixel input
 - [tests.md](docs/agent/tests.md) - standalone test binaries (scan, shape, color, layer) and what each in-app `ScribbleTest` check pins
 - [ui-floating-bar.md](docs/agent/ui-floating-bar.md) - **the reference UI component**: floating action bar (rounded container of FAB-sized buttons replacing the FABs in a mode), exact padding/radii/colors, card selection marks, top inset - build new floating UI like this

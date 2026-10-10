@@ -76,6 +76,8 @@ second finger down to the gesture finishing. The pan the fingers started is **ca
 `singleTouchMode == PAN` the gesture only finishes when the last finger lifts, so the first lift resets
 `prevPointerCOM` to the remaining finger, or the centroid jump alone would exceed the click distance.
 `ScribbleView::doTwoFingerTap()` is the hook; only `ScribbleArea` acts on it (one `ID_UNDO`).
+**The change in finger spread counts as travel too** (`addSpreadTravel`): by the centroid alone a quick pinch
+was a tap, reverting the zoom and undoing a stroke - see [touch-input.md](touch-input.md).
 Pinned by `twoFingerTapTest`.
 
 ## The current page follows the middle of the view
