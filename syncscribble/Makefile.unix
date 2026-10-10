@@ -14,6 +14,14 @@ CCFLAGS += --std=c99 -Werror=implicit-function-declaration -Werror=int-conversio
 LD = g++
 LDFLAGS +=
 
+# optimized build with the in-app tests compiled in (basics.h only enables them without NDEBUG);
+# this is what tools/perf-bench.sh measures: make SCRIBBLE_TEST=1 (-> Bench/)
+SCRIBBLE_TEST ?= 0
+ifneq ($(SCRIBBLE_TEST), 0)
+  CFLAGS += -DSCRIBBLE_TEST=1
+  BUILDDIR ?= Bench
+endif
+
 DEBUG ?= 0
 ifneq ($(DEBUG), 0)
   #DEFS += _GLIBCXX_DEBUG ... causes "Not accessible" for containers in QtCreator debugging

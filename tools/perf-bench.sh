@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 # perf-bench.sh - run Sumi's in-app benchmark headless and report timings + peak memory.
 #
-#   tools/perf-bench.sh [--build Release] [--runs 5] [--mode perftest] [--timeout 300]
+#   tools/perf-bench.sh [--build Bench] [--runs 5] [--mode perftest] [--timeout 300]
 #                       [--wrap "valgrind --tool=callgrind --callgrind-out-file=/path/cg.out"]
 #                       [-- extra app args]
+#
+# The binary must have the in-app tests compiled in: Release builds define NDEBUG, which
+# compiles them out (basics.h), and the app then ignores --perftest and sits in the document
+# list forever.  Build the measured binary with: cd syncscribble && make SCRIBBLE_TEST=1 (-> Bench/).
 #
 # Each run starts a fresh headless cage (invisible, cannot take focus - see CLAUDE.md,
 # Agent display) with the app in a sandbox: a throwaway write.xml beside the binary (so
@@ -18,7 +22,7 @@ set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_DIR="$ROOT/syncscribble"
-build=Release runs=5 mode=perftest timeout=300 wrap=""
+build=Bench runs=5 mode=perftest timeout=300 wrap=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --build)   build="$2"; shift 2 ;;
@@ -33,7 +37,10 @@ done
 extra="$*"
 
 app="$APP_DIR/$build/Sumi"
-[[ -x "$app" ]] || { echo "no binary at $app - build it first" >&2; exit 1; }
+[[ -x "$app" ]] || { echo "no binary at $app - build it: cd syncscribble && make SCRIBBLE_TEST=1 [BUILDDIR=$build]" >&2; exit 1; }
+grep -q "ScribbleTest" "$app" || {
+  echo "$app has no in-app tests compiled in (NDEBUG without SCRIBBLE_TEST) - --$mode would hang;" \
+       "build with: make SCRIBBLE_TEST=1 [BUILDDIR=$build]" >&2; exit 1; }
 command -v cage >/dev/null || { echo "cage missing (sudo pacman -S cage)" >&2; exit 1; }
 
 # fonts are looked up beside the binary
