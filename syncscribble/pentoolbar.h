@@ -216,6 +216,19 @@ private:
   WidthPresets savedEphemeralWidths;  // DRAWTOOL_EPHEMERAL
   // which of those lists is currently on the row
   int widthsTool = 0;
+  // What setPen()'s full refresh last drew besides the pen itself, so an unchanged pen can skip it only
+  //  when none of these moved either (see setPen)
+  struct ShownContext {
+    const void* doc = NULL;  // the swatches' palette follows the active document
+    Mode mode = PEN_MODE;
+    Color pageColor, ruleColor;  // the width display draws the current page's ruling
+    Dim lineHeight = 0;  // relative widths, presets in the other unit, the display's stroke
+    bool operator==(const ShownContext& b) const { return doc == b.doc && mode == b.mode
+        && pageColor == b.pageColor && ruleColor == b.ruleColor && lineHeight == b.lineHeight; }
+  };
+  ShownContext shownContext;
+  bool shownValid = false;
+  int singlesDashStyle = -2;  // the line style updateSingles() last drew (-2: never)
   static std::unique_ptr<SvgNode> widthBtnNode;
   static std::unique_ptr<SvgNode> compactWidthBtnNode;
   static std::unique_ptr<SvgNode> compactColorBtnNode;

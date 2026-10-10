@@ -758,9 +758,16 @@ std::string Sidebar::docState(ScribbleDoc* doc) const
   if(!doc)
     return "none";
   std::string state = fstring("%p %d|", (void*)doc, int(currView));
+  // This runs after every stroke while the sidebar is up, so the per-entry parts are appended as raw
+  //  bytes rather than formatted: the string is only ever compared, never shown, and fstring() per page
+  //  made the check O(pages) printf calls.  Still an exact comparison of the same inputs - a revision
+  //  counter would miss the changes that arrive by undo, sync or a page load.
   if(currView == OUTLINE) {
-    for(const OutlineEntry& entry : doc->outline(false))
-      state += fstring("%d %d %s\n", entry.pagenum, entry.level, entry.title.c_str());
+    for(const OutlineEntry& entry : doc->outline(false)) {
+      int nums[2] = {entry.pagenum, entry.level};
+      state.append(reinterpret_cast<const char*>(nums), sizeof(nums));
+      state.append(entry.title.c_str(), entry.title.size() + 1);  // with its NUL, so titles cannot run together
+    }
   }
   else if(currView == LAYERS)
     state += doc->layers().serialize() + fstring("|%d", doc->currentLayer());
@@ -1162,9 +1169,11 @@ static SvgNode* createPagePlaceholder(const Page* page)
 
 std::string Sidebar::pageOrderState(ScribbleDoc* doc) const
 {
+  // raw uids, not formatted ones - see docState()
   std::string state = fstring("%d|", int(pageSelectMode));
+  state.reserve(state.size() + doc->document->pages.size()*sizeof(unsigned int));
   for(Page* page : doc->document->pages)
-    state += fstring("%u ", page->uid);
+    state.append(reinterpret_cast<const char*>(&page->uid), sizeof(page->uid));
   return state;
 }
 

@@ -881,6 +881,7 @@ static void setupSinglePopup(ArrowPopup *popup, Button *btn) {
 
 Widget *PenToolbar::createSingleSwatch(std::function<void(Color)> onPicked) {
   singleSwatches.emplace_back(new SingleSwatch());
+  singlesDashStyle = -2;  // drawn by the next refresh, which would otherwise skip updateSingles()
   SingleSwatch *sw = singleSwatches.back().get();
   sw->onPicked = onPicked;
   sw->btn = new Button(compactColorBtnNode->clone());
@@ -956,6 +957,7 @@ void PenToolbar::pickSingleSwatch(SingleSwatch *sw, Color color) {
 
 Widget *PenToolbar::createSingleWidth(std::function<void()> onWidthChanged) {
   singleWidths.emplace_back(new SingleWidth());
+  singlesDashStyle = -2;  // drawn by the next refresh, which would otherwise skip updateSingles()
   SingleWidth *sw = singleWidths.back().get();
   sw->onChanged = onWidthChanged;
   // the draw row's thickness cell, with a longer line so that a dash pattern has room to show
@@ -1058,6 +1060,7 @@ void PenToolbar::setSingleWidth(SingleWidth *sw, Dim width) {
 }
 
 void PenToolbar::updateSingles() {
+  singlesDashStyle = dashStyle;
   for (auto &sw : singleSwatches)
     sw->btn->selectFirst(".btn-color")->node->setAttr<color_t>("fill", ScribbleApp::displayColor(pen.color).color);
   const std::vector<Dim> &widths = activeWidths();
@@ -1238,10 +1241,35 @@ void PenToolbar::setPen(const ScribblePen &newpen, Mode m, int selDashStyle) {
   int tool = drawToolForMode(m);
   centerLineToggle->setVisible(mode == PEN_MODE && tool == ScribbleMode::DRAWTOOL_HIGHLIGHT);
   centerLineToggle->setChecked(newpen.hasFlag(ScribblePen::CENTER_ON_LINE));
-  if (newpen == pen && tool == widthsTool) {
-    updateSingles();  // a selection's line style is not part of its pen, so it may still have changed
+  // MainWindow::refreshUI() lands here after every stroke and edit, nearly always with the same pen, and
+  //  the full path below rewrites the color box, its sliders and hex text, the width display and every
+  //  swatch (~110K instructions).  It is skipped only when the pen and everything else that path draws
+  //  from is unchanged: the mode and tool, the document (its palette), and the page's colors and line
+  //  height (the width display, relative widths).  This early-out was dead for a long time because
+  //  ScribblePen::operator== compared padding bytes; with it working, a caller that changes anything
+  //  else the toolbar shows must refresh it itself (refreshPalette, refreshDisplayColors).
+  ShownContext context;
+  context.doc = ScribbleApp::app ? ScribbleApp::app->activeDoc() : NULL;
+  context.mode = mode;
+  Page *page = currentPage();
+  context.pageColor = page ? page->props.color : Color::WHITE;
+  context.ruleColor = page ? page->props.ruleColor : Color(0, 0, 0xFF, 0x9F);
+  context.lineHeight = lineHeight();
+  if (newpen == pen && tool == widthsTool && shownValid && context == shownContext) {
+    // a selection's line style is not part of its pen, so it may still have changed
+    if (dashStyle != singlesDashStyle)
+      updateSingles();
+    else {
+      // the one thing updateSingles() reads that is not the pen, the line style or the context: a spin
+      //  box left showing something other than the width
+      for (auto &sw : singleWidths)
+        if (pen.width > 0 && sw->spin->value() != pen.width)
+          sw->spin->setValue(pen.width);
+    }
     return;
   }
+  shownContext = context;
+  shownValid = true;
   bool rebuild = tool != widthsTool
       || relativeWidths() != newpen.hasFlag(ScribblePen::WIDTH_RELATIVE);
   widthsTool = tool;

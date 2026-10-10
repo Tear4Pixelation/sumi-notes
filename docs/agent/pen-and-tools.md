@@ -216,6 +216,28 @@ Known gaps: undoing a dotted style leaves the round cap it set; the width item's
 pattern clearly at thin widths. Tested by `ScribbleTest::dashStyleTest()` (mutation-checked: no
 conversion, no dash scaling).
 
+# Pen toolbar refresh after every stroke
+
+`MainWindow::refreshUI()` runs after every stroke and edit and ends in `PenToolbar::setPen()`, nearly
+always with the same pen. The full path rewrites the color box (hex text, preview, four slider gradients
+and thumbs), the width display and every swatch - about 110K instructions a stroke, 1.8% of the perftest.
+Its early return was dead for years: `ScribblePen::operator==` was a `memcmp`, and the struct's padding
+(after `color`, after `flags`) holds whatever the copy or temporary left there, so identical pens compared
+different. It is now member by member - **a new pen member must be added to `operator==`**, and never go
+back to `memcmp` (`savePen()`'s recent-pens dedupe depended on it too and was failing the same way).
+
+With the early return working it must not swallow anything else the full path draws, so it also keys on
+`PenToolbar::ShownContext`: the active document (the swatches' palette follows it - a switch to a tab
+already in memory does not run `loadConfig()`/`refreshPalette()`), the mode, and the current page's
+colors and `lineHeight()` (width display, relative widths). It skips `updateSingles()` too unless the
+selection's line style moved, keeping only the spin-box resync. Anything else the toolbar shows has to be
+refreshed by whoever changes it: `themeApplied()`/`loadConfig()` call `refreshPalette()`, night mode calls
+`refreshDisplayColors()`, a new single swatch/width resets `singlesDashStyle`. Below it, ugui's
+`ColorEditBox`/`ColorSliders::setColor()`, `TextEdit::setText()` and usvg's `SvgTspan::setText()` return
+early on an unchanged value (each comparing its own state; `TextEdit` only when it already has no
+selection and the cursor at 0, which is what `setText` would leave). Pinned by
+`ScribbleTest::penToolbarRefreshTest()`. Perftest: `MainWindow::refreshUI` 213M -> 54M Ir.
+
 # Pen and selection
 
 The pen and a selection share the one `PenToolbar` (one `pen`, one `mode`), so something has to say

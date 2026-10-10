@@ -63,6 +63,13 @@ edited in the selection's preset editor landing back in line heights, and a 144 
 `loadModes()`. Its toolbar checks fail three ways against the pre-fix toolbar, and the load check fails
 with the clamp removed.
 
+`ScribbleTest::penToolbarRefreshTest()` pins `PenToolbar::setPen()`'s early return (pen-and-tools.md,
+"Pen toolbar refresh"): two equal pens with garbage written into their padding compare equal (fails
+against the old `memcmp`; the garbage has to be written after construction, since -O2 merges the member
+stores and zeroes the padding, which made a first version pass either way), a refresh with an unchanged
+pen leaves the color box alone, a new color reaches it, and a recolored page reaches the width display with
+the pen unchanged (fails with the `ShownContext` check removed from the early return).
+
 The relative-width reference for a selection (`selectionLineHeight()`: patch pitch, plurality across regions, tie to earliest stroke) is pinned in `scribbletest/regiontest.cpp`; mutation-checked by returning the fallback.
 
 The page tag summary and the tag index's document cache are tested in `scribbletest/pagetagtest.cpp`

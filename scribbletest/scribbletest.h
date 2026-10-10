@@ -33,6 +33,9 @@ public:
   //  goes back into the pen's list in line heights (docs/agent/pen-and-tools.md, relative pen width)
   int penWidthPresetTest();
   int penSelectionTest();
+  // equal pens compare equal whatever their padding holds (memcmp did not), and the pen toolbar's
+  //  per-refresh early-out still follows a new color and a recolored page
+  int penToolbarRefreshTest();
   int outlineTest();
   int outlineNestTest();
   // the sidebar's Pages view: moving pages after a target (or to the front) keeps the moved pages' order,
