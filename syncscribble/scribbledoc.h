@@ -239,6 +239,10 @@ public:
   Timestamp fileLastMod = 0;
   bool autoSaveReq = false;
   Palette themePalette;
+  // the recipe themePalette was generated from: invalidation is frequent (every cfg swap, loadConfig()
+  //  runs twice at startup) but the recipe rarely changes, and generatePalette() is a pure function of it
+  PaletteRecipe themePaletteRecipe;
+  bool themePaletteGenerated = false;
   bool paletteValid = false;
   bool themeGenKnown = true;
 

@@ -43,6 +43,14 @@ reverts the strokes while the paper stays on the new theme.
   `scribbletest/colortest_golden.inc` pins every color it produces and is what makes this a property
   rather than an intention; the failure message says to add an id rather than regenerate the table.
   Shipped generators are never deleted - each is ~80 lines of dependency-free math.
+- **The cusp table is a literal** (`ulib/oklab_cusptable.inc`, 720 doubles printed with `%.17g`, which
+  round-trips exactly). Building it at runtime was ~1.1M gamut tests, ~50 ms and a fifth of startup
+  instructions. `oklchBuildCuspTable()` is the unchanged builder, kept only as the reference: the
+  standalone colortest rebuilds the table and requires bit-identity (a one-ulp edit fails it; the golden
+  palette check alone does not catch that). Never hand-edit the .inc; `colortest --dump-cusp` prints it.
+  The literal also removes per-target drift: a runtime build under FMA contraction (clang, arm64) could
+  differ in the last bit. The check is standalone-only for that reason. `ScribbleDoc::palette()` also
+  skips regenerating when the recipe equals the one its cached palette came from.
 - **The generator id is a string**, never an index, and is stored per document - the same lesson
   `shapeId` was bitten by twice, except that a misread index here would change every color in the
   document rather than a tool. An unknown id is *not* an error: strokes still render literally, the

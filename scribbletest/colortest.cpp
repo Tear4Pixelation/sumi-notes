@@ -8,6 +8,7 @@
 //   pull in platform_assert, which lives in the application.)
 //
 // Run ./colortest --dump to print the golden table in the form pasted into GOLDEN_CUSPWALK1 below.
+// ./colortest --dump-cusp prints ulib/oklab_cusptable.inc; the standalone run checks that literal bit for bit.
 //
 // runColorTests() returns the number of failed checks and is also called from ScribbleTest::runAll().
 
@@ -569,13 +570,48 @@ int runColorTests()
 }
 
 #ifdef COLORTEST_MAIN
+// oklchCusp() reads a literal table (ulib/oklab_cusptable.inc); rebuild it with the builder that generated
+//  it and require every entry to be bit-identical, so the literal can never drift from the frozen math.
+//  Standalone only (CI, x86-64): the in-app run is skipped because the builder takes ~50 ms and because
+//  on targets that contract a*b+c into FMA (clang on arm64) the runtime build can differ in the last
+//  bit - which is exactly the variation the literal removes, not a fault in it.
+static void testCuspTableLiteral()
+{
+  static real L[360], C[360];
+  oklchBuildCuspTable(L, C);
+  colorCheckTrue(memcmp(L, oklchCuspTableL, sizeof(L)) == 0 && memcmp(C, oklchCuspTableC, sizeof(C)) == 0,
+      "cusp table literal (ulib/oklab_cusptable.inc) is bit-identical to oklchBuildCuspTable()");
+}
+
+static void dumpCuspTable()
+{
+  static real L[360], C[360];
+  oklchBuildCuspTable(L, C);
+  printf("// Generated from oklchBuildCuspTable() (ulib/oklab.cpp) - do not edit by hand; see the comment there.\n");
+  printf("// %%.17g round-trips every double exactly; colortest compares this to a fresh build bit for bit.\n\n");
+  const char* names[2] = {"oklchCuspTableL", "oklchCuspTableC"};
+  const real* arrays[2] = {L, C};
+  for(int which = 0; which < 2; ++which) {
+    printf("const real %s[360] = {\n", names[which]);
+    for(int i = 0; i < 360; ++i)
+      printf("%s%.17g,%s", (i % 4) ? " " : "  ", double(arrays[which][i]), (i % 4 == 3) ? "\n" : "");
+    printf("};\n%s", which == 0 ? "\n" : "");
+  }
+}
+
 int main(int argc, char* argv[])
 {
   if(argc > 1 && strcmp(argv[1], "--dump") == 0) {
     dumpGolden();
     return 0;
   }
+  if(argc > 1 && strcmp(argv[1], "--dump-cusp") == 0) {
+    dumpCuspTable();
+    return 0;
+  }
   int nFailed = runColorTests();
+  testCuspTableLiteral();
+  nFailed = nColorChecksFailed;
   printf("%d color checks failed\n", nFailed);
   return nFailed;
 }

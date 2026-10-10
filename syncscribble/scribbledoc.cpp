@@ -1128,7 +1128,12 @@ bool ScribbleDoc::setPageProperties(const PageProperties* props, bool applytoall
 const Palette& ScribbleDoc::palette()
 {
   if(!paletteValid) {
-    themeGenKnown = generatePalette(cfg->themeRecipe(), &themePalette);
+    PaletteRecipe recipe = cfg->themeRecipe();
+    if(!themePaletteGenerated || recipe != themePaletteRecipe) {
+      themeGenKnown = generatePalette(recipe, &themePalette);
+      themePaletteRecipe = recipe;
+      themePaletteGenerated = true;
+    }
     paletteValid = true;
   }
   return themePalette;
