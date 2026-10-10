@@ -38,6 +38,8 @@ static const Dim sbGripCell     = floatTouchUI ? floatBtnSize : sbIconSize;
 //  icon the toolbar's icon size (see floatTouchUI in basics.h).
 static const Dim sbActionIcon   = floatTouchUI ? 32*floatUIScale : sbIconSize;
 static const Dim sbActionCell   = floatTouchUI ? floatBtnSize : sbIconSize;
+// width of the Pages select bar's count label, see createPageSelectBar()
+static const Dim sbSelectLabelW = 104;
 static const Dim sbActionsH     = std::max(Dim(61*floatUIScale), sbActionCell);
 static const Dim sbRowH         = 50*floatUIScale;   // an outline row
 static const Dim sbLayerRowH    = 88*floatUIScale;   // a layer row, which carries a preview
@@ -671,8 +673,19 @@ bool Sidebar::matchesSearch(const std::string& text) const
   return toLower(text).find(toLower(searchQuery)) != std::string::npos;
 }
 
+void Sidebar::updateBackfillTheme()
+{
+  if(!backFill)
+    return;
+  if(ScribbleApp::cfg->Bool("invertColors"))
+    backFill->node->addClass("night");
+  else
+    backFill->node->removeClass("night");
+}
+
 void Sidebar::refresh()
 {
+  updateBackfillTheme();
   ScribbleDoc* prevDoc = scribbleDoc;
   scribbleDoc = ScribbleApp::app ? ScribbleApp::app->activeDoc() : NULL;
   const char* label = currView == OUTLINE ? _("Outline") : currView == LAYERS ? _("Layers")
@@ -1389,7 +1402,18 @@ Widget* Sidebar::createPageSelectBar()
   barRow->setMargins(6);
   pageSelectCount = createTextNode(_("Select pages"));
   pageSelectCount->addClass("selectbar-count");
-  Widget* countLabel = new Widget(pageSelectCount);
+  // The label's text changes with the count ("Select pages" -> "1 selected" -> "12 selected") and the bar
+  //  is as wide as its contents, so a label that sized itself to its text moved every button each time a
+  //  page was ticked - and under a stationary pointer the hover fill then stayed on the slot the button
+  //  had left.  A box with a fixed-width sizer rect holds the text instead (ui-floating-bar.md: the
+  //  layout must not jump); the width fits the widest wording with room for a translation.
+  Widget* countLabel = new Widget(new SvgG());
+  countLabel->node->setAttribute("layout", "box");
+  SvgRect* countSizer = new SvgRect(Rect::wh(sbSelectLabelW, 1));
+  countSizer->setAttribute("fill", "none");
+  countLabel->containerNode()->addChild(countSizer);
+  pageSelectCount->setAttribute("box-anchor", "left");
+  countLabel->containerNode()->addChild(pageSelectCount);
   countLabel->setMargins(0, 14, 0, 12);
   barRow->addWidget(countLabel);
   // an action on the selection, run on the next turn: a file dialog pumps events, and the delete rebuilds

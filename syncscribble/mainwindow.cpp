@@ -1018,6 +1018,8 @@ void MainWindow::toggleInvertColors()
   actionInvertColors->setChecked(invert);
   ScribbleApp::cfg->set("invertColors", invert);
   app->penToolbar->refreshDisplayColors();
+  if(sidebar)
+    sidebar->updateBackfillTheme();
   redraw();
 }
 
