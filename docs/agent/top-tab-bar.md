@@ -127,6 +127,15 @@ Removed, and where each still is:
   pixel row was antialiased from both sides over stale pixels. Whatever follows paints over the overlap.
 - **Changing the bar's height repaints the canvas from a 1 ms timer** (`orientationChanged`): the canvas
   only repaints what it believes changed, and the strip it gained kept the bar's old pixels.
+- **`TopBar::refresh()` rebuilds on a 1 ms timer once the window is shown, never synchronously.**
+  `refreshUI()` is reached from inside a layout pass (`ScribbleView::doResizeEvent` -> `doRefresh`, the first
+  layout after a document opens), after the bar, earlier in the window, was already laid out in that pass:
+  tabs added then were never laid out, and the frame's paint cleared the dirty flags they set. Starting with
+  no tabs (no `openTabs`, or a file on the command line) and opening one left the editor's bar without its
+  tab - and, before the ugui zero-size fix, drew that unlaid tab over home at the window's corner. No
+  `Timer*` is kept: closing the library window drops its timers while its `TopBar` lives on, so each call
+  that sees a change sets its own timer and `rebuild()` re-checks the state. While the window has never
+  been shown (no `SvgGui`: setupUI, the library's first `TagDocList::setup()`) the rebuild is immediate.
 - The test library must not be `Debug/library`: that is also the desktop debug build's fallback library,
   and the startup move from fallback into library deletes the marker when both are the same folder
   (pre-existing, not this feature's; only an agent fixture would set it up that way).
@@ -150,10 +159,12 @@ value is what was exercised:
 - **Mode 0**: editor and library as before the feature, the View popup on the toolbar's panel.
 
 Not exercised: Preferences changing the mode live (it calls the same `applyTopBarMode()` as startup),
-the vertical toolbar, light theme, and any device (status bar hiding on iOS/Android). UBSan reports a
-float division by zero in `Widget::setLayoutBounds` under an `AutoAdjContainer` - once at startup
-without any bar (pre-existing), once more with the editor's bar (its tab strip's first, empty layout);
-harmless, the box has nothing in it.
+the vertical toolbar, light theme, and any device (status bar hiding on iOS/Android).
+
+The UBSan float division by zero in `Widget::setLayoutBounds` (the tab strip's first, empty layout) was
+not harmless: it was ugui scaling a zero-width node to a real width, which made its layout transform
+inf/NaN for good. Fixed in ugui (a zero-size node is only moved), pinned by
+`ScribbleTest::zeroSizeLayoutTest()` (tests.md).
 
 ## Gaps
 
