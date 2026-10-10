@@ -16,13 +16,22 @@
 # over when the last result line appears; VmHWM (peak RSS) is read from /proc just before
 # the app is killed.  Output: every run's numbers, then the median of each metric.
 #
+# The run is event-paced without help: the benchmarks call processEvents(), which blocks in
+# SDL_WaitEvent, and a headless compositor delivers almost no events. perf-waitshim.c (built
+# here on first use, LD_PRELOADed) makes that wait a poll. --no-shim disables it.
+# --updateCheck=0 is always passed so no run touches the network.
+#
+# Note: the classic perftest never calls layoutAndDraw, so it measures input and document-model
+# work but no painting (it reports 0 frames), and its PeakRSS is dominated by a 512 MB
+# calibration buffer - do not judge memory changes by perftest's PeakRSS.
+#
 # Timings are wall-clock on a shared machine (other agents compile here): compare medians
 # of >= 5 runs, before vs after, from the same build type, and distrust < 3% differences.
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_DIR="$ROOT/syncscribble"
-build=Bench runs=5 mode=perftest timeout=300 wrap=""
+build=Bench runs=5 mode=perftest timeout=300 wrap="" shim=1
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --build)   build="$2"; shift 2 ;;
@@ -30,11 +39,12 @@ while [[ $# -gt 0 ]]; do
     --mode)    mode="$2"; shift 2 ;;
     --timeout) timeout="$2"; shift 2 ;;
     --wrap)    wrap="$2"; shift 2 ;;
+    --no-shim) shim=0; shift ;;
     --)        shift; break ;;
     *)         break ;;
   esac
 done
-extra="$*"
+extra="--updateCheck=0 $*"
 
 app="$APP_DIR/$build/Sumi"
 [[ -x "$app" ]] || { echo "no binary at $app - build it: cd syncscribble && make SCRIBBLE_TEST=1 [BUILDDIR=$build]" >&2; exit 1; }
@@ -45,6 +55,16 @@ command -v cage >/dev/null || { echo "cage missing (sudo pacman -S cage)" >&2; e
 
 # fonts are looked up beside the binary
 [[ -d "$APP_DIR/$build/fonts" ]] || cp -r "$ROOT/scribbleres/fonts" "$APP_DIR/$build/" 2>/dev/null
+
+preload=""
+if (( shim )); then
+  shimso="${XDG_RUNTIME_DIR:-/tmp}/sumi-perf-waitshim.so"
+  if [[ ! -f "$shimso" || "$ROOT/tools/perf-waitshim.c" -nt "$shimso" ]]; then
+    cc -shared -fPIC -O2 $(pkg-config --cflags sdl2 2>/dev/null) -o "$shimso.tmp" "$ROOT/tools/perf-waitshim.c" -ldl \
+      && mv -f "$shimso.tmp" "$shimso" || { echo "failed to build perf-waitshim.so" >&2; exit 1; }
+  fi
+  preload="env LD_PRELOAD=$shimso"
+fi
 
 work="$(mktemp -d "${TMPDIR:-/tmp}/sumi-bench.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
@@ -78,7 +98,7 @@ for (( run=1; run<=runs; run++ )); do
   rm -rf "$work/lib" && mkdir -p "$work/lib"
   out="$work/run$run.log" pidf="$work/app.pid"
   rm -f "$pidf"
-  inner="printf '%s' \"\$\$\" > '$pidf'; exec $wrap '$app' --$mode --library '$work/lib' $extra"
+  inner="printf '%s' \"\$\$\" > '$pidf'; exec $preload $wrap '$app' --$mode --library '$work/lib' $extra"
   WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=1 WLR_LIBINPUT_NO_DEVICES=1 \
     cage -- bash -c "$inner" >"$out" 2>&1 &
   cage_pid=$!
