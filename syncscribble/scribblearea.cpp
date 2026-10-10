@@ -157,6 +157,7 @@ void ScribbleArea::drawThumbnail(Image* dest)
   bool thumbtest = cfg->Int("saveThumbnail") == 2;
   int srgb = thumbtest ? Painter::SRGB_AWARE : 0;  // disable sRGB for better contrast
   Painter thumbpaint(Painter::PAINT_SW | srgb, dest);
+  thumbpaint.useImageProxies = true;  // a page scan is drawn from a small copy, not decoded at full size
   thumbpaint.beginFrame();
   thumbpaint.save();
   // aliasing in thumbnails is quite noticible on high-DPI displays

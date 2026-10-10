@@ -93,6 +93,24 @@ page; `pdfImportLossy`/JPEG changed nothing, it only picks the format at save ti
 Result: the 31-page scanned `Geschichte.pdf` stays flat at ~187 MB (was 477 MB and climbing), Noteful
 peaks at 148 MB (was 395). Quality is unchanged - same pixel sizes and formats.
 
+After the import, in the app:
+
+- **Saves.** With `savePicScaled` on (the default), every ordinary save after the import resamples each page
+  image to one pixel per unit (the first such save is the one that throws away `pdfImportDPI`, see above).
+  That decode + resample + JPEG encode was ~98% of a save (2.6-3.6 s for Mathe.svgz's 11 scans, 9 s for a
+  114-page notebook). `SvgImage::saveCache` now keeps the bytes the writer produced, keyed by
+  `Image::contentId` (new on every constructor and `invalidate()`), the crop and the scaled size, so only
+  the first save pays: ~150 ms / ~630 ms after. The saved bytes are identical. **Trap:** code that changes an
+  image's pixels in place must call `invalidate()` (it already had to, for the texture), or the old pixels
+  are saved. Pinned by `ScribbleTest::imageSaveCacheTest()`. `Image::cropped()` no longer leaves a crop's
+  source decoded in RAM (it kept ~35 MB per cropped scan for good).
+- **Textures.** The caching painter's image textures are evicted least recently used past
+  `Painter::maxCachedBytes` (512 MB desktop, 128 MB iOS/Android/wasm, set in `application.cpp`), but never
+  one drawn in the last 8 frames - it used to drop *every* texture at once, and with a cap below the visible
+  set it re-uploaded every image every frame (going back and forth between two scan pages under a 64 MB cap:
+  4.1 s for 40 frames before, 0.72 s after, the same as with no cap). A page that is unloaded frees its
+  images' textures (`Image::~Image` -> `invalidateImage`).
+
 **Limit memory** (Import popup, `importLimitMemory` + `importMemoryLimitMB`, 128 MB-2 GB): a
 `MemoryBudget` counts what the import *holds* - its input (`setInput`, a whole notebook), each
 `Renderer`'s MuPDF allocations (exact, through a tracking `fz_alloc_context`) and its in-memory PDF, and
