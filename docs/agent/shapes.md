@@ -226,6 +226,13 @@ were all refused. 240 Hz sampling by itself cost nothing.
   arches, spikes) always have a short pass or a turn over the gap limit: pass length and gap ignore
   their worst 20-25%, and long strokes get a wider turn limit. On lift, don't start that rule below 24
   or loosen the base 0.2 - long mmm arches then erase as you write.
+- **The lift test runs on every stroke written**, so its cost is pen-up latency: up to 12 axes, ~600
+  resampled points each. `findEndsOf()` takes the 5th/95th percentiles with `nth_element` (same values as
+  the full sort it replaced, which was 14% of perftest; a bounded heap was slower on perftest's spiral);
+  candidate axes are tested for `along` before their pass ends are found, and keep their projection and
+  ends so `tryAxis()` does not compute them a second time. Perftest: 2.97G -> 1.25G instructions over
+  1521 lifts. Results are bit-identical (every `recognize`/`recognizeScribble` result over 36k synthetic
+  and recorded strokes, four parameter sets, was diffed before/after).
 - **Real strokes:** config `recordShapeStrokes` = 1 logs every held stroke to `shape-strokes.strokes` in
   the library (lab format, plus what it was recognized as). Wrong ones, labelled, go in
   `labs/shape-recognition/fixtures/`, where `make test` gates their class.

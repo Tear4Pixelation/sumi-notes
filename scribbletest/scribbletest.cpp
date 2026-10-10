@@ -964,6 +964,79 @@ int ScribbleTest::penSelectionTest()
   return nbad;
 }
 
+// MainWindow::refreshUI() pushes the pen into the toolbar after every stroke, and PenToolbar::setPen()
+//  returns early when nothing it draws has changed.  That early-out was dead for years: operator==
+//  compared the pen with memcmp, padding included, and identical pens built in different places
+//  differed there.
+int ScribbleTest::penToolbarRefreshTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: pen toolbar refresh: %s\n", what); }
+  };
+  // two equal pens with different garbage in their padding - this is what memcmp got wrong.  The garbage
+  //  is written after construction: -O2 merges the member stores into whole words, zeroing the padding,
+  //  so pens merely built over different buffers came out byte-identical and compared equal either way.
+  ScribblePen penA(Color::BLUE, 2.5, ScribblePen::TIP_ROUND, 0.5, 2);
+  ScribblePen penB(Color::BLUE, 2.5, ScribblePen::TIP_ROUND, 0.5, 2);
+  unsigned char* bytesB = reinterpret_cast<unsigned char*>(&penB);
+  size_t afterColor = offsetof(ScribblePen, color) + sizeof(Color);
+  size_t afterFlags = offsetof(ScribblePen, flags) + sizeof(penB.flags);
+  memset(bytesB + afterColor, 0xA5, offsetof(ScribblePen, width) - afterColor);
+  memset(bytesB + afterFlags, 0xA5, sizeof(ScribblePen) - afterFlags);
+  check(afterColor < offsetof(ScribblePen, width) || afterFlags < sizeof(ScribblePen),
+      "ScribblePen has padding (else this check tests nothing)");
+  check(penA == penB, "equal pens compare equal whatever their padding holds");
+  ScribblePen penC = penA;
+  penC.width = 2.6;
+  check(!(penA == penC), "...and a different width is a different pen");
+
+  ScribbleApp* app = scribbleDoc->app;
+  PenToolbar* toolbar = app ? app->penToolbar : NULL;
+  if(!toolbar) {
+    check(false, "no pen toolbar");
+    return nbad;
+  }
+  scribbleDoc->newDocument();
+  int oldDrawTool = scribbleMode->drawTool;
+  ScribblePen oldPen = *app->getPen();
+  scribbleMode->drawTool = ScribbleMode::DRAWTOOL_PEN;
+  scribbleMode->setMode(MODE_STROKE);
+
+  app->setPen(ScribblePen(Color::BLUE, 2));
+  app->updatePenToolbar();
+  check(toolbar->colorPicker->color() == Color(Color::BLUE), "the color box shows the pen's color");
+  // the box changed behind the toolbar's back stays changed through a refresh with the same pen: the
+  //  refresh after a stroke is the early-out, not a rewrite of the box
+  toolbar->colorPicker->setColor(Color::GREEN);
+  app->updatePenToolbar();
+  check(toolbar->colorPicker->color() == Color(Color::GREEN), "a refresh with an unchanged pen is skipped");
+  app->setPen(ScribblePen(Color::RED, 2));
+  app->updatePenToolbar();
+  check(toolbar->colorPicker->color() == Color(Color::RED), "...but a new color reaches the color box");
+
+  // same pen, recolored page: the width display draws the page, so the early-out must not hold it back
+  Page* page = toolbar->currentPage();  // the page the toolbar measures against
+  if(page) {
+    Color oldPageColor = page->props.color;
+    page->props.color = Color(0x20, 0x40, 0x60);
+    app->updatePenToolbar();
+    SvgNode* bg = toolbar->rulingPreview->node->selectFirst(".page-bg");
+    Color shown = bg ? bg->getColorAttr("fill") : Color(Color::INVALID_COLOR);
+    Color expected = ScribbleApp::displayColor(page->props.color);
+    if(!(shown == expected))
+      printf("page-bg fill %08X, expected %08X\n", shown.argb(), expected.argb());
+    check(shown == expected, "the width display follows the page color with the pen unchanged");
+    page->props.color = oldPageColor;
+  }
+
+  scribbleMode->drawTool = oldDrawTool;
+  app->setPen(oldPen);
+  app->updatePenToolbar();
+  scribbleDoc->newDocument();
+  return nbad;
+}
+
 int ScribbleTest::outlineTest()
 {
   int nbad = 0;
@@ -4255,6 +4328,55 @@ int ScribbleTest::insSpaceAxisTest()
   return nbad;
 }
 
+int ScribbleTest::imageSaveCacheTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: image save cache: %s\n", what); }
+  };
+  auto saved = [](SvgNode* node) {
+    MemStream strm;
+    SvgWriter::save(node, strm);
+    return std::string(strm.data(), strm.size());
+  };
+  float savedImageScale = SvgWriter::DEFAULT_SAVE_IMAGE_SCALED;
+  SvgWriter::DEFAULT_SAVE_IMAGE_SCALED = 1;  // savePicScaled
+  // 400 px shown 100 units wide: the writer shrinks it on every save
+  Image image(400, 400, Image::PNG);
+  unsigned int* pixels = image.pixels();
+  for(int y = 0; y < 400; ++y) {
+    for(int x = 0; x < 400; ++x)
+      pixels[y*400 + x] = 0xFF000000 | (x*255/399) | ((y*255/399) << 8) | (((x + y)%256) << 16);
+  }
+  std::unique_ptr<SvgImage> node(new SvgImage(std::move(image), Rect::wh(100, 100)));
+  std::string first = saved(node.get());
+  check(first.find("data:image/png;base64,") != std::string::npos, "the image is saved inline");
+  check(node->saveCache.contentId == node->m_image.contentId && !node->saveCache.data.empty(),
+      "a rescaled image is cached after a save");
+  check(saved(node.get()) == first, "an unchanged image is saved the same again");
+
+  // each change is saved anew, and a copy of the node (no cache) saves exactly the same bytes
+  node->m_image.fill(0xFF2040C0);  // fill() invalidates
+  std::string filled = saved(node.get());
+  check(filled != first, "changed pixels are saved, not the cached image");
+  check(saved(std::unique_ptr<SvgNode>(node->clone()).get()) == filled, "changed pixels: same bytes as uncached");
+  for(int y = 0; y < 400; ++y)
+    node->m_image.pixels()[y*400 + y] = 0xFFFFFFFF;
+  node->m_image.invalidate();
+  std::string diagonal = saved(node.get());
+  check(diagonal != filled, "pixels changed in place then invalidate()d are saved anew");
+  node->srcRect = Rect::ltrb(0, 0, 200, 400);
+  std::string cropped = saved(node.get());
+  check(cropped != diagonal, "a new crop is saved anew");
+  check(saved(std::unique_ptr<SvgNode>(node->clone()).get()) == cropped, "a crop: same bytes as uncached");
+  node->setSize(Rect::wh(40, 80));
+  std::string smaller = saved(node.get());
+  check(smaller != cropped, "a new displayed size is saved anew");
+  check(saved(std::unique_ptr<SvgNode>(node->clone()).get()) == smaller, "a new size: same bytes as uncached");
+  SvgWriter::DEFAULT_SAVE_IMAGE_SCALED = savedImageScale;
+  return nbad;
+}
+
 int ScribbleTest::rulingRegionTest()
 {
   int nbad = 0;
@@ -4685,6 +4807,7 @@ void ScribbleTest::runAll(bool runsynctest)
   nUnitFailed += dashStyleTest();
   nUnitFailed += penWidthPresetTest();
   nUnitFailed += penSelectionTest();
+  nUnitFailed += penToolbarRefreshTest();
   nUnitFailed += outlineTest();
   nUnitFailed += outlineNestTest();
   nUnitFailed += pageMoveTest();
@@ -4717,6 +4840,7 @@ void ScribbleTest::runAll(bool runsynctest)
   nUnitFailed += skippedLinesTest();
   nUnitFailed += insSpaceAxisTest();
   nUnitFailed += undoPersistTest();
+  nUnitFailed += imageSaveCacheTest();
   runAllTime = mSecSinceEpoch() - runAllTime;
   // restore global config
   srandpp(mSecSinceEpoch());

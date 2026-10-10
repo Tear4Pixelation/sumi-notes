@@ -26,10 +26,16 @@ public:
   // solid/dashed/dotted on a selection: sized per element, filled strokes converted, scales with width,
   //  one undo step that restores exactly
   int dashStyleTest();
+  // SvgImage::saveCache: a rescaled or cropped image is written from the cache while nothing changed, and
+  //  anew - the same bytes a fresh save writes - when its pixels, crop or size do (docs/agent/tests.md)
+  int imageSaveCacheTest();
   // a selection shows a relative pen's thickness presets in document units, and a width edited there
   //  goes back into the pen's list in line heights (docs/agent/pen-and-tools.md, relative pen width)
   int penWidthPresetTest();
   int penSelectionTest();
+  // equal pens compare equal whatever their padding holds (memcmp did not), and the pen toolbar's
+  //  per-refresh early-out still follows a new color and a recolored page
+  int penToolbarRefreshTest();
   int outlineTest();
   int outlineNestTest();
   // the sidebar's Pages view: moving pages after a target (or to the front) keeps the moved pages' order,

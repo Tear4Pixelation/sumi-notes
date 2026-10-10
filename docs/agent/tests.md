@@ -63,6 +63,13 @@ edited in the selection's preset editor landing back in line heights, and a 144 
 `loadModes()`. Its toolbar checks fail three ways against the pre-fix toolbar, and the load check fails
 with the clamp removed.
 
+`ScribbleTest::penToolbarRefreshTest()` pins `PenToolbar::setPen()`'s early return (pen-and-tools.md,
+"Pen toolbar refresh"): two equal pens with garbage written into their padding compare equal (fails
+against the old `memcmp`; the garbage has to be written after construction, since -O2 merges the member
+stores and zeroes the padding, which made a first version pass either way), a refresh with an unchanged
+pen leaves the color box alone, a new color reaches it, and a recolored page reaches the width display with
+the pen unchanged (fails with the `ShownContext` check removed from the early return).
+
 The relative-width reference for a selection (`selectionLineHeight()`: patch pitch, plurality across regions, tie to earliest stroke) is pinned in `scribbletest/regiontest.cpp`; mutation-checked by returning the fallback.
 
 The page tag summary and the tag index's document cache are tested in `scribbletest/pagetagtest.cpp`
@@ -210,6 +217,11 @@ heading blue. See [night-mode.md](night-mode.md).
 Marker multiply blending is tested by `ScribbleTest::markerBlendTest()` (unit-check count), rendered with
 the software painter: details and mutation checks in [pen-and-tools.md](pen-and-tools.md#marker-multiplies-text-stays-dark).
 `test15_ref.html` carries `comp-op="multiply"` on its marker strokes since then.
+
+`ScribbleTest::imageSaveCacheTest()` (unit-check count) pins `SvgImage::saveCache`: a rescaled image is
+saved the same twice from the cache, and changed pixels (`fill()`, or edited then `invalidate()`d), a new
+crop or a new size are saved anew, byte-identical to a copy of the node that has no cache. Removing
+`contentId` from the cache key fails three of its checks.
 
 Persistent undo is tested by `ScribbleTest::undoPersistTest()` (unit-check count): edits covering
 strokes, a layer, a layer move, a page, an outline entry and a page deletion undo back to each recorded

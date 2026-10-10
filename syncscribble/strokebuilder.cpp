@@ -338,6 +338,7 @@ void FilledStrokeBuilder::addPoint(const StrokePoint& pt)
     stroke->lineTo(pt.x - w2/2, pt.y + w2/2);
     stroke->lineTo(pt.x + w2/2, pt.y + w2/2);
     stroke->lineTo(pt.x + w2/2, pt.y - w2/2);  // note unclosed like longer flat paths
+    flatAssembled = false;
     dirty.rectUnion(stroke->controlPointRect());
     return;
   }
@@ -393,15 +394,56 @@ void FilledStrokeBuilder::assembleFlatStroke()
   Point pt0 = points[points.size() - 2];
   Point pt1 = points.back();
   Dim hw = widths.back()/2;
-  *stroke = path1;
   Point dr = (pt1 - pt0).normalize();
   // extend to create something like a square end cap - note that no change to Element::fromPenPoints needed!
   pt1 = pt1 + dr*hw;
   Point a = Point(pt1.x - dr.y*hw, pt1.y + dr.x*hw);
   Point b = Point(pt1.x + dr.y*hw, pt1.y - dr.x*hw);
-  stroke->lineTo(a.x, a.y);
-  stroke->lineTo(b.x, b.y);
-  stroke->connectPath(path2.toReversed());
+  // stroke = path1 + a + b + reversed path2.  This runs several times per input sample (the curve fit's
+  //  provisional tip is removed and re-added, and each chord is a point), so it must not cost O(n) per call:
+  //  copying path1 into the stroke and appending path2.toReversed() allocated two whole outlines every time
+  //  (2 GB per perftest).  Instead the stroke is updated in place: path1's unchanged prefix stays where it
+  //  is, the unchanged part of reversed path2 (the stroke's tail) slides over by one memmove, and only the
+  //  new points and the cap are written.  If the stroke is not exactly what the last assembly left (first
+  //  call, the single-point square, a clear) it is rebuilt from scratch.  path1/path2 only ever get moveTo +
+  //  lineTo, so they are simple (no commands); the general path below is kept for safety.
+  if(path1.isSimple() && path2.isSimple()) {
+    std::vector<Point>& out = stroke->points;
+    size_t n1 = path1.points.size(), n2 = path2.points.size();
+    if(!flatAssembled || !stroke->isSimple() || out.size() != flatN1 + 2 + flatN2) {
+      out.clear();
+      stroke->commands.clear();
+      stroke->fillRule = path1.fillRule;
+      flatKeep1 = flatKeep2 = 0;
+    }
+    size_t oldSize = out.size(), newSize = n1 + 2 + n2;
+    size_t oldTail = oldSize - flatKeep2, newTail = newSize - flatKeep2;
+    if(newSize > oldSize)
+      out.resize(newSize);
+    if(newTail > oldTail)
+      std::copy_backward(out.begin() + oldTail, out.begin() + oldTail + flatKeep2, out.begin() + newTail + flatKeep2);
+    else if(newTail < oldTail)
+      std::copy(out.begin() + oldTail, out.begin() + oldTail + flatKeep2, out.begin() + newTail);
+    if(newSize < oldSize)
+      out.resize(newSize);
+    std::copy(path1.points.begin() + flatKeep1, path1.points.end(), out.begin() + flatKeep1);
+    out[n1] = a;
+    out[n1 + 1] = b;
+    Point* dst = out.data() + n1 + 2;
+    const Point* src = path2.points.data();
+    for(size_t jj = 0; jj < n2 - flatKeep2; ++jj)
+      dst[jj] = src[n2 - 1 - jj];
+    flatAssembled = true;
+    flatN1 = flatKeep1 = n1;
+    flatN2 = flatKeep2 = n2;
+  }
+  else {
+    *stroke = path1;
+    stroke->lineTo(a.x, a.y);
+    stroke->lineTo(b.x, b.y);
+    stroke->connectPath(path2.toReversed());
+    flatAssembled = false;
+  }
   dirty.rectUnion(a).rectUnion(b);  //Intersect(Rect::corners(a, b));
 }
 
@@ -417,6 +459,7 @@ void FilledStrokeBuilder::removePoints(int n)
     path1.clear();
     path2.clear();
     stroke->clear();
+    flatAssembled = false;
   }
   else if(style != Flat) {
     for(; n > 0; --n) {
@@ -447,6 +490,8 @@ void FilledStrokeBuilder::removePoints(int n)
       }
       path1.resize(path1.size() - (two ? 2 : 1));
       path2.resize(path2.size() - (two ? 2 : 1));
+      flatKeep1 = std::min(flatKeep1, size_t(path1.size()));
+      flatKeep2 = std::min(flatKeep2, size_t(path2.size()));
     }
     if(!path1.empty() && !path2.empty()) {
       dirty.rectUnion(path1.rpoint(1));
@@ -599,37 +644,60 @@ void StreamStabilizer::finalize()
 
 // curve fit - see comment in strokebuilder.h
 
-// the relaxed position of point ii, given that pts[0..n-1] is the stroke so far.  The pure uniform cubic
-//  B-spline would put its knot at (P[i-1] + 4P[i] + P[i+1])/6; relax is how far of the way there we go, so
-//  1 is the B-spline and 0 leaves the input points untouched.  Indices outside the stroke are reflected
+// The relaxed positions of points ii-1 .. ii+2 (the four knots segment ii..ii+1 needs), given that
+//  pts[0..n-1] is the stroke so far.  The pure uniform cubic B-spline would put its knot at
+//  (P[i-1] + 4P[i] + P[i+1])/6; relax is how far of the way there we go, so 1 is the B-spline and 0 leaves
+//  the input points untouched, and this is applied `passes` times.  Indices outside the stroke are reflected
 //  rather than clamped, which makes the curve's end tangent come out along the first/last segment; the two
 //  end points themselves are never relaxed, so a stroke starts and stops exactly where the pen did.
-StrokePoint CurveFitFilter::knotAt(int ii, int n, int level) const
+// Computed level by level over the window the four knots depend on.  This used to be a recursive
+//  knotAt(ii, n, level) that recomputed each knot's whole 3^passes dependency tree, separately for each of
+//  the four; the arithmetic per point and level is the same expression, so the knots are bit-identical.
+void CurveFitFilter::segmentKnots(int ii, int n, StrokePoint knots[4]) const
 {
-  if(ii < 0 || ii > n - 1) {
-    int jj = ii < 0 ? 0 : n - 1, kk = ii < 0 ? std::min(1, n - 1) : std::max(0, n - 2);
-    StrokePoint a = knotAt(jj, n, level), b = knotAt(kk, n, level);
-    a.x = 2*a.x - b.x;
-    a.y = 2*a.y - b.y;
-    return a;
+  int lo = std::max(0, ii - 1), hi = std::min(n - 1, ii + 2);
+  int base = std::max(0, lo - passes), top = std::min(n - 1, hi + passes);
+  StrokePoint cur[4 + 2*4], below[4 + 2*4];  // passes <= 4
+  for(int i = base; i <= top; ++i)
+    cur[i - base] = pts[i];
+  // level l is only needed over [lo - (passes - l), hi + (passes - l)]: those read level l-1 one further out
+  for(int level = 1; level <= passes; ++level) {
+    std::copy(cur, cur + (top - base + 1), below);
+    int from = std::max(0, lo - (passes - level)), to = std::min(n - 1, hi + (passes - level));
+    for(int i = from; i <= to; ++i) {
+      StrokePoint k = below[i - base];
+      if(relax > 0 && i > 0 && i < n - 1) {
+        const StrokePoint& prev = below[i - 1 - base];
+        const StrokePoint& nxt = below[i + 1 - base];
+        Point bspline = (Point(prev) + 4*Point(k) + Point(nxt))/6;
+        k.x += relax*(bspline.x - k.x);
+        k.y += relax*(bspline.y - k.y);
+      }
+      cur[i - base] = k;
+    }
   }
-  if(level <= 0)
-    return pts[ii];
-  StrokePoint k = knotAt(ii, n, level - 1);
-  if(relax > 0 && ii > 0 && ii < n - 1) {
-    StrokePoint prev = knotAt(ii - 1, n, level - 1), nxt = knotAt(ii + 1, n, level - 1);
-    Point bspline = (Point(prev) + 4*Point(k) + Point(nxt))/6;
-    k.x += relax*(bspline.x - k.x);
-    k.y += relax*(bspline.y - k.y);
+  for(int jj = 0; jj < 4; ++jj) {
+    int idx = ii - 1 + jj;
+    if(idx < 0 || idx > n - 1) {
+      int refl = idx < 0 ? 0 : n - 1, next = idx < 0 ? std::min(1, n - 1) : std::max(0, n - 2);
+      StrokePoint a = cur[refl - base];
+      const StrokePoint& b = cur[next - base];
+      a.x = 2*a.x - b.x;
+      a.y = 2*a.y - b.y;
+      knots[jj] = a;
+    }
+    else
+      knots[jj] = cur[idx - base];
   }
-  return k;
 }
 
 // emit the curve from knot ii to knot ii+1 as chords; pressure, tilt and time are interpolated along it
 void CurveFitFilter::emitSegment(int ii, int n)
 {
-  StrokePoint s1 = knotAt(ii, n, passes), s2 = knotAt(ii + 1, n, passes);
-  Point p0 = knotAt(ii - 1, n, passes), p1 = s1, p2 = s2, p3 = knotAt(ii + 2, n, passes);
+  StrokePoint knots[4];
+  segmentKnots(ii, n, knots);
+  StrokePoint s1 = knots[1], s2 = knots[2];
+  Point p0 = knots[0], p1 = s1, p2 = s2, p3 = knots[3];
   // knot spacing; 0.5 (i.e. sqrt of distance) is centripetal - uniform overshoots badly on the uneven
   //  spacing that real input has, and chordal is loose at sharp turns
   Dim d1 = std::sqrt((p1 - p0).dist()), d2 = std::sqrt((p2 - p1).dist()), d3 = std::sqrt((p3 - p2).dist());
