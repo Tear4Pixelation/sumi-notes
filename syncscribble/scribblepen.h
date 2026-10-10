@@ -29,7 +29,15 @@ public:
   ScribblePen(Color c, Dim w, unsigned int _flags = 0, Dim wr = 0, Dim pr = 0, Dim spd = 0, Dim angle = 0, Dim _dash = 0, Dim _gap = 0)
       : color(c), width(w), wRatio(wr), prParam(pr), spdMax(spd), dirAngle(angle), dash(_dash), gap(_gap), flags(_flags) {}
 
-  bool operator==(const ScribblePen& b) const { return memcmp(this, &b, sizeof(ScribblePen)) == 0; }
+  // Member by member, never memcmp: the class has padding (after color and after flags) that copies and
+  //  temporaries leave holding garbage, so memcmp called identical pens different.  That silently
+  //  disabled PenToolbar::setPen()'s early-out (the whole pen toolbar was rewritten after every stroke)
+  //  and ScribbleConfig::savePen()'s dedupe.  A new member must be added here.
+  bool operator==(const ScribblePen& b) const
+  {
+    return color == b.color && width == b.width && wRatio == b.wRatio && prParam == b.prParam
+        && spdMax == b.spdMax && dirAngle == b.dirAngle && dash == b.dash && gap == b.gap && flags == b.flags;
+  }
 
   bool hasFlag(unsigned int flag) const { return (flags & flag) == flag; }
   void setFlag(unsigned int flag, bool value) { if(value) flags |= flag; else flags &= ~flag; }

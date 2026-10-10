@@ -108,6 +108,9 @@ the summary. `syncscribble/sidebar.cpp`.
   change, since `refreshUI` runs after every stroke. Without it the list kept the previous document's
   contents after opening another, ignored undo and peers' edits, and came up empty when open at
   startup: `MainWindow`'s constructor opens it before there is an `SvgGui` to build rows through.
+  The signature (`docState()`, `pageOrderState()`) appends page uids and outline numbers as raw bytes,
+  not `fstring()`s: it is only compared, and formatting cost ~490 Ir a page after every stroke (100 pages:
+  49K -> 6.6K Ir). Keep it an exact comparison - a revision counter would miss undo, sync and page loads.
 
 - **A layer row's click and its lock toggle run on a 1 ms timer.** Either can let go of the selection,
   whose `refreshUI` rebuilds this list synchronously - deleting the button still dispatching (ASan:

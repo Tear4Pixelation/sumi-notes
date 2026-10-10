@@ -963,6 +963,79 @@ int ScribbleTest::penSelectionTest()
   return nbad;
 }
 
+// MainWindow::refreshUI() pushes the pen into the toolbar after every stroke, and PenToolbar::setPen()
+//  returns early when nothing it draws has changed.  That early-out was dead for years: operator==
+//  compared the pen with memcmp, padding included, and identical pens built in different places
+//  differed there.
+int ScribbleTest::penToolbarRefreshTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: pen toolbar refresh: %s\n", what); }
+  };
+  // two equal pens with different garbage in their padding - this is what memcmp got wrong.  The garbage
+  //  is written after construction: -O2 merges the member stores into whole words, zeroing the padding,
+  //  so pens merely built over different buffers came out byte-identical and compared equal either way.
+  ScribblePen penA(Color::BLUE, 2.5, ScribblePen::TIP_ROUND, 0.5, 2);
+  ScribblePen penB(Color::BLUE, 2.5, ScribblePen::TIP_ROUND, 0.5, 2);
+  unsigned char* bytesB = reinterpret_cast<unsigned char*>(&penB);
+  size_t afterColor = offsetof(ScribblePen, color) + sizeof(Color);
+  size_t afterFlags = offsetof(ScribblePen, flags) + sizeof(penB.flags);
+  memset(bytesB + afterColor, 0xA5, offsetof(ScribblePen, width) - afterColor);
+  memset(bytesB + afterFlags, 0xA5, sizeof(ScribblePen) - afterFlags);
+  check(afterColor < offsetof(ScribblePen, width) || afterFlags < sizeof(ScribblePen),
+      "ScribblePen has padding (else this check tests nothing)");
+  check(penA == penB, "equal pens compare equal whatever their padding holds");
+  ScribblePen penC = penA;
+  penC.width = 2.6;
+  check(!(penA == penC), "...and a different width is a different pen");
+
+  ScribbleApp* app = scribbleDoc->app;
+  PenToolbar* toolbar = app ? app->penToolbar : NULL;
+  if(!toolbar) {
+    check(false, "no pen toolbar");
+    return nbad;
+  }
+  scribbleDoc->newDocument();
+  int oldDrawTool = scribbleMode->drawTool;
+  ScribblePen oldPen = *app->getPen();
+  scribbleMode->drawTool = ScribbleMode::DRAWTOOL_PEN;
+  scribbleMode->setMode(MODE_STROKE);
+
+  app->setPen(ScribblePen(Color::BLUE, 2));
+  app->updatePenToolbar();
+  check(toolbar->colorPicker->color() == Color(Color::BLUE), "the color box shows the pen's color");
+  // the box changed behind the toolbar's back stays changed through a refresh with the same pen: the
+  //  refresh after a stroke is the early-out, not a rewrite of the box
+  toolbar->colorPicker->setColor(Color::GREEN);
+  app->updatePenToolbar();
+  check(toolbar->colorPicker->color() == Color(Color::GREEN), "a refresh with an unchanged pen is skipped");
+  app->setPen(ScribblePen(Color::RED, 2));
+  app->updatePenToolbar();
+  check(toolbar->colorPicker->color() == Color(Color::RED), "...but a new color reaches the color box");
+
+  // same pen, recolored page: the width display draws the page, so the early-out must not hold it back
+  Page* page = toolbar->currentPage();  // the page the toolbar measures against
+  if(page) {
+    Color oldPageColor = page->props.color;
+    page->props.color = Color(0x20, 0x40, 0x60);
+    app->updatePenToolbar();
+    SvgNode* bg = toolbar->rulingPreview->node->selectFirst(".page-bg");
+    Color shown = bg ? bg->getColorAttr("fill") : Color(Color::INVALID_COLOR);
+    Color expected = ScribbleApp::displayColor(page->props.color);
+    if(!(shown == expected))
+      printf("page-bg fill %08X, expected %08X\n", shown.argb(), expected.argb());
+    check(shown == expected, "the width display follows the page color with the pen unchanged");
+    page->props.color = oldPageColor;
+  }
+
+  scribbleMode->drawTool = oldDrawTool;
+  app->setPen(oldPen);
+  app->updatePenToolbar();
+  scribbleDoc->newDocument();
+  return nbad;
+}
+
 int ScribbleTest::outlineTest()
 {
   int nbad = 0;
@@ -4502,6 +4575,7 @@ void ScribbleTest::runAll(bool runsynctest)
   nUnitFailed += dashStyleTest();
   nUnitFailed += penWidthPresetTest();
   nUnitFailed += penSelectionTest();
+  nUnitFailed += penToolbarRefreshTest();
   nUnitFailed += outlineTest();
   nUnitFailed += outlineNestTest();
   nUnitFailed += pageMoveTest();
