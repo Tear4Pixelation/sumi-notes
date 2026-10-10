@@ -79,6 +79,47 @@ on a branch (as `crash-symbols-121` did), then compare `__TEXT,__text` of the ol
 even though the UUID differs; the extra commit only changes the embedded short hash
 (`SCRIBBLE_REV_NUMBER`) and the build number in the Info.plist, both the same length.
 
+## Resume (black screen after returning from background)
+
+What SDL's UIKit backend sends (`SDL/src/video/SDL_video.c`, `SDL_OnApplication*`):
+
+- resign active: `FOCUS_LOST`, `MINIMIZED`, then `SDL_APP_WILLENTERBACKGROUND` (also for Control Center or
+  an app switcher peek that never reaches the background)
+- `SDL_APP_DIDENTERBACKGROUND`, `SDL_APP_WILLENTERFOREGROUND`
+- become active: `SDL_APP_DIDENTERFOREGROUND`, then per window `FOCUS_GAINED` and `RESTORED`
+- never `EXPOSED`. Resizes come from `viewDidLayoutSubviews` as `RESIZED`/`SIZE_CHANGED`, and SDL drops
+  any still-queued size event when a new one arrives (`RemovePendingSizeChangedAndResizedEvents`).
+
+How the app handles them: the filter (`ScribbleApp::sdlEventFilter`, runs inside the UIKit callback on the
+main thread) saves on WILLENTERBACKGROUND, sets `Application::isSuspended` on DIDENTERBACKGROUND and clears
+it on DIDENTERFOREGROUND. While suspended `tracedGuiLayoutAndDraw()` returns before `SvgGui::layoutAndDraw`,
+so no GL calls and the dirty state is kept, not lost. All off-screen rendering (thumbnails, PDF, screenshot)
+is `PAINT_SW`; GL is only touched inside the frame. The GL context is never destroyed, so textures and
+`nvglFB` survive. Every frame blits the whole of `nvglFB` to SDL's renderbuffer, so *any* frame repaints
+the full screen.
+
+**Fixed bug (confirmed from code):** nothing forced a frame on resume. `SvgGui::sdlWindowEvent` repaints
+everything on `EXPOSED`, and on `RESTORED` only under `#if PLATFORM_ANDROID`; iOS sends no `EXPOSED`. So
+after resume nothing was dirty and no frame was presented until the user touched something. If the
+CAEAGLLayer still held its last frame that is invisible; if not (see below) the screen is black.
+`ScribbleApp::sdlEventHandler` now unions the window into `gui->closedWindowBounds` on `RESTORED` under
+`PLATFORM_IOS`, exactly what the `EXPOSED` case does. (The cleaner fix is `PLATFORM_ANDROID` ->
+`PLATFORM_MOBILE` in ugui's `sdlWindowEvent`; done in the app to avoid a ugui fork commit.)
+
+Why the layer can be empty on resume (hypotheses, not verified on a device):
+
+- iOS may discard a backgrounded app's layer backing store under memory pressure. `SDL_GL_RETAINED_BACKING`
+  is 0, so presented content is not guaranteed to persist. Fits "sometimes".
+- iPadOS takes app switcher snapshots in the other orientation after `DIDENTERBACKGROUND`. That runs
+  `SDL_uikitopenglview layoutSubviews` -> `updateFrame`, which reallocates the renderbuffer
+  (`renderbufferStorage:fromDrawable:`, contents undefined) - SDL issues those GL calls in the background
+  itself, outside our gate. On the way back the two size events can coalesce into one with the original
+  size, so the app may see no size change at all and redraw nothing. The fix above covers this too, since
+  `RESTORED` comes after any snapshot pass.
+
+Untested: none of this has run on an iPad. To verify, lock/unlock and use the app switcher (including
+rotating the iPad while Sumi is in the switcher) with a document open and with the document list open.
+
 ## Gaps
 
 - No TestFlight / App Store upload: that needs an App Store profile and an upload step with an App Store

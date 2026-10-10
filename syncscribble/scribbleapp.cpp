@@ -833,6 +833,16 @@ bool ScribbleApp::sdlEventHandler(SDL_Event* event)
       gui->removeTimer(win);  // external modification check timer
 #endif
     }
+#if PLATFORM_IOS
+    else if(event->window.event == SDL_WINDOWEVENT_RESTORED) {
+      // SDL's UIKit backend sends no EXPOSED on resume, only DIDENTERFOREGROUND, FOCUS_GAINED and RESTORED,
+      //  and SvgGui treats RESTORED as "repaint everything" only on Android.  Without this nothing is dirty
+      //  after resume, no frame is presented, and if iOS dropped the layer contents while we were in the
+      //  background (or SDL reallocated the renderbuffer for an app switcher snapshot in the other
+      //  orientation) the screen stays black until something gets touched.  Same as SvgGui's EXPOSED case.
+      gui->closedWindowBounds.rectUnion(win->winBounds());
+    }
+#endif
     else if(event->window.event == SDL_WINDOWEVENT_SIZE_CHANGED) {
 #if PLATFORM_OSX
       // we may want this for other desktop platforms too, but need to test first
