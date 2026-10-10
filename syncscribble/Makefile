@@ -357,6 +357,14 @@ else
 SOURCES += linux/linuxtablet.c linux/sdl3input.cpp linux/camera_v4l2.cpp ../nanovgXC/glad/glad.c
 DEFS += SCRIBBLE_TEST_PATH='"$(CURDIR)/../scribbletest"'
 DEBUG ?= 0
+# BENCH=1: an optimized (Release flags) build with the in-app test modes compiled in, in Bench/.  A plain
+#  Release build has none (basics.h defines SCRIBBLE_TEST only without NDEBUG), so `--perftest` and
+#  `--benchtest` do nothing there.  This is what tools/perf-bench.sh runs by default.
+BENCH ?= 0
+ifneq ($(BENCH),0)
+  DEFS += SCRIBBLE_TEST=1
+  BUILDDIR ?= Bench
+endif
 USE_SYSTEM_SDL ?= 0
 ifneq ($(USE_SYSTEM_SDL),0)
   # Linux - pass `USE_SYSTEM_SDL=1` to use the system SDL2 (via pkg-config Makefile.unix)
@@ -371,8 +379,8 @@ else
   ifneq ($(DEBUG), 0)
     LIBS = ../SDL/Debug/libSDL2d.a
   else
-    # use $(BUILDDIR) to support Release and LinuxRel
-    LIBS = ../SDL/$(BUILDDIR)/libSDL2.a
+    # use $(BUILDDIR) to support Release and LinuxRel (a BENCH=1 build links the Release SDL)
+    LIBS = ../SDL/$(if $(filter-out 0,$(BENCH)),Release,$(BUILDDIR))/libSDL2.a
   endif
 endif
 

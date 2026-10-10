@@ -4344,6 +4344,11 @@ std::string ScribbleApp::runTest(std::string runtype)
     test.performanceTest();
     return test.resultStr;
   }
+  else if(runtype == "benchtest") {
+    ScribbleTest test(activeDoc(), bookmarkArea, scribbleMode);
+    test.benchTest();
+    return test.resultStr;
+  }
   else if(runtype == "inputtest") {
     // see 83a76eea88eb for TouchInputFilter::notifyTouchEvent test
     ScribbleTest test(activeDoc(), bookmarkArea, scribbleMode);

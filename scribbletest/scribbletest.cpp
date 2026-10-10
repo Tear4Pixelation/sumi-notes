@@ -30,6 +30,7 @@
 #include "pagetagtest.cpp"
 #include "widthpresettest.cpp"
 #include "jumphistorytest.cpp"
+#include "benchtest.cpp"
 #include "pentoolbar.h"
 
 // Ideally, these tests should be run under valgrind to help check for memory leaks
@@ -4557,6 +4558,9 @@ void ScribbleTest::runAll(bool runsynctest)
 
 void ScribbleTest::performanceTest()
 {
+  // frames are timed as work, not as waits for vblank (see benchtest.cpp; SUMI_BENCH_VSYNC=1 keeps vsync)
+  if(Application::glRender && !(getenv("SUMI_BENCH_VSYNC") && atoi(getenv("SUMI_BENCH_VSYNC")) > 0))
+    SDL_GL_SetSwapInterval(0);
   scribbleArea->gotoPos(0, Point(0,0));
   scribbleMode->setMode(MODE_STROKE);
   scribbleDoc->app->setPen(ScribblePen(Color::BLACK, 1, ScribblePen::TIP_FLAT | ScribblePen::WIDTH_PR, 1.0, 2.0));
@@ -4579,7 +4583,7 @@ void ScribbleTest::performanceTest()
   // draw many strokes
   for(Dim y = 20; y < 800; y += 20) {
     for(Dim x = 20; x < 800; x += 20) {
-      ScribbleApp::processEvents();
+      benchFrame();  // was ScribbleApp::processEvents(): a blocking wait that painted nothing (benchtest.cpp)
       s3(x, y);
       scribbleArea->doRefresh();
     }
@@ -4593,7 +4597,7 @@ void ScribbleTest::performanceTest()
   doCommand(ID_SELALL);
   // move them around
   for(int ii = 0; ii < 10; ii++) {
-    ScribbleApp::processEvents();
+    benchFrame();  // was ScribbleApp::processEvents(): a blocking wait that painted nothing (benchtest.cpp)
     s3(400, 400);
     scribbleArea->doRefresh();
   }
@@ -4607,14 +4611,14 @@ void ScribbleTest::performanceTest()
   ie(400, 800, 0, pen, press);
   for(int ii = 0; ii < 2000; ii++) {
     // cleverly generate a triangle wave
-    ScribbleApp::processEvents();
+    benchFrame();  // was ScribbleApp::processEvents(): a blocking wait that painted nothing (benchtest.cpp)
     ie(400, 16*ABS((ii % 100) - 50), 0, pen);
     scribbleArea->doRefresh();
   }
-  ScribbleApp::processEvents();
+  benchFrame();  // was ScribbleApp::processEvents(): a blocking wait that painted nothing (benchtest.cpp)
   ie(0, 0, 1, pen, release);
   scribbleArea->doRefresh();
-  ScribbleApp::processEvents();
+  benchFrame();  // was ScribbleApp::processEvents(): a blocking wait that painted nothing (benchtest.cpp)
   t1 = mSecSinceEpoch();
   int panTime = t1 - t0;
   t0 = t1;
