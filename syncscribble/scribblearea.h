@@ -5,6 +5,7 @@
 #include "jumphistory.h"
 #include "selection.h"
 #include "nightmode.h"
+#include "smartscale.h"
 
 struct Timer;
 
@@ -101,6 +102,11 @@ public:
   void updateUIState(UIState* state);
   bool hasSelection() const { return currSelection != NULL; }
   const Selection* selection() const { return currSelection; }
+  // smart scale ("Resize Handwriting", smart-scale.md): the selection's handle resizes its handwriting on
+  //  the ruled lines, reflowing it; a toggle on the selection, offered by the selection popup
+  bool canSmartScale() const;
+  bool smartScaleOn() const;
+  void toggleSmartScale();
   void setStrokeProperties(const StrokeProperties& props, bool undoable = true);
   // dashStyle, if given, receives the selection's ScribblePen::DASH_* (DASH_MIXED if it has several)
   ScribblePen getPenForSelection(int* dashStyle = NULL) const;
@@ -276,6 +282,25 @@ protected:
   // the pen's local x at the press: the side of a vertical line (column stop) Insert Lines keeps to when it
   //  moves whole lines (insSpaceSelX == MIN_DIM)
   Dim insSpaceColX = 0;
+  // smart scale gesture (smartscalegesture.cpp): the selection's ink as it was at the press, and what the
+  //  layout needs; the later content that follows the text up or down is tempSelection
+  struct SmartScaleGesture {
+    std::vector<Element*> strokes;
+    std::vector<SmartScaleItem> items;  // ruled: per stroke, its local box and line before the gesture
+    SmartScaleParams params;
+    RulingFrame frame;
+    bool ruled = false;
+    int blockedLine = INT_MIN;  // lowest line of the selection's range holding other ink (it stays)
+    Point anchor;  // unruled: the scale origin (left edge, baseline estimate)
+    Point corner;  // the selection's top left: the drag is measured from it
+    Dim scale = 1;
+  };
+  std::unique_ptr<SmartScaleGesture> smartScale;
+  void smartScaleStart();
+  void smartScaleMove(Point pos);
+  void smartScaleFinish();
+  void smartScaleCancel();
+
   // for resize selection
   Point scaleOrigin;
   Dim bookmarkSnapX;

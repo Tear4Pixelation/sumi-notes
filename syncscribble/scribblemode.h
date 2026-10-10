@@ -13,6 +13,8 @@ enum { MODE_NONE = 10, MODE_PAN, MODE_STROKE, MODE_ERASE, MODE_ERASESTROKE, MODE
     //  both at once, is what ScribbleArea runs them as.  No longer offered (tests use them): the options row
     //  offers MODE_INSSPACEAUTO, whose drag picks the axis - or both - with a dead zone (see doMoveEvent)
     MODE_INSSPACEDOWN, MODE_INSSPACERIGHT, MODE_INSSPACEAUTO,
+    // dragging the smart scale handle ("Resize Handwriting", smart-scale.md); never a tool
+    MODE_SMARTSCALE,
     MODE_LAST};
 
 constexpr int MODEMOD_NONE = 0;
@@ -23,6 +25,7 @@ constexpr int MODEMOD_SCALESEL = 0x08;
 constexpr int MODEMOD_ROTATESEL = 0x10;
 constexpr int MODEMOD_CROPSEL = 0x20;
 constexpr int MODEMOD_SHAPEHANDLE = 0x40;
+constexpr int MODEMOD_SMARTSCALE = 0x80;
 // flags indicating cursor entered from edge of screen
 constexpr int MODEMOD_EDGETOP = 0x100;
 constexpr int MODEMOD_EDGEBOTTOM = 0x200;
@@ -42,7 +45,8 @@ enum {ID_UNDO = 100, ID_REDO, ID_SELALL, ID_SELSIMILAR, ID_INVSEL, ID_DELSEL, ID
     ID_PASTE, ID_CANCEL, ID_EXPANDDOWN, ID_EXPANDRIGHT, ID_ZOOMIN, ID_ZOOMOUT, ID_RESETZOOM, ID_PREVPAGE,
     ID_NEXTPAGE, ID_PAGEAFTER, ID_PAGEBEFORE, ID_DELPAGE, ID_NEWDOC, ID_ZOOMALL, ID_ZOOMWIDTH, ID_DUPSEL,
     ID_LINKBOOKMARK, ID_PREVVIEW, ID_NEXTVIEW, ID_SELRECENT, ID_DESELRECENT, ID_SAVESEL, ID_NEXTPAGENEW,
-    ID_PREVSCREEN, ID_NEXTSCREEN, ID_STARTOFDOC, ID_ENDOFDOC, ID_SCROLLUP, ID_SCROLLDOWN, ID_UNGROUP, ID_LASTPAGE};
+    ID_PREVSCREEN, ID_NEXTSCREEN, ID_STARTOFDOC, ID_ENDOFDOC, ID_SCROLLUP, ID_SCROLLDOWN, ID_UNGROUP, ID_LASTPAGE,
+    ID_SMARTSCALE};
 
 constexpr int ID_EMULATEPENBTN = 3000;
 

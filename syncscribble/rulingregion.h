@@ -104,6 +104,9 @@ Point snapCornerToRect(const RulingFrame& frame, const std::vector<Point>& corne
 //  spanning regions are therefore resolved by where most of the ink is, never by an average - a mean of
 //  two pitches would be a line height that exists nowhere.  `fallback` stands in for an unruled frame.
 Dim selectionLineHeight(const std::vector<Point>& centres, const std::function<RulingFrame(Point)>& frameAt, Dim fallback);
+// the frame itself, by the same vote (a default RulingFrame, unruled, for no centres); smart scale lays the
+//  selection out in it
+RulingFrame selectionFrame(const std::vector<Point>& centres, const std::function<RulingFrame(Point)>& frameAt);
 
 // Music paper ("staff" ruling).  The y ruling is the height of one band, which holds one staff of
 //  STAFF_LINES lines; the staff spacing is yRuling/STAFF_BAND_SPACES and the staff sits centred in its

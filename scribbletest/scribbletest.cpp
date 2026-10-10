@@ -24,6 +24,7 @@
 #include "tabstest.cpp"
 #include "regiontest.cpp"
 #include "erasetest.cpp"
+#include "smartscaletest.cpp"
 #include "librarytest.cpp"
 #include "notefultest.cpp"
 #include "pagetagtest.cpp"
@@ -3566,6 +3567,109 @@ int ScribbleTest::reflowIndentTest()
   return nbad;
 }
 
+// Smart scale ("Resize Handwriting", smart-scale.md) end to end: three full lines of handwriting on lined
+//  paper, a paragraph below them after a blank line.  The selection popup's toggle gives the selection its
+//  handle; dragging it halfway shrinks the ink onto two lines, on the rules, strokes thinner, and pulls the
+//  paragraph below up by the freed line - and one undo puts all of it back.
+int ScribbleTest::smartScaleTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: smart scale: %s\n", what); }
+  };
+  auto at = [&](Point pagept, int ev) {
+    Point scr = scribbleArea->dimToScreen(scribbleArea->pageDimToDim(pagept));
+    ie(scr.x, scr.y, 0, pen, ev);
+  };
+  const Dim pitch = 30, row = 4*pitch, textLeft = 20;
+  auto word = [&](Dim x, Dim rowTop, int n) {
+    scribbleMode->setMode(MODE_STROKE);
+    for(int ii = 0; ii < n; ++ii) {
+      Dim lx = x + ii*14;
+      at(Point(lx, rowTop + 0.35*pitch), press);
+      at(Point(lx + 4, rowTop + 0.85*pitch), INPUTEVENT_MOVE);
+      at(Point(lx + 8, rowTop + 0.35*pitch), INPUTEVENT_MOVE);
+      at(Point(lx + 11, rowTop + 0.85*pitch), INPUTEVENT_MOVE);
+      at(Point(lx + 11, rowTop + 0.85*pitch), release);
+    }
+    return x + n*14;
+  };
+  auto lineOf = [&](const Element* s) { return int(std::floor(s->com().y/pitch)); };
+
+  scribbleDoc->newDocument();
+  doCommand(ID_RESETZOOM);
+  scribbleDoc->app->setPen(ScribblePen(Color::BLACK, 2, ScribblePen::TIP_ROUND));
+  PageProperties props(768, 1024, 0, pitch, 0, Color::WHITE, Color::BLUE, 1.5);
+  scribbleDoc->setPageProperties(&props, true, false, false, false);
+  for(int line = 0; line < 3; ++line) {
+    Dim x = textLeft;
+    while(x + 60 < 740) x = word(x, row + line*pitch, 4) + 16;
+  }
+  word(textLeft, row + 4*pitch, 4);  // the next paragraph, after a blank line
+  std::map<Element*, Rect> before;
+  std::vector<Element*> following;
+  for(Element* s : scribbleArea->currPage->children()) {
+    before[s] = s->bbox();
+    if(lineOf(s) == 8) following.push_back(s);
+  }
+  check(following.size() == 4, "the paragraph below is written");
+
+  scribbleMode->setMode(MODE_SELECTRECT);
+  at(Point(5, row + 2), press);
+  at(Point(400, row + 50), INPUTEVENT_MOVE);
+  at(Point(760, row + 3*pitch - 2), INPUTEVENT_MOVE);
+  at(Point(760, row + 3*pitch - 2), release);
+  Selection* sel = scribbleArea->currSelection;
+  check(sel && sel->count() == int(before.size()) - 4, "the three lines are selected");
+  if(!sel)
+    return nbad;
+  check(scribbleArea->canSmartScale() && !scribbleArea->smartScaleOn(), "smart scale offered, off");
+  doCommand(ID_SMARTSCALE);
+  check(scribbleArea->smartScaleOn(), "the toggle turns it on");
+  RectSelector* selector = sel->selector && sel->selector->offersSmartScale() ?
+      static_cast<RectSelector*>(sel->selector) : NULL;
+  check(selector != NULL, "a rect selection");
+  if(!selector)
+    return nbad;
+  Rect r = selector->rect();
+  check(std::isnan(selector->scaleHandleHit(Point(r.right, r.bottom), false).x),
+      "the square scale handles are gone while it is on");
+  size_t stepsBefore = scribbleDoc->history->undoSteps();
+
+  // drag the round handle halfway towards the selection's top left
+  const Point corner = sel->getBBox().origin(), grip(r.right, r.bottom);
+  at(grip, press);
+  for(int ii = 1; ii <= 10; ++ii)
+    at(grip + (corner - grip)*(0.05*ii), INPUTEVENT_MOVE);
+  at(grip + (corner - grip)*0.5, release);
+
+  int lastLine = 0, offRule = 0;
+  bool halved = true;
+  for(Element* s : sel->strokes) {
+    lastLine = std::max(lastLine, lineOf(s));
+    // letters end 0.15 pitch above the rule (plus the pen's half width), half that once shrunk on the rule
+    Dim fromRule = (lineOf(s) + 1)*pitch - s->bbox().bottom;
+    Dim wasFromRule = (std::floor(before[s].bottom/pitch) + 1)*pitch - before[s].bottom;
+    if(std::abs(fromRule - 0.5*wasFromRule) > 0.6) ++offRule;
+    halved = halved && std::abs(s->bbox().height() - 0.5*before[s].height()) < 0.6;
+  }
+  check(lastLine == 5, "the three lines shrink onto two");
+  check(offRule == 0, "shrunk letters still sit on their rules");
+  check(halved, "letters (and their pen width) are half size");
+  check(std::all_of(following.begin(), following.end(), [&](Element* s) { return lineOf(s) == 7; }),
+      "the paragraph below is pulled up by the freed line");
+  check(scribbleArea->smartScaleOn(), "still on after the drag");
+  check(scribbleDoc->history->undoSteps() == stepsBefore + 1, "one undo step");
+
+  doCommand(ID_UNDO);
+  bool restored = true;
+  for(Element* s : scribbleArea->currPage->children())
+    restored = restored && before.count(s) && approxEq(s->bbox(), before[s], 0.01);
+  check(restored, "one undo puts everything back");
+  scribbleDoc->clearSelection();
+  return nbad;
+}
+
 // The Skip Lines toggle (skippedLineFrame): with it on, reflow wraps to the next *text* line, an underline in
 //  a blank line does not pull anything onto it, and vertical steps are two lines; with it off, nothing changes.
 //  Default test page: lined, 40 pitch, margin 100.
@@ -4239,7 +4343,7 @@ void ScribbleTest::runAll(bool runsynctest)
   int nThumbsFailed = 0;
   int nUnitFailed = runScanTests() + runShapeTests() + runColorTests() + runLayerTests() + runLibraryTests()
       + runRegionTests() + runNotefulTests() + runPageTagTests() + runWidthPresetTests() + runTabTests()
-      + runJumpHistoryTests() + runEraseTests();
+      + runJumpHistoryTests() + runEraseTests() + runSmartScaleTests();
   std::vector<std::string> slFailed;
   void (ScribbleTest::*tests[])() = {
     &ScribbleTest::test0,
@@ -4425,6 +4529,7 @@ void ScribbleTest::runAll(bool runsynctest)
   nUnitFailed += eraserHitTest();
   nUnitFailed += rulingRegionTest();
   nUnitFailed += reflowIndentTest();
+  nUnitFailed += smartScaleTest();
   nUnitFailed += skippedLinesTest();
   nUnitFailed += insSpaceAxisTest();
   nUnitFailed += undoPersistTest();

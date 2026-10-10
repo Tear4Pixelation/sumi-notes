@@ -137,6 +137,7 @@ public:
   Action* actionPreferences;
   Action* actionCreate_Link;
   Action* actionScreenshot;
+  Action* actionSmart_Scale;  // Resize Handwriting (smart-scale.md), on the selection popup only
   Action* actionUngroup;
   Action* actionUpdateCheck;
   Action* actionFree_Eraser;

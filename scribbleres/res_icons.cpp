@@ -1153,6 +1153,17 @@ static const char* icons__ic_menu_sidebar_right_svg = R"~~~~(<?xml version="1.0"
 </svg>
 )~~~~";
 
+static const char* icons__ic_menu_smart_scale_svg = R"~~~~(<?xml version="1.0" encoding="utf-8"?>
+<svg version="1.2" baseProfile="tiny" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+  x="0px" y="0px" viewBox="0 0 24 24" xml:space="preserve">
+<!-- reicon "size" (outline), https://reicon.dev - MIT -->
+<g class="icon">
+  <path fill="none" d="M16.97 12.25V16.75C16.97 20.5 15.47 22 11.72 22H7.22C3.47 22 1.97 20.5 1.97 16.75V12.25C1.97 8.5 3.47 7 7.22 7H11.72C15.47 7 16.97 8.5 16.97 12.25Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path fill="none" d="M21.97 5.85V9.15C21.97 11.9 20.87 13 18.12 13H16.97V12.25C16.97 8.5 15.47 7 11.72 7H10.97V5.85C10.97 3.1 12.07 2 14.82 2H18.12C20.87 2 21.97 3.1 21.97 5.85Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+</svg>
+)~~~~";
+
 static const char* icons__ic_menu_split_bt_svg = R"~~~~(<?xml version="1.0" encoding="utf-8"?>
 <svg version="1.2" baseProfile="tiny" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
   x="0px" y="0px" viewBox="0 0 24 24" xml:space="preserve">
@@ -1469,6 +1480,7 @@ static void LOAD_RES_FN() { addStringResources({
   {"icons/ic_menu_share.svg", icons__ic_menu_share_svg},
   {"icons/ic_menu_sidebar_left.svg", icons__ic_menu_sidebar_left_svg},
   {"icons/ic_menu_sidebar_right.svg", icons__ic_menu_sidebar_right_svg},
+  {"icons/ic_menu_smart_scale.svg", icons__ic_menu_smart_scale_svg},
   {"icons/ic_menu_split_bt.svg", icons__ic_menu_split_bt_svg},
   {"icons/ic_menu_split_lr.svg", icons__ic_menu_split_lr_svg},
   {"icons/ic_menu_split_rl.svg", icons__ic_menu_split_rl_svg},
