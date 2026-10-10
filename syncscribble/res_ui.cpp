@@ -6,6 +6,9 @@ const char* mainWindowSVG = R"#(
   <g class="window-layout" box-anchor="fill" layout="flex" flex-direction="column">
     <g id="pen-toolbar-container" box-anchor="hfill" layout="box">
     </g>
+    <!-- the top tab bar (topbar.h), stuck to the top: the canvas and its floating toolbar start below it -->
+    <g id="top-tabbar-container" box-anchor="hfill" layout="box">
+    </g>
 
     <g id="main-container" box-anchor="fill" layout="box">
       <g class="sub-window-layout" box-anchor="fill" layout="flex" flex-direction="row">
@@ -112,6 +115,9 @@ const char* prefInfoXML = R"#(
   <pref name="uiTheme" type="int" group="User Interface"
       enum="Dark;Light" enumvals="1;2"
       title="Theme" description="User interface style" />
+  <pref name="topTabBar" type="int" level="1" group="User Interface"
+      enum="Off;Library only;Library + Writing"
+      title="Top tab bar" description="Open documents as tabs along the top of the window" />
   <pref name="popupToolbar" type="bool" group="User Interface"
       title="Popup selection tools" description="Show floating toolbar when selection is made" />
   <!-- pref name="scrollerLocation" type="int" group="User Interface"

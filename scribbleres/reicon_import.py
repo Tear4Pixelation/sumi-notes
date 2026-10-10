@@ -74,6 +74,11 @@ MAPPING = {
   'ic_menu_sidebar_right': 'sidebar-right',
   # editor tabs: the toolbar button and the sidebar view that list the open documents (sidebartabs.cpp)
   'ic_menu_tabs': 'files',
+  # the top tab bar (topbar.cpp, docs/agent/top-tab-bar.md): the library (home) button - its filled
+  #  variant, ic_menu_home_fill, is in FILLED - and the View popup's button.  eye-scan is a placeholder:
+  #  swapping it is this one line plus re-running the script
+  'ic_menu_home': 'home',
+  'ic_menu_view': 'eye-scan',
   'ic_menu_minus': 'minus',
   'ic_menu_next': 'chevron-right',
   'ic_menu_pagesel': 'layers',
@@ -126,7 +131,9 @@ ROTATE = {'ic_menu_overflow': ('more-h', 90),
 
 # the document list draws these at thumbnail size rather than toolbar size, where the outline weight
 # reads as spindly; everything else in the app stays outline
-FILLED = {'ic_file_fill': 'file', 'ic_folder_fill': 'folder2'}
+FILLED = {'ic_file_fill': 'file', 'ic_folder_fill': 'folder2',
+  # the top tab bar's home button while the library is the active "tab"
+  'ic_menu_home_fill': 'home'}
 
 TEMPLATE = """<?xml version="1.0" encoding="utf-8"?>
 <svg version="1.2" baseProfile="tiny" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"

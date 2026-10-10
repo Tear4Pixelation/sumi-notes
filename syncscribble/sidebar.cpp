@@ -173,7 +173,7 @@ void Sidebar::createUI()
   viewMenu->addItem(_("Outline"), SvgGui::useFile("icons/ic_menu_outline.svg"), [this](){ setView(OUTLINE); });
   viewMenu->addItem(_("Layers"), SvgGui::useFile("icons/ic_menu_pagesel.svg"), [this](){ setView(LAYERS); });
   viewMenu->addItem(_("Pages"), SvgGui::useFile("icons/ic_menu_pages.svg"), [this](){ setView(PAGES); });
-  viewMenu->addItem(_("Tabs"), SvgGui::useFile("icons/ic_menu_tabs.svg"), [this](){ setView(TABS); });
+  tabsViewItem = viewMenu->addItem(_("Tabs"), SvgGui::useFile("icons/ic_menu_tabs.svg"), [this](){ setView(TABS); });
   setupPopupMenu(viewSelector, viewMenu);
   panelContent->addWidget(viewSelector);
 
@@ -506,6 +506,24 @@ void Sidebar::applyPlacement(bool wasOpen)
   placing = false;
 }
 
+void Sidebar::setTabsViewAvailable(bool available)
+{
+  if(tabsViewItem)
+    tabsViewItem->setVisible(available);
+  if(available == tabsViewAvailable)
+    return;
+  tabsViewAvailable = available;
+  if(!available && currView == TABS) {
+    currView = OUTLINE;  // not stored: the cfg keeps TABS for when the bar is turned off again
+    refresh();
+  }
+  else if(available && currView != TABS && !temporary
+      && ScribbleApp::cfg->Int("sidebarView", OUTLINE) == TABS) {
+    currView = TABS;
+    refresh();
+  }
+}
+
 void Sidebar::updateInsets()
 {
   if(!panel)
@@ -515,7 +533,7 @@ void Sidebar::updateInsets()
   //  the difference and drifts out of line with the toolbar above it.
   panel->node->setAttribute("box-anchor", onLeft ? "left vfill" : "right vfill");
   // below the toolbar, which steps down past the status bar (MainWindow::orientationChanged())
-  panel->setMargins(sbTopInset + ScribbleApp::topInset, onLeft ? sbCanvasGutter : sbEdgeInset,
+  panel->setMargins(sbTopInset + ScribbleApp::editorTopInset(), onLeft ? sbCanvasGutter : sbEdgeInset,
       sbEdgeInset, onLeft ? sbEdgeInset : sbCanvasGutter);
   // select mode's bar is wider than the panel, so it floats over the canvas, one edge inset beside the
   //  panel on whichever side the panel is, and 43 up as in the document list (ui-floating-bar.md) - which

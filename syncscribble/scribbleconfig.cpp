@@ -223,6 +223,14 @@ void ScribbleConfig::init()
   cfg["tabUnloadSecs"] = 600;
   // which of the restored tabs (cfgS openTabs) was active, so a restart reopens that one
   cfg["activeTab"] = 0;
+  // The top tab bar (docs/agent/top-tab-bar.md, TopBar::Mode): 0 = off (tabs only in the sidebar),
+  //  1 = over the library only, 2 = over the library and the editor, where it replaces the sidebar's
+  //  Tabs view and holds the View popup and the overflow menu.  On in both by default, including for
+  //  existing installs that never saved a value.
+  cfg["topTabBar"] = 2;
+  // the app-level "system status bar shown" (ScribbleApp::statusBarShown, View > Status Bar): the space
+  //  above the top bar (or the toolbar) left for it; mobile shows the system's, desktop has none
+  cfg["showStatusBar"] = PLATFORM_MOBILE ? 1 : 0;
 
   cfgF["themeSeedHue"] = 218.0f;
   cfgF["themeVividness"] = 1.0f;

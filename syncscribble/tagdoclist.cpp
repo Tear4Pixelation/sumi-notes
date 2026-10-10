@@ -7,6 +7,8 @@
 #include "document.h"
 #include "scribbleconfig.h"
 #include "pdfimport.h"
+#include "topbar.h"
+#include "mainwindow.h"
 #include "ulib/stringutil.h"
 #include <algorithm>
 #include <codecvt>
@@ -34,7 +36,10 @@ TagNameDialog::TagNameDialog(const char* title, const char* initialName) : Popup
 
 static const char* tagDocListWindowSVG = R"#(
 <svg class="window tagdoclist" layout="box">
-  <g id="main-layout" box-anchor="fill" layout="flex" flex-direction="row"></g>
+  <g box-anchor="fill" layout="flex" flex-direction="column">
+    <g id="library-topbar-container" box-anchor="hfill" layout="box"></g>
+    <g id="main-layout" box-anchor="fill" layout="flex" flex-direction="row"></g>
+  </g>
 </svg>
 )#";
 
@@ -1708,6 +1713,31 @@ void TagDocList::createUI()
   mainLayout->addWidget(sidebar);
   mainLayout->addWidget(content);
 
+  // The top tab bar over the library (docs/agent/top-tab-bar.md): home is the active "tab" here, and a tab
+  //  opens its document the way a card does.  No overflow menu - it is the editor's - but View is here.
+  topBar = new TopBar(true);
+  selectFirst("#library-topbar-container")->addWidget(topBar);
+  if(ScribbleApp::win)
+    setupPopupMenu(topBar->viewBtn, ScribbleApp::win->createViewPopup(true));
+  topBar->onTab = [this](const std::string& path){
+    if(selectMode)
+      setSelectMode(false);
+    selectedFile = path;
+    selectedPage = -1;
+    finish(EXISTING_DOC);
+  };
+  // the library's bar marks no tab active, so it offers no close button; kept for completeness
+  topBar->onCloseTab = [this](const std::string& path){
+    gui()->setTimer(1, this, [this, path](){
+      ScribbleApp* app = ScribbleApp::app;
+      int idx = app ? app->tabs.find(path) : -1;
+      if(idx >= 0)
+        app->closeTab(idx);
+      topBar->refresh();
+      return 0;
+    });
+  };
+
   // grid item prototype - identical to DocumentList's, kept as a local copy since the two views are
   // deliberately independent (see tagdoclist.h).  Anchored to the top of its grid row: cells differ in
   //  height (a notebook's tag line, a page card's notebook line), and unanchored a shorter one is
@@ -1898,8 +1928,17 @@ void TagDocList::setup(Window* parent, bool hasCurrentNote)
   selectedDocs.clear();
   fabRow->setVisible(true);
   selectBar->setVisible(false);
-  // clear of the status bar, which the window extends under (ScribbleApp::topInset)
-  docSearchRow->setMargins(8 + ScribbleApp::topInset, 24, 0, 24);
+  // clear of the status bar, which the window extends under (ScribbleApp::topInset) - or the top bar
+  //  takes it, as padding above itself
+  bool barShown = ScribbleApp::app && ScribbleApp::app->topBarInLibrary();
+  // the container, not just the bar: an empty box in the window's flex column lays out at zero size, and
+  //  the division by it left the whole library unpainted (black)
+  topBar->setVisible(barShown);
+  selectFirst("#library-topbar-container")->setVisible(barShown);
+  topBar->setTopPadding(ScribbleApp::topInset);
+  if(barShown)
+    topBar->refresh(true);
+  docSearchRow->setMargins(8 + (barShown ? 0 : ScribbleApp::topInset), 24, 0, 24);
   // the editor's Tag Page dialog adds tags to the same index file; every edit here is saved as it is
   //  made, so reading the file back loses nothing
   tagStore.load();

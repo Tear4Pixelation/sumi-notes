@@ -13,6 +13,7 @@
 
 class Document;
 class ScribbleConfig;
+class TopBar;
 
 // Small prompt for naming a new tag or renaming an existing one -- deliberately not NewDocDialog,
 // which is filesystem-oriented (existence checks, invalid-path characters, a ruling combo box).
@@ -166,6 +167,8 @@ private:
   TextEdit* tagSearchEdit;
   TextEdit* docSearchEdit;
   Widget* docSearchRow;
+  // the top tab bar (topbar.h, docs/agent/top-tab-bar.md), over the whole library; shown per topTabBar
+  TopBar* topBar = NULL;
   Button* allDocumentsBtn;
   Button* newTagBtn;
   Button* multiSelectBtn;

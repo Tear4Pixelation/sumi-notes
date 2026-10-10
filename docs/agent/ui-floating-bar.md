@@ -140,3 +140,5 @@ Nothing is painted behind the status bar; content steps down instead (`ScribbleA
 
 `topInset` is the top safe area: the status bar's height (about 24 on iPad), the notch on a portrait
 iPhone, 0 in fullscreen and on desktop. Anything new pinned to the top edge should add it the same way.
+While the top tab bar is shown ([top-tab-bar.md](top-tab-bar.md)) it takes the inset as padding above
+itself, and the toolbar and sidebar below it use `ScribbleApp::editorTopInset()` (0) instead.

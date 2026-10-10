@@ -43,6 +43,7 @@ SOURCES = \
   notefulimport.cpp \
   sidebar.cpp \
   sidebartabs.cpp \
+  topbar.cpp \
   rowdrag.cpp \
   tablist.cpp \
   editortabs.cpp \
