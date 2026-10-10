@@ -66,7 +66,7 @@ case "$mode" in
   *)        last_re="${BENCH_LAST_LINE:-^BENCH_DONE}" ;;
 esac
 
-declare -a all_results
+declare -a all_results=()
 for (( run=1; run<=runs; run++ )); do
   rm -rf "$work/lib" && mkdir -p "$work/lib"
   out="$work/run$run.log" pidf="$work/app.pid"
