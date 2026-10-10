@@ -78,7 +78,7 @@ gives, an integer grid only allows a handful of segment directions. `CurveFitFil
   scratch. `CurveFitFilter::segmentKnots()` computes the four knots a segment needs level by level over
   their window; the old recursive `knotAt()` recomputed each knot's 3^passes tree separately. Both give
   bit-identical paths (checked by diffing the document perftest saves, inputCurveFit 0-4, and with
-  inputSmoothing 2). Perftest draw phase: 5.64G -> 3.16G instructions with the scratch-out change in
+  inputSmoothing 2). Perftest draw phase: 5.64G -> 2.40G instructions with the scratch-out changes in
   shapes.md.
 - **`scribbletest.cpp` sets `inputCurveFit` to 0**, alongside `inputSmoothing`: the `testN_ref.html`
   fixtures are polylines through the input points. Baseline after this change is unchanged - 0 failed

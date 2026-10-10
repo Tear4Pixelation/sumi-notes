@@ -301,11 +301,9 @@ bool fitScribble(const std::vector<Vec2>& pts, double arcLen, const Params& para
   };
 
   // Everything below, along one candidate scrub axis; fills `res` and returns true if it is a scratch-out.
-  auto tryAxis = [&](double axisAngle, std::string& axisWhy) {
-    std::vector<double> proj;
-    std::vector<int> ends;
-    project(axisAngle, proj);
-    findEndsOf(proj, ends);
+  //  `proj` and `ends` are the samples projected onto the axis and the pass ends found along it.
+  auto tryAxis = [&](double axisAngle, std::string& axisWhy, const std::vector<double>& proj,
+      const std::vector<int>& ends) {
     Vec2 axis(std::cos(axisAngle), std::sin(axisAngle)), across = axis.perp();
     int reversals = int(ends.size()) - 2;
     if(reversals < params.scribbleMinReversals) {
@@ -380,8 +378,14 @@ bool fitScribble(const std::vector<Vec2>& pts, double arcLen, const Params& para
     return true;
   };
 
-  if(tryAxis(meanAngle, why))
-    return true;
+  {
+    std::vector<double> meanProj;
+    std::vector<int> meanEnds;
+    project(meanAngle, meanProj);
+    findEndsOf(meanProj, meanEnds);
+    if(tryAxis(meanAngle, why, meanProj, meanEnds))
+      return true;
+  }
   // The mean chord direction is the scrub axis only while the passes lean less than 45 degrees.  A hand
   //  travelling fast along what it erases (half of a line, say) draws passes leaning further over than
   //  that, the mean then points along the travel, and along the travel the stroke never turns back - so
@@ -389,7 +393,9 @@ bool fitScribble(const std::vector<Vec2>& pts, double arcLen, const Params& para
   //  stroke reverses along most often first, and each still has to pass every test above.  An axis
   //  only counts if most of the motion is along it: across a line, its wobble reverses plenty of times,
   //  and picking the axis with the most reversals outright took plain lines for scratch-outs.
-  std::vector<std::pair<int, double>> candidates;  // (pass ends, angle)
+  // each candidate keeps its projection and pass ends for tryAxis(), which would only compute them again
+  struct AxisCandidate { int nEnds; double angle; std::vector<double> proj; std::vector<int> ends; };
+  std::vector<AxisCandidate> candidates;
   std::vector<double> axisProj;
   std::vector<int> axisEnds;
   for(int step = 0; step < params.scribbleAxisSteps; ++step) {
@@ -402,16 +408,15 @@ bool fitScribble(const std::vector<Vec2>& pts, double arcLen, const Params& para
     if(along < params.scribbleMinAlongFrac*spacing*(count - 1))
       continue;
     findEndsOf(axisProj, axisEnds);
-    std::vector<int>& ends = axisEnds;
-    if(int(ends.size()) - 2 < params.scribbleMinReversals)
+    if(int(axisEnds.size()) - 2 < params.scribbleMinReversals)
       continue;
-    candidates.emplace_back(int(ends.size()), angle);
+    candidates.push_back(AxisCandidate{int(axisEnds.size()), angle, axisProj, axisEnds});
   }
   std::stable_sort(candidates.begin(), candidates.end(),
-      [](const auto& lhs, const auto& rhs) { return lhs.first > rhs.first; });
-  for(const auto& candidate : candidates) {
+      [](const AxisCandidate& lhs, const AxisCandidate& rhs) { return lhs.nEnds > rhs.nEnds; });
+  for(const AxisCandidate& candidate : candidates) {
     std::string ignored;
-    if(tryAxis(candidate.second, ignored))
+    if(tryAxis(candidate.angle, ignored, candidate.proj, candidate.ends))
       return true;
   }
   return false;
