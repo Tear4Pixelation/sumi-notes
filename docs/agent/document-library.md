@@ -245,4 +245,6 @@ canvas below the status bar. It is gone: the window draws edge to edge and `Scri
 (`iosTopSafeInset()` - the top safe area on every device, iPad included - times `inputScale`, refreshed
 in `MainWindow::orientationChanged()` and on fullscreen toggles) steps down only the floating toolbar
 (`#main-toolbar-container`'s top margin), the sidebar panel (`Sidebar::updateInsets()`) and the browser's
-search row (`TagDocList::setup()`). On desktop `SUMI_TOP_INSET=24` previews it. Not yet run on a device.
+search row (`TagDocList::setup()`). On desktop, View > Status Bar (`showStatusBar`) previews it: 24 units, or
+`SUMI_TOP_INSET`. Not yet run on a device. With the top tab bar shown, the bar takes the inset as padding
+above itself and what is below it takes none (`ScribbleApp::editorTopInset()`, [top-tab-bar.md](top-tab-bar.md)).

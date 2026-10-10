@@ -14,6 +14,7 @@
 #include "bookmarkview.h"
 #include "mainwindow.h"
 #include "sidebar.h"
+#include "tagdoclist.h"
 #include <algorithm>
 
 bool ScribbleApp::tabsEnabled() const
@@ -25,6 +26,27 @@ bool ScribbleApp::tabsEnabled() const
 int ScribbleApp::activeTabIndex() const
 {
   return activeArea() ? tabs.findDoc(activeDoc()) : -1;
+}
+
+// the top tab bar (docs/agent/top-tab-bar.md)
+int ScribbleApp::topBarMode() const
+{
+  return tabsEnabled() ? std::min(std::max(cfg->Int("topTabBar"), 0), 2) : 0;
+}
+
+bool ScribbleApp::libraryShown() const
+{
+  return tagDocList && tagDocList->isVisible();
+}
+
+Dim ScribbleApp::editorTopInset()
+{
+  return app && app->topBarInEditor() ? 0 : topInset;
+}
+
+bool ScribbleApp::statusBarShown()
+{
+  return cfg->Bool("showStatusBar");
 }
 
 static TabViewState viewOf(ScribbleArea* area)
@@ -235,8 +257,9 @@ bool ScribbleApp::closeTab(int idx)
   updateSplitLabels();
   onLoadFile(activeDoc()->fileName());
   refreshUI(activeDoc(), UIState::SetDoc);
-  // the last tab: back to the library, as when the app starts with no document
-  if(tabs.empty() && !activeDoc()->fileName()[0] && !activeDoc()->isModified())
+  // the last tab: back to the library, as when the app starts with no document - unless it was closed
+  //  from the library's own top bar, which is already showing it (a second, nested library otherwise)
+  if(tabs.empty() && !activeDoc()->fileName()[0] && !activeDoc()->isModified() && !libraryShown())
     openOrCreateDoc(!PLATFORM_IOS || libraryManaged());
   return true;
 }

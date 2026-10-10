@@ -62,8 +62,14 @@ public:
   void toggleOpen() { setOpen(!isOpen()); }
   // reapply the panel's margins, e.g. after ScribbleApp::topInset changed
   void updateInsets();
+  // The top tab bar, shown over the editor, replaces the Tabs view (docs/agent/top-tab-bar.md): it leaves
+  //  the view selector, and a sidebar showing it falls back to the outline.  The stored view is left
+  //  alone, so turning the bar off again brings Tabs back where it was.
+  void setTabsViewAvailable(bool available);
 
 private:
+  Widget* tabsViewItem = NULL;
+  bool tabsViewAvailable = true;
   void createUI();
   // move this widget between the flex row (pinned) and the overlay stack (floating); the one place
   //  that knows about either parent

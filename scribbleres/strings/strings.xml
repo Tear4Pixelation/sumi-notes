@@ -344,6 +344,17 @@
   <string name="sidebar_tabs">Tabs</string>
   <string name="sidebar_search_tabs">Search tabs</string>
   <string name="tab_close">Close Tab</string>
+  <!-- top tab bar (docs/agent/top-tab-bar.md) -->
+  <string name="topbar_library">Library</string>
+  <string name="topbar_menu">Menu</string>
+  <string name="menu_export">Export</string>
+  <string name="menu_exportpng">Export PNG...</string>
+  <string name="menu_statusbar">Status Bar</string>
+  <string name="pref_toptabbar">Top tab bar</string>
+  <string name="pref_toptabbar_desc">Open documents as tabs along the top of the window</string>
+  <string name="pref_toptabbar_off">Off</string>
+  <string name="pref_toptabbar_library">Library only</string>
+  <string name="pref_toptabbar_both">Library + Writing</string>
   <string name="menu_webview">Show Web View</string>
   <string name="menu_exportdocs">Backup Documents</string>
   <string name="menu_addbookmark">Bookmark</string>

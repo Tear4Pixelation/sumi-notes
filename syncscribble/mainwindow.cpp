@@ -13,6 +13,7 @@
 #include "tagmenu.h"
 #include "configdialog.h"
 #include "sidebar.h"
+#include "topbar.h"
 #include "usvg/svgparser.h"
 
 // SVG for main window, preferences info
@@ -332,6 +333,8 @@ void MainWindow::refreshUI(ScribbleDoc* doc, int reason)
   syncTagPlaceHint();
   if(sidebar)
     sidebar->refreshIfChanged();
+  if(topBar && topBar->isVisible())
+    topBar->refresh();
 
   // if a pen was released, may need to save pen to recent pens list
   if(reason & (1 << UIState::PenRelease)) {
@@ -1118,16 +1121,145 @@ void MainWindow::orientationChanged()
     scribbleAreaStatusInset.y = std::min(std::max(bottom, 6.0f), 18.0f);
   }
   // safe area insets are in points, i.e. SDL window coordinates
+  // (with the status bar hidden - applyStatusBar - the safe area shrinks to the notch, or to nothing)
   ScribbleApp::topInset = iosTopSafeInset()*Application::gui->inputScale;
+#elif PLATFORM_ANDROID
+  // targetSdk 29: the system lays the window out below a shown status bar, so nothing reaches under it
+  ScribbleApp::topInset = 0;
 #else
-  // SUMI_TOP_INSET previews a status bar inset on desktop, where there is none
+  // Desktop has no status bar; turned on (View > Status Bar) it previews one: 24 units, or SUMI_TOP_INSET
   const char* previewInset = getenv("SUMI_TOP_INSET");
-  ScribbleApp::topInset = previewInset ? atof(previewInset) : 0;
+  ScribbleApp::topInset = !ScribbleApp::statusBarShown() ? 0 : previewInset ? atof(previewInset) : 24;
 #endif
-  selectFirst("#main-toolbar-container")->setMargins(ScribbleApp::topInset, 0, 0, 0);
+  // with the top bar over the editor, the inset is padding above the bar instead (TopBar::setTopPadding)
+  selectFirst("#main-toolbar-container")->setMargins(ScribbleApp::editorTopInset(), 0, 0, 0);
+  if(topBar)
+    topBar->setTopPadding(ScribbleApp::topInset);
   if(sidebar)
     sidebar->updateInsets();
+  // The canvas moves when the bar or its padding changes height, and a canvas only repaints what it
+  //  thinks changed: the strip it gains kept the bar's old pixels (tab titles ghosting under the bar).
+  //  Once laid out at the new size, everything is repainted.
+  if(gui() && app) {
+    gui()->setTimer(1, this, [this](){
+      for(ScribbleArea* area : app->scribbleAreas) {
+        area->repaintAll(true);
+        if(area->widget)
+          area->widget->node->setDirty(SvgNode::PIXELS_DIRTY);
+      }
+      redraw();
+      return 0;
+    });
+  }
 }
+
+// View > Status Bar (docs/agent/top-tab-bar.md)
+void MainWindow::toggleStatusBar()
+{
+  ScribbleApp::cfg->set("showStatusBar", !ScribbleApp::statusBarShown());
+  applyStatusBar();
+}
+
+void MainWindow::applyStatusBar(bool initial)
+{
+  bool shown = ScribbleApp::statusBarShown();
+  actionStatusBar->setChecked(shown);
+#if PLATFORM_IOS
+  // SDL's view controller hides the status bar for a borderless (or fullscreen) window
+  //  (prefersStatusBarHidden), and asks UIKit to update when the border changes
+  if(!initial || !shown)
+    SDL_SetWindowBordered(sdlWindow, shown ? SDL_TRUE : SDL_FALSE);
+#elif PLATFORM_ANDROID
+  // SDL on Android has only fullscreen (immersive mode) to hide the status bar with
+  if(!initial || !shown) {
+    SDL_SetWindowFullscreen(sdlWindow, shown ? 0 : SDL_WINDOW_FULLSCREEN);
+    actionFullscreen->setChecked(!shown);
+  }
+#endif
+  orientationChanged();
+}
+
+// the View popup: what the overflow menu's View submenu held, plus Status Bar
+ArrowPopup* MainWindow::createViewPopup(bool forLibrary)
+{
+  ArrowPopup* viewPopup = createArrowPopup(Menu::VERT);
+  if(!forLibrary) {
+    viewPopup->addAction(actionPrevious_View);
+    viewPopup->addAction(actionNext_View);
+    Button* splitviewbtn = viewPopup->addAction(actionSplitView);
+    if(splitviewbtn->mPopup)
+      splitviewbtn->mPopup->setAlign(Menu::HORZ_LEFT);
+    viewPopup->addAction(actionShow_Bookmarks);  // in case hidden from toolbar
+  }
+  viewPopup->addAction(actionFullscreen);
+  if(!forLibrary)
+    viewPopup->addAction(actionInvertColors);
+  viewPopup->addAction(actionStatusBar);
+  return viewPopup;
+}
+
+// The overflow popup holds the toolbar's auto-hidden items, so there is only one; it lives under the
+//  button that opens it (an ArrowPopup is positioned relative to its parent) and moves when the other one
+//  - toolbar or top bar - is pressed.  Opened on press, like a menu.
+void MainWindow::hostOverflowPopup(Button* btn)
+{
+  if(!overflowPopup->parent())
+    btn->addWidget(overflowPopup);
+  // added after the Button handler, so it runs first and swallows the event
+  btn->addHandler([this, btn](SvgGui* gui, SDL_Event* event){
+    if(event->type != SDL_FINGERDOWN || event->tfinger.fingerId != SDL_BUTTON_LMASK)
+      return false;
+    // the press that closed the popup (as an outside press) must not immediately reopen it
+    if(gui->lastClosedMenu != overflowPopup || overflowPopup->parent() != btn) {
+      gui->closeMenus();
+      if(overflowPopup->parent() != btn) {
+        overflowPopup->removeFromParent();
+        btn->addWidget(overflowPopup);
+      }
+      openAutoClosePopup(overflowPopup);
+      // note we must NOT setPressed() the popup: the release over this button is not over the popup, so
+      //  it would arrive as an outside press and close the popup as soon as the button is released
+      btn->node->addClass("pressed");  // cleared by closeMenus(), which unpresses popup's parent
+    }
+    return true;
+  });
+}
+
+// The topTabBar setting (docs/agent/top-tab-bar.md).  Library + Writing puts the bar over the editor:
+//  View and the overflow menu leave the toolbar for it, and it replaces both the toolbar's Tabs button
+//  and the sidebar's Tabs view.  Otherwise the editor is as it was.  The library's bar is TagDocList's.
+void MainWindow::applyTopBarMode()
+{
+  bool inEditor = app->topBarInEditor();
+  if(topBar) {
+    topBar->setVisible(inEditor);
+    // hide the container too: an empty box in a flex column lays out at zero size (see TagDocList::setup)
+    selectFirst("#top-tabbar-container")->setVisible(inEditor);
+    if(inEditor)
+      topBar->refresh(true);
+  }
+  if(overflowRow)
+    overflowRow->setVisible(!inEditor);
+  // the vertical toolbar has View and the overflow menu inline rather than in a panel of their own;
+  //  "topbar-moved" keeps auto-adjust (which shows everything before hiding what does not fit) off them
+  for(Action* action : {actionOverflow_Menu, actionView_Menu, actionShow_Tabs}) {
+    for(Button* btn : action->buttons) {
+      if(topBar && btn->isDescendantOf(topBar))
+        continue;
+      if(overflowRow && btn->isDescendantOf(overflowRow))
+        continue;
+      if(btn->node->hasClass("menuitem"))  // the overflow menu's mirror of a hidden Tabs button
+        continue;
+      btn->node->setXmlClass((inEditor ? addWord(btn->node->xmlClass(), "topbar-moved")
+          : removeWord(btn->node->xmlClass(), "topbar-moved")).c_str());
+      btn->setVisible(!inEditor);
+    }
+  }
+  if(sidebar)
+    sidebar->setTabsViewAvailable(!inEditor);
+  orientationChanged();  // the insets move between the toolbar and the bar
+}
+
 
 /// Setup
 
@@ -1399,6 +1531,37 @@ void MainWindow::setupUI(ScribbleApp* a)
     sidebar->setOpen(true);
   updateSidebarButton();
 
+  // The top tab bar (docs/agent/top-tab-bar.md), stuck to the top of the window above the canvas.  Its
+  //  presses are acted on after the event, since each one rebuilds the bar (refreshUI -> refresh) and
+  //  may open the library, whose modal loop must not run inside a handler of a button it deletes.
+  topBar = new TopBar(false);
+  selectFirst("#top-tabbar-container")->addWidget(topBar);
+  setupPopupMenu(topBar->viewBtn, createViewPopup(false));
+  hostOverflowPopup(topBar->overflowBtn);
+  topBar->onHome = [this](){
+    gui()->setTimer(1, this, [this](){ app->openDocument(); return 0; });
+  };
+  topBar->onTab = [this](const std::string& path){
+    gui()->setTimer(1, this, [this, path](){
+      int idx = app->tabs.find(path);
+      if(idx >= 0 && idx != app->activeTabIndex())
+        app->switchToTab(idx);
+      return 0;
+    });
+  };
+  topBar->onCloseTab = [this](const std::string& path){
+    gui()->setTimer(1, this, [this, path](){
+      int idx = app->tabs.find(path);
+      if(idx >= 0)
+        app->closeTab(idx);
+      if(topBar->isVisible())
+        topBar->refresh();
+      return 0;
+    });
+  };
+  applyTopBarMode();
+  applyStatusBar(true);
+
   // popup selection toolbar
   Menubar* selToolbar = createMenubar();  // Menubar used instead of Toolbar so that popup closes after use
   selInkButtons.push_back(selToolbar->addAction(actionCut)); // TouchBar::HideText is default
@@ -1617,6 +1780,9 @@ void MainWindow::createToolBars()
       }
       else {
         Action* action = findAction(tbcfg[jj].c_str());
+        // View sits beside the overflow menu wherever that is (docs/agent/top-tab-bar.md)
+        if(action == actionOverflow_Menu)
+          addTBWidget(tb->addAction(actionView_Menu), action->priority);
         if(action)
           addTBWidget(tb->addAction(action), action->priority, {action});
       }
@@ -1640,7 +1806,7 @@ void MainWindow::createToolBars()
   adjtb->node->addClass("main-toolbar-autoadj");
 
   // the other three floating panels of the desktop toolbar row
-  Toolbar* pageopsRow = NULL, *fileopsRow = NULL, *overflowRow = NULL;
+  Toolbar* pageopsRow = NULL, *fileopsRow = NULL;
   Widget* stretch2 = NULL;
 
   // each panel sizes to its contents and gets a rounded floating background inset from its contents;
@@ -1709,11 +1875,14 @@ void MainWindow::createToolBars()
     floatBox(fileopsRow, 18*floatUIScale, floatSidePad);
     scaleFloatPanel(fileopsRow, floatSideIconSize);
 
-    // overflow menu sits alone in its own small panel at the right edge
-    overflowRow = createToolbar();
-    overflowRow->addAction(actionOverflow_Menu);  // never hidden: it holds everything that was
-    floatBox(overflowRow, floatEdgeInset, 0);
-    scaleFloatPanel(overflowRow, floatSideIconSize);
+    // View and the overflow menu share a small panel at the right edge; with the top bar over the editor
+    //  both move into it instead and this panel is hidden (applyTopBarMode)
+    Toolbar* viewOverflowRow = createToolbar();
+    viewOverflowRow->addAction(actionView_Menu);
+    viewOverflowRow->addAction(actionOverflow_Menu);  // never hidden: it holds everything that was
+    floatBox(viewOverflowRow, floatEdgeInset, 0);
+    scaleFloatPanel(viewOverflowRow, floatSideIconSize);
+    overflowRow = viewOverflowRow;
 
     stretch = createStretch();
     stretch2 = createStretch();
@@ -2038,8 +2207,10 @@ void MainWindow::createToolBars()
     titleButton->setShowTitle(!vertToolbar);
     titleButton->setText(titleStr.c_str());
     for(Widget* w : tbWidgets) {
-      // the options row and its divider are shown only while a tool's options are open (showOptionsRow())
-      w->setVisible(w == optsRowContainer || w == optsRowDivider ? openOptionsRow != 0 : true);
+      // the options row and its divider are shown only while a tool's options are open (showOptionsRow());
+      //  a button the top bar took over (applyTopBarMode) stays hidden
+      bool moved = w->node->hasClass("topbar-moved");
+      w->setVisible(moved ? false : w == optsRowContainer || w == optsRowDivider ? openOptionsRow != 0 : true);
       for(Button* item : tbOverflowItems[w])
         item->setVisible(false);
     }
@@ -2055,8 +2226,11 @@ void MainWindow::createToolBars()
         titleButton->setShowTitle(false);
         continue;  // retry this widget: hide the button itself only if dropping the text wasn't enough
       }
+      bool moved = w->node->hasClass("topbar-moved");
       w->setVisible(false);
       for(Button* item : tbOverflowItems[w]) {
+        if(moved)
+          continue;  // not hidden for lack of room: the top bar does its job
         item->setVisible(true);
         anyHidden = true;
       }
@@ -2079,23 +2253,12 @@ void MainWindow::createToolBars()
 
   // the overflow button opens an ArrowPopup (created in setupActions()) instead of a Menu, so it can't be
   //  wired up by Action::setMenu(); the popup must be a child of the button to be positioned relative to it
-  if(!actionOverflow_Menu->buttons.empty()) {
-    Button* overflowBtn = actionOverflow_Menu->buttons.front();
-    overflowBtn->addWidget(overflowPopup);
-    // open on press, like a menu; added after the Button handler, so it runs first and swallows the event
-    overflowBtn->addHandler([this, overflowBtn](SvgGui* gui, SDL_Event* event){
-      if(event->type != SDL_FINGERDOWN || event->tfinger.fingerId != SDL_BUTTON_LMASK)
-        return false;
-      // the press that closed the popup (as an outside press) must not immediately reopen it
-      if(gui->lastClosedMenu != overflowPopup) {
-        gui->closeMenus();
-        openAutoClosePopup(overflowPopup);
-        // note we must NOT setPressed() the popup: the release over this button is not over the popup, so
-        //  it would arrive as an outside press and close the popup as soon as the button is released
-        overflowBtn->node->addClass("pressed");  // cleared by closeMenus(), which unpresses popup's parent
-      }
-      return true;
-    });
+  if(!actionOverflow_Menu->buttons.empty())
+    hostOverflowPopup(actionOverflow_Menu->buttons.front());
+  // View: a popup of its own per button (createViewPopup)
+  for(Button* viewBtn : actionView_Menu->buttons) {
+    if(!viewBtn->node->hasClass("menuitem"))
+      setupPopupMenu(viewBtn, createViewPopup(false));
   }
 
   showOptionsRow(ScribbleApp::cfg->Bool("showPenToolbar") ? MODE_STROKE : 0);
@@ -2220,6 +2383,10 @@ void MainWindow::setupActions()
       "Dark Mode", "", "", [this](){ toggleInvertColors(); });
   actionInvertColors->setCheckable(true);
   actionInvertColors->setChecked(ScribbleApp::cfg->Bool("invertColors"));
+  // the app-level "system status bar shown"; the space above the top bar (or toolbar) follows it
+  actionStatusBar = createAction("actionStatusBar", "Status Bar", "", "", [this](){ toggleStatusBar(); });
+  actionStatusBar->setCheckable(true);
+  actionStatusBar->setChecked(ScribbleApp::statusBarShown());
 
   actionNew_Page_Before = createAction("actionNew_Page_Before",
       "New Page &Before", "", "Ctrl+Shift+Left", SLOT(doCommand(ID_PAGEBEFORE)));
@@ -2338,6 +2505,13 @@ void MainWindow::setupActions()
   actionBookmarksPin->setChecked(!cfg->Bool("autoHideBookmarks"));
 
   actionExport_PDF = createAction("actionExport_PDF", "Export PDF...", "", "", SLOT(exportPDF()));
+  // every page as an image (the sidebar's Pages view exports a chosen set the same way)
+  actionExport_PNG = createAction("actionExport_PNG", "Export PNG...", "", "", [this](){
+    std::vector<int> pages(app->activeDoc()->document->numPages());
+    for(size_t ii = 0; ii < pages.size(); ++ii)
+      pages[ii] = int(ii);
+    app->exportPagesPNG(pages);
+  });
   actionImport_PDF = createAction("actionImport_PDF", "Import PDF...", "", "", SLOT(importPDF()));
   // don't use direct connection for prefs because it might destroy the toolbars (which might contain menu
   //  from which it was launched)
@@ -2511,62 +2685,24 @@ void MainWindow::setupActions()
   actionSelection_Menu = createAction("actionSelection_Menu", "Selection Menu", ":/icons/ic_menu_paste.svg", "", NULL);
 
   // the overflow menu's submenus are popups too, so the whole tree shares the arrow popup styling
-  ArrowPopup* docmenu = createArrowPopup(Menu::HORZ);
-  // don't rely on these actions being on toolbar when not using doc list!
-  if(!cfg->Bool("useDocList")) {
-    docmenu->addAction(actionNew_Document);
-    docmenu->addAction(action_Open);
-    docmenu->addAction(actionSave);
-  }
-  if(IS_DEBUG || !PLATFORM_IOS || cfg->String("syncServer", "")[0]) {
-    docmenu->addAction(actionShare_Document);
-#if PLATFORM_IOS
-    docmenu->addAction(actionOpen_Shared_Doc);
-#endif
-  }
-  //if(!cfg->Bool("useDocList")) docmenu->addAction(actionOpen_Shared_Doc);
-  docmenu->addAction(actionRevert);
-  docmenu->addAction(actionSave_As);
-  docmenu->addAction(actionInsertDocument);
-  docmenu->addAction(actionInsert_PDF);
+  // Export: every format the document can leave the app in (docs/agent/top-tab-bar.md).  It replaced the
+  //  Document submenu; that submenu's other items went elsewhere or away - see the doc for where
+  ArrowPopup* exportmenu = createArrowPopup(Menu::HORZ);
 #if PLATFORM_MOBILE
-  docmenu->addAction(actionSend_Page);
-  docmenu->addAction(actionSend_HTML);
-  docmenu->addAction(actionSend_PDF);
+  exportmenu->addAction(actionSend_PDF);
+  exportmenu->addAction(actionSend_HTML);
+  exportmenu->addAction(actionSend_Page);
 #else
-  docmenu->addAction(actionImport_PDF);
-  docmenu->addAction(actionExport_PDF);
+  exportmenu->addAction(actionExport_PDF);
 #endif
+  exportmenu->addAction(actionExport_PNG);
+  exportmenu->addAction(actionSave_As);
 
-  ArrowPopup* pagemenu = createArrowPopup(Menu::HORZ);
-  pagemenu->addAction(actionNew_Page_Before);
-  pagemenu->addAction(actionNew_Page_After);
-  // would be nice if we could avoid having menu items for these expand down/right
-  pagemenu->addAction(actionExpand_Down);
-  pagemenu->addAction(actionExpand_Right);
-  pagemenu->addAction(actionSelect_Pages);
-  pagemenu->addAction(actionDelete_Page);
-  pagemenu->addAction(actionScan_Page);
-
-  ArrowPopup* viewmenu = createArrowPopup(Menu::HORZ);
-  viewmenu->addAction(actionPrevious_View);
-  viewmenu->addAction(actionNext_View);
-  // Doesn't much sense to have these buried in submenu now that we have zoom button on statusbar
-  //viewmenu->addAction(actionZoom_In);
-  //viewmenu->addAction(actionZoom_Out);
-  //viewmenu->addAction(actionReset_Zoom);
-  Button* splitviewbtn = viewmenu->addAction(actionSplitView);
-  splitviewbtn->mPopup->setAlign(Menu::HORZ_LEFT);
-  viewmenu->addAction(actionShow_Bookmarks);  // in case hidden from toolbar
-  // Qt uses immersive mode (sticky) for fullscreen on Android 4.4+; hides status bar on earlier versions
-  viewmenu->addAction(actionFullscreen);
-  viewmenu->addAction(actionInvertColors);
+  // View moved out of this menu into a popup of its own, on the button beside it (createViewPopup)
+  actionView_Menu = createAction("actionView_Menu", "View", ":/icons/ic_menu_view.svg", "", NULL);
 
   Action* selactions[] = {actionCut, actionCopy, actionPaste, actionDupSel, actionDelete_Selection,
       actionUngroup, actionInvert_Selection, actionSelect_All, actionCreate_Link};  //actionSelect_Similar
-  ArrowPopup* selectionmenu = createArrowPopup(Menu::HORZ);
-  for(Action* a : selactions)
-    selectionmenu->addAction(a);
   // trying to share the same Menu between overflow menu and Selection Menu action causes problems
   Menu* selmenu2 = createMenu("selMenu2", "Selection", tbMenuAlign);
   for(Action* a : selactions)
@@ -2596,17 +2732,23 @@ void MainWindow::setupActions()
   overflowHiddenSep->setVisible(false);
   overflowPopup->addWidget(overflowHiddenSep);
   menuWhiteboardBtn = overflowPopup->addSubmenu(_("Whiteboard"), menuWhiteboard);
-  overflowPopup->addSubmenu(_("Document"), docmenu);
-  overflowPopup->addSubmenu(_("Page"), pagemenu);
-  // also at the top level, not only under Page: it is important and would otherwise be hard to find
-  overflowPopup->addAction(actionDelete_Page);
-  overflowPopup->addSubmenu(_("View"), viewmenu);
-  overflowPopup->addSubmenu(_("Selection"), selectionmenu);
+  // the legacy file list (useDocList off) has no other way to these
+  if(!cfg->Bool("useDocList")) {
+    overflowPopup->addAction(actionNew_Document);
+    overflowPopup->addAction(action_Open);
+    overflowPopup->addAction(actionSave);
+  }
+  overflowPopup->addSubmenu(_("Export"), exportmenu);
+  if(IS_DEBUG || !PLATFORM_IOS || cfg->String("syncServer", "")[0]) {
+    overflowPopup->addAction(actionShare_Document);
+#if PLATFORM_IOS
+    overflowPopup->addAction(actionOpen_Shared_Doc);
+#endif
+  }
+  // Selection (the selection popup has it), View (its own popup), Page (Add Page, the sidebar's Pages
+  //  view), Discard Changes, Import, Insert Image and Scan (the "+" menu and the library) are gone
   overflowPopup->addAction(actionPage_Setup);
   overflowPopup->addAction(actionTheme);
-  overflowPopup->addAction(actionTagDocList);
-  overflowPopup->addAction(actionInsert_Image);  // move to Document menu?
-  overflowPopup->addAction(actionScan_Element);
   overflowPopup->addAction(actionPreferences);
 
 #ifdef SCRIBBLE_TEST

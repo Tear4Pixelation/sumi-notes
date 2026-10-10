@@ -17,6 +17,7 @@ class ScribbleDoc;
 class OverlayWidget;
 class Sidebar;
 class AutoAdjContainer;
+class TopBar;
 
 class MainWindow : public Window
 {
@@ -55,6 +56,18 @@ public:
   void toggleSyncViewMaster();
   void toggleSplitView(int newstate);
   void toggleInvertColors();
+  // View > Status Bar: the app-level "system status bar shown" (ScribbleApp::statusBarShown)
+  void toggleStatusBar();
+  // hide/show the system status bar to match the setting (iOS, Android) and redo the insets; `initial`
+  //  only at startup, where a shown status bar is the system's default and needs nothing done
+  void applyStatusBar(bool initial = false);
+  // put the top tab bar, the toolbar's View/overflow panel, the Tabs button and the sidebar's Tabs view
+  //  where the topTabBar setting says (docs/agent/top-tab-bar.md); at startup and on Preferences OK
+  void applyTopBarMode();
+  // the View popup: the old overflow menu's View submenu.  One per button that opens it (the toolbar's,
+  //  the editor's bar, the library's bar - a popup must be its button's child); the library's leaves out
+  //  what only acts on a document view
+  ArrowPopup* createViewPopup(bool forLibrary);
 
   Action* findAction(const char* name);
 
@@ -163,9 +176,18 @@ public:
   Action* actionDisable_Touch;
   Action* actionSyncInfo;
   Action* actionInvertColors;
+  Action* actionStatusBar = NULL;
+  Action* actionView_Menu = NULL;
+  Action* actionExport_PNG = NULL;
 
   Menu* menuRecent_Files;
   ArrowPopup* overflowPopup;
+  // the top tab bar over the editor (topbar.h); owned by the widget tree
+  TopBar* topBar = NULL;
+  // the toolbar's right end panel holding View and the overflow menu; hidden while the top bar holds them
+  Widget* overflowRow = NULL;
+  // the overflow popup is one widget that moves to whichever button opens it (toolbar or top bar)
+  void hostOverflowPopup(Button* btn);
   ArrowPopup* menuWhiteboard;
   Button* menuWhiteboardBtn;
   Button* undoRedoBtn;

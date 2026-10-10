@@ -227,6 +227,13 @@ public:
   // bring the list in line with the documents in the panes (new file, Save As, a document reset to
   //  untitled); called from onLoadFile
   void syncTabs();
+  // The top tab bar (docs/agent/top-tab-bar.md): the topTabBar setting (TopBar::Mode), OFF whenever there
+  //  are no tabs to show (iOS outside library mode)
+  int topBarMode() const;
+  bool topBarInLibrary() const { return topBarMode() >= 1; }
+  bool topBarInEditor() const { return topBarMode() == 2; }
+  // whether the library is up (the modal TagDocList), e.g. so closing the last tab does not reopen it
+  bool libraryShown() const;
 
   void repaintBookmarks(bool newdoc = false);
   void refreshUI(ScribbleDoc* doc, int reason);
@@ -258,6 +265,12 @@ public:
   // UI units at the top of the window that system UI covers (the iOS status bar, the notch); the window
   //  draws edge to edge, so the toolbar and the browser's search row step down by this much
   static Dim topInset;
+  // topInset for what sits below the top tab bar: 0 while the bar is shown, since it takes the inset as
+  //  padding above itself (the toolbar, the pinned sidebar)
+  static Dim editorTopInset();
+  // the app-level "system status bar shown" (cfg showStatusBar, View > Status Bar): on by default on
+  //  iOS/Android, off on desktop.  Shown, topInset is the status bar's height (desktop previews 24)
+  static bool statusBarShown();
 
   enum MessageType {Info, Question, Warning, Error};
   static std::string messageBox(

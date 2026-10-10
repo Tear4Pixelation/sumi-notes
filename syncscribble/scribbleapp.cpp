@@ -3719,6 +3719,9 @@ void ScribbleApp::reloadConfig()
   for(ScribbleDoc* doc : scribbleDocs)
     doc->loadConfig(true);
   bookmarkArea->loadConfig(cfg);
+  // the topTabBar setting (docs/agent/top-tab-bar.md); the library's bar follows it on its next setup()
+  if(win)
+    win->applyTopBarMode();
   // destroy doc list so that it will be recreated with new settings
   delete documentList;
   documentList = NULL;

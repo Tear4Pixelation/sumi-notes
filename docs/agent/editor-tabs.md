@@ -1,7 +1,8 @@
 # Editor tabs
 
 Every open document with a file is a **tab**; a pane (one, or two in a split) shows one tab's document.
-The tabs are listed in the sidebar's **Tabs** view and reached from a toolbar button. Code:
+The tabs are listed in the sidebar's **Tabs** view and reached from a toolbar button - or, with the top tab bar
+over the editor (the default), in that bar, which replaces both ([top-tab-bar.md](top-tab-bar.md)). Code:
 `syncscribble/tablist.h/.cpp` (the list itself, no app dependencies), `editortabs.cpp` (`ScribbleApp`
 methods: loading, showing, saving, closing, dropping on the canvas), `sidebartabs.cpp` (the rows),
 plus hooks in `scribbleapp.cpp` (`doOpenDocument`, `closeSplit`, `onLoadFile`, quit/suspend, library moves).
