@@ -423,8 +423,8 @@ bool Page::saveSVG(IOStream& file, Dim x, Dim y)
     svgDoc->setAttr("x", x);
     svgDoc->setAttr("y", y);
   }
-  // write SVG
-  XmlStreamWriter xmlwriter;
+  // write SVG - streamed straight to file, no intermediate DOM
+  XmlStreamWriter xmlwriter(file);
   SvgWriter(xmlwriter).serialize(svgDoc.get());
   xmlwriter.save(file);
   svgDoc->removeAttr("x");

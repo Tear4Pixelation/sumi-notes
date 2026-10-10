@@ -87,6 +87,12 @@ standalone-buildable - see the command in its header. Its checks are the fail-op
 layer always being writable, z-order being independent of ids, ids never being reused across a save,
 and the serialization round trip including a name containing the separators.
 
+`scribbletest/xmlwritertest.cpp` (standalone only, command in its header) checks that the streaming
+`XmlStreamWriter` (`usvg/svgxml.h`) prints byte for byte what the pugixml-DOM writer it replaced
+printed - every saved page goes through it. 20000 random documents with escapes, text and fragments
+of every pugi node type, buffered and streamed. A broken `&gt;` escape or a wrong indent after a
+text fragment both fail it.
+
 - `ScribbleTest::layerTest()` - everything that needs a document: new content (including an
   **inserted image**) landing on the current layer, a later stroke on a lower layer stacking *under*
   the upper layer's content, a locked layer surviving Select All, a rect selection, the stroke eraser

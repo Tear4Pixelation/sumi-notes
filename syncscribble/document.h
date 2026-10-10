@@ -25,6 +25,8 @@ struct DocViewBox {
   bool isValid() { return pagenum >= 0 && box.isValid(); }
 };
 
+struct BgzBlock;  // document.cpp
+
 // One entry of the document's outline (table of contents).  pagenum is computed when the outline is
 //  built, never stored, which is what makes an entry immune to pages being inserted or removed above it.
 struct OutlineEntry {
@@ -92,6 +94,9 @@ public:
   int numPages() const { return int(pages.size()); }
 
   bool saveBgz(IOStream* outstrm, const char* thumb, saveflags_t flags);
+  bool canCopyBlock(Page* p, Dim y, BgzBlock& blk);
+  // set once any layer has been hidden: page blocks then carry display="none" that a reload would rewrite
+  bool layersEverHidden = false;
   bool loadBgzPage(Page* page);
   Document::loadresult_t loadBgzDoc(IOStream* instrm);
   const char* fileName() const { return blockStream ? blockStream->name() : ""; }
