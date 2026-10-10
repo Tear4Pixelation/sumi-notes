@@ -52,6 +52,10 @@ and sync entirely out of the import path. `.pdf` paths are routed to the importe
 `doOpenDocument()` (doc list, drag-drop, Android intents) and from the command-line `argDoc` branch.
 Note the import temporarily forces `SvgWriter::DEFAULT_SAVE_IMAGE_SCALED = 0` (in `ImportSaver::save`),
 otherwise `savePicScaled` resamples the pages back down to 150 DPI and discards the chosen `pdfImportDPI`.
+Since `Document::saveBgz` copies unloaded, clean pages' compressed blocks verbatim (see the comment
+above `canCopyBlock()`), a later ordinary save only resamples the pages it actually loads; an imported
+page nobody opened keeps its import resolution. Before, editing page 1 and saving re-serialized (and so
+resampled) every later page.
 
 Import runs synchronously on the UI thread, so nothing is drawn until it returns: a `showNotify()`
 set before it never appeared and the app looked frozen. `ProgressBox` (`scribbleapp.cpp`, also used
