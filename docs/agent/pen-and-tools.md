@@ -512,3 +512,24 @@ itself pale, so alpha alone could not make it vivid.
   hide text. Night mode is a render-time `ColorMap` (see night-mode.md) and maps whatever colour is stored.
 - Verified in agent-display (Debug build) with a marker stroke over a pen line on lined paper: clearly
   saturated pink, line fully visible. Themed variants were not screenshotted.
+
+# Interaction fast paths (selection drag, ruled erase)
+
+- **Dragging a selection shifts cached bounds instead of recomputing them.** `Element::applyTransform()` with a
+  pure translate on a path whose pending transform is itself a pure deferred translate (or none) moves
+  `node->m_cachedBounds` by the offset after `invalidate()`. The node stays `BOUNDS_DIRTY` and the parents'
+  bounds are cleared, so the dirty rect still unites old and new. This is exact because `Element::applyStyle()`
+  applies the pending transform in root space, which is the space bounds are cached in. It is not exact for
+  scale, rotation, crops, groups, regions or a pending transform the painter does not apply, so those keep the
+  full invalidate. Without it a drag recomputed every moved stroke's styled bounds once per input event (63%
+  of a full page drag). Shifted and recomputed boxes can differ by about 1E-6 from rounding. The commit on
+  release recomputes them.
+- **Ruled select/erase culls before testing.** `Selection::doSelect()` asks `Selector::cannotHit()` before
+  the layer check and `selectHit()`. `RuledSelector::cannotHit()` rejects an element only if its frame box
+  misses the range's rows padded by a quarter line plus 1, *and* its com is outside them too. Small strokes
+  are decided by com, which grouping can move outside the box. Groups are never culled. In a tilted frame the
+  pad also gets half the stroke width (`localElementBBox()` pads the path's own box). Changing
+  `containedRuled()`/`overlapRuled()` so that a hit no longer needs one of those means changing the cull too.
+  `ScribbleTest::interactCullTest()` compares against testing every element (`Selector::cullEnabled = false`).
+  `freeEraseRuled()` likewise does its rect test before `isEditable()`/`regionAt()`. `Page::regionAt()` no
+  longer builds the `regions()` vector on every call.

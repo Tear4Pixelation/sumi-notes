@@ -3381,6 +3381,188 @@ int ScribbleTest::shapeSnapTest()
 //  is relative to the eraser radius r and the line's half width, so the checks hold at any zoom.  Against
 //  the old code (centre line only, and a square-ended rectangle for the free eraser) the "edge" checks and
 //  the free eraser's "corner" check fail; the "not yet" checks guard against an eraser grown too eager.
+// The interaction fast paths must give exactly what the slow paths gave (see pen-and-tools.md, "Interaction
+//  fast paths"): RuledSelector::cannotHit() may only skip elements selectHit() rejects, so a ruled select
+//  or erase with the cull takes the same elements as testing every one; and the bounds a dragged
+//  selection's strokes carry (shifted, not recomputed) must equal a fresh computation.
+int ScribbleTest::interactCullTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: interaction cull: %s\n", what); }
+  };
+  auto at = [&](Point pagept, int ev) {
+    Point scr = scribbleArea->dimToScreen(scribbleArea->pageDimToDim(pagept));
+    ie(scr.x, scr.y, 0, pen, ev);
+  };
+  Page* page = NULL;
+  auto line = [&](Point a, Point b, Dim width) {
+    SvgPath* node = new SvgPath();
+    node->path()->moveTo(a);
+    node->path()->lineTo(b);
+    node->setAttr<color_t>("fill", Color::NONE);
+    setSvgStrokeColor(node, Color::BLACK);
+    node->setAttr<float>("stroke-width", width);
+    node->setAttr<int>("stroke-linecap", Painter::RoundCap);
+    node->addClass(Element::STROKE_PEN_CLASS);
+    Element* s = new Element(node);
+    page->addStroke(s);
+    return s;
+  };
+  uint32_t seed = 12345;
+  auto rnd = [&]() { seed = seed*1664525u + 1013904223u; return Dim(seed >> 8)/Dim(1u << 24); };
+
+  // *** ruled select/erase: the cull changes nothing ***
+  scribbleDoc->newDocument();
+  page = scribbleArea->currPage;
+  Element* region = scribbleArea->addRulingRegion(Rect::ltrb(450, 500, 800, 800));
+  check(region != NULL, "a ruling region can be added");
+  if(!region) return nbad;
+  RulingRegionParams params = region->regionParams();
+  params.yRuling = 30;
+  params.transform(Transform2D().rotate(0.3, Point(625, 650)));
+  scribbleArea->setSelRegionParams(params);
+  scribbleDoc->clearSelection();
+  const RulingFrame pageFrame(Point(0, page->pageFrame().origin.y), 0, 0, 40);
+  const RulingFrame regionFrame = region->regionParams().frame(region);
+
+  for(int ii = 0; ii < 400; ++ii) {
+    Point a(20 + 900*rnd(), 20 + 1000*rnd());
+    Dim kind = rnd();
+    Element* s;
+    if(kind < 0.55)  // a short stroke, decided by its com
+      s = line(a, a + Point(40*rnd() - 20, 30*rnd() - 15), 0.5 + 6*rnd());
+    else if(kind < 0.8)  // a tall one, decided by its points, ending anywhere around a quarter line out
+      s = line(a, a + Point(20*rnd() - 10, 50 + 90*rnd()), 0.5 + 12*rnd());
+    else {
+      // a com away from the box (grouped writing gets one), so the box alone does not decide it
+      s = line(a, a + Point(30*rnd() - 15, 20*rnd() - 10), 1 + 4*rnd());
+      s->setCom(s->bbox().center() + Point(0, 160*rnd() - 80));
+    }
+    (void)s;
+  }
+
+  int nhit = 0, nculled = 0, nwrongcull = 0, nmismatch = 0;
+  for(int ff = 0; ff < 2; ++ff) {
+    const RulingFrame& frame = ff == 0 ? pageFrame : regionFrame;
+    const Dim yr = frame.yRuling;
+    for(int rr = 0; rr < 40; ++rr) {
+      int line0 = int(30*rnd()) - 3;
+      int nlines = rr % 3 == 0 ? 1 + int(4*rnd()) : 1;
+      Dim x0 = 900*rnd() - 100, x1 = x0 + 50 + 600*rnd();
+      for(int mode = 0; mode < 2; ++mode) {
+        for(int same = 0; same < 2; ++same) {
+          std::unique_ptr<Selection> probe(new Selection(page, Selection::STROKEDRAW_NONE));
+          probe->selMode = Selection::SELMODE_PASSIVE;
+          probe->ruling = frame;
+          RuledSelector* selector = new RuledSelector(probe.get(), RuledSelector::COL_NONE);
+          selector->selMode = mode ? RuledSelector::SEL_OVERLAP : RuledSelector::SEL_CONTAINED;
+          selector->sameRulingOnly = same != 0;
+          selector->selectRuled(RuledRange(x0, line0*yr, x1, (line0 + nlines)*yr, 0, yr, frame));
+          std::set<Element*> got(probe->strokes.begin(), probe->strokes.end());
+          std::set<Element*> want;
+          for(Element* s : page->children()) {
+            bool hit = page->isEditable(s) && selector->selectHit(s);
+            if(hit) want.insert(s);
+            if(selector->cannotHit(s)) {
+              ++nculled;
+              if(selector->selectHit(s)) ++nwrongcull;
+            }
+          }
+          nhit += want.size();
+          if(got != want) ++nmismatch;
+        }
+      }
+    }
+  }
+  check(nwrongcull == 0, "the ruled cull never skips an element the ruled selector would take");
+  check(nmismatch == 0, "a ruled selection with the cull takes exactly the elements testing every one takes");
+  // a test that selected nothing, or culled nothing, would prove nothing
+  check(nhit > 200 && nculled > 10000, "the ruled cull checks hit and culled plenty of elements");
+
+  // the same through the real ruled eraser, with and without the cull: on the page's ruling and in the region
+  for(int ff = 0; ff < 2; ++ff) {
+    Point from = ff == 0 ? Point(30, page->pageFrame().origin.y + 5.5*40) : regionFrame.toPage(Point(10, 3.5*30));
+    Point to = ff == 0 ? Point(880, from.y) : regionFrame.toPage(Point(320, 3.5*30));
+    int before = page->strokeCount();
+    std::set<Element*> left[2];
+    for(int cull = 0; cull < 2; ++cull) {
+      Selector::cullEnabled = cull != 0;
+      scribbleMode->setMode(MODE_ERASERULED);
+      at(from, press);
+      for(int ii = 1; ii <= 8; ++ii)
+        at(from + (to - from)*(ii/8.0), INPUTEVENT_MOVE);
+      at(to, release);
+      for(Element* s : page->children()) left[cull].insert(s);
+      scribbleDoc->doUndoRedo(false);
+    }
+    Selector::cullEnabled = true;
+    char what[128];
+    snprintf(what, sizeof(what), "the ruled eraser on the %s erases the same strokes with the cull as without",
+        ff == 0 ? "page's ruling" : "tilted region");
+    check(left[0] == left[1] && int(left[1].size()) < before, what);
+    check(page->strokeCount() == before, "undoing the ruled erase brings every stroke back");
+  }
+  scribbleMode->setMode(MODE_STROKE);
+
+  // *** a dragged selection's bounds equal fresh ones ***
+  scribbleDoc->newDocument();
+  page = scribbleArea->currPage;
+  std::vector<Element*> strokes;
+  for(int ii = 0; ii < 12; ++ii)
+    strokes.push_back(line(Point(120 + 40*ii, 300 + 7*(ii % 3)), Point(150 + 40*ii, 340 - 5*(ii % 4)), 1 + ii));
+  // one with a transform of its own: the deferred move is applied in page space, not the node's
+  strokes.back()->node->setTransform(Transform2D().scale(1.5).translate(30, -40));
+  std::vector<Rect> origBounds;
+  for(Element* s : strokes) origBounds.push_back(s->bbox());
+  scribbleDoc->doCommand(ID_SELALL);
+  check(scribbleArea->currSelection && scribbleArea->currSelection->count() == int(strokes.size()),
+      "Select All takes every stroke");
+  auto freshBounds = [](Element* s) {
+    Rect cached = s->node->m_cachedBounds;
+    s->node->m_cachedBounds = Rect();
+    Rect b = s->node->bounds();
+    s->node->m_cachedBounds = cached;
+    return b;
+  };
+  auto boundsMatch = [&](const char* when) {
+    Dim worst = 0;
+    bool valid = true;
+    for(Element* s : strokes) {
+      Rect b = s->bbox(), f = freshBounds(s);
+      valid = valid && b.isValid();
+      worst = std::max({worst, std::abs(b.left - f.left), std::abs(b.top - f.top),
+          std::abs(b.right - f.right), std::abs(b.bottom - f.bottom)});
+    }
+    char what[128];
+    snprintf(what, sizeof(what), "%s, every stroke's bounds equal freshly computed ones (off by %g)", when, worst);
+    check(valid && worst < 1E-3, what);  // shifting and recomputing round differently (~1E-6)
+  };
+  Point grab = strokes[3]->bbox().center();
+  Point offset(0, 0);
+  at(grab, press);
+  for(int ii = 1; ii <= 6; ++ii) {
+    offset = Point(13.37*ii, -7.25*ii);
+    at(grab + offset, INPUTEVENT_MOVE);
+    // the frame's dirty rect is what reads (and caches) the bounds between moves
+    for(Element* s : strokes) s->bbox();
+  }
+  boundsMatch("mid-drag");
+  at(grab + offset, release);
+  boundsMatch("after the drag");
+  Point d0 = strokes[0]->bbox().origin() - origBounds[0].origin(), d5 = strokes[5]->bbox().origin() - origBounds[5].origin();
+  check(d0.x > 10 && std::abs(d0.x - d5.x) < 1E-6 && std::abs(d0.y - d5.y) < 1E-6, "the drag moved the strokes together");
+  scribbleDoc->doUndoRedo(false);
+  bool back = true;
+  for(size_t ii = 0; ii < strokes.size(); ++ii) {
+    Rect b = strokes[ii]->bbox();
+    back = back && std::abs(b.left - origBounds[ii].left) < 1E-6 && std::abs(b.top - origBounds[ii].top) < 1E-6;
+  }
+  check(back, "undoing the drag puts every stroke back where it was");
+  scribbleDoc->clearSelection();
+  return nbad;
+}
+
 int ScribbleTest::eraserHitTest()
 {
   int nbad = 0;
@@ -4528,6 +4710,7 @@ void ScribbleTest::runAll(bool runsynctest)
   nUnitFailed += curveFitTest();
   nUnitFailed += shapeSnapTest();
   nUnitFailed += eraserHitTest();
+  nUnitFailed += interactCullTest();
   nUnitFailed += rulingRegionTest();
   nUnitFailed += reflowIndentTest();
   nUnitFailed += smartScaleTest();

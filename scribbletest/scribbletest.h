@@ -85,6 +85,7 @@ public:
   // recognized is its own undo step; a held scratch-out erases what it covers
   int shapeSnapTest();
   int eraserHitTest();
+  int interactCullTest();
   // ruling regions: the ruled tools follow a (tilted) region's lines, the region stays below all ink and
   // out of reach of ink selection and erasers, moves with its ink, and survives undo, reload and sync
   int rulingRegionTest();

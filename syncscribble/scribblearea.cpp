@@ -2668,13 +2668,16 @@ void ScribbleArea::freeEraseRuled(Dim xmin, Dim xmax, int line)
   auto strokes = currPage->children();
   for(auto ii = strokes.begin(); ii != strokes.end();) {
     Element* s = *ii++;
+    // the rect test first: it is the cheapest of these and rejects almost every element
+    if(s->isSelected(tempSelection) || !erasebox.intersects(s->bbox()))
+      continue;
     if(!currPage->isEditable(s))
       continue;  // see freeErase()
     // ink belongs to the ruling it sits on, as for RuledSelector::selectHit; pieces this gesture already
     //  cut are exempt, since cutting can move a piece's centre across a region's edge
     if(!s->isSelected(freeErasePieces) && currPage->regionAt(s->com()) != gestureFrame.region)
       continue;
-    if(!s->isSelected(tempSelection) && erasebox.intersects(s->bbox())) {
+    {
       if(s->isSelected(freeErasePieces)) {
         touched = s->freeErase(band) || touched;
       }
