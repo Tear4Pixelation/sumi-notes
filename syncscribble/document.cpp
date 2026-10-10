@@ -504,6 +504,7 @@ bool Document::saveBgz(IOStream* outstrm, const char* thumb, saveflags_t flags)
   //  blocks in order.  At most a few blocks are in flight, bounding the extra memory.
   ThreadPool* pool = bgzThreadPool();
   const size_t maxInFlight = 6;
+  size_t svgSizeHint = 64 << 10;
   size_t nextWrite = 0;
   bool ok = true, writeok = true;
   auto writeNext = [&]() {
@@ -536,7 +537,9 @@ bool Document::saveBgz(IOStream* outstrm, const char* thumb, saveflags_t flags)
     BgzBlock* blk = blocks[ii].get();
     Page* p = blk->page;
     if(!blk->copied) {
+      blk->svg.reserve(svgSizeHint);  // pages tend to be alike: skip most of the doubling reallocs
       blk->saveok = p->saveSVG(blk->svg, SVGZ_BORDER, totalheight);
+      svgSizeHint = blk->svg.size() + blk->svg.size()/4;
       ok = blk->saveok && ok;
       if(pool)
         blk->done = pool->enqueue([blk, level](){ blk->compress(level | MINIZ_GZ_NO_FINISH); });
