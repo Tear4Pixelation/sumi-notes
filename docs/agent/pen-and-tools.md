@@ -324,6 +324,36 @@ edge, ink diagonally past the eraser's end, and where the free eraser's cut land
 `scribbletest/erasetest.cpp` (`runEraseTests()`). Against the old code the edge checks of both erasers,
 the diagonal check of the free eraser and the cut position fail.
 
+# Element memory
+
+Per-stroke state that ordinary ink never has lives in `Element::Extra` behind one pointer (`m_extra`):
+the pending transform (+ `applyPending`), the pen point cache, `ShapeParams` and `RulingRegionParams`.
+`Element` went from 328 to 88 bytes. `extra()` allocates it, `trimExtra()` frees it once everything in it
+is default (an identity pending transform counts as default whatever `applyPending` says). Traps:
+
+- **Never trim while holding a reference into it.** `applyTransform()` holds `Extra& ext` across
+  `setShapeParams()`, `setRegionParams()`, `dropShape()` and `rebuildShapePath()`, so none of those trims;
+  trimming happens in `commitTransform()`, `resetTransform()`, `scaleWidth()`, `releasePenPoints()`.
+- **The pen point cache** (`toPenPoints()`, 40 B per centre-line point) is built by erasing and by scaling
+  filled pens. It is needed while a gesture runs - mid-erase the path has several subpaths that
+  `toPenPoints()` cannot pair up, and a live resize/reset round-trips through it - and used to be kept
+  for good after any erase, resize or width change (an erased stroke's pieces held 2x their point memory).
+  `releasePenPoints()` now drops it when the gesture or selection is over: erase pieces in
+  `getEraseSubPaths()`, `Selection::clear()`/`deleteStrokes()`, and `commitTransform()`/`scaleWidth()`
+  on an element no selection holds (undo, sync). It only drops a cache that `toPenPoints()` gives back from
+  the path (within 1e-6; in practice ~3e-13): a round pen segment so thin that `addArc()` drew its cap as a
+  line has no curve for `toPenPoints()` to find, and there the cache is the only true copy and stays.
+  Consequence: an edit after a dropped cache starts from the path, so a saved coordinate can differ from
+  the old build's in the last written digit where it sits on a rounding tie - exactly what the old build
+  did after a reload. `clone()` still copies the cache.
+- **`__comx`/`__comy`** are no longer kept in `node->attrs` when their place in the file is fixed by what
+  follows them (`stripComAttrs()`: nothing but attributes `serializeAttr()` writes after them -
+  `__rr*`, `__layer`, `__timestamp`, `__shape*` - at least one, none before). `serializeAttr()` then writes
+  them from `m_com` through `SvgWriter::extraAttrs` just before the first of those, so files stay byte
+  for byte the same; `m_comStripped` remembers this. Anything else keeps the old store-on-save path,
+  since baseline order there depends on when the attributes were first appended. Code that reads
+  `__comx` from a node after load must use `Element::com()` instead.
+
 # Select touching
 
 A toggle on the select options row (`ScribbleMode::selectTouching`, appended at the end of `toolModes`,

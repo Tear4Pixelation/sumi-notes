@@ -162,11 +162,12 @@ public:
   Element* cloneNode() const;
   void deleteNode();
 
-  const ScribbleTransform& pendingTransform() const { return m_pendingTransform; }
+  const ScribbleTransform& pendingTransform() const { return m_extra ? m_extra->pendingTransform : NO_TRANSFORM; }
   // the pending transform lives only in rendering (applyStyle) and bbox(), not in the path or node
   //  transform - true for a plain translate of ink until commitTransform()
-  bool pendingDeferred() const { return m_applyPending && !m_pendingTransform.isIdentity(); }
-  void resetTransform() { applyTransform(m_pendingTransform.inverse()); m_pendingTransform.reset(); }
+  bool pendingDeferred() const
+      { return m_extra && m_extra->applyPending && !m_extra->pendingTransform.isIdentity(); }
+  void resetTransform();
   void applyTransform(const ScribbleTransform& tf);
   void commitTransform();
   void scaleWidth(Dim sx_int, Dim sy_int);
@@ -185,8 +186,8 @@ public:
 
   bool isPathElement() const { return node->type() == SvgNode::PATH; }
   // parametric shapes (SHAPES_SPEC.md): the descriptor is the document, the path is a cache
-  bool isShape() const { return m_shape.isValid(); }
-  const ShapeParams& shapeParams() const { return m_shape; }
+  bool isShape() const { return m_extra && m_extra->shape.isValid(); }
+  const ShapeParams& shapeParams() const { return m_extra ? m_extra->shape : NO_SHAPE; }
   void setShapeParams(const ShapeParams& params);  // updates descriptor and regenerates the path
   void rebuildShapePath();
   // degradation contract: any operation that cannot be expressed in the descriptor must drop it and
@@ -195,8 +196,8 @@ public:
   // Ruling regions (rulingregion.h): a <g class="write-ruling-region"> whose parameters are the
   //  document and whose children - the paper fill and the rule lines - are a cache, like a shape's path.
   //  A region is not ink: ink selection and every eraser skip it, and it sits below every layer.
-  bool isRulingRegion() const { return m_region.isValid(); }
-  const RulingRegionParams& regionParams() const { return m_region; }
+  bool isRulingRegion() const { return m_extra && m_extra->region.isValid(); }
+  const RulingRegionParams& regionParams() const { return m_extra ? m_extra->region : NO_REGION; }
   void setRegionParams(const RulingRegionParams& params);  // updates parameters and rebuilds the children
   // rebuild the children; invalid colors keep the ones the children already carry
   void rebuildRegion(Color paper = Color::INVALID_COLOR, Color rule = Color::INVALID_COLOR);
@@ -249,6 +250,9 @@ public:
   // erase against any polygon (page coordinates), e.g. a ruled line's band in a tilted region
   bool freeErase(const std::vector<Point>& poly);
   std::vector<Element*> getEraseSubPaths();
+  // frees the pen point cache that erasing and scaling build (toPenPoints()), for when the gesture or
+  //  selection that wanted it is over - unless the path cannot give the same points back
+  void releasePenPoints();
 
   void updateFromNode();
   void serializeAttr(SvgWriter* writer) override;
@@ -275,14 +279,56 @@ private:
   std::vector<PenPoint> toPenPoints();
   void fromPenPoints(const std::vector<PenPoint>& pts);
 
+  // State that ordinary ink never has, kept out of line so a stroke pays one pointer for it
+  //  (docs/agent/pen-and-tools.md, "Element memory"): allocated on first use, freed by trimExtra() once
+  //  it is all default again.  An identity pending transform counts as default whatever applyPending
+  //  says - nothing reads applyPending without first checking the transform.  Never trim while a
+  //  reference into it is held: applyTransform() holds one across setShapeParams()/dropShape() etc.
+  struct Extra
+  {
+    ScribbleTransform pendingTransform;
+    bool applyPending = false;
+    // centre line + width per point, rebuilt from the path by toPenPoints() for erasing and scaling and
+    //  kept while a gesture or selection is working on the element, since repeated rebuilding from the
+    //  path would accumulate rounding (and mid-erase the path has subpaths toPenPoints() cannot pair up);
+    //  releasePenPoints() frees it after
+    std::vector<PenPoint> penPoints;
+    ShapeParams shape;
+    RulingRegionParams region;
+
+    bool isDefault() const
+      { return pendingTransform.isIdentity() && penPoints.empty() && !shape.isValid() && !region.isValid(); }
+  };
+  // copying, i.e. clone(), is a deep copy
+  class ExtraPtr
+  {
+  public:
+    ExtraPtr() {}
+    ExtraPtr(const ExtraPtr& other) { *this = other; }
+    ExtraPtr& operator=(const ExtraPtr& other);
+    Extra* operator->() const { return p.get(); }
+    explicit operator bool() const { return bool(p); }
+    Extra& get() { if(!p) p.reset(new Extra); return *p; }
+    void trim() { if(p && p->isDefault()) p.reset(); }
+  private:
+    std::unique_ptr<Extra> p;
+  };
+
+  Extra& extra() { return m_extra.get(); }
+  void trimExtra() { m_extra.trim(); }
+
+  static const ScribbleTransform NO_TRANSFORM;
+  static const ShapeParams NO_SHAPE;
+  static const RulingRegionParams NO_REGION;
+
+  void stripComAttrs();
+
   const Selection* m_selection;
   int m_layer = LayerList::DEFAULT_LAYER;
+  // __comx/__comy are not kept in node->attrs but written from m_com, just before the first of the
+  //  attributes serializeAttr() writes after them - where they would otherwise sit (stripComAttrs())
+  bool m_comStripped = false;
   Timestamp m_timestamp;
   Point m_com;
-  ScribbleTransform m_pendingTransform;
-  bool m_applyPending = false;
-
-  std::vector<PenPoint> penPoints;
-  ShapeParams m_shape;
-  RulingRegionParams m_region;
+  ExtraPtr m_extra;
 };
