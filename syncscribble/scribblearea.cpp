@@ -4055,8 +4055,10 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
     Rect r = currStroke->node->m_renderedBounds;
     // DRAW_UNDER means under the other ink on this layer, not under the whole page: going under a
     //  lower layer would put the stroke outside its own layer's run and break the stacking
-    Element* under = currPage->layerFirstElement(scribbleDoc->document->layers.currentId);
-    if(currPen()->hasFlag(ScribblePen::DRAW_UNDER) && under)
+    // (only looked up for a draw-under pen: it walks the whole page)
+    Element* under = currPen()->hasFlag(ScribblePen::DRAW_UNDER) ?
+        currPage->layerFirstElement(scribbleDoc->document->layers.currentId) : NULL;
+    if(under)
       currPage->addStroke(currStroke, under);
     else if(currPage->getDirty().isValid())  // we expect page to usually be clean, so this call is cheap
       currPage->addStroke(currStroke);

@@ -255,15 +255,27 @@ bool fitScribble(const std::vector<Vec2>& pts, double arcLen, const Params& para
   }
   double meanAngle = 0.5*std::atan2(sumSin, sumCos);
 
-  // the pass ends along `angle`: extrema of the projection, with hysteresis so jitter is not a reversal
-  auto findEnds = [&](double angle, std::vector<double>& proj, std::vector<int>& ends) {
+  auto project = [&](double angle, std::vector<double>& proj) {
     Vec2 dir(std::cos(angle), std::sin(angle));
     proj.resize(count);
     for(int i = 0; i < count; ++i)
       proj[i] = samples[i].dot(dir);
-    std::vector<double> sorted = proj;
-    std::sort(sorted.begin(), sorted.end());
-    double extent = sorted[size_t(0.95*(count - 1))] - sorted[size_t(0.05*(count - 1))];
+  };
+  // the pass ends along the axis `proj` was projected onto: extrema of the projection, with hysteresis so
+  //  jitter is not a reversal.  The 5th/95th percentiles come from nth_element, not a full sort: the same
+  //  two values (order statistics do not depend on how the rest is ordered), and this runs on every pen
+  //  lift for up to 12 axes of ~600 samples - the sort was 14% of perftest's instructions.  A bounded heap
+  //  of the k+1 smallest was tried too and was 70% slower: on perftest's spiral nearly every value
+  //  displaces the heap's top.
+  std::vector<double> sorted;
+  auto findEndsOf = [&](const std::vector<double>& proj, std::vector<int>& ends) {
+    sorted.assign(proj.begin(), proj.end());
+    size_t loIdx = size_t(0.05*(count - 1)), hiIdx = size_t(0.95*(count - 1));
+    std::nth_element(sorted.begin(), sorted.begin() + loIdx, sorted.end());
+    double lo = sorted[loIdx];
+    if(hiIdx > loIdx)  // everything after loIdx is >= lo, so the hiIdx'th smallest is in there
+      std::nth_element(sorted.begin() + loIdx + 1, sorted.begin() + hiIdx, sorted.end());
+    double extent = sorted[hiIdx] - lo;
     ends.clear();
     if(extent <= 0)
       return;
@@ -289,10 +301,9 @@ bool fitScribble(const std::vector<Vec2>& pts, double arcLen, const Params& para
   };
 
   // Everything below, along one candidate scrub axis; fills `res` and returns true if it is a scratch-out.
-  auto tryAxis = [&](double axisAngle, std::string& axisWhy) {
-    std::vector<double> proj;
-    std::vector<int> ends;
-    findEnds(axisAngle, proj, ends);
+  //  `proj` and `ends` are the samples projected onto the axis and the pass ends found along it.
+  auto tryAxis = [&](double axisAngle, std::string& axisWhy, const std::vector<double>& proj,
+      const std::vector<int>& ends) {
     Vec2 axis(std::cos(axisAngle), std::sin(axisAngle)), across = axis.perp();
     int reversals = int(ends.size()) - 2;
     if(reversals < params.scribbleMinReversals) {
@@ -367,8 +378,14 @@ bool fitScribble(const std::vector<Vec2>& pts, double arcLen, const Params& para
     return true;
   };
 
-  if(tryAxis(meanAngle, why))
-    return true;
+  {
+    std::vector<double> meanProj;
+    std::vector<int> meanEnds;
+    project(meanAngle, meanProj);
+    findEndsOf(meanProj, meanEnds);
+    if(tryAxis(meanAngle, why, meanProj, meanEnds))
+      return true;
+  }
   // The mean chord direction is the scrub axis only while the passes lean less than 45 degrees.  A hand
   //  travelling fast along what it erases (half of a line, say) draws passes leaning further over than
   //  that, the mean then points along the travel, and along the travel the stroke never turns back - so
@@ -376,26 +393,30 @@ bool fitScribble(const std::vector<Vec2>& pts, double arcLen, const Params& para
   //  stroke reverses along most often first, and each still has to pass every test above.  An axis
   //  only counts if most of the motion is along it: across a line, its wobble reverses plenty of times,
   //  and picking the axis with the most reversals outright took plain lines for scratch-outs.
-  std::vector<std::pair<int, double>> candidates;  // (pass ends, angle)
+  // each candidate keeps its projection and pass ends for tryAxis(), which would only compute them again
+  struct AxisCandidate { int nEnds; double angle; std::vector<double> proj; std::vector<int> ends; };
+  std::vector<AxisCandidate> candidates;
+  std::vector<double> axisProj;
+  std::vector<int> axisEnds;
   for(int step = 0; step < params.scribbleAxisSteps; ++step) {
     double angle = meanAngle + PI*(step + 1)/(params.scribbleAxisSteps + 1);
-    std::vector<double> proj;
-    std::vector<int> ends;
-    findEnds(angle, proj, ends);
-    if(int(ends.size()) - 2 < params.scribbleMinReversals)
-      continue;
+    // the cheap test first: both only skip the axis, so their order does not change the candidates
+    project(angle, axisProj);
     double along = 0;
     for(int i = 1; i < count; ++i)
-      along += std::fabs(proj[i] - proj[i-1]);
+      along += std::fabs(axisProj[i] - axisProj[i-1]);
     if(along < params.scribbleMinAlongFrac*spacing*(count - 1))
       continue;
-    candidates.emplace_back(int(ends.size()), angle);
+    findEndsOf(axisProj, axisEnds);
+    if(int(axisEnds.size()) - 2 < params.scribbleMinReversals)
+      continue;
+    candidates.push_back(AxisCandidate{int(axisEnds.size()), angle, axisProj, axisEnds});
   }
   std::stable_sort(candidates.begin(), candidates.end(),
-      [](const auto& lhs, const auto& rhs) { return lhs.first > rhs.first; });
-  for(const auto& candidate : candidates) {
+      [](const AxisCandidate& lhs, const AxisCandidate& rhs) { return lhs.nEnds > rhs.nEnds; });
+  for(const AxisCandidate& candidate : candidates) {
     std::string ignored;
-    if(tryAxis(candidate.second, ignored))
+    if(tryAxis(candidate.angle, ignored, candidate.proj, candidate.ends))
       return true;
   }
   return false;

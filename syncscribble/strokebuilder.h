@@ -95,6 +95,11 @@ private:
   Rect dirty;
   Path2D path1;
   Path2D path2;
+  // what assembleFlatStroke() last wrote into the stroke (path1 + cap + reversed path2): the sizes of path1
+  //  and path2 then, and how many leading points of each are unchanged since - only removePoints() shrinks
+  //  them, everything else appends.  Lets the next assembly rewrite only what changed.
+  bool flatAssembled = false;
+  size_t flatN1 = 0, flatN2 = 0, flatKeep1 = 0, flatKeep2 = 0;
   std::vector<Point> points;
   std::vector<Dim> widths;
 
@@ -183,7 +188,7 @@ public:
   void finalize() override;
 
 private:
-  StrokePoint knotAt(int ii, int n, int level) const;
+  void segmentKnots(int ii, int n, StrokePoint knots[4]) const;
   void emitSegment(int ii, int n);
 
   std::vector<StrokePoint> pts;

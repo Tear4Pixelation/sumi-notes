@@ -744,6 +744,10 @@ Element* Page::layerInsertPos(int layer) const
   if(!document)
     return NULL;
   int z = document->layers.zIndexOf(layer);
+  // zIndexOf() never exceeds the top index, so nothing goes above the top layer - skip the walk over the
+  //  page (every pen-up on a one-layer document, and drawing on the top layer, ends here)
+  if(z >= 0 && z == document->layers.size() - 1)
+    return NULL;
   for(Element* s : children()) {
     if(document->layers.zIndexOf(s->layer()) > z)
       return s;
