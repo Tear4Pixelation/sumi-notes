@@ -508,11 +508,11 @@ void ScribbleTest::benchTest()
     benchFrame();
   }
 
-  // erasers swept across full pages: whole-stroke and free (stroke splitting) erase
+  // erasers swept across full pages: whole-stroke, free (stroke splitting) and ruled (line by line) erase
   {
-    const int modes[] = {MODE_ERASESTROKE, MODE_ERASEFREE};
-    const char* names[] = {"big_erase_stroke", "big_erase_free"};
-    for(int mm = 0; mm < 2; ++mm) {
+    const int modes[] = {MODE_ERASESTROKE, MODE_ERASEFREE, MODE_ERASERULED};
+    const char* names[] = {"big_erase_stroke", "big_erase_free", "big_erase_ruled"};
+    for(int mm = 0; mm < 3; ++mm) {
       scribbleArea->gotoPos(std::min(30 + mm, npages - 1), Point(-10, -10));
       benchFrame();
       scribbleMode->setMode(modes[mm]);
