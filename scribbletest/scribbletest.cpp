@@ -3791,6 +3791,21 @@ int ScribbleTest::insSpaceAxisTest()
     check(allOn(first, 5) && allOn(second, 5), "near the rule above a line: the whole line moves down");
     check(allOn(below, 7), "near the rule above a line: the text below moves with it");
   }
+  // the third-day report: rules A (3) and B (4), text between them.  Near A with text on the line above A,
+  //  that line moved nothing (only the text below A did); near B with nothing below, nothing moved at all.
+  //  A rule's text is the line above it (sitting on it), the line below only when the line above is blank
+  for(Dim offset : { -0.1*pitch, 0.1*pitch }) {
+    fresh();
+    std::vector<Element*> onA = word(textLeft, 2), onB = word(textLeft, 3);
+    downDrag(Point(gapX, 3*pitch + offset), 2*pitch);
+    check(allOn(onA, 4) && allOn(onB, 5), offset < 0 ? "just above rule A: the text on A and all below move"
+                                                    : "just below rule A: the text on A and all below move");
+    fresh();
+    onB = word(textLeft, 3);
+    downDrag(Point(gapX, 4*pitch + offset), 2*pitch);
+    check(allOn(onB, 5), offset < 0 ? "just above rule B, nothing below: the text on B moves"
+                                    : "just below rule B, nothing below: the text on B moves");
+  }
   {
     // split a line in the middle, then press anywhere left of the rest it put on the next line and drag up:
     //  the rest rejoins its line, and the start of that line (ending left of the split) is not erased

@@ -70,10 +70,13 @@ struct RulingFrame
 
 // Where Insert Lines (ruled insert space held to Down) takes the text from.  `localY` is the press in a frame
 //  of single pitch `yr`; the result is the line (band) the moved text starts on, in that frame, and whether
-//  that whole line moves (a block) or only its part right of the pen (a split).  ONE rule, the same with or
-//  without Skip Lines and whatever is on the lines:
-//  - within INSERT_LINES_SNAP (1/8) of a line height of a rule line, above or below it: the WHOLE line below
-//    that rule, and everything under it - never part of that line, never the line above
+//  that whole line moves (a block) or only its part right of the pen (a split).  The same with or without
+//  Skip Lines:
+//  - within INSERT_LINES_SNAP (1/8) of a line height of a rule line, above or below it: that rule's own
+//    text - the WHOLE line above it, which is where handwriting sitting on the rule is - and everything
+//    under it.  When the line above holds no ink (`lineHasInk(rule - 1)` false: a blank line, the gap above
+//    a paragraph, the top of a region) it is the whole line below the rule instead, so a press on the rule
+//    over text still moves that text and a drag up from it deletes the blank line, not the line above
 //  - otherwise the line the pen is in, split at the pen
 struct InsertLinesStart
 {
@@ -81,7 +84,7 @@ struct InsertLinesStart
   bool wholeLine;
 };
 constexpr Dim INSERT_LINES_SNAP = 0.125;
-InsertLinesStart insertLinesStart(Dim localY, Dim yr);
+InsertLinesStart insertLinesStart(Dim localY, Dim yr, const std::function<bool(int)>& lineHasInk);
 
 // Soft rectangle snap for dragging corner `index` of a four-corner outline to `pos`.  Measured in the
 //  region's frame, relative to the two neighbouring corners, never to absolute x/y: the edge from the
