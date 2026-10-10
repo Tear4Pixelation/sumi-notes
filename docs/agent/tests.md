@@ -226,3 +226,35 @@ fail (9 checks) against the old ugui widgets.cpp. Related behavior in ugui, not 
 applied on focus loss (a numeric soft keyboard has no Return), and a press on the -/+ buttons must not focus the
 text field (iOS soft keyboard) - inside popups `pressedWidget` is the popup, so `SpinBox` checks `hoveredWidget`.
 Input boxes are rounded by `--input-radius` in ugui `theme.cpp`.
+
+## Benchmark (benchtest)
+
+`tools/perf-bench.sh --mode benchtest [--runs 5]` runs `scribbletest/benchtest.cpp` headless in a fresh cage per
+run and prints the median, min and max of every `BENCH <name>: <value> <unit>` line. It needs a binary with
+the test modes: a plain Release build has none (`basics.h` defines `SCRIBBLE_TEST` only without `NDEBUG`), so
+`--perftest`/`--benchtest` are silently ignored there and the run just times out. Build
+`make USE_SYSTEM_SDL=1 BENCH=1` (Release flags plus `SCRIBBLE_TEST=1`, into `Bench/`), which is perf-bench's
+default `--build`. One run takes about 35 s on this machine when it is quiet.
+
+What it covers: full repaints, the perftest scenarios (now painted), a deterministic 100 page document (one
+generated page of 300 handwritten words, drawn through the real input path, then replicated), scrolling through
+all of it, zoom, goto page, pen move latency on a full page (mean/p95/max per event, the event plus its frame),
+rect select / select all / move / undo / redo / delete, stroke and free erasers, 240 px page thumbnails, save
+and load as .html and .svgz, PDF import of a generated vector PDF and scrolling through it, startup to first
+frame, and VmRSS/VmHWM at several points. Each total also has a `_cpu` twin (main thread CPU time).
+
+Traps, each found the hard way:
+- perftest calls `ScribbleApp::processEvents()`, a blocking `SDL_WaitEvent`, and never `layoutAndDraw()`:
+  with nothing queued it sleeps, and it paints nothing. benchtest drains events without blocking and paints
+  every step itself.
+- The swap interval: with the driver default every frame waits for vblank (16.1 ms a frame in the headless
+  cage, whatever the work). benchtest sets it to 0 for the run; `SUMI_BENCH_VSYNC=1` keeps the default.
+- Generated wavy words get taken for a scratch-out on pen lift and erase themselves; benchtest turns
+  `liftScratchOut` off in the app config. A new document's config falls back to the app's, so a value set
+  on `scribbleDoc->cfg` is lost at the next `newDocument()`.
+- `groupStrokes` only aligns words' centres: a page's element count is still one per stroke.
+- The machine is shared: compare the `_cpu` numbers, and the min as well as the median, over >= 5 runs.
+  Under a load average of ~25 on 12 cores, CPU metrics spread 20-60% from min to max, wall clock far more.
+
+Env: `SUMI_BENCH_PAGES` (default 100), `SUMI_BENCH_VSYNC=1`, `SUMI_BENCH_KEEP=1` (leaves the generated
+files in `$TMPDIR/sumi-bench-<pid>`).

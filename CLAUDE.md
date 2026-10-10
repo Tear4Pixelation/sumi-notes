@@ -155,7 +155,7 @@ Test support is compiled in via the `SCRIBBLE_TEST` define (already 1 by default
 ./Debug/Sumi --test          # ScribbleApp::runTest("test") -> ScribbleTest::runAll()
 ```
 
-Other in-app test modes dispatched the same way (see `ScribbleApp::runTest` in `scribbleapp.cpp`): `synctest` (sync between two instances), `perftest`, `inputtest`. Test fixtures/reference output live in `scribbletest/` (`testN_in.html` inputs, `testN_ref.html` expected results). Because tests require a real GL-capable display, CI does not run them (see the commented-out step in `sumi-ci.yml`).
+Other in-app test modes dispatched the same way (see `ScribbleApp::runTest` in `scribbleapp.cpp`): `synctest` (sync between two instances), `perftest`, `benchtest` (the broad benchmark: `tools/perf-bench.sh --mode benchtest`; needs a `make BENCH=1` build, as a Release build has no test modes - see docs/agent/tests.md), `inputtest`. Test fixtures/reference output live in `scribbletest/` (`testN_in.html` inputs, `testN_ref.html` expected results). Because tests require a real GL-capable display, CI does not run them (see the commented-out step in `sumi-ci.yml`).
 
 Pure-math parts (scan, shapes, palette, layer table, ruling regions, Noteful reader, library) also build as
 standalone tests without GL - commands in each `scribbletest/*test.cpp` header; details and what every

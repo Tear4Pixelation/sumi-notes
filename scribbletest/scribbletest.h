@@ -4,6 +4,8 @@
 #include "scribbledoc.h"
 #include "bookmarkview.h"
 
+struct BenchRng;  // benchtest.cpp
+
 class ScribbleTest
 {
 friend class ScribbleApp;
@@ -95,6 +97,8 @@ public:
   //  file changed behind the sidecar's back opens with no history at all
   int undoPersistTest();
   void performanceTest();
+  // broad benchmark printing "BENCH <name>: <value> <unit>" lines (benchtest.cpp, tools/perf-bench.sh)
+  void benchTest();
   void inputTest();
   void syncSlaveMsg(std::string msg, int level);
 
@@ -141,6 +145,13 @@ private:
   void hr(Dim xoffset, Dim yoffset);
   void s3();
   void s4();
+  // benchtest.cpp
+  void benchFrame();
+  void benchFullFrame();
+  Point benchPageToScreen(Point pagept);
+  void benchWord(BenchRng& rng, Point origin, std::vector<double>* latency);
+  void benchHandwriting(BenchRng& rng, int lines, int words, Dim pitch);
+  void benchDrag(Point from, Point to, int steps, int src, std::vector<double>* latency, Dim zigzag = 0);
 
   void test0();
   void test1();
