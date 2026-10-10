@@ -1,0 +1,9 @@
+# UndefinedBehaviorSanitizer suppressions for the Debug (SANITIZE=1) build - vendored code only.
+# Use: UBSAN_OPTIONS=print_stacktrace=1,suppressions=$PWD/tools/sanitizers/ubsan.supp
+
+# miniz's deflate reads and writes unaligned 16/64-bit words on purpose (MINIZ_USE_UNALIGNED_LOADS_AND_STORES,
+#  on for x86/x64), tdefl_compress_lz_codes
+alignment:miniz_tdef.c
+# stb_image_write's JPEG writer left-shifts a negative bit buffer (stbiw__jpg_writeBits); defined since C++20,
+#  and what every compiler does anyway
+shift-base:stb_image_write.h

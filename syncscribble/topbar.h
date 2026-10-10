@@ -25,7 +25,8 @@ public:
   explicit TopBar(bool inLibrary);
 
   // rebuilds the tab buttons if the tabs, the active one or a title changed since last time (always with
-  //  force); cheap enough to call from every MainWindow::refreshUI()
+  //  force); cheap enough to call from every MainWindow::refreshUI().  Once the window is shown, the
+  //  rebuild happens on a 1 ms timer, never inside the layout pass that may be calling this
   void refresh(bool force = false);
   // room above the bar's contents, painted in the bar's color: the status bar inset (ScribbleApp::topInset)
   void setTopPadding(Dim pad);
@@ -53,6 +54,8 @@ private:
 
   Button* createIconButton(const char* icon, Dim hitWidth, Dim iconSize, const char* tooltip);
   TabCell createTab(const std::string& path, bool active);
+  std::string tabState() const;
+  void rebuild(bool force);
   // tabs share the strip's width equally, up to the design's tab width; titles are elided to fit
   void fitTabs(Dim width);
 
@@ -63,4 +66,5 @@ private:
   AutoAdjContainer* tabsAdj = NULL;
   std::vector<TabCell> cells;
   std::string shownState;
+  bool forcePending = false;
 };
