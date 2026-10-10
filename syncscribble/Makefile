@@ -312,7 +312,17 @@ ALL_INC := $(INC) $(INCSYS) ../SDL/include
 LOCAL_C_INCLUDES := $(addprefix $(LOCAL_PATH)/, $(ALL_INC))
 
 LOCAL_CFLAGS := $(addprefix -D, $(DEFS))
-LOCAL_CPPFLAGS := -std=c++14 -Wno-unused -Wno-error=format-security
+# Export only what is looked up by name: every exported dynamic symbol is a GC root, so otherwise
+#  --gc-sections keeps all of MuPDF's ~3200 global functions whether reachable or not.  The two that
+#  must stay exported are SDL_main (SDL's nativeRunMain dlsym()s it) and JNI_OnLoad (the JVM finds it;
+#  it binds the jni* natives with RegisterNatives, so there are no Java_* exports).  Both are also
+#  declared default-visibility by their headers (SDLMAIN_DECLSPEC in SDL_main.h on Android, JNIEXPORT
+#  in jni.h).  -fvisibility=hidden hides our own code and lets the compiler call it directly; the
+#  version script also hides FreeType's FT_* API (FT_EXPORT forces visibility("default")) and libc++
+#  instantiations.  A new native looked up by name (Java_*, dlsym) must be added to libmain.map.
+LOCAL_CFLAGS += -fvisibility=hidden
+LOCAL_CPPFLAGS := -std=c++14 -Wno-unused -Wno-error=format-security -fvisibility-inlines-hidden
+LOCAL_LDFLAGS := -Wl,--version-script=$(LOCAL_PATH)/android/libmain.map
 
 LOCAL_SRC_FILES := $(addprefix $(LOCAL_PATH)/, $(SOURCES))
 LOCAL_SHARED_LIBRARIES := SDL2
@@ -449,6 +459,11 @@ ifeq ($(OS),Windows_NT)
 $(patsubst %,$(OBJDIR)/%.obj,$(basename $(MUPDF_REL_SRC))): CFLAGS += /O1
 else ifeq ($(BUILD_SHARED_LIBRARY),)
 $(patsubst %,$(OBJDIR)/%.o,$(basename $(MUPDF_REL_SRC))): CFLAGS += -Os
+# With FZ_ENABLE_JPX=0, load-jpx.c compiles a stub fz_load_jpx_info() that lacks the declared
+# `defcs` parameter (upstream bug; the stub only throws and JPX is disabled).  LTO sees both
+# declarations and warns -Wlto-type-mismatch, so keep this one object out of LTO instead of
+# carrying a local patch in the mupdf submodule (CI clones mupdf from upstream).
+$(filter %/load-jpx.o,$(patsubst %,$(OBJDIR)/%.o,$(basename $(MUPDF_REL_SRC)))): CFLAGS += -fno-lto
 endif
 endif
 

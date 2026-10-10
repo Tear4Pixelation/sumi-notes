@@ -17,8 +17,19 @@ profiles, base-14 font dumps) to git, so no host codegen step is needed.
     extraction, subsetting, signatures, forms and a dozen output formats. Worth ~1.4 MB. These
     flags live at the *end* of `syncscribble/Makefile` because `Makefile.mac/.ios/.wasm/.msvc`
     assign `CFLAGS` with `=`, which would discard anything set before the platform include.
+  - On Android, gc-sections only works because `libmain.so` exports nothing but `SDL_main` and
+    `JNI_OnLoad` (`-fvisibility=hidden` + `android/libmain.map` version script, Makefile Android
+    branch): every exported dynamic symbol is a GC root, and before this all ~3200 MuPDF globals
+    plus FreeType's `FT_*` API (forced default-visible by `FT_EXPORT`) were exported. A native
+    looked up by name (a `Java_*` function, a `dlsym` target) must be added to `libmain.map`, or it
+    fails at runtime, not at link time.
   - `-Os` for MuPDF's objects only, via a target-specific `CFLAGS` override next to those flags.
     MuPDF runs once per page at import, never in the drawing or input path. Worth ~0.55 MB.
+  - Release builds use LTO (`Makefile.unix` `-flto=auto`, `Makefile.msvc` `/GL` + `/LTCG`; `LTO=0`
+    turns it off). `load-jpx.c` alone is built `-fno-lto`: with `FZ_ENABLE_JPX=0` its stub
+    `fz_load_jpx_info()` lacks the declared `defcs` parameter (upstream bug), which LTO reports as
+    `-Wlto-type-mismatch`. Excluding the object avoids carrying a local patch in the mupdf
+    submodule, which CI clones from upstream.
   - `NO_CJK` (see below). Worth ~0.85 MB.
   - Considered and declined: the base-14 URW font data is ~0.58 MB. `TOFU_BASE14` would drop it, but
     then PDFs that reference Helvetica/Times/Courier *without embedding them* need a substitute
