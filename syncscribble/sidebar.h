@@ -122,6 +122,7 @@ private:
   void ensureThumbTimer();
   // renders thumbnails until a small time budget is spent; the timer's next period, 0 when none is left
   int renderThumbnails();
+  void pruneThumbnails(int first, int last);
   void showThumbnail(size_t cellIdx, const Image& image);
   // a signature of the page order, and of what every thumbnail is drawn from, for refreshIfChanged
   std::string pageOrderState(ScribbleDoc* doc) const;
@@ -196,7 +197,8 @@ private:
     bool upToDate;      // false: still the placeholder, or an image of an older state of the page
   };
   std::vector<PageCell> pageCells;
-  // rendered thumbnails by Page::uid, so a rebuild (a move, an insert) does not render them all again
+  // rendered thumbnails by Page::uid, so a rebuild (a move, an insert) does not render them all again;
+  //  encoded only (PNG), and capped by pruneThumbnails()
   struct Thumbnail { unsigned int revision; Image image; };
   std::unordered_map<unsigned int, Thumbnail> thumbnails;
   std::string shownThumbnailInputs;

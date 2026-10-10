@@ -324,6 +324,7 @@ Image ScribbleDoc::renderPageThumbnail(Page* page, int width)
   int height = std::min(int(width*page->height()/page->width() + 0.5), 4*width);
   Image image(width, std::max(height, 1), Image::PNG);
   Painter painter(Painter::PAINT_SW, &image);
+  painter.useImageProxies = true;  // a page scan is drawn from a small copy, not decoded at full size
   painter.beginFrame();
   painter.setAntiAlias(true);
   Dim scale = width/page->width();

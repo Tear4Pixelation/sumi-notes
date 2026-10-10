@@ -2,6 +2,7 @@
 
 #include "mainwindow.h"
 #include "scribbleapp.h"
+#include "miniz/miniz.h"
 #include "scribbledoc.h"
 #include "scribblearea.h"
 #include "scribbleconfig.h"
@@ -62,6 +63,27 @@ static const Dim sbBadgeInset   = 5;
 static const Dim sbCheckSize    = 12;
 // how long one turn of the event loop may spend rendering thumbnails before it lets input through
 static const int thumbBudgetMs  = 12;
+// rendered thumbnails kept for rebuilds (Sidebar::thumbnails, PNG bytes) before those far from view go
+static const size_t thumbCacheMaxBytes = 8 << 20;
+
+// A thumbnail is kept as PNG bytes only, in the cache and in its cell: decoded, it was held twice
+//  (~80 KB each at desktop scale, never freed while the document was open).  The decoded pixels now live
+//  only in the texture, which Painter::drawImage() decodes from the bytes as it uploads it.  miniz's
+//  writer at its fastest level, not Image::encodePNG(): stb's per-row filter search at level 8 took ~10 ms
+//  a thumbnail, about three times the render itself; this takes ~1 ms for a somewhat larger file.
+static Image encodedThumbnail(Image&& image)
+{
+  if(image.isNull())
+    return Image(0, 0);
+  size_t len = 0;
+  void* png = tdefl_write_image_to_png_file_in_memory_ex(image.constBytes(), image.width, image.height, 4,
+      &len, MZ_BEST_SPEED, MZ_FALSE);
+  if(!png)
+    return std::move(image);
+  Image encoded = Image::decodeBuffer(png, len, Image::PNG);
+  mz_free(png);
+  return encoded;
+}
 
 // The sidebar's inset from the window, taken from the floating toolbar's own geometry (basics.h)
 //  rather than from the design file's numbers.  The panel has to *line up* with the toolbar above
@@ -1378,14 +1400,37 @@ int Sidebar::renderThumbnails()
       if(cached == thumbnails.end() || cached->second.revision != page->revision) {
         if(cached != thumbnails.end())
           thumbnails.erase(cached);
-        Image image = ScribbleDoc::renderPageThumbnail(page, thumbWidthPx);
+        Image image = encodedThumbnail(ScribbleDoc::renderPageThumbnail(page, thumbWidthPx));
         cached = thumbnails.emplace(page->uid, Thumbnail{page->revision, std::move(image)}).first;
+        pruneThumbnails(2*nearFirst, std::min(2*nearLast + 1, int(pageCells.size()) - 1));
       }
       showThumbnail(ii, cached->second.image);
       renderedOne = true;
     }
   }
   return 0;
+}
+
+// past thumbCacheMaxBytes, drop cached thumbnails of pages outside cells [first, last] (those near the view);
+//  their cells keep showing them, only a rebuild of the grid has to render them again
+void Sidebar::pruneThumbnails(int first, int last)
+{
+  size_t total = 0;
+  for(auto& entry : thumbnails)
+    total += entry.second.image.encData.size();
+  if(total <= thumbCacheMaxBytes)
+    return;
+  std::set<unsigned int> nearUids;
+  for(int ii = std::max(0, first); ii <= last && ii < int(pageCells.size()); ++ii)
+    nearUids.insert(pageCells[ii].uid);
+  for(auto it = thumbnails.begin(); it != thumbnails.end() && total > thumbCacheMaxBytes;) {
+    if(nearUids.count(it->first))
+      ++it;
+    else {
+      total -= it->second.image.encData.size();
+      it = thumbnails.erase(it);
+    }
+  }
 }
 
 void Sidebar::updateCurrentPage()

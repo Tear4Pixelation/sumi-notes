@@ -211,6 +211,11 @@ Marker multiply blending is tested by `ScribbleTest::markerBlendTest()` (unit-ch
 the software painter: details and mutation checks in [pen-and-tools.md](pen-and-tools.md#marker-multiplies-text-stays-dark).
 `test15_ref.html` carries `comp-op="multiply"` on its marker strokes since then.
 
+`ScribbleTest::imageSaveCacheTest()` (unit-check count) pins `SvgImage::saveCache`: a rescaled image is
+saved the same twice from the cache, and changed pixels (`fill()`, or edited then `invalidate()`d), a new
+crop or a new size are saved anew, byte-identical to a copy of the node that has no cache. Removing
+`contentId` from the cache key fails three of its checks.
+
 Persistent undo is tested by `ScribbleTest::undoPersistTest()` (unit-check count): edits covering
 strokes, a layer, a layer move, a page, an outline entry and a page deletion undo back to each recorded
 state after save and reopen, redo survives, and a file appended to externally opens with no history and

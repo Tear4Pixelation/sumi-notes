@@ -4072,6 +4072,55 @@ int ScribbleTest::insSpaceAxisTest()
   return nbad;
 }
 
+int ScribbleTest::imageSaveCacheTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: image save cache: %s\n", what); }
+  };
+  auto saved = [](SvgNode* node) {
+    MemStream strm;
+    SvgWriter::save(node, strm);
+    return std::string(strm.data(), strm.size());
+  };
+  float savedImageScale = SvgWriter::DEFAULT_SAVE_IMAGE_SCALED;
+  SvgWriter::DEFAULT_SAVE_IMAGE_SCALED = 1;  // savePicScaled
+  // 400 px shown 100 units wide: the writer shrinks it on every save
+  Image image(400, 400, Image::PNG);
+  unsigned int* pixels = image.pixels();
+  for(int y = 0; y < 400; ++y) {
+    for(int x = 0; x < 400; ++x)
+      pixels[y*400 + x] = 0xFF000000 | (x*255/399) | ((y*255/399) << 8) | (((x + y)%256) << 16);
+  }
+  std::unique_ptr<SvgImage> node(new SvgImage(std::move(image), Rect::wh(100, 100)));
+  std::string first = saved(node.get());
+  check(first.find("data:image/png;base64,") != std::string::npos, "the image is saved inline");
+  check(node->saveCache.contentId == node->m_image.contentId && !node->saveCache.data.empty(),
+      "a rescaled image is cached after a save");
+  check(saved(node.get()) == first, "an unchanged image is saved the same again");
+
+  // each change is saved anew, and a copy of the node (no cache) saves exactly the same bytes
+  node->m_image.fill(0xFF2040C0);  // fill() invalidates
+  std::string filled = saved(node.get());
+  check(filled != first, "changed pixels are saved, not the cached image");
+  check(saved(std::unique_ptr<SvgNode>(node->clone()).get()) == filled, "changed pixels: same bytes as uncached");
+  for(int y = 0; y < 400; ++y)
+    node->m_image.pixels()[y*400 + y] = 0xFFFFFFFF;
+  node->m_image.invalidate();
+  std::string diagonal = saved(node.get());
+  check(diagonal != filled, "pixels changed in place then invalidate()d are saved anew");
+  node->srcRect = Rect::ltrb(0, 0, 200, 400);
+  std::string cropped = saved(node.get());
+  check(cropped != diagonal, "a new crop is saved anew");
+  check(saved(std::unique_ptr<SvgNode>(node->clone()).get()) == cropped, "a crop: same bytes as uncached");
+  node->setSize(Rect::wh(40, 80));
+  std::string smaller = saved(node.get());
+  check(smaller != cropped, "a new displayed size is saved anew");
+  check(saved(std::unique_ptr<SvgNode>(node->clone()).get()) == smaller, "a new size: same bytes as uncached");
+  SvgWriter::DEFAULT_SAVE_IMAGE_SCALED = savedImageScale;
+  return nbad;
+}
+
 int ScribbleTest::rulingRegionTest()
 {
   int nbad = 0;
@@ -4533,6 +4582,7 @@ void ScribbleTest::runAll(bool runsynctest)
   nUnitFailed += skippedLinesTest();
   nUnitFailed += insSpaceAxisTest();
   nUnitFailed += undoPersistTest();
+  nUnitFailed += imageSaveCacheTest();
   runAllTime = mSecSinceEpoch() - runAllTime;
   // restore global config
   srandpp(mSecSinceEpoch());
