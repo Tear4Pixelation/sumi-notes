@@ -68,6 +68,8 @@ void Selection::clear()
     for(Element* node : strokes) {
       node->setSelected(NULL);
       node->resetTransform();
+      // the pen points were kept for this selection's transforms (Element::commitTransform())
+      node->releasePenPoints();
     }
   }
   strokes.clear();
@@ -77,6 +79,7 @@ void Selection::deleteStrokes()
 {
   for(Element* s : strokes) {
     s->setSelected(NULL);
+    s->releasePenPoints();  // undo keeps a deleted stroke, and it can rebuild them
     page->removeStroke(s);
   }
   // delete our list of now invalid strokes
