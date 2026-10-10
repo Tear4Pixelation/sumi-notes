@@ -22,6 +22,8 @@ SOURCES = \
   syncundo.cpp \
   undopersist.cpp \
   selection.cpp \
+  smartscale.cpp \
+  smartscalegesture.cpp \
   document.cpp \
   scribblemode.cpp \
   scribbleinput.cpp \

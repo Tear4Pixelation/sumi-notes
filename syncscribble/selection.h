@@ -95,6 +95,10 @@ public:
   StrokeDrawType m_drawType;
 };
 
+// an element's bounding box in a frame's local coordinates, from its own points when the frame is tilted
+//  (rotating the page bbox would inflate it by several lines)
+Rect localElementBBox(const RulingFrame& f, Element* s);
+
 // for text written on every second line: a frame whose lines are the line at pos and every second one from it
 RulingFrame skippedLineFrame(const RulingFrame& frame, Point pos);
 // the same with its first text line given as a line of `frame` (Insert Lines picks it, see insertLinesStart())
@@ -137,6 +141,11 @@ public:
   virtual int shapeHandleHit(Point pos, bool touch) { return -1; }
   virtual Point rotHandleHit(Point pos, bool touch) { return Point(NaN, NaN); }
   virtual Point cropHandleHit(Point pos, bool touch) { return Point(NaN, NaN); }
+  // smart scale ("Resize Handwriting", smart-scale.md): while on, the selection offers one handle that
+  //  resizes the handwriting on its lines instead of the scale/rotate handles; only RectSelector has it
+  virtual bool smartScaleHandleHit(Point pos, bool touch) { return false; }
+  virtual bool offersSmartScale() const { return false; }
+  bool smartScale = false;
 
   bool drawHandles = true;
   bool bgDirty = false;
@@ -186,6 +195,8 @@ public:
   Point scaleHandleHit(Point pos, bool touch) override;
   Point rotHandleHit(Point pos, bool touch) override;
   Point cropHandleHit(Point pos, bool touch) override;
+  bool smartScaleHandleHit(Point pos, bool touch) override;
+  bool offersSmartScale() const override { return true; }
 
   static Dim HANDLE_PAD;
 

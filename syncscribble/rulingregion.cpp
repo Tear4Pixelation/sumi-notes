@@ -541,7 +541,7 @@ void parseRegionPoints(const char* str, std::vector<Point>& points)
   }
 }
 
-Dim selectionLineHeight(const std::vector<Point>& centres, const std::function<RulingFrame(Point)>& frameAt, Dim fallback)
+RulingFrame selectionFrame(const std::vector<Point>& centres, const std::function<RulingFrame(Point)>& frameAt)
 {
   std::vector<RulingFrame> frames;
   std::vector<int> votes;
@@ -560,5 +560,10 @@ Dim selectionLineHeight(const std::vector<Point>& centres, const std::function<R
     if(best < 0 || votes[idx] > votes[best])
       best = int(idx);
   }
-  return best < 0 ? fallback : frames[best].yrulingOr(fallback);
+  return best < 0 ? RulingFrame() : frames[best];
+}
+
+Dim selectionLineHeight(const std::vector<Point>& centres, const std::function<RulingFrame(Point)>& frameAt, Dim fallback)
+{
+  return centres.empty() ? fallback : selectionFrame(centres, frameAt).yrulingOr(fallback);
 }

@@ -317,6 +317,8 @@ int ScribbleMode::getScribbleMode(int modifier) const
     return MODE_PAN;
   else if(currMode == MODE_PAGESEL)
     return MODE_PAGESEL;
+  else if(modifier & MODEMOD_SMARTSCALE)
+    return MODE_SMARTSCALE;
   else if(modifier & MODEMOD_SCALESEL)
     return (modifier & MODEMOD_PENBTN) ? MODE_SCALESELW : MODE_SCALESEL;
   else if(modifier & MODEMOD_ROTATESEL)
@@ -353,5 +355,5 @@ bool ScribbleMode::isUndoable(int mode)
 bool ScribbleMode::isSlow(int mode)
 {
   return (mode >= MODE_SELECT && mode <= MODE_INSSPACERULED) || mode == MODE_INSSPACEDOWN || mode == MODE_INSSPACERIGHT
-      || mode == MODE_INSSPACEAUTO;
+      || mode == MODE_INSSPACEAUTO || mode == MODE_SMARTSCALE;
 }

@@ -87,6 +87,7 @@ public:
   // out of reach of ink selection and erasers, moves with its ink, and survives undo, reload and sync
   int rulingRegionTest();
   int reflowIndentTest();
+  int smartScaleTest();
   int skippedLinesTest();
   int insSpaceAxisTest();
   // persistent undo (docs/agent/undo-persistence.md): strokes, a layer, a layer move, a page, an outline

@@ -597,6 +597,14 @@ ScribblePen ScribbleArea::getPenForSelection(int* dashStyle) const
 //  page is deleted by another user) ... also called when stroke is moved, since that can invalidate sel BG
 void ScribbleArea::invalidateStroke(Element* s)
 {
+  // a peer changed ink a smart scale drag is holding per-stroke state for: drop the drag, keep the selection
+  auto holds = [s](const std::vector<Element*>& v) { return std::find(v.begin(), v.end(), s) != v.end(); };
+  if(smartScale && (holds(smartScale->strokes) || (tempSelection && std::find(tempSelection->strokes.begin(),
+      tempSelection->strokes.end(), s) != tempSelection->strokes.end()))) {
+    smartScaleCancel();
+    clearTempSelection();
+    currMode = MODE_NONE;
+  }
   RecentStrokesIter it = std::find(recentStrokes.begin(), recentStrokes.end(), s);
   if(it != recentStrokes.end())
     recentStrokes.erase(it);
@@ -623,6 +631,11 @@ void ScribbleArea::invalidateStroke(Element* s)
 // note that we do not handle setting new page - that is done in the same way as local undo (pageCountChanged)
 void ScribbleArea::invalidatePage(Page* p)
 {
+  if(smartScale && currSelection && currSelection->page == p) {
+    smartScaleCancel();
+    clearTempSelection();
+    currMode = MODE_NONE;
+  }
   if(currSelection && currSelection->page == p)
     clearSelection();
   // recent strokes are always on currPage since groupStrokes() is called in setPageNum()
@@ -2723,6 +2736,7 @@ void ScribbleArea::doCommand(int itemid)
   case ID_ENDOFDOC:  jumpToPage(numPages());  break;
   case ID_LASTPAGE:  jumpToPage(numPages() - 1);  break;  // >=numPages() takes us to end of last page
   case ID_UNGROUP:  ungroupSelection();  break;
+  case ID_SMARTSCALE:  toggleSmartScale();  break;
   default:  return;
   }
   uiChanged(UIState::Command);
@@ -2802,6 +2816,9 @@ int ScribbleArea::selectionHit(Point pos, bool touch)
 {
   if(!currSelection || !currSelection->selector)
     return 0;
+  // the smart scale handle replaces the scale/rotate handles while it is on (smart-scale.md)
+  if(currSelection->selector->smartScaleHandleHit(pos, touch))
+    return MODEMOD_SMARTSCALE;
   // a shape's parameter handles replace the scale/rotate handles, so check them first
   shapeHandleIdx = currSelection->selector->shapeHandleHit(pos, touch);
   if(shapeHandleIdx >= 0)
@@ -3024,7 +3041,7 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
   bool selvisible = currSelection &&
       currSelPageNum == currPageNum && isVisible(pageDimToDim(currSelection->getBGBBox()));
   int selhit = selvisible ? selectionHit(pos, event.source == INPUTSOURCE_TOUCH) : 0;
-  bool onHandle = selhit & (MODEMOD_SHAPEHANDLE | MODEMOD_SCALESEL | MODEMOD_ROTATESEL | MODEMOD_CROPSEL);
+  bool onHandle = selhit & (MODEMOD_SHAPEHANDLE | MODEMOD_SCALESEL | MODEMOD_ROTATESEL | MODEMOD_CROPSEL | MODEMOD_SMARTSCALE);
   switch(onHandle ? 0 : cfg->Int("panFromEdge")) {
   case 1: {
     Dim border = cfg->Float("panBorder") * preScale;
@@ -3402,6 +3419,12 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
       refreshRegionSelection();
     // nothing to do until mouse actually moves
     break;
+  case MODE_SMARTSCALE:
+    if(!canSmartScale())
+      currMode = MODE_NONE;
+    else
+      smartScaleStart();
+    break;
   case MODE_INSSPACEVERT:
     tempSelection = new Selection(selsource);
     rectSelector = new RectSelector(tempSelection);
@@ -3593,6 +3616,9 @@ void ScribbleArea::doMoveEvent(const InputEvent& event)
   }
   case MODE_ROTATESEL:
     currSelection->rotate(calcAngle(prevPos, scaleOrigin, pos), scaleOrigin);
+    break;
+  case MODE_SMARTSCALE:
+    smartScaleMove(pos);
     break;
   case MODE_ROTATESELW:
   {
@@ -4224,6 +4250,9 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
     scribbleDoc->endAction();
     break;
   }
+  case MODE_SMARTSCALE:
+    smartScaleFinish();  // one undo step: the action started above, ended below
+    break;
   case MODE_SCALESEL:
   case MODE_SCALESELW:
   case MODE_ROTATESEL:
@@ -4454,6 +4483,9 @@ void ScribbleArea::doCancelAction(bool refresh)
   case MODE_ROTATESEL:
   case MODE_ROTATESELW:
     currSelection->resetTransform();
+    break;
+  case MODE_SMARTSCALE:
+    smartScaleCancel();  // the later content in tempSelection goes back with clearTempSelection() too
     break;
   case MODE_CROPSEL:
     if(tempSelection) {

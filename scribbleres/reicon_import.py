@@ -114,6 +114,8 @@ MAPPING = {
   'ic_menu_share': 'share',
   # ic_menu_split_* (all four split view directions) are in ROTATE
   'ic_menu_stretch': 'scale',
+  # Resize Handwriting (smart scale) on the selection popup: a large square and a small one
+  'ic_menu_smart_scale': 'size',
   'ic_menu_undo': 'undo',
   'ic_menu_zoom': 'magnifier',
   'ic_menu_search2': 'search2',

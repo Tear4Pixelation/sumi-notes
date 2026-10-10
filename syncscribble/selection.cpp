@@ -3,6 +3,7 @@
 #include "basics.h"
 #include "usvg/svgxml.h"
 #include "erasegeom.h"
+#include "smartscale.h"
 
 // Selection:
 // Basic procedure:
@@ -465,7 +466,7 @@ static int rulingLine(const RulingFrame& f, const Element* s) { return f.line(s-
 //  exactly as before.  Tilted, rotating the page bbox would inflate it - a stroke written along a tilted
 //  line would get a box several lines tall and fail every "is it on this line" test - so a path's box
 //  is taken from its own points in the frame instead.
-static Rect localElementBBox(const RulingFrame& f, Element* s)
+Rect localElementBBox(const RulingFrame& f, Element* s)
 {
   if(!f.isRotated() || !s->isPathElement())
     return f.localBBox(s->bbox());
@@ -626,8 +627,8 @@ void Selection::reflowStrokes(Dim dx, int dline, Dim minWordSep)
     measureReflowInk(minWordGap);
   // the gap put between wrapped words and text already on the line: the writer's own, but at least the old
   //  fixed 1.25 x minWordGap and at most a line height, so one wide gap cannot open a column
-  const Dim wordGap = reflowWordGap > 0 ?
-      std::min(std::max(reflowWordGap, 1.25*minWordGap), yruling) : 1.25*minWordGap;
+  //  (writerWordGap(), shared with smart scale)
+  const Dim wordGap = reflowWordGap > 0 ? writerWordGap({reflowWordGap}, minWordGap, yruling) : 1.25*minWordGap;
   auto curr = strokes.begin();
   auto wordbreak = strokes.begin();
   // TODO: should we init currRight to left instead of 0?
@@ -913,7 +914,8 @@ Rect RectSelector::getBGBBox()
     return Rect::centerwh(center, maxwidth, maxwidth);
   }
   // padding accounts for the grab handles
-  Rect r = Rect(selRect).pad(HANDLE_SIZE/mZoom);  //selection->transform.mult(selRect).pad(HANDLE_SIZE/mZoom);
+  Rect r = Rect(selRect).pad((smartScale ? 1.6 : 1)*HANDLE_SIZE/mZoom);  // the smart scale disc is larger
+  //selection->transform.mult(selRect).pad(HANDLE_SIZE/mZoom);
   if(drawHandles)
     r.top -= 7*HANDLE_SIZE/mZoom;  // rotation handle
   return r;
@@ -947,7 +949,7 @@ void RectSelector::shrink()
 // We return the scaling origin point, which is the corner opposite the handle grabbed!
 Point RectSelector::scaleHandleHit(Point pos, bool touch)
 {
-  if(!drawHandles)
+  if(!drawHandles || smartScale)
     return Point(NaN, NaN);
   Dim h = touch ? 2*HANDLE_SIZE : HANDLE_SIZE;
   Dim a = (h+3)/mZoom; // +3 is to make it easier to grab handle
@@ -967,7 +969,7 @@ Point RectSelector::scaleHandleHit(Point pos, bool touch)
 
 Point RectSelector::rotHandleHit(Point pos, bool touch)
 {
-  if(!drawHandles)
+  if(!drawHandles || smartScale)
     return Point(NaN, NaN);
   Dim h = touch ? 2*HANDLE_SIZE : HANDLE_SIZE;
   Dim a = (h+3)/mZoom;
@@ -979,7 +981,7 @@ Point RectSelector::rotHandleHit(Point pos, bool touch)
 
 Point RectSelector::cropHandleHit(Point pos, bool touch)
 {
-  if(!drawHandles || !enableCrop)
+  if(!drawHandles || !enableCrop || smartScale)
     return Point(NaN, NaN);
   Dim h = touch ? 2*HANDLE_SIZE : HANDLE_SIZE;
   Dim a = (h+3)/mZoom; // +3 is to make it easier to grab handle
@@ -994,6 +996,17 @@ Point RectSelector::cropHandleHit(Point pos, bool touch)
   if(Rect(handlerect).translate(selRect.center().x, selRect.bottom).contains(pos))
     return Point(NaN, bbox.top);  //Point(0, 1);
   return Point(NaN, NaN);
+}
+
+// the smart scale handle: one round grip on the bottom right corner, a little larger than the square ones
+//  (it is the only handle), and shown in ruled move mode too - it is how the mode was asked for
+bool RectSelector::smartScaleHandleHit(Point pos, bool touch)
+{
+  if(!smartScale || !selRect.isValid())
+    return false;
+  Dim h = touch ? 2*HANDLE_SIZE : HANDLE_SIZE;
+  Dim a = (1.5*h + 3)/mZoom;
+  return (pos - Point(selRect.right, selRect.bottom)).dist() <= a;
 }
 
 void RectSelector::setZoom(Dim zoom)
@@ -1587,7 +1600,29 @@ void RectSelector::drawBG(Painter* painter)
 
   // Rect sel looks much better w/o antialiasing
   painter->drawRect(r);
-  if(drawHandles) {
+  if(smartScale) {
+    // a disc in the selection's own colour with a diagonal two-way arrow cut out in the paper's colour
+    painter->setAntiAlias(true);
+    const Dim radius = 1.5*a;
+    const Point c(r.right, r.bottom);
+    painter->setFillBrush(bgStroke);
+    painter->setStrokeBrush(Color::NONE);
+    painter->drawPath(Path2D().addEllipse(c.x, c.y, radius, radius));
+    const Dim arm = 0.55*radius, head = 0.3*radius;
+    Path2D arrow;
+    arrow.moveTo(c.x - arm, c.y - arm);
+    arrow.lineTo(c.x + arm, c.y + arm);
+    arrow.moveTo(c.x - arm + head, c.y - arm);
+    arrow.lineTo(c.x - arm, c.y - arm);
+    arrow.lineTo(c.x - arm, c.y - arm + head);
+    arrow.moveTo(c.x + arm - head, c.y + arm);
+    arrow.lineTo(c.x + arm, c.y + arm);
+    arrow.lineTo(c.x + arm, c.y + arm - head);
+    painter->setFillBrush(Color::NONE);
+    painter->setStroke(selection->page->props.color, 0.18*radius, Painter::RoundCap, Painter::RoundJoin);
+    painter->drawPath(arrow);
+  }
+  else if(drawHandles) {
     // draw resize handles on top of border
     painter->fillRect(Rect(handlerect).translate(r.left, r.top), Color::BLACK);
     painter->fillRect(Rect(handlerect).translate(r.right, r.top), Color::BLACK);
