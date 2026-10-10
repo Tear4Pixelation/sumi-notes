@@ -178,26 +178,62 @@ TopBar::TabCell TopBar::createTab(const std::string& path, bool active)
   return cell;
 }
 
+std::string TopBar::tabState() const
+{
+  ScribbleApp* app = ScribbleApp::app;
+  // in the library, home is the active "tab"; the document behind it is not
+  std::string state = fstring("%d|", inLibrary ? -1 : app->activeTabIndex());
+  for(const EditorTab& tab : app->tabs.tabs)
+    state += tab.path + "\n";
+  return state;
+}
+
+// Once the window is shown the rebuild is deferred.  refreshUI() reaches here from inside a layout pass
+//  (ScribbleView::doResizeEvent -> doRefresh, the first layout after a document is opened), and the bar,
+//  earlier in the window, has already been laid out in that pass: tabs added then were never laid out (the
+//  frame's paint clears the dirty flags they set), so a bar that started with no tabs stayed empty - or,
+//  before the zero-size layout fix in ugui, drew an unlaid tab over home at the window's corner.  Each call
+//  that sees a change sets its own 1 ms timer (no Timer* kept: closing the library window drops its
+//  timers while the bar lives on); rebuild() re-checks, so extra timers do nothing.
 void TopBar::refresh(bool force)
+{
+  if(!ScribbleApp::app)
+    return;
+  SvgGui* gui = window() ? window()->gui() : NULL;
+  if(!gui) {
+    rebuild(force);  // not shown yet (setupUI, TagDocList::setup): nothing is laid out or dispatching
+    return;
+  }
+  if(!force && tabState() == shownState)
+    return;
+  forcePending = forcePending || force;
+  gui->setTimer(1, this, [this](){
+    bool forced = forcePending;
+    forcePending = false;
+    rebuild(forced);
+    return 0;
+  });
+}
+
+void TopBar::rebuild(bool force)
 {
   ScribbleApp* app = ScribbleApp::app;
   if(!app)
     return;
-  // in the library, home is the active "tab"; the document behind it is not
-  int activeIdx = inLibrary ? -1 : app->activeTabIndex();
-  std::string state = fstring("%d|", activeIdx);
-  for(const EditorTab& tab : app->tabs.tabs)
-    state += tab.path + "\n";
+  std::string state = tabState();
   if(!force && state == shownState)
     return;
   shownState = state;
+  int activeIdx = inLibrary ? -1 : app->activeTabIndex();
 
   // the press that got us here may be on one of these buttons: owners defer their actions (onTab etc.)
   //  by a timer, so by now nothing is dispatching to a tab being deleted
-  if(window())
-    window()->gui()->deleteContents(tabsRow);
+  // a window not shown yet (setupUI) has no SvgGui: gui() is NULL there
+  SvgGui* gui = window() ? window()->gui() : NULL;
+  if(gui)
+    gui->deleteContents(tabsRow);
   else {
-    // not in a window yet: nothing can be hovered or pressed, so plain deletion is enough
+    // not shown yet: nothing can be hovered or pressed, so plain deletion is enough
     for(TabCell& cell : cells) {
       cell.btn->removeFromParent();
       delete cell.btn->node;
