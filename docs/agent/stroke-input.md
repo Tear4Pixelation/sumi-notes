@@ -66,6 +66,20 @@ gives, an integer grid only allows a handful of segment directions. `CurveFitFil
   back to itself. A pen carrying neither `TIP_FLAT` nor `TIP_CHISEL` is drawn by `StrokedStrokeBuilder`,
   whose cap and join are round, so it shows as Round. Note the old toolbar auto-switched Flat -> Round
   above width 4; that heuristic was not restored.
+- **Cost per input point (perftest draw phase).** With the tip trick, one input sample causes a
+  `removePoints(1)`, up to 16 chord `addPoint`s and the tip `addPoint`, and for a Flat pen each of those
+  re-assembles the outline in `FilledStrokeBuilder::assembleFlatStroke()` (path1 + end cap + reversed
+  path2). It used to copy `path1` into the stroke and append `path2.toReversed()`, two whole outlines
+  allocated per call (2 GB per perftest). Now it updates the stroke in place: path1's unchanged prefix
+  stays, the unchanged tail (reversed path2) slides by one memmove, only new points and the cap are
+  written. `flatKeep1/2` track how much of path1/path2 is untouched since the last assembly - **anything new
+  that shrinks or rewrites path1, path2 or the stroke must lower those or clear `flatAssembled`**, or the
+  outline keeps stale points. A stroke whose size is not what the last assembly left is rebuilt from
+  scratch. `CurveFitFilter::segmentKnots()` computes the four knots a segment needs level by level over
+  their window; the old recursive `knotAt()` recomputed each knot's 3^passes tree separately. Both give
+  bit-identical paths (checked by diffing the document perftest saves, inputCurveFit 0-4, and with
+  inputSmoothing 2). Perftest draw phase: 5.64G -> 3.16G instructions with the scratch-out change in
+  shapes.md.
 - **`scribbletest.cpp` sets `inputCurveFit` to 0**, alongside `inputSmoothing`: the `testN_ref.html`
   fixtures are polylines through the input points. Baseline after this change is unchanged - 0 failed
   tests, 0 failed unit checks, 16 failed thumbnails.
