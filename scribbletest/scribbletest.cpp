@@ -1348,9 +1348,71 @@ int ScribbleTest::twoFingerTapTest()
     mtinput(INPUTEVENT_RELEASE, 200, 260, INPUTEVENT_MOVE, 260, 260);
     mtinput(INPUTEVENT_NONE, 0, 0, INPUTEVENT_RELEASE, 260, 260);
     check(scribbleArea->currPage->strokeCount() == 1, "a two finger drag does not undo");
+    // a quick pinch: the fingers spread 60px about a centroid that stays put
+    mtinput(INPUTEVENT_PRESS, 200, 200, INPUTEVENT_NONE, 0, 0);
+    mtinput(INPUTEVENT_MOVE, 200, 200, INPUTEVENT_PRESS, 260, 200);
+    mtinput(INPUTEVENT_MOVE, 185, 200, INPUTEVENT_MOVE, 275, 200);
+    mtinput(INPUTEVENT_MOVE, 170, 200, INPUTEVENT_MOVE, 290, 200);
+    mtinput(INPUTEVENT_RELEASE, 170, 200, INPUTEVENT_MOVE, 290, 200);
+    mtinput(INPUTEVENT_NONE, 0, 0, INPUTEVENT_RELEASE, 290, 200);
+    check(scribbleArea->currPage->strokeCount() == 1, "a quick pinch does not undo");
   }
   input->singleTouchMode = wasSingle;
   input->multiTouchMode = wasMulti;
+  return nbad;
+}
+
+// A pen stroke the system cancels (iOS touchesCancelled, Android ACTION_CANCEL) reaches ScribbleInput only as
+//  a MULTITOUCH event whose points are the fingers.  It used to be dropped, leaving the pen "drawing": every
+//  finger was then refused until the pen touched down again.  With no finger down, the pen's press must also
+//  stop holding SvgGui::pressedWidget, or the next finger press anywhere is sent to the canvas.
+int ScribbleTest::penCancelTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: pen cancel: %s\n", what); }
+  };
+  ScribbleInput* input = scribbleArea->scribbleInput.get();
+  SvgGui* gui = ScribbleApp::gui;
+  Widget* wasPressed = gui->pressedWidget;
+  scribbleDoc->newDocument();
+  scribbleMode->setMode(MODE_STROKE);
+  for(bool palmDown : {false, true}) {
+    const char* what = palmDown ? "with a palm down" : "with no finger down";
+    ie(120, 160, 0, pen, press);  ie(300, 160, 0, pen);
+    std::vector<SDL_Finger> fingers;
+    if(palmDown)
+      fingers.push_back(SDL_Finger{77, 400, 400, 1});
+    SDL_Event cancel = {};
+    cancel.type = SVGGUI_FINGERCANCEL;
+    cancel.tfinger.touchId = PenPointerPen;
+    cancel.tfinger.fingerId = SDL_BUTTON_LMASK;
+    SDL_Event multitouch = {};
+    multitouch.type = SvgGui::MULTITOUCH;
+    multitouch.user.data1 = &cancel;
+    multitouch.user.data2 = &fingers;
+    // as the pen's press left it (the test view has no widget of its own, so any widget stands in)
+    gui->pressedWidget = gui->windows.front();
+    input->sdlEvent(gui, &multitouch);
+    check(input->scribbling == ScribbleInput::NOT_SCRIBBLING, what);
+    check(input->isTouchAccepted(), "a finger is accepted after the cancel");
+    if(!palmDown)
+      check(gui->pressedWidget == NULL, "the cancelled pen no longer holds the press");
+    // the next stroke is a stroke of its own, not the cancelled one carried on to where the pen lands
+    int before = scribbleArea->currPage->strokeCount();
+    ie(120, 400, 0, pen, press);  ie(200, 400, 0, pen);  ie(0, 0, 0, pen, release);
+    bool added = scribbleArea->currPage->strokeCount() == before + 1;
+    check(added, "the next pen stroke is drawn");
+    if(added) {
+      Element* last = NULL;
+      for(Element* stroke : scribbleArea->currPage->children())
+        last = stroke;
+      // drawn level; carried on from (300, 160) it would be taller than wide
+      check(last->bbox().height() < last->bbox().width()/2, "the next pen stroke does not continue the cancelled one");
+    }
+    input->cancelAction();  // leave a clean state even if the checks failed
+  }
+  gui->pressedWidget = wasPressed;
   return nbad;
 }
 
@@ -4331,6 +4393,7 @@ void ScribbleTest::runAll(bool runsynctest)
   nUnitFailed += markerBlendTest();
   nUnitFailed += selectTouchingTest();
   nUnitFailed += twoFingerTapTest();
+  nUnitFailed += penCancelTest();
   nUnitFailed += timerBacklogTest();
   nUnitFailed += thumbRendererTest();
   nUnitFailed += shapeTapEditTest();

@@ -59,6 +59,7 @@ public:
   // for double clicking
   Point prevPointerCOM;
   Dim pointerPathLen = 0;
+  Dim prevPointerSpread = -1;  // pointerSpread() at the previous event
   Timestamp initPointerTime = 0;
   Point lastClickPos;
   Timestamp lastClickTime = 0;
@@ -92,6 +93,8 @@ public:
   bool sdlEvent(SvgGui* gui, SDL_Event* event);
 
   static Point pointerCOM(const std::vector<InputPoint>& points);
+  static Dim pointerSpread(const std::vector<InputPoint>& points);
+  void addSpreadTravel(const std::vector<InputPoint>& points);
 };
 
 #endif

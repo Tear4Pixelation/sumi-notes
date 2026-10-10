@@ -96,10 +96,26 @@ bool ScribbleInput::sdlEvent(SvgGui* gui, SDL_Event* event)
   default:
     if(event->type == SvgGui::MULTITOUCH) {
       SDL_Event* fevent = static_cast<SDL_Event*>(event->user.data1);
+      auto points = static_cast<std::vector<SDL_Finger>*>(event->user.data2);
+      // A cancelled pen (iOS touchesCancelled, Android ACTION_CANCEL) reaches us only here: SvgGui sends
+      //  every cancel as MULTITOUCH, and the points are the fingers - none of them the pen.  Built as a touch
+      //  event below it was dropped (no points, or isTouchAccepted() refusing touch during a pen stroke), so
+      //  the stroke was never cancelled: every finger was then ignored until the pen touched down again, and
+      //  that stroke continued the cancelled one.  See docs/agent/touch-input.md.
+      if(fevent->type == SVGGUI_FINGERCANCEL
+          && (fevent->tfinger.touchId == PenPointerPen || fevent->tfinger.touchId == PenPointerEraser)) {
+        if(currInputSource == INPUTSOURCE_PEN)
+          cancelAction();
+        // SvgGui clears pressedWidget when the last touch point goes only if the pen is not down, and it
+        //  clears penDown for this cancel after that check - so with no finger down the pen's press is left
+        //  holding pressedWidget, and the next finger press anywhere (a toolbar button) is sent here instead
+        if(gui && points->empty())
+          gui->pressedWidget = NULL;
+        return true;
+      }
       Dim maxw = std::max(fevent->tfinger.dx, fevent->tfinger.dy);
       InputEvent ievent(INPUTSOURCE_TOUCH, MODEMOD_NONE, event->user.timestamp, maxw);
       Point p0 = parent->screenOrigin;
-      auto points = static_cast<std::vector<SDL_Finger>*>(event->user.data2);
       for(const SDL_Finger& pt : *points) {
         inputevent_t t = pt.id == fevent->tfinger.fingerId ? typeFromSDLFinger(fevent->type) : INPUTEVENT_NONE;
         ievent.points.push_back(InputPoint(t, pt.x - p0.x, pt.y - p0.y, pt.pressure > 0 ? pt.pressure : 1));
@@ -164,6 +180,23 @@ Point ScribbleInput::pointerCOM(const std::vector<InputPoint>& points)
     }
   }
   return n > 0 ? Point(x/n, y/n) : Point(0,0);
+}
+
+// distance between the fingers of a two finger gesture, -1 for any other number of points
+Dim ScribbleInput::pointerSpread(const std::vector<InputPoint>& points)
+{
+  return points.size() == 2 ? Point(points[0].x, points[0].y).dist(Point(points[1].x, points[1].y)) : -1;
+}
+
+// A pinch moves the fingers apart about a centroid that hardly moves, so measured by the centroid alone a
+//  quick pinch was a two finger tap: the zoom was reverted and the last stroke undone.  The change in spread
+//  counts as pointer travel too, so a pinch is neither a tap nor a click.
+void ScribbleInput::addSpreadTravel(const std::vector<InputPoint>& points)
+{
+  Dim spread = pointerSpread(points);
+  if(spread >= 0 && prevPointerSpread >= 0)
+    pointerPathLen += std::abs(spread - prevPointerSpread);
+  prevPointerSpread = spread;
 }
 
 // doInputEvent serves as a nexus for all input events from stylus, mouse, and touch
@@ -280,6 +313,7 @@ void ScribbleInput::doInputEvent(InputEvent& event)
       currInputSource = event.source;
       twoFingerTap = event.source == INPUTSOURCE_TOUCH && npoints == 2;
       pointerPathLen = 0;
+      prevPointerSpread = pointerSpread(event.points);
       prevPointerCOM = event.com;
       initPointerTime = event.t;
       parent->doMotionEvent(event, INPUTEVENT_PRESS);  // used to give ScribbleArea focus on cursor down
@@ -304,11 +338,13 @@ void ScribbleInput::doInputEvent(InputEvent& event)
       // TODO: need to figure out this case
       twoFingerTap = event.source == INPUTSOURCE_TOUCH && npoints == 2;
       pointerPathLen = 0;
+      prevPointerSpread = pointerSpread(event.points);
       prevPointerCOM = event.com;
       initPointerTime = event.t;
     }
     else if(nextpoints < npoints) {
       eventtype = INPUTEVENT_RELEASE;
+      addSpreadTravel(event.points);
       // measure the remaining finger from where it is, not from the two finger centroid
       if(twoFingerTap && !finishing)
         prevPointerCOM = event.com;
@@ -328,6 +364,7 @@ void ScribbleInput::doInputEvent(InputEvent& event)
     }
     else {
       pointerPathLen += (event.com - prevPointerCOM).dist();
+      addSpreadTravel(event.points);
       prevPointerCOM = event.com;
       // used for highlighting stuff between press and release of a click
       if(pointerPathLen < PANLENGTH_CLICK && event.t - initPointerTime < MAX_CLICK_TIME)

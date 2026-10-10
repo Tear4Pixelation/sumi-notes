@@ -50,6 +50,7 @@ public:
   //  its points inside; off, only what lies entirely inside
   int selectTouchingTest();
   int twoFingerTapTest();
+  int penCancelTest();
   // a periodic timer slower than its own period does not hold back other timers (SvgGui::processTimers)
   int timerBacklogTest();
   // closing and reopening the sidebar's Pages view leaves one thumbnail renderer, not one per opening
