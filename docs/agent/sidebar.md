@@ -75,8 +75,17 @@ the summary. `syncscribble/sidebar.cpp`.
   page of a delay-loaded document once, when the list is built for it; after that it loads nothing.
   `Document::outline(false)` counts a page unloaded under the memory limit from its cached title, so
   the check does not see entries vanish either.
-- Colors are literals from the Penpot file, as the floating toolbars' are - this panel is part of the
-  same dark chrome and does not follow the document theme.
+- **Every color is a theme token** (`.gp-sidebar` rules in `ugui/theme.cpp`: `--dark` panel, `--doclist-field`
+  fields, `--text`/`--icon` labels, `--checked` accent, `--sidebar-preview`, `--danger`, `--badge-*`,
+  `--on-checked`), so the panel follows the UI theme (Preferences, light/dark) like the toolbar. The dark
+  values equal the Penpot literals it was designed with. **Invert Colors ("Dark Mode") does not restyle
+  chrome** - only the canvas - so the one thing that follows it is the pinned column's backfill
+  (`.sb-backfill.night` -> `--canvas-night`, toggled by `Sidebar::updateBackfillTheme()`), which must match the
+  canvas's dark gray under a light UI. Never add a literal here.
+- **The Pages select bar's count label has a fixed width** (`sbSelectLabelW`, a sizer rect in a box). It used to
+  size to its text, and the bar is as wide as its contents, so ticking a page ("Select pages" -> "1 selected")
+  shifted every button ~16 px sideways; under a still pointer the hover fill then sat on the slot the button
+  had left. Do not let any text in that bar change the bar's width.
 - **The toolbar button's glyph names the edge the sidebar is docked to** - reicon `sidebar-left`/
   `sidebar-right` as `ic_menu_sidebar_left`/`_right`, swapped by `MainWindow::updateSidebarButton()`
   whenever the side changes, and the action is checkable so the button also reads as open/closed.

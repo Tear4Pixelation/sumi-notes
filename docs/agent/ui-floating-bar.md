@@ -34,7 +34,7 @@ two-argument call is (vertical, horizontal).
 | Buttons | **44 x 44** slot, corner radius **10**, no gap between neighbouring buttons |
 | Button background | none at rest, `--floating-hovered` hovered, `--floating-pressed` pressed |
 | Button icon | **20 x 20**, theme `--icon` color; disabled: `var(--icon-disabled)` |
-| Destructive icon | **#E5534B** (red), `--icon-disabled` when disabled |
+| Destructive icon | `--danger` (red), `--icon-disabled` when disabled |
 | Label | font-size **15**, `var(--text)`, Satoshi (inherited from `.tagdoclist`); **12** left, **14** right |
 | Separator | **1 x 28**, fill `--floating-separator`, **6** on either side |
 
@@ -66,7 +66,8 @@ shared background.
 
 - **A mode swaps the controls, it does not add to them.** Entering select mode hides the FAB row and
   shows the bar in the same corner; leaving restores the FABs. Escape leaves too.
-- **The label carries the state** ("Select documents" / "2 selected"), and buttons that would do
+- **The label carries the state** ("Select documents" / "2 selected") **at a fixed width** - a label that sizes
+  to its text resizes the bar and slides every button (the Pages bar has a sizer for this) - and buttons that would do
   nothing are disabled rather than hidden, so the bar's layout does not jump.
 - **Exit is the last button** and is always enabled.
 - Hover/pressed/disabled come from the classes ugui's `Button` sets (`hovered`, `pressed`, `disabled`,

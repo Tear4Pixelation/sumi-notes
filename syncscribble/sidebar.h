@@ -37,6 +37,8 @@ public:
 
   // rebuild the list from the active document
   void refresh();
+  // Invert Colors draws the canvas in its dark gray whatever the UI theme, so the pinned column's backfill follows
+  void updateBackfillTheme();
   // refresh() only if what the list shows has changed (another document, an undo, a peer's edit); cheap
   //  enough for MainWindow::refreshUI, which runs after every stroke
   void refreshIfChanged();
