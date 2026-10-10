@@ -2893,11 +2893,23 @@ void ScribbleArea::ruledInsSpaceStart(Point pos)
   insSpaceSelX = insSpaceColX = insSpaceAppliedX = gestureFrame.toLocal(pos).x;
   const bool skipLines = scribbleDoc->scribbleMode->insSpaceSkipLines;
   if(insSpaceAxis == MODE_INSSPACEDOWN) {
-    // Insert Lines: within 1/8 line of a rule moves the whole line below it and all under, otherwise the
-    //  line splits at the pen - one rule, with Skip Lines or not (see insertLinesStart())
+    // Insert Lines: within 1/8 line of a rule moves that rule's text (the whole line above it, or the line
+    //  below when the one above is blank) and all under, otherwise the line splits at the pen - one rule,
+    //  with Skip Lines or not (see insertLinesStart())
     const RulingFrame lineFrame = gestureFrame;
     const Dim yr = lineFrame.yrulingOr(Page::BLANK_Y_RULING);
-    InsertLinesStart start = insertLinesStart(lineFrame.toLocal(pos).y, yr);
+    // ink on a line, as the gesture would select it (its own ruling, the pen's column)
+    auto lineHasInk = [&](int line) {
+      std::unique_ptr<Selection> probe(new Selection(currPage, Selection::STROKEDRAW_NONE));
+      probe->selMode = Selection::SELMODE_PASSIVE;
+      probe->ruling = lineFrame;
+      RuledSelector* selector = new RuledSelector(probe.get(), selColMode);
+      if(selColMode != RuledSelector::COL_NONE)
+        selector->findStops(insSpaceColX, line - 1);
+      selector->selectRuled(MIN_DIM, line, MAX_DIM, line);
+      return probe->count() > 0;
+    };
+    InsertLinesStart start = insertLinesStart(lineFrame.toLocal(pos).y, yr, lineHasInk);
     if(skipLines)
       gestureFrame = skippedLineFrame(lineFrame, start.line);
     prevLine = initialLine = gestureFrame.line(pos, Page::BLANK_Y_RULING);

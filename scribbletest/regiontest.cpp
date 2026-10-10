@@ -154,31 +154,44 @@ int runRegionTests()
     regionCheck(r.outline, "new regions are outlined");
   }
 
-  // Insert Lines' zones (second-day report), pitch 40 so the snap band (1/8) is 5 either side of a rule
+  // Insert Lines' zones (second-day report), pitch 40 so the snap band (1/8) is 5 either side of a rule.
+  //  Near a rule it is the rule's own text, the line above it, unless that line is blank
   {
     const Dim yr = 40;
-    InsertLinesStart start = insertLinesStart(3.5*yr, yr);
+    auto blank = [](int) { return false; };
+    auto inked = [](int) { return true; };
+    // text on line 3 only (between rule 3 and rule 4, sitting on rule 4)
+    auto line3 = [](int line) { return line == 3; };
+    InsertLinesStart start = insertLinesStart(3.5*yr, yr, inked);
     regionCheck(start.line == 3 && !start.wholeLine, "mid-line: split line 3 at the pen");
-    start = insertLinesStart(3*yr + 3, yr);
-    regionCheck(start.line == 3 && start.wholeLine, "just below rule 3: the whole of line 3 down");
-    start = insertLinesStart(3*yr - 3, yr);
-    regionCheck(start.line == 3 && start.wholeLine, "just above rule 3 (bottom of line 2): the whole of line 3 down");
-    start = insertLinesStart(4*yr - 0.1*yr, yr);
-    regionCheck(start.line == 4 && start.wholeLine, "near the rule the text sits on: the block below it");
-    start = insertLinesStart(3*yr + 0.3*yr, yr);
+    start = insertLinesStart(3*yr + 3, yr, line3);
+    regionCheck(start.line == 3 && start.wholeLine, "just below rule 3, blank line 2: the whole of line 3 down");
+    start = insertLinesStart(3*yr - 3, yr, line3);
+    regionCheck(start.line == 3 && start.wholeLine, "just above rule 3, blank line 2: the whole of line 3 down");
+    // the user's report: rules A (3) and B (4), text between them.  Near B it moves that text, not the
+    //  empty line below it (which moved nothing); near A with text on line 2 it moves line 2, not only line 3
+    start = insertLinesStart(4*yr - 0.1*yr, yr, line3);
+    regionCheck(start.line == 3 && start.wholeLine, "near the rule the text sits on: that text moves");
+    start = insertLinesStart(4*yr + 0.1*yr, yr, line3);
+    regionCheck(start.line == 3 && start.wholeLine, "just below the rule the text sits on: that text moves");
+    start = insertLinesStart(3*yr + 3, yr, inked);
+    regionCheck(start.line == 2 && start.wholeLine, "near rule 3 with text on line 2: line 2 moves, the line above");
+    start = insertLinesStart(3*yr - 3, yr, inked);
+    regionCheck(start.line == 2 && start.wholeLine, "just above rule 3 with text on line 2: line 2 moves");
+    start = insertLinesStart(3*yr + 0.3*yr, yr, inked);
     regionCheck(start.line == 3 && !start.wholeLine, "past the snap band: a split again");
-    start = insertLinesStart(-3, yr);
+    start = insertLinesStart(-3, yr, blank);
     regionCheck(start.line == 0 && start.wholeLine, "just above a region's top rule: its first line as a block");
-    // exactly 1/8 either side still counts, just past it does not; and nothing about the lines matters
-    start = insertLinesStart(3*yr + 0.125*yr, yr);
-    regionCheck(start.line == 3 && start.wholeLine, "1/8 line below a rule: the whole line");
-    start = insertLinesStart(3*yr - 0.125*yr, yr);
-    regionCheck(start.line == 3 && start.wholeLine, "1/8 line above a rule: the whole line below it, not the line above");
-    start = insertLinesStart(3*yr + 0.13*yr, yr);
+    // exactly 1/8 either side still counts, just past it does not
+    start = insertLinesStart(3*yr + 0.125*yr, yr, inked);
+    regionCheck(start.line == 2 && start.wholeLine, "1/8 line below a rule: the whole line above it");
+    start = insertLinesStart(3*yr - 0.125*yr, yr, blank);
+    regionCheck(start.line == 3 && start.wholeLine, "1/8 line above a rule, blank above: the whole line below it");
+    start = insertLinesStart(3*yr + 0.13*yr, yr, inked);
     regionCheck(start.line == 3 && !start.wholeLine, "just past 1/8 below a rule: a split");
-    start = insertLinesStart(3*yr - 0.13*yr, yr);
+    start = insertLinesStart(3*yr - 0.13*yr, yr, inked);
     regionCheck(start.line == 2 && !start.wholeLine, "just past 1/8 above a rule: a split of the line above");
-    start = insertLinesStart(4.5*yr, yr);
+    start = insertLinesStart(4.5*yr, yr, blank);
     regionCheck(start.line == 4 && !start.wholeLine, "mid-line is a split, empty line or not (Skip Lines makes no difference)");
   }
 

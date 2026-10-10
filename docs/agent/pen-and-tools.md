@@ -407,12 +407,24 @@ applied in `ruledInsSpaceStart()`). "Insert Lines" is now the one tool once its 
 the internal combined `MODE_INSSPACERULED`, still take the press's own line and x. Lines are the gesture's
 frame (`rulingAt()`, so a Paper Patch's pitch and tilt), at single pitch even with Skip Lines:
 
-- **Within `INSERT_LINES_SNAP` (1/8) of a line height of a rule line**, on either side of it: the WHOLE line
-  below that rule and everything under it moves, whatever x the pen is at - never part of that line, never the
-  line above. A pen resting on the rule a line's text sits on therefore moves the lines *below* that text.
+- **Within `INSERT_LINES_SNAP` (1/8) of a line height of a rule line**, on either side of it: that rule's
+  own text - the WHOLE line *above* the rule, where handwriting sitting on it is - and everything under it
+  moves, whatever x the pen is at. Only when the line above holds no ink (as the gesture would select it:
+  its ruling, the pen's column) is it the whole line *below* the rule instead.
 - **Otherwise (mid-line)**: the line splits at the pen. Its part right of the pen, and everything below, moves.
 
-This is ONE rule, `insertLinesStart(localY, yr)`, with no Skip Lines special case and no look at the ink. It
+**Root cause of the third-day report** ("near rule A it takes the whole line below and nothing above; near
+rule B, with no text below, it does nothing"): the zone used to always pick the band *below* the rule
+(`{rule, true}`). Bands are `[k*yr, (k+1)*yr)` and handwriting sits on the rule at the band's bottom, so
+the text "on" rule B is band B-1. Pressing at B therefore moved the empty band under the text (nothing
+visible), and pressing at A skipped the text written on A. The zone itself was fine; the side was wrong.
+The blank-above fallback keeps the old result where it was right: the rule over a paragraph (blank line
+above) still moves that paragraph, Skip Lines text is moved from either rule around it, and a drag up from
+the rule under a blank line deletes that blank line rather than the text above it.
+
+This is ONE rule, `insertLinesStart(localY, yr, lineHasInk)`, with no Skip Lines special case; the only look
+at the ink is "is the line above the rule blank" (`lineHasInk`, a probe `RuledSelector` in
+`ruledInsSpaceStart()`). It
 used to treat a mid-line press on a blank line with Skip Lines as a whole-line press and the zone was 0.2, so
 the same press gave a different selection with the toggle on; do not reintroduce a parameter for it. Skip
 Lines only changes the *frame* the gesture then runs in (doubled pitch from the chosen line's top), i.e. the
@@ -436,6 +448,9 @@ dragging a block up over lines is how lines get deleted. Column stops are still 
 (`findStops()` is called explicitly before `selectRuled()`, which would otherwise use the erase's start).
 Each gesture is one undo step. Insert Space in Line pulled back left rejoins as it always has.
 
+The third-day fix is pinned by `regiontest` (rule's own text above, blank-above fallback; the old
+below-only rule fails 5 checks) and by the "rule A / rule B" checks in `insSpaceAxisTest()` (text on A and
+B, press 0.1 line either side of each; the old rule fails all 4).
 Tested standalone by `regiontest` (the zones, now incl. exactly 1/8 and just past it; with the zones removed, 5 checks fail) and in-app by the end of
 `ScribbleTest::insSpaceAxisTest()`: near-rule block, split then rejoin without erasing, and the near-rule whole line / past-1/8 split
 run with Skip Lines off and on (identical results, both sides of the rule). With the press zones and the erase change reverted, 4 checks fail. Verified
