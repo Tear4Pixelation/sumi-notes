@@ -312,6 +312,50 @@ int runRegionTests()
     regionCheck(lined.xRuling == 30 && lined.dotRadius == 0, "sanitize: axes get a square grid and no dots");
   }
 
+  // soft rectangle snap of a dragged corner (snapCornerToRect): relative to the neighbours, in the frame
+  {
+    const Dim tol = 5;
+    // corners TL, TR, BR, BL of a 200 x 100 rectangle that is not at the origin
+    std::vector<Point> rect = {Point(50, 40), Point(250, 40), Point(250, 140), Point(50, 140)};
+    RulingFrame flat(Point(0, 0), 0, 0, 30);
+    // drag BR: 3 off in x and 2 off in y -> back to the rectangle corner
+    Point snapped = snapCornerToRect(flat, rect, 2, Point(253, 138), tol);
+    regionCheck(nearPt(snapped, Point(250, 140)), "snap: a corner dragged near the rectangle corner returns to it");
+    // each axis on its own
+    snapped = snapCornerToRect(flat, rect, 2, Point(253, 160), tol);
+    regionCheck(nearPt(snapped, Point(250, 160)), "snap: only the axis within tolerance snaps (x)");
+    snapped = snapCornerToRect(flat, rect, 2, Point(280, 138), tol);
+    regionCheck(nearPt(snapped, Point(280, 140)), "snap: only the axis within tolerance snaps (y)");
+    // beyond the tolerance nothing moves
+    snapped = snapCornerToRect(flat, rect, 2, Point(257, 147), tol);
+    regionCheck(nearPt(snapped, Point(257, 147)), "snap: outside the tolerance the corner is left alone");
+    // every corner, not just one: TL dragged
+    snapped = snapCornerToRect(flat, rect, 0, Point(48, 43), tol);
+    regionCheck(nearPt(snapped, Point(50, 40)), "snap: works for the first corner too");
+    // relative, not absolute: the same drag with the whole patch moved snaps to the moved neighbours
+    std::vector<Point> moved;
+    for(const Point& corner : rect)
+      moved.push_back(corner + Point(1000.5, -333.25));
+    snapped = snapCornerToRect(flat, moved, 2, Point(253, 138) + Point(1000.5, -333.25), tol);
+    regionCheck(nearPt(snapped, Point(250, 140) + Point(1000.5, -333.25)), "snap: relative to neighbours, not absolute x/y");
+    // a tilted frame: the rectangle is axis-aligned in the frame, not on the page
+    RulingFrame tilted(Point(10, 20), 0.4, 0, 30);
+    std::vector<Point> tiltedRect;
+    for(const Point& corner : rect)
+      tiltedRect.push_back(tilted.toPage(corner));
+    Point drag = tilted.toPage(Point(253, 138));
+    snapped = snapCornerToRect(tilted, tiltedRect, 2, drag, tol);
+    regionCheck(nearPt(snapped, tiltedRect[2], 1E-6), "snap: measured in the tilted frame");
+    // one that is NOT a rectangle: the horizontal edge goes level and the vertical one plumb, whatever the
+    //  opposite corner does
+    std::vector<Point> trapezoid = {Point(50, 40), Point(250, 55), Point(250, 140), Point(50, 140)};
+    snapped = snapCornerToRect(flat, trapezoid, 2, Point(252, 143), tol);
+    regionCheck(nearPt(snapped, Point(250, 140)), "snap: the dragged corner lines up with its neighbours only");
+    // not a quad: untouched
+    std::vector<Point> triangle = {Point(0, 0), Point(10, 0), Point(10, 10)};
+    regionCheck(nearPt(snapCornerToRect(flat, triangle, 2, Point(11, 11), tol), Point(11, 11)), "snap: not four corners, no snap");
+  }
+
   return nRegionChecksFailed;
 }
 

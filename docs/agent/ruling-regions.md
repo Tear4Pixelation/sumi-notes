@@ -129,6 +129,19 @@ selection in `RegionSelector` (`selection.cpp`), the UI in `ScribbleArea` and th
   arrowhead's length of the tip, are dropped. `sanitize()` keeps it squared and dotless and a staff never
   has axes. Geometry (tick step, y up, clipping, sanitize) tested in `regiontest.cpp`, mutation-checked.
 
+- **Corner drag snaps softly back to a rectangle** (`snapCornerToRect()`, `REGION_CORNER_SNAP_SCREEN` = 5
+  screen units / `mScale`, so a few pixels at any zoom). Relative to the *neighbouring corners*, measured in
+  the region's frame (so tilted patches work), never absolute x/y: the neighbour whose edge runs more nearly
+  along x gives the dragged corner its local y, the other gives its local x, each axis only when within
+  tolerance. Two such snaps make a rectangle if the other three corners were one. Only four-corner outlines.
+  Tested in `regiontest.cpp` (mutation-checked: stubbing the function fails 7 checks).
+- **Handles are tested before pan-from-edge** (`doPressEvent`: `selectionHit` now runs before the
+  `panFromEdge` switch, and a handle hit skips it). The size handle sits past the bottom-right corner, so
+  for a patch spanning the page it is off the page and, with `panFromEdge` on (default on phones/tablets;
+  2 = any press off the page) the press became `MODE_PAN`, and the pan's tap then cleared the selection.
+  All handles (shape, scale, rotate, crop) are hit-tested in page coordinates with no page-bounds check, so
+  they work off-page once the edge pan is out of the way. Not covered by an automated test (needs the app).
+
 Known gaps: page-level ruled insert space does not move regions below it (vertical/horizontal insert space
 do); content pushed past a region's edge by ruled insert space leaves it; a corner drag can make a
 self-intersecting outline; the hover cursor for a relative-width marker uses the page's line height; regions

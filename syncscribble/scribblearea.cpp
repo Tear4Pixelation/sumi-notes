@@ -3006,7 +3006,14 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
   if(currPage->yruling() == 0)
     currPage->yRuleOffset = fmod(pos.y - Page::BLANK_Y_RULING/2, Page::BLANK_Y_RULING);
 
-  switch(cfg->Int("panFromEdge")) {
+  // A press on a selection's handle is never a pan-from-edge: a patch's size handle sits past its corner, so
+  //  with a patch spanning the page it lies off the page and, on a phone or tablet, in the edge strip.
+  //  Handles are hit-tested in page coordinates and do not care where the page ends, so test them first.
+  bool selvisible = currSelection &&
+      currSelPageNum == currPageNum && isVisible(pageDimToDim(currSelection->getBGBBox()));
+  int selhit = selvisible ? selectionHit(pos, event.source == INPUTSOURCE_TOUCH) : 0;
+  bool onHandle = selhit & (MODEMOD_SHAPEHANDLE | MODEMOD_SCALESEL | MODEMOD_ROTATESEL | MODEMOD_CROPSEL);
+  switch(onHandle ? 0 : cfg->Int("panFromEdge")) {
   case 1: {
     Dim border = cfg->Float("panBorder") * preScale;
     // all edges are treated the same for now, so just set EDGEMASK
@@ -3057,10 +3064,7 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
     }
   }
 
-  bool selvisible = currSelection &&
-      currSelPageNum == currPageNum && isVisible(pageDimToDim(currSelection->getBGBBox()));
-  if(selvisible)
-    modemod |= selectionHit(pos, event.source == INPUTSOURCE_TOUCH);
+  modemod |= selhit;
   // get the mode!
   currMode = scribbleDoc->getScribbleMode(modemod);
   // Down and Right are ruled insert space held to one axis: everything about the gesture - selection, Skip
@@ -3661,7 +3665,8 @@ void ScribbleArea::doMoveEvent(const InputEvent& event)
         break;
       }
       if(shapeHandleIdx >= 0 && shapeHandleIdx < int(params.corners.size()))
-        params.corners[shapeHandleIdx] = pos;
+        params.corners[shapeHandleIdx] = snapCornerToRect(params.frame(), params.corners, shapeHandleIdx, pos,
+            REGION_CORNER_SNAP_SCREEN/mScale);
       else if(shapeHandleIdx == int(params.corners.size()))
       {
         params.origin = params.origin + (pos - regionHandleStartPos);

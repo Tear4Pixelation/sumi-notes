@@ -83,6 +83,18 @@ struct InsertLinesStart
 constexpr Dim INSERT_LINES_SNAP = 0.125;
 InsertLinesStart insertLinesStart(Dim localY, Dim yr);
 
+// Soft rectangle snap for dragging corner `index` of a four-corner outline to `pos`.  Measured in the
+//  region's frame, relative to the two neighbouring corners, never to absolute x/y: the edge from the
+//  dragged corner to the neighbour it runs more nearly horizontal to is made exactly horizontal (the
+//  corner takes that neighbour's local y) when within `tolerance`, and the vertical edge likewise (the
+//  corner takes the other neighbour's local x).  Each axis snaps on its own, so a corner that is close on
+//  one axis only still gets that one; when both land, the outline is a rectangle in the frame if the
+//  other three corners already were.  `tolerance` is in page units: callers pass
+//  REGION_CORNER_SNAP_SCREEN/scale so the pull is the same few pixels at any zoom.  Not four corners,
+//  or a bad index: `pos` unchanged.
+constexpr Dim REGION_CORNER_SNAP_SCREEN = 5;
+Point snapCornerToRect(const RulingFrame& frame, const std::vector<Point>& corners, int index, Point pos, Dim tolerance);
+
 // The line height a selection's relative width is measured in: the ruling of the region most of its
 //  strokes' centres lie in (frameAt answers per centre, as Page::rulingAt does), the page's own when that
 //  is the plurality.  A tie goes to whichever of the tied regions holds the earliest stroke.  Strokes

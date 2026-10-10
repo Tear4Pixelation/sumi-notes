@@ -92,6 +92,25 @@ InsertLinesStart insertLinesStart(Dim localY, Dim yr)
   return {int(std::floor(localY/yr)), false};
 }
 
+Point snapCornerToRect(const RulingFrame& frame, const std::vector<Point>& corners, int index, Point pos, Dim tolerance)
+{
+  if(corners.size() != 4 || index < 0 || index >= 4 || tolerance <= 0)
+    return pos;
+  Point local = frame.toLocal(pos);
+  Point prev = frame.toLocal(corners[(index + 3)%4]);
+  Point next = frame.toLocal(corners[(index + 1)%4]);
+  // the neighbour whose edge runs more nearly along x is the horizontal one; the other is the vertical one
+  Point diffPrev = prev - local;
+  bool prevHorizontal = std::abs(diffPrev.x) >= std::abs(diffPrev.y);
+  Point horizontal = prevHorizontal ? prev : next;
+  Point vertical = prevHorizontal ? next : prev;
+  if(std::abs(local.y - horizontal.y) <= tolerance)
+    local.y = horizontal.y;
+  if(std::abs(local.x - vertical.x) <= tolerance)
+    local.x = vertical.x;
+  return frame.toPage(local);
+}
+
 // RulingRegionParams
 
 constexpr Dim RulingRegionParams::MIN_PITCH;  // C++14: std::max takes it by reference
