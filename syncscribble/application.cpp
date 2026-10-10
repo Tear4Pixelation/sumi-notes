@@ -6,6 +6,7 @@
 #include "scribbleapp.h"
 #include "scribbleview.h"
 #include "scribbleconfig.h"
+#include "sumiwindowicon.h"
 
 #if PLATFORM_WIN
 #include "windows/winhelper.h"
@@ -118,6 +119,23 @@ SvgGui* Application::gui = NULL;
 bool Application::runApplication = true;
 bool Application::glRender = false;
 bool Application::isSuspended = false;
+// Without this the desktop shows whatever icon it has cached for the window's class (an old Write one) until
+//  Sumi.desktop is matched; the Sumi logo is embedded so the very first frame already carries it
+static void setSumiWindowIcon(SDL_Window* window)
+{
+#if PLATFORM_LINUX || PLATFORM_WIN
+  if(!window)
+    return;
+  const int iconSize = 64;
+  SDL_Surface* icon = SDL_CreateRGBSurfaceWithFormatFrom(const_cast<unsigned char*>(sumiWindowIconPixels),
+      iconSize, iconSize, 32, iconSize*4, SDL_PIXELFORMAT_RGBA32);
+  if(icon) {
+    SDL_SetWindowIcon(window, icon);
+    SDL_FreeSurface(icon);
+  }
+#endif
+}
+
 SDL_Window* Application::sdlWindow = NULL;
 Painter* Application::painter = NULL;
 std::string Application::appDir;
@@ -345,6 +363,7 @@ int SDL_main(int argc, char* argv[])
     // create window so we can create GL context
     sdlWindow = SDL_CreateWindow("Sumi", winGeom[0], winGeom[1], winGeom[2], winGeom[3],
         winMaxFlag|SDL_WINDOW_RESIZABLE|SDL_WINDOW_OPENGL|SDL_WINDOW_ALLOW_HIGHDPI);
+    setSumiWindowIcon(sdlWindow);
     if(!sdlWindow)
       PLATFORM_LOG("SDL_CreateWindow (OpenGL) failed: %s\n", SDL_GetError());
     else {
@@ -404,6 +423,7 @@ int SDL_main(int argc, char* argv[])
 #endif
     sdlWindow = SDL_CreateWindow("Sumi", winGeom[0], winGeom[1], winGeom[2], winGeom[3],
         winMaxFlag|SDL_WINDOW_RESIZABLE|SDL_WINDOW_ALLOW_HIGHDPI|(USE_GL_BLITTER ? SDL_WINDOW_OPENGL : 0));
+    setSumiWindowIcon(sdlWindow);
 #if USE_GL_BLITTER
     // note that OpenGL loader is not needed for Mac
     sdlContext = SDL_GL_CreateContext(sdlWindow);
