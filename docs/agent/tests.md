@@ -87,6 +87,12 @@ standalone-buildable - see the command in its header. Its checks are the fail-op
 layer always being writable, z-order being independent of ids, ids never being reused across a save,
 and the serialization round trip including a name containing the separators.
 
+`scribbletest/xmlwritertest.cpp` (standalone only, command in its header) checks that the streaming
+`XmlStreamWriter` (`usvg/svgxml.h`) prints byte for byte what the pugixml-DOM writer it replaced
+printed - every saved page goes through it. 20000 random documents with escapes, text and fragments
+of every pugi node type, buffered and streamed. A broken `&gt;` escape or a wrong indent after a
+text fragment both fail it.
+
 - `ScribbleTest::layerTest()` - everything that needs a document: new content (including an
   **inserted image**) landing on the current layer, a later stroke on a lower layer stacking *under*
   the upper layer's content, a locked layer surviving Select All, a rect selection, the stroke eraser
@@ -133,7 +139,11 @@ and the serialization round trip including a name containing the separators.
   place, a 40 MB budget gets a smaller page and counts it, a spent budget still gets the page at 72 DPI
   rather than dropping it, and `ImportSaver` leaves every written page unloaded while the file reloads
   with all three backgrounds. Mutation-tested: keeping pages decoded, never lowering the DPI, never
-  unloading, and capping MuPDF at only what is left each fail it.
+  unloading, and capping MuPDF at only what is left each fail it. Also ([pdf-import.md](pdf-import.md#speed-png-encoding-the-renderencode-overlap-decoding-ahead)):
+  four pages of different widths arrive in order through the render/encode overlap, `Image::encodePNGStriped`
+  is lossless for 1-4 channels with a padded stride, and a prefetched decode (`Image::prefetchDecode`, the
+  image moved meanwhile) gives the pixels a plain decode does. Mutation-tested: filtering a stripe's first row
+  against zeros and flipping a byte in the worker's pixels each fail it.
 
 - **Two-client sync (`--synctest`)** needs a real server: run stylusboard
   (github.com/styluslabs/stylusboard, Node; `npm install moment minimist` is enough without `--db`)
@@ -252,7 +262,9 @@ What it covers: full repaints, the perftest scenarios (now painted), a determini
 generated page of 300 handwritten words, drawn through the real input path, then replicated), scrolling through
 all of it, zoom, goto page, pen move latency on a full page (mean/p95/max per event, the event plus its frame),
 rect select / select all / move / undo / redo / delete, stroke and free erasers, 240 px page thumbnails, save
-and load as .html and .svgz, PDF import of a generated vector PDF and scrolling through it, startup to first
+and load as .html and .svgz, PDF import of a generated vector PDF (`SUMI_BENCH_PDF_PAGES`, default 2) and
+scrolling through it (`SUMI_BENCH_PDF_PACED=1` adds `pdf_paced_scroll_frame`: a fresh import scrolled with 150 ms
+idle before each step, where decoding ahead has time to work), startup to first
 frame, and VmRSS/VmHWM at several points. Each total also has a `_cpu` twin (main thread CPU time).
 
 Traps, each found the hard way:

@@ -138,9 +138,17 @@ public:
   //  points goes to widthPt/heightPt.  A null Image on failure, with error() set.
   Image render(int pageNum, Dim dpi, Image::Encoding encoding, Dim* widthPt = NULL, Dim* heightPt = NULL,
       const Rect& crop = Rect());
+  // Every page in order, whole, as render() makes them, each handed to `onPage` on this thread (a null
+  //  Image for a page that failed, with error() set); `beforePage` is asked first for each page.  Either
+  //  returning false stops the run, and false is returned.  The next page is rendered while this one is
+  //  compressed on another thread - unless the memory budget is limited, as it counts on one page at a time.
+  bool renderPages(Dim dpi, Image::Encoding encoding,
+      const std::function<bool(int pageNum, int numPages)>& beforePage,
+      const std::function<bool(int pageNum, Image&& img, Dim widthPt, Dim heightPt)>& onPage);
   const char* error() const;
 
 private:
+  struct PageJob;
   struct Impl;
   std::unique_ptr<Impl> impl;
 };

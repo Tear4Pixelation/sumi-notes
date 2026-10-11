@@ -1,6 +1,8 @@
 #include "scribbletest.h"
 #include <fstream>
 #include <set>
+#include <thread>
+#include <chrono>
 
 #include "usvg/svgparser.h"
 #include "application.h"
@@ -793,6 +795,86 @@ int ScribbleTest::pdfImportTest()
     scribbleDoc->doUndoRedo(true);
     check(scribbleDoc->document->numPages() == before + 3, "redo brings them back");
     scribbleDoc->newDocument();
+  }
+
+  // pages come back in order although the next is rendered while the last is still being encoded
+  {
+    std::string sized = "%PDF-1.4\n1 0 obj <</Type/Catalog/Pages 2 0 R>> endobj\n"
+        "2 0 obj <</Type/Pages/Kids[3 0 R 4 0 R 5 0 R 6 0 R]/Count 4>> endobj\n"
+        "3 0 obj <</Type/Page/Parent 2 0 R/MediaBox[0 0 300 400]>> endobj\n"
+        "4 0 obj <</Type/Page/Parent 2 0 R/MediaBox[0 0 400 400]>> endobj\n"
+        "5 0 obj <</Type/Page/Parent 2 0 R/MediaBox[0 0 500 400]>> endobj\n"
+        "6 0 obj <</Type/Page/Parent 2 0 R/MediaBox[0 0 600 400]>> endobj\n"
+        "trailer <</Root 1 0 R>>\n%%EOF\n";
+    std::string sizedPath = pdfPath + "-order.pdf";
+    {
+      FileStream out(sizedPath.c_str(), "wb");
+      out.write(sized.data(), sized.size());
+    }
+    Document ordered;
+    PdfImport::Options opts;
+    opts.dpi = 100;
+    int seen = 0;
+    opts.onProgress = [&](int pageNum, int numPages) { return pageNum == seen++ && numPages == 4; };
+    bool inOrder = PdfImport::importPdf(&ordered, sizedPath.c_str(), opts) == 4 && ordered.numPages() == 4;
+    for(int ii = 0; inOrder && ii < 4; ++ii)
+      inOrder = std::abs(ordered.pages[ii]->width() - (300 + 100*ii)*PdfImport::UNITS_PER_POINT) < 0.5;
+    check(inOrder, "pages arrive in the PDF's order");
+    removeFile(sizedPath.c_str());
+  }
+
+  // the import's PNG encoder (stripes on threads): exactly the pixels given, for each channel count, with
+  //  stripe boundaries inside the image
+  {
+    const int w = 61, h = 517;
+    std::vector<unsigned char> samples(size_t(w*4 + 3)*h);
+    uint32_t seed = 12345;
+    for(size_t ii = 0; ii < samples.size(); ++ii) {
+      seed = seed*1103515245 + 12345;
+      // mostly smooth with some noise, so every filter type gets chosen somewhere
+      samples[ii] = (unsigned char)((ii % 7)*20 + (ii/(w*4))/3 + ((seed >> 16) & 0x7));
+    }
+    bool exact = true;
+    for(int channels = 1; channels <= 4 && exact; ++channels) {
+      ptrdiff_t stride = ptrdiff_t(w)*channels + 3;  // not tightly packed
+      Image::EncodeBuff png = Image::encodePNGStriped(samples.data(), w, h, channels, stride, 5);
+      Image decoded = Image::decodeBuffer(png.data(), png.size());
+      const unsigned char* rgba = decoded.width == w && decoded.height == h ? decoded.bytes() : NULL;
+      exact = rgba != NULL;
+      for(int y = 0; exact && y < h; ++y) {
+        for(int x = 0; exact && x < w; ++x) {
+          const unsigned char* in = &samples[y*stride + x*channels];
+          const unsigned char* out = &rgba[(size_t(y)*w + x)*4];
+          int gray = in[0], alpha = channels == 2 ? in[1] : channels == 4 ? in[3] : 255;
+          exact = channels <= 2 ? (out[0] == gray && out[1] == gray && out[2] == gray && out[3] == alpha)
+              : (out[0] == in[0] && out[1] == in[1] && out[2] == in[2] && out[3] == alpha);
+        }
+      }
+    }
+    check(exact, "the striped PNG encoder is lossless");
+  }
+
+  // decoding ahead on a worker gives the pixels a plain decode does, also when the image moves meanwhile
+  if(!page.encData.empty()) {
+    // encoded only, as a page is held (`page` itself was decoded above)
+    auto encodedPage = [&](){ return Image::decodeBuffer(page.encData.data(), page.encData.size()); };
+    Image copy = encodedPage();
+    Image fresh = encodedPage();
+    bool started = copy.prefetchDecode();
+    Image moved(std::move(copy));  // same encoded buffer, so the job still belongs to it
+    // give the worker time to finish, so the pixels really come from it (one not started yet is dropped
+    //  and the image decoded here, which would pass whatever the worker does)
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    unsigned char* ahead = moved.bytesOnce();
+    unsigned char* plain = fresh.bytesOnce();
+    check(started && ahead && plain && memcmp(ahead, plain, page.dataLen()) == 0, "a prefetched decode matches");
+    free(ahead);
+    free(plain);
+    // an image destroyed while its decode runs must not crash the worker (it decodes a copy)
+    {
+      Image gone = encodedPage();
+      gone.prefetchDecode();
+    }
   }
 
   removeFile(pdfPath);

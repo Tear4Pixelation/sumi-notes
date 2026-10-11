@@ -5,6 +5,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <memory>
+#include <thread>
+#ifdef __GLIBC__
+#include <malloc.h>  // malloc_trim
+#endif
 #include "document.h"
 #include "page.h"
 #include "resources.h"  // _() for translated strings
@@ -16,7 +21,8 @@
 #ifdef SCRIBBLE_PDF
 // fitz.h provides its own extern "C" guard
 #include "mupdf/fitz.h"
-// declarations only: the implementation is compiled in ulib/image.cpp, with miniz doing PNG's deflate
+// declarations only: the implementation is compiled in ulib/image.cpp (PNG goes through
+//  Image::encodePNGStriped, also there)
 #include "stb_image_write.h"
 #endif
 
@@ -135,6 +141,8 @@ bool PdfImport::Renderer::openMemory(std::string, MemoryBudget*) { return false;
 bool PdfImport::Renderer::isOpen() const { return false; }
 int PdfImport::Renderer::numPages() { return -1; }
 Image PdfImport::Renderer::render(int, Dim, Image::Encoding, Dim*, Dim*, const Rect&) { return Image(0, 0); }
+bool PdfImport::Renderer::renderPages(Dim, Image::Encoding, const std::function<bool(int, int)>&,
+    const std::function<bool(int, Image&&, Dim, Dim)>&) { return false; }
 const char* PdfImport::Renderer::error() const { return _("This build of Sumi does not include PDF support."); }
 
 #else
@@ -356,6 +364,13 @@ void appendBytes(void* context, void* data, int size)
   out->insert(out->end(), bytes, bytes + size);
 }
 
+// threads for compressing one page image (Image::encodePNGStriped)
+int encodeThreads()
+{
+  unsigned int cores = std::thread::hardware_concurrency();
+  return int(std::max(1u, std::min(cores, 8u)));
+}
+
 // MuPDF's tightly packed 8-bit samples (`n` per pixel, a per-row stride) straight to PNG or JPEG.  Going
 //  through a 32-bit Image first, as this used to, took 4 bytes a pixel on top of the pixmap's 3.
 Image encodePixmap(const fz_pixmap* pix, Image::Encoding encoding)
@@ -374,8 +389,11 @@ Image encodePixmap(const fz_pixmap* pix, Image::Encoding encoding)
       ok = stbi_write_jpg_to_func(&appendBytes, &encoded, w, h, n, packed.data(), 75);
     }
   }
-  else
-    ok = stbi_write_png_to_func(&appendBytes, &encoded, w, h, n, pix->samples, int(pix->stride));
+  else {
+    // not stb's PNG writer: its level 8 and try-every-filter search were 80-90% of an import (see there)
+    encoded = Image::encodePNGStriped(pix->samples, w, h, n, pix->stride, encodeThreads());
+    ok = !encoded.empty();
+  }
   return ok ? Image::decodeBuffer(encoded.data(), encoded.size()) : Image(0, 0);
 }
 
@@ -410,6 +428,10 @@ struct PdfImport::Renderer::Impl {
 
   // what this renderer holds: MuPDF's allocations and the PDF it was given in memory
   size_t inUse() const { return tracker.live + data.size(); }
+
+  fz_pixmap* renderPixmap(int pageNum, Dim dpi, Image::Encoding encoding, const Rect& crop,
+      Dim* widthPtOut, Dim* heightPtOut, Dim* renderDpiOut);
+  Image finish(Image img, Dim renderDpi, Dim dpi);
 
   // Opening a PDF parses it, which the budget covers too - but never with less than MuPDF's reserve, or
   //  a budget already spent would fail the open itself.  render() moves the cap for each page.
@@ -455,26 +477,24 @@ int PdfImport::Renderer::numPages() { return isOpen() ? impl->fzdoc.numPages() :
 
 const char* PdfImport::Renderer::error() const { return impl ? impl->fzdoc.err : ""; }
 
-Image PdfImport::Renderer::render(int pageNum, Dim dpi, Image::Encoding encoding, Dim* widthPtOut,
-    Dim* heightPtOut, const Rect& crop)
+// render()'s first half: the page rendered to an RGB pixmap at `dpi`, or less to stay within the budget
+//  (the resolution used goes to renderDpiOut).  NULL on failure, with fzdoc.err set.
+fz_pixmap* PdfImport::Renderer::Impl::renderPixmap(int pageNum, Dim dpi, Image::Encoding encoding,
+    const Rect& crop, Dim* widthPtOut, Dim* heightPtOut, Dim* renderDpiOut)
 {
-  if(!isOpen())
-    return Image(0, 0);
-  FzDoc& fzdoc = impl->fzdoc;
-  MemoryBudget* budget = impl->budget;
   bool limited = budget && budget->limited();
   if(limited)  // loading the page; the cap is set again for rendering it below
-    impl->tracker.cap = impl->tracker.live + std::max(budget->remaining(impl->inUse()), MUPDF_RESERVE);
+    tracker.cap = tracker.live + std::max(budget->remaining(inUse()), MUPDF_RESERVE);
 
   fz_rect bounds;
   fz_page* page = loadPage(fzdoc, pageNum, &bounds);
   if(!page)
-    return Image(0, 0);
+    return NULL;
   float widthPt = bounds.x1 - bounds.x0, heightPt = bounds.y1 - bounds.y0;
   if(widthPt <= 0 || heightPt <= 0) {
     fz_drop_page(fzdoc.ctx, page);
     snprintf(fzdoc.err, sizeof(fzdoc.err), "The page is empty.");
-    return Image(0, 0);
+    return NULL;
   }
   Rect part = crop.isValid() ? Rect(crop).rectIntersect(Rect::ltrb(0, 0, 1, 1)) : Rect::ltrb(0, 0, 1, 1);
   fz_rect area = fz_make_rect(bounds.x0 + part.left*widthPt, bounds.y0 + part.top*heightPt,
@@ -486,14 +506,14 @@ Image PdfImport::Renderer::render(int pageNum, Dim dpi, Image::Encoding encoding
   if(limited) {
     double pointsSq = double(area.x1 - area.x0)*(area.y1 - area.y0);
     double pixels = pointsSq*(dpi/72)*(dpi/72);
-    size_t remaining = budget->remaining(impl->inUse());
+    size_t remaining = budget->remaining(inUse());
     double maxPixels = double(remaining > MUPDF_RESERVE ? remaining - MUPDF_RESERVE : 0)/peakBytesPerPixel(encoding);
     if(pixels > maxPixels)
       renderDpi = std::max(floorDpi, Dim(dpi*sqrt(maxPixels/pixels)));
     // what the coarsest rendering takes is always allowed, so a page comes out coarse rather than not at
     //  all, however little is left; the limit gives way by that much
     size_t floorBytes = size_t(pointsSq*(floorDpi/72)*(floorDpi/72)*peakBytesPerPixel(encoding)) + MUPDF_RESERVE;
-    impl->tracker.cap = impl->tracker.live + std::max(remaining, floorBytes);
+    tracker.cap = tracker.live + std::max(remaining, floorBytes);
   }
   fz_pixmap* pix = renderArea(fzdoc, page, area, float(renderDpi/72));
   // MuPDF ran out of what the budget left it: one more try at the coarsest resolution
@@ -502,11 +522,15 @@ Image PdfImport::Renderer::render(int pageNum, Dim dpi, Image::Encoding encoding
     pix = renderArea(fzdoc, page, area, float(renderDpi/72));
   }
   fz_drop_page(fzdoc.ctx, page);
-  if(!pix)
-    return Image(0, 0);
+  if(widthPtOut) *widthPtOut = widthPt;
+  if(heightPtOut) *heightPtOut = heightPt;
+  if(renderDpiOut) *renderDpiOut = renderDpi;
+  return pix;
+}
 
-  Image img = encodePixmap(pix, encoding);
-  fz_drop_pixmap(fzdoc.ctx, pix);
+// render()'s last half, once the pixmap is encoded: the budget is told of the page
+Image PdfImport::Renderer::Impl::finish(Image img, Dim renderDpi, Dim dpi)
+{
   if(img.isNull()) {
     snprintf(fzdoc.err, sizeof(fzdoc.err), "The page could not be compressed.");
     return Image(0, 0);
@@ -518,9 +542,104 @@ Image PdfImport::Renderer::render(int pageNum, Dim dpi, Image::Encoding encoding
       budget->lowestDpi = budget->lowestDpi > 0 ? std::min(budget->lowestDpi, renderDpi) : renderDpi;
     }
   }
+  return img;
+}
+
+Image PdfImport::Renderer::render(int pageNum, Dim dpi, Image::Encoding encoding, Dim* widthPtOut,
+    Dim* heightPtOut, const Rect& crop)
+{
+  if(!isOpen())
+    return Image(0, 0);
+  Dim widthPt = 0, heightPt = 0, renderDpi = dpi;
+  fz_pixmap* pix = impl->renderPixmap(pageNum, dpi, encoding, crop, &widthPt, &heightPt, &renderDpi);
+  if(!pix)
+    return Image(0, 0);
+  Image img = encodePixmap(pix, encoding);
+  fz_drop_pixmap(impl->fzdoc.ctx, pix);
+  img = impl->finish(std::move(img), renderDpi, dpi);
+  if(img.isNull())
+    return img;
   if(widthPtOut) *widthPtOut = widthPt;
   if(heightPtOut) *heightPtOut = heightPt;
   return img;
+}
+
+// A page rendered and being encoded on a thread of its own.  That thread only reads the pixmap's samples:
+//  MuPDF itself - the context, which has no locks, and releasing the pixmap - stays on the renderer's.
+struct PdfImport::Renderer::PageJob {
+  int pageNum;
+  fz_pixmap* pix = NULL;
+  Dim widthPt = 0, heightPt = 0, renderDpi = 0;
+  Image img = Image(0, 0);
+  std::thread worker;
+};
+
+bool PdfImport::Renderer::renderPages(Dim dpi, Image::Encoding encoding,
+    const std::function<bool(int pageNum, int numPages)>& beforePage,
+    const std::function<bool(int pageNum, Image&& img, Dim widthPt, Dim heightPt)>& onPage)
+{
+  int numPages = this->numPages();
+  if(numPages < 0)
+    return false;
+  // a budget counts on one page held at a time (peakBytesPerPixel), which overlapping would double
+  bool overlap = !(impl->budget && impl->budget->limited()) && std::thread::hardware_concurrency() > 1;
+#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
+  overlap = false;  // no threads
+#endif
+  std::unique_ptr<PageJob> pending;
+  // a page whose encoding finished, handed over (false: stop), or dropped
+  auto deliver = [&](std::unique_ptr<PageJob> done) {
+    if(done->worker.joinable())
+      done->worker.join();
+    fz_drop_pixmap(impl->fzdoc.ctx, done->pix);
+    Image img = impl->finish(std::move(done->img), done->renderDpi, dpi);
+    return onPage(done->pageNum, std::move(img), done->widthPt, done->heightPt);
+  };
+  auto discard = [&](std::unique_ptr<PageJob> done) {
+    if(done->worker.joinable())
+      done->worker.join();
+    fz_drop_pixmap(impl->fzdoc.ctx, done->pix);
+  };
+  bool cancelled = false;  // by beforePage: a page already rendered is still delivered
+  bool stopped = false;  // by onPage: nothing more is
+  for(int ii = 0; ii < numPages && !stopped; ++ii) {
+    if(beforePage && !beforePage(ii, numPages)) {
+      cancelled = true;
+      break;
+    }
+    std::unique_ptr<PageJob> page(new PageJob);
+    page->pageNum = ii;
+    page->pix = impl->renderPixmap(ii, dpi, encoding, Rect(), &page->widthPt, &page->heightPt, &page->renderDpi);
+    std::string renderError = page->pix ? std::string() : std::string(impl->fzdoc.err);
+    // the previous page was encoded while this one rendered; this one is encoded while that one is
+    //  delivered (inserted and written)
+    std::unique_ptr<PageJob> previous = std::move(pending);
+    if(previous && previous->worker.joinable())
+      previous->worker.join();
+    if(page->pix) {
+      PageJob* job = page.get();
+      if(overlap)
+        job->worker = std::thread([job, encoding](){ job->img = encodePixmap(job->pix, encoding); });
+      else
+        job->img = encodePixmap(job->pix, encoding);
+      pending = std::move(page);
+    }
+    if(previous && !deliver(std::move(previous)))
+      stopped = true;
+    else if(!renderError.empty()) {
+      snprintf(impl->fzdoc.err, sizeof(impl->fzdoc.err), "%s", renderError.c_str());
+      stopped = !onPage(ii, Image(0, 0), 0, 0);
+    }
+    if(!overlap && pending && !stopped)
+      stopped = !deliver(std::move(pending));
+  }
+  if(pending) {
+    if(stopped)
+      discard(std::move(pending));
+    else
+      stopped = !deliver(std::move(pending));
+  }
+  return !stopped && !cancelled;
 }
 
 int PdfImport::pageCount(const char* filename, const char* password)
@@ -545,16 +664,17 @@ int PdfImport::importPdf(Document* doc, const char* filename, const Options& opt
   }
 
   int imported = 0;
-  for(int ii = 0; ii < numPages; ++ii) {
-    if(opts.onProgress && !opts.onProgress(ii, numPages))
-      break;  // user cancelled; keep the pages imported so far
-
-    Dim widthPt = 0, heightPt = 0;
-    Image img = renderer.render(ii, opts.dpi, opts.lossy ? Image::JPEG : Image::PNG, &widthPt, &heightPt);
+  bool saveFailed = false;
+  renderer.renderPages(opts.dpi, opts.lossy ? Image::JPEG : Image::PNG,
+      [&](int pageNum, int pageCount) {
+        // false: the user cancelled; keep the pages imported so far
+        return !opts.onProgress || opts.onProgress(pageNum, pageCount);
+      },
+      [&](int pageNum, Image&& img, Dim widthPt, Dim heightPt) {
     if(img.isNull()) {
       // a single unrenderable page shouldn't abort the whole import
-      SCRIBBLE_LOG("PDF import: page %d of %s failed to render: %s\n", ii + 1, filename, renderer.error());
-      continue;
+      SCRIBBLE_LOG("PDF import: page %d of %s failed to render: %s\n", pageNum + 1, filename, renderer.error());
+      return true;
     }
 
     Dim width = widthPt*UNITS_PER_POINT, height = heightPt*UNITS_PER_POINT;
@@ -576,9 +696,18 @@ int PdfImport::importPdf(Document* doc, const char* filename, const Options& opt
     doc->insertPage(page);
     ++imported;
     if(opts.saver && !opts.saver->pageDone()) {
-      if(errorOut) *errorOut = _("The imported document could not be saved.");
-      return -1;
+      saveFailed = true;
+      return false;
     }
+    return true;
+  });
+#ifdef __GLIBC__
+  // the encoder's threads each got a malloc arena, which keeps the page-sized buffers they freed
+  malloc_trim(0);
+#endif
+  if(saveFailed) {
+    if(errorOut) *errorOut = _("The imported document could not be saved.");
+    return -1;
   }
 
   if(imported == 0 && errorOut) {

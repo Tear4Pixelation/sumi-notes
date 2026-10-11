@@ -98,6 +98,10 @@ layer and drop the rest on save. The attribute has no such failure mode.
   one operation that calls `ensurePagesLoaded()` first, because an unloaded page can still hold
   elements on the layer being removed and they must be reassigned undoably rather than orphaned.
 
+Because hidden layers end up in the page SVG as `display="none"`, `Document::saveBgz` stops copying
+unloaded pages' blocks verbatim once any layer has been hidden (`Document::layersEverHidden`, set in
+`Document::applyLayerState`): a reload would apply the current table and write different bytes.
+
 Known gaps: hiding a layer in a large delay-loaded document only
 affects loaded pages until the rest are loaded; and `setLayerHidden` has no UI yet
 (see the sidebar's own gaps in [sidebar.md](sidebar.md)).

@@ -16,6 +16,26 @@ const char* Element::ROUND_PEN_CLASS = "write-round-pen";
 const char* Element::CHISEL_PEN_CLASS = "write-chisel-pen";
 const char* Element::RULING_REGION_CLASS = "write-ruling-region";
 const char* Element::PAGE_TAG_CLASS = "write-pagetag";
+const ScribbleTransform Element::NO_TRANSFORM{};
+const ShapeParams Element::NO_SHAPE{};
+const RulingRegionParams Element::NO_REGION{};
+
+Element::ExtraPtr& Element::ExtraPtr::operator=(const ExtraPtr& other)
+{
+  if(this == &other)
+    return *this;
+  p.reset();
+  if(other.p) {
+    p.reset(new Extra);
+    p->pendingTransform = other.p->pendingTransform;
+    p->applyPending = other.p->applyPending;
+    p->penPoints = other.p->penPoints;
+    p->shape = other.p->shape;
+    p->region = other.p->region;
+    trim();
+  }
+  return *this;
+}
 
 Element::Element(SvgNode* n)
     : SvgNodeExtension(n), m_selection(NULL), m_timestamp(0), m_com(NaN, NaN)
@@ -265,7 +285,11 @@ bool Element::convertToStroked()
   for(const char* cls : {FLAT_PEN_CLASS, ROUND_PEN_CLASS, CHISEL_PEN_CLASS, "write-fstroke"})
     node->removeClass(cls);
   node->addClass(STROKE_PEN_CLASS);
-  penPoints.clear();
+  // they describe the filled outline that is gone
+  if(m_extra) {
+    std::vector<PenPoint>().swap(m_extra->penPoints);
+    trimExtra();
+  }
   node->invalidate(true);
   return true;
 }
@@ -462,6 +486,7 @@ bool Element::freeErase(const Point& prevpos, const Point& pos, Dim radius)
     const Transform2D inv = node->getTransform().inverse();
     const Point a = inv.map(prevpos), b = inv.map(pos);
     const Dim localRadius = radius*inv.avgScale();
+    std::vector<PenPoint>& penPoints = extra().penPoints;
     if(penPoints.empty())
       penPoints = toPenPoints();
     // the width of the ink where the eraser is: the widest pen segment within reach (pressure varies it)
@@ -489,6 +514,8 @@ bool Element::freeErase(const Point& prevpos, const Point& pos, Dim radius)
       // for wide stroke, dirty area may be larger than eraser bbox, so we just have to dirty whole stroke
       node->invalidate(false);  //node->invalidateBounds(false);  // we assume caller will take care of dirty rect
     }
+    else if(penPoints.empty())
+      trimExtra();
   }
   else if(node->type() == SvgNode::IMAGE) {
     SvgImage* imagenode = static_cast<SvgImage*>(node);
@@ -565,6 +592,7 @@ bool Element::freeErase(const std::vector<Point>& poly)
     if(polygonArea(eraser.points) > 0)
       std::reverse(eraser.points.begin(), eraser.points.end());
 
+    std::vector<PenPoint>& penPoints = extra().penPoints;
     if(penPoints.empty())
       penPoints = toPenPoints();
     if(!penPoints.empty())
@@ -573,6 +601,8 @@ bool Element::freeErase(const std::vector<Point>& poly)
       fromPenPoints(penPoints);
       node->invalidate(false);
     }
+    else if(penPoints.empty())
+      trimExtra();
   }
   return touched;
 }
@@ -599,7 +629,7 @@ std::vector<Element*> Element::getEraseSubPaths()
     return {c};
   }
 
-  if(!isPathElement() || penPoints.empty())
+  if(!isPathElement() || !m_extra || m_extra->penPoints.empty())
     return {};
   // don't copy path when cloning!
   static_cast<SvgPath*>(node)->path()->clear();
@@ -607,20 +637,59 @@ std::vector<Element*> Element::getEraseSubPaths()
 
   std::vector<Element*> pieces;
   std::vector<PenPoint> pts;
-  pts.swap(penPoints);
+  pts.swap(m_extra->penPoints);
+  trimExtra();
   auto a = pts.begin();
   for(auto b = a; b != pts.end();) {
     if(++b == pts.end() || b->moveTo()) {
       Element* s = cloneNode();
-      s->penPoints.assign(a, b);
+      std::vector<PenPoint>& piecePts = s->extra().penPoints;
+      piecePts.assign(a, b);
       a = b;
-      s->fromPenPoints(s->penPoints);
+      s->fromPenPoints(piecePts);
       // if we set com to NaN, we have to do removeAttr("__comx/y")
       s->setCom(s->bbox().center());  //Point(NaN, NaN));
+      // the erase is over; a piece is a single run, which toPenPoints() normally reads back from its path,
+      //  and keeping the cache would hold 40 bytes per point for good on top of the path
+      s->releasePenPoints();
       pieces.push_back(s);
     }
   }
   return pieces;
+}
+
+void Element::releasePenPoints()
+{
+  if(isMultiStroke()) {
+    for(Element* s : children())
+      s->releasePenPoints();
+  }
+  if(!m_extra || m_extra->penPoints.empty())
+    return;
+  // only a cache the path gives back: toPenPoints() misreads some outlines - a round pen segment so thin
+  //  that its cap was drawn as a line has no curve to find - and the cache is then the only true copy.
+  //  Equal up to rounding is enough (an ulp of difference is what a reload gives as well).
+  const std::vector<PenPoint>& cache = m_extra->penPoints;
+  std::vector<PenPoint> rebuilt = toPenPoints();
+  if(rebuilt.size() != cache.size())
+    return;
+  // round and chisel outlines are drawn from the width alone, flat ones from the full vector, and a
+  //  stroked path not from the pen points' widths at all
+  bool noWidth = node->hasClass(STROKE_PEN_CLASS);
+  bool widthOnly = node->hasClass(ROUND_PEN_CLASS) || node->hasClass(CHISEL_PEN_CLASS);
+  const Dim tol = 1E-6;
+  for(size_t ii = 0; ii < cache.size(); ++ii) {
+    const PenPoint& c = cache[ii];
+    const PenPoint& r = rebuilt[ii];
+    if((c.cmd & 0xFF) != (r.cmd & 0xFF) || (c.p - r.p).dist() > tol)
+      return;
+    if(noWidth)
+      continue;
+    if(widthOnly ? std::abs(c.dr.dist() - r.dr.dist()) > tol : (c.dr - r.dr).dist() > tol)
+      return;
+  }
+  std::vector<PenPoint>().swap(m_extra->penPoints);
+  trimExtra();
 }
 
 bool Element::isHyperRef() const
@@ -680,6 +749,7 @@ void Element::scaleWidth(Dim sx_int, Dim sy_int)
     return;
 
   // this will be a no-op except for known Write path types
+  std::vector<PenPoint>& penPoints = extra().penPoints;
   if(penPoints.empty())
     penPoints = toPenPoints();
   for(PenPoint& p : penPoints) {
@@ -688,6 +758,10 @@ void Element::scaleWidth(Dim sx_int, Dim sy_int)
   }
   if(!penPoints.empty())
     fromPenPoints(penPoints);
+  // a selection keeps the cache until it lets go (Selection::clear()); nothing else will want it again
+  if(!m_selection)
+    releasePenPoints();
+  trimExtra();
 }
 
 void Element::applyTransform(const ScribbleTransform& tf)
@@ -699,14 +773,15 @@ void Element::applyTransform(const ScribbleTransform& tf)
   //  root space, the space bounds are cached in), so shift the cached bounds below instead of leaving them
   //  to be recomputed for every dirty rect while a selection is dragged (see pen-and-tools.md)
   // (this runs per stroke per move event, so it is kept to plain compares - see perf_move_selection)
+  Extra& ext = extra();
   const Rect oldBounds = node->m_cachedBounds;
   const bool shiftBounds = tf.isTranslate() && tf.internalScale[0] == 1 && tf.internalScale[1] == 1
-      && m_pendingTransform.isTranslate() && m_pendingTransform.internalScale[0] == 1
-      && m_pendingTransform.internalScale[1] == 1 && (m_applyPending || m_pendingTransform.isIdentity())
+      && ext.pendingTransform.isTranslate() && ext.pendingTransform.internalScale[0] == 1
+      && ext.pendingTransform.internalScale[1] == 1 && (ext.applyPending || ext.pendingTransform.isIdentity())
       && oldBounds.left <= oldBounds.right && oldBounds.top <= oldBounds.bottom  // Rect::isValid()
       && node->type() == SvgNode::PATH;
-  m_pendingTransform = tf * m_pendingTransform;
-  m_applyPending = false;  // will be set to true if none of special cases below apply
+  ext.pendingTransform = tf * ext.pendingTransform;
+  ext.applyPending = false;  // will be set to true if none of special cases below apply
   if(!m_com.isNaN())
     m_com = tf.map(m_com);
   node->invalidate(true);
@@ -739,21 +814,21 @@ void Element::applyTransform(const ScribbleTransform& tf)
     //  similarities without reflection (move/rotate/uniform positive scale), which the parameters express
     //  exactly - anything else is approximated by RulingRegionParams::transform()
     Transform2D pttf = node->getTransform().inverse() * tf.tf() * node->getTransform();
-    RulingRegionParams params = m_region;
+    RulingRegionParams params = ext.region;
     params.transform(pttf);
     setRegionParams(params);
   }
   else if(isShape()) {
     // spec 7.8: the generic path branch below would rewrite the geometry and leave the descriptor stale,
     //  so the shape must never reach it - the descriptor itself is transformed and the path regenerated
-    bool bboxShape = m_shape.id == SHAPE_BOX || m_shape.id == SHAPE_ELLIPSE;
+    bool bboxShape = ext.shape.id == SHAPE_BOX || ext.shape.id == SHAPE_ELLIPSE;
     if(tf.isRotating() && bboxShape) {
       dropShape();  // a rotated axis-aligned rect is not representable in the descriptor
-      m_applyPending = true;
+      ext.applyPending = true;
     }
     else if(tf.isRotating() || !(approxEq(sx_int, 1, 1E-7) && approxEq(sy_int, 1, 1E-7))) {
       Transform2D pttf = node->getTransform().inverse() * tf.tf() * node->getTransform();
-      ShapeParams params = m_shape;
+      ShapeParams params = ext.shape;
       for(Point& p : params.points)
         p = pttf.map(p);
       // a non-uniform scale legitimately makes rx and ry diverge; that is representable, so keep it
@@ -762,7 +837,7 @@ void Element::applyTransform(const ScribbleTransform& tf)
       setShapeParams(params);
     }
     else
-      m_applyPending = true;  // pure translate: node transform, descriptor stays node-local
+      ext.applyPending = true;  // pure translate: node transform, descriptor stays node-local
   }
   else if(isPathElement() && !tf.isRotating() && !(approxEq(sx_int, 1, 1E-7) && approxEq(sy_int, 1, 1E-7))) {
     SvgPath* pathnode = static_cast<SvgPath*>(node);
@@ -770,6 +845,7 @@ void Element::applyTransform(const ScribbleTransform& tf)
     // this is basically a hack that assumes this case can only happen via Selection
     Transform2D pttf = node->getTransform().inverse() * tf.tf() * node->getTransform();
     if(node->hasClass(FLAT_PEN_CLASS) || node->hasClass(ROUND_PEN_CLASS) || node->hasClass(CHISEL_PEN_CLASS)) {
+      std::vector<PenPoint>& penPoints = ext.penPoints;
       if(penPoints.empty())
         penPoints = toPenPoints();
       for(PenPoint& p : penPoints) {
@@ -788,27 +864,90 @@ void Element::applyTransform(const ScribbleTransform& tf)
       pathnode->m_pathType = SvgNode::PATH;
   }
   else
-    m_applyPending = true;
+    ext.applyPending = true;
   // invalidate() above still marked the node BOUNDS_DIRTY and cleared the parents' bounds, so the dirty
   //  rect unites the old rendered bounds with these
-  if(shiftBounds && m_applyPending) {
+  if(shiftBounds && ext.applyPending) {
     const Dim dx = tf.xoffset(), dy = tf.yoffset();
     node->m_cachedBounds = Rect::ltrb(oldBounds.left + dx, oldBounds.top + dy, oldBounds.right + dx, oldBounds.bottom + dy);
   }
 }
 
+void Element::resetTransform()
+{
+  if(!m_extra)
+    return;
+  applyTransform(m_extra->pendingTransform.inverse());
+  m_extra->pendingTransform.reset();
+  trimExtra();
+}
+
 void Element::commitTransform()
 {
-  if(m_pendingTransform.isIdentity())
+  if(!m_extra || m_extra->pendingTransform.isIdentity())
     return;
   if(isMultiStroke()) {
     for(Element* s : children())
       s->commitTransform();
   }
-  else if(m_applyPending)
-    node->setTransform(m_pendingTransform.tf() * node->getTransform());
-  m_pendingTransform.reset();
-  m_applyPending = false;
+  else if(m_extra->applyPending)
+    node->setTransform(m_extra->pendingTransform.tf() * node->getTransform());
+  m_extra->pendingTransform.reset();
+  m_extra->applyPending = false;
+  // a selection keeps the pen point cache across its drags until it lets go (Selection::clear()); a
+  //  transform from anywhere else (undo, sync) is done once this returns
+  if(!m_selection)
+    releasePenPoints();
+  trimExtra();
+}
+
+// the attributes serializeAttr() writes after __comx/__comy
+static bool isPostComAttr(const SvgAttr& attr)
+{
+  const char* name = attr.name();
+  return strncmp(name, "__rr", 4) == 0 || strncmp(name, "__shape", 7) == 0
+      || strcmp(name, "__layer") == 0 || strcmp(name, "__timestamp") == 0;
+}
+
+// index of the first of node's XML attributes that serializeAttr() writes after __comx/__comy, or -1
+static int firstPostComAttr(const SvgNode* node)
+{
+  const std::vector<SvgAttr>& attrs = node->attrs;
+  for(size_t ii = 0; ii < attrs.size() && attrs[ii].src() == SvgAttr::XMLSrc; ++ii) {
+    if(isPostComAttr(attrs[ii]))
+      return int(ii);
+  }
+  return -1;
+}
+
+// __comx/__comy duplicate m_com, and a stroke would carry the two attributes (80 bytes) for good just to
+//  keep their place in the file.  Where that place is fixed by the attributes after them - all of them
+//  ones serializeAttr() writes after __comx/__comy, at least one, and none before - they are dropped and
+//  serializeAttr() writes them from m_com right there, so the file comes out byte for byte the same.
+void Element::stripComAttrs()
+{
+  std::vector<SvgAttr>& attrs = node->attrs;
+  if(m_com.isNaN() || attrs.size() < 3)
+    return;
+  size_t xmlEnd = 0;
+  while(xmlEnd < attrs.size() && attrs[xmlEnd].src() == SvgAttr::XMLSrc)
+    ++xmlEnd;
+  size_t ix = 0;
+  while(ix < xmlEnd && !attrs[ix].nameIs("__comx")) {
+    if(isPostComAttr(attrs[ix]))
+      return;
+    ++ix;
+  }
+  if(ix + 2 >= xmlEnd || !attrs[ix+1].nameIs("__comy"))
+    return;
+  for(size_t jj = ix + 2; jj < xmlEnd; ++jj) {
+    if(!isPostComAttr(attrs[jj]))
+      return;
+  }
+  attrs.erase(attrs.begin() + ix, attrs.begin() + ix + 2);
+  // not shrink_to_fit(): without exceptions libstdc++ makes that a no-op
+  std::vector<SvgAttr>(std::make_move_iterator(attrs.begin()), std::make_move_iterator(attrs.end())).swap(attrs);
+  m_comStripped = true;
 }
 
 // the normal and preferred way to handle attributes not subject to CSS and that we wish to store directly in
@@ -825,6 +964,7 @@ void Element::updateFromNode()
   //  existed - and every element of one - is on
   const char* layerstr = node->getStringAttr("__layer");
   m_layer = layerstr && layerstr[0] ? int(strtol(layerstr, NULL, 0)) : LayerList::DEFAULT_LAYER;
+  stripComAttrs();
   if(node->type() == SvgNode::G && node->hasClass(RULING_REGION_CLASS)) {
     RulingRegionParams params;
     parseRegionPoints(node->getStringAttr("__rrpts"), params.corners);
@@ -847,7 +987,7 @@ void Element::updateFromNode()
     }
     params.sanitize();
     if(params.isValid()) {
-      m_region = params;
+      extra().region = params;
       m_layer = LayerList::REGION_LAYER;
       rebuildRegion();
     }
@@ -859,43 +999,53 @@ void Element::updateFromNode()
   int shapeid = shapeIdByStringId(node->getStringAttr("__shape"), &aliasFlags, &aliasTight);
   const ShapeDef* def = shapeDef(shapeid);
   if(def && isPathElement()) {
-    m_shape.id = shapeid;
-    parseShapePoints(node->getStringAttr("__shapepts"), m_shape.points);
-    m_shape.rx = toReal(node->getStringAttr("__shaperx"), 0);
-    m_shape.ry = toReal(node->getStringAttr("__shapery"), 0);
-    m_shape.tightness = toReal(node->getStringAttr("__shapetight"), 0);
+    ShapeParams shape;
+    shape.id = shapeid;
+    parseShapePoints(node->getStringAttr("__shapepts"), shape.points);
+    shape.rx = toReal(node->getStringAttr("__shaperx"), 0);
+    shape.ry = toReal(node->getStringAttr("__shapery"), 0);
+    shape.tightness = toReal(node->getStringAttr("__shapetight"), 0);
     if(aliasTight >= 0)
-      m_shape.tightness = aliasTight;
+      shape.tightness = aliasTight;
     const char* flags = node->getStringAttr("__shapeflags");
-    m_shape.flags = (flags && flags[0] ? int(strtol(flags, NULL, 0)) : 0) | aliasFlags;
-    if(int(m_shape.points.size()) < def->minPoints)
-      m_shape = ShapeParams();  // descriptor is unusable; keep the path as saved
-    else
+    shape.flags = (flags && flags[0] ? int(strtol(flags, NULL, 0)) : 0) | aliasFlags;
+    if(int(shape.points.size()) < def->minPoints) {
+      if(m_extra)
+        m_extra->shape = ShapeParams();  // descriptor is unusable; keep the path as saved
+    }
+    else {
+      extra().shape = std::move(shape);
       rebuildShapePath();
+    }
   }
 }
 
 // the path is a cache of the descriptor, so it is regenerated rather than edited
 void Element::rebuildShapePath()
 {
-  if(!m_shape.isValid() || !isPathElement())
+  if(!isShape() || !isPathElement())
     return;
-  m_shape.strokeWidth = node->getFloatAttr("stroke-width", 1);
+  ShapeParams& shape = m_extra->shape;
+  shape.strokeWidth = node->getFloatAttr("stroke-width", 1);
   Path2D* path = static_cast<SvgPath*>(node)->path();
-  *path = buildShapePath(m_shape);
-  penPoints.clear();
+  *path = buildShapePath(shape);
+  // not releasePenPoints(): this runs inside applyTransform(), which holds on to the Extra
+  std::vector<PenPoint>().swap(m_extra->penPoints);
   node->invalidate(false);
 }
 
+// neither trims the Extra: both run inside applyTransform(), which holds on to it
 void Element::setShapeParams(const ShapeParams& params)
 {
-  m_shape = params;
+  if(params.isValid() || m_extra)
+    extra().shape = params;
   rebuildShapePath();
 }
 
 void Element::setRegionParams(const RulingRegionParams& params)
 {
-  m_region = params;
+  if(params.isValid() || m_extra)
+    extra().region = params;
   m_layer = LayerList::REGION_LAYER;
   rebuildRegion();
 }
@@ -907,8 +1057,9 @@ void Element::setRegionParams(const RulingRegionParams& params)
 void Element::rebuildRegion(Color paper, Color rule)
 {
   SvgContainerNode* g = containerNode();
-  if(!g || !m_region.isValid())
+  if(!g || !isRulingRegion())
     return;
+  const RulingRegionParams& region = m_extra->region;
   SvgPath* paperNode = NULL;
   SvgPath* rulesNode = NULL;
   SvgPath* outlineNode = NULL;
@@ -939,16 +1090,16 @@ void Element::rebuildRegion(Color paper, Color rule)
     g->addChild(rulesNode);
   }
 
-  *paperNode->path() = m_region.outlinePath();
+  *paperNode->path() = region.outlinePath();
   // the paper color is kept on the node even when transparent, so toggling opaque back on restores it
   paperNode->setAttr("__rrpaper", fstring("#%06X", paper.rgb()).c_str());
-  setSvgFillColor(paperNode, m_region.opaque ? paper.opaque() : Color(Color::NONE));
+  setSvgFillColor(paperNode, region.opaque ? paper.opaque() : Color(Color::NONE));
   setSvgStrokeColor(paperNode, Color::NONE);
   paperNode->invalidate(false);
 
   rulesNode->setAttr("__rrrule", fstring("#%08X", rule.argb()).c_str());
-  bool dots = m_region.dotRadius > 0;
-  *rulesNode->path() = dots ? m_region.dotsPath() : m_region.linesPath();
+  bool dots = region.dotRadius > 0;
+  *rulesNode->path() = dots ? region.dotsPath() : region.linesPath();
   if(dots) {
     setSvgFillColor(rulesNode, rule);
     setSvgStrokeColor(rulesNode, Color::NONE);
@@ -962,11 +1113,11 @@ void Element::rebuildRegion(Color paper, Color rule)
     rulesNode->setAttr<float>("stroke-width", 1);
     rulesNode->setAttribute("vector-effect", "non-scaling-stroke");
     // crisp edges only while the lines are on the pixel grid; a tilted region wants antialiasing
-    rulesNode->setAttribute("shape-rendering", std::abs(std::sin(m_region.angle)) < 1E-9 ? "crispEdges" : "auto");
+    rulesNode->setAttribute("shape-rendering", std::abs(std::sin(region.angle)) < 1E-9 ? "crispEdges" : "auto");
   }
   rulesNode->invalidate(false);
 
-  if(m_region.outline && !outlineNode) {
+  if(region.outline && !outlineNode) {
     outlineNode = new SvgPath;
     outlineNode->addClass("rr-outline");
     g->addChild(outlineNode);
@@ -974,7 +1125,7 @@ void Element::rebuildRegion(Color paper, Color rule)
   if(outlineNode) {
     // twice a rule line's width, in screen pixels like the lines, so it reads as the region's edge
     //  rather than as one more line at any zoom
-    *outlineNode->path() = m_region.outline ? m_region.outlinePath() : Path2D();
+    *outlineNode->path() = region.outline ? region.outlinePath() : Path2D();
     setSvgFillColor(outlineNode, Color::NONE);
     setSvgStrokeColor(outlineNode, rule);
     outlineNode->setAttr<float>("stroke-width", 2);
@@ -986,13 +1137,13 @@ void Element::rebuildRegion(Color paper, Color rule)
   // coordinate system: axes, arrowheads and ticks (rr-axes), then the tick numbers (rr-labels), both in the
   //  rule color made opaque - the page's rule color is translucent, and the axes must read above the grid
   //  they sit on.  Like the outline, created on first need and emptied (not removed) when turned off.
-  if(m_region.axes && !axesNode) {
+  if(region.axes && !axesNode) {
     axesNode = new SvgPath;
     axesNode->addClass("rr-axes");
     g->addChild(axesNode);
   }
   if(axesNode) {
-    *axesNode->path() = m_region.axes ? m_region.axesPath() : Path2D();
+    *axesNode->path() = region.axes ? region.axesPath() : Path2D();
     setSvgFillColor(axesNode, Color::NONE);
     setSvgStrokeColor(axesNode, rule.opaque());
     axesNode->setAttr<float>("stroke-width", 3.0f);  // twice the outline, 3x a rule line
@@ -1001,7 +1152,7 @@ void Element::rebuildRegion(Color paper, Color rule)
     axesNode->setAttribute("stroke-linecap", "round");
     axesNode->invalidate(false);
   }
-  if(m_region.axes && !labelsNode) {
+  if(region.axes && !labelsNode) {
     labelsNode = new SvgG;
     labelsNode->addClass("rr-labels");
     g->addChild(labelsNode);
@@ -1012,13 +1163,13 @@ void Element::rebuildRegion(Color paper, Color rule)
       labelsNode->removeChild(oldLabel);
       delete oldLabel;
     }
-    if(m_region.axes) {
-      RulingFrame frame = m_region.frame();
+    if(region.axes) {
+      RulingFrame frame = region.frame();
       Dim cosAngle = std::cos(frame.angle), sinAngle = std::sin(frame.angle);
       setSvgFillColor(labelsNode, rule.opaque());
       labelsNode->setAttribute("font-family", "satoshi, ui-sans, sans-serif");
-      labelsNode->setAttribute("font-size", fstring("%g", double(m_region.axisLabelFontSize())).c_str());
-      for(const AxisLabel& label : m_region.axisLabels()) {
+      labelsNode->setAttribute("font-size", fstring("%g", double(region.axisLabelFontSize())).c_str());
+      for(const AxisLabel& label : region.axisLabels()) {
         SvgText* text = new SvgText();
         text->setAttribute("text-anchor", label.alignEnd ? "end" : "middle");
         // a minus sign, not a hyphen, as a plotted axis is printed
@@ -1147,9 +1298,9 @@ Rect Element::todoBoxRect() const
 
 void Element::dropShape()
 {
-  if(!m_shape.isValid())
+  if(!isShape())
     return;
-  m_shape = ShapeParams();
+  m_extra->shape = ShapeParams();  // not trimmed here: applyTransform() calls this and holds on to the Extra
   // the attributes are only written by serializeAttr(), but a node parsed from file still carries them
   node->removeAttr("__shape");
   node->removeAttr("__shapepts");
@@ -1180,34 +1331,44 @@ void Element::serializeAttr(SvgWriter* writer)
     containerNode()->addChild(a);
     writer->tempNodes.push_back(a);
   }
+  // __comx/__comy go just before the attributes written below, which are appended after them if new: written
+  //  from m_com without being stored (stripComAttrs()) unless something other than those attributes might
+  //  later be appended after them
+  bool writeCom = false;
   if(!m_com.isNaN()) {
-    node->setAttr<Dim>("__comx", m_com.x);
-    node->setAttr<Dim>("__comy", m_com.y);
+    if(node->getAttr("__comx", SvgAttr::XMLSrc) || (!m_comStripped && firstPostComAttr(node) >= 0)) {
+      node->setAttr<Dim>("__comx", m_com.x);
+      node->setAttr<Dim>("__comy", m_com.y);
+      m_comStripped = false;
+    }
+    else
+      writeCom = true;
   }
   if(isRulingRegion()) {
-    node->setAttr("__rrpts", serializeRegionPoints(m_region.corners).c_str());
-    node->setAttr("__rrorigin", serializeRegionPoints({m_region.origin}).c_str());
+    const RulingRegionParams& region = m_extra->region;
+    node->setAttr("__rrpts", serializeRegionPoints(region.corners).c_str());
+    node->setAttr("__rrorigin", serializeRegionPoints({region.origin}).c_str());
     // degrees, so a hand-edited file reads naturally; full precision, since sync compares nothing here
     //  but a region transformed by a peer must land exactly where it did locally
-    node->setAttr("__rrangle", fstring("%.9g", double(m_region.angle*180/M_PI)).c_str());
-    node->setAttr<Dim>("__rrxruling", m_region.xRuling);
-    node->setAttr<Dim>("__rryruling", m_region.yRuling);
-    if(m_region.dotRadius > 0)
-      node->setAttr<Dim>("__rrdotradius", m_region.dotRadius);
+    node->setAttr("__rrangle", fstring("%.9g", double(region.angle*180/M_PI)).c_str());
+    node->setAttr<Dim>("__rrxruling", region.xRuling);
+    node->setAttr<Dim>("__rryruling", region.yRuling);
+    if(region.dotRadius > 0)
+      node->setAttr<Dim>("__rrdotradius", region.dotRadius);
     else
       node->removeAttr("__rrdotradius");
     // written only when on, so a region without it is byte-identical to before and older builds show lines
-    if(m_region.staff)
+    if(region.staff)
       node->setAttr("__rrstaff", "1");
     else
       node->removeAttr("__rrstaff");
-    node->setAttr("__rropaque", m_region.opaque ? "1" : "0");
+    node->setAttr("__rropaque", region.opaque ? "1" : "0");
     // written only when on, so a region without one is byte-identical to before
-    if(m_region.outline)
+    if(region.outline)
       node->setAttr("__rroutline", "1");
     else
       node->removeAttr("__rroutline");
-    if(m_region.axes)
+    if(region.axes)
       node->setAttr("__rraxes", "1");
     else
       node->removeAttr("__rraxes");
@@ -1219,17 +1380,34 @@ void Element::serializeAttr(SvgWriter* writer)
   if(m_timestamp > 0 && !SVG_NO_TIMESTAMP)
     node->setAttr("__timestamp",
         fstring("0x%x%08x", uint32_t(m_timestamp >> 32), uint32_t(m_timestamp)).c_str());
-  if(m_shape.isValid()) {
-    node->setAttr("__shape", shapeDef(m_shape.id)->id);
-    node->setAttr("__shapepts", serializeShapePoints(m_shape.points).c_str());
-    if(m_shape.rx != 0 || m_shape.ry != 0) {
-      node->setAttr<Dim>("__shaperx", m_shape.rx);
-      node->setAttr<Dim>("__shapery", m_shape.ry);
+  if(isShape()) {
+    const ShapeParams& shape = m_extra->shape;
+    node->setAttr("__shape", shapeDef(shape.id)->id);
+    node->setAttr("__shapepts", serializeShapePoints(shape.points).c_str());
+    if(shape.rx != 0 || shape.ry != 0) {
+      node->setAttr<Dim>("__shaperx", shape.rx);
+      node->setAttr<Dim>("__shapery", shape.ry);
     }
-    if(m_shape.tightness != 0)
-      node->setAttr<Dim>("__shapetight", m_shape.tightness);
-    if(m_shape.flags)
-      node->setAttr("__shapeflags", fstring("%d", m_shape.flags).c_str());
+    if(shape.tightness != 0)
+      node->setAttr<Dim>("__shapetight", shape.tightness);
+    if(shape.flags)
+      node->setAttr("__shapeflags", fstring("%d", shape.flags).c_str());
+  }
+  if(writeCom) {
+    int ix = firstPostComAttr(node);
+    if(ix < 0) {
+      // nothing after them to hold their place, so they are kept on the node as they always were
+      node->setAttr<Dim>("__comx", m_com.x);
+      node->setAttr<Dim>("__comy", m_com.y);
+      m_comStripped = false;
+    }
+    else {
+      writer->extraAttrs.emplace_back(size_t(ix),
+          SvgAttr("__comx", m_com.x, SvgAttr::XMLSrc | SvgAttr::nameToStdAttr("__comx")));
+      writer->extraAttrs.emplace_back(size_t(ix),
+          SvgAttr("__comy", m_com.y, SvgAttr::XMLSrc | SvgAttr::nameToStdAttr("__comy")));
+      m_comStripped = true;
+    }
   }
 }
 
@@ -1245,13 +1423,13 @@ bool Element::isLegacyMarker(const SvgNode* node)
 void Element::applyStyle(SvgPainter* svgp) const
 {
   Painter* painter = svgp->p;
-  if(m_applyPending && !m_pendingTransform.isIdentity()) {
+  if(pendingDeferred()) {
     // ideally, we would not have to get inverse of existing transform
     Transform2D tf = node->totalTransform();
     if(!tf.isIdentity())
-      painter->transform(tf.inverse() * m_pendingTransform.tf() * tf);
+      painter->transform(tf.inverse() * m_extra->pendingTransform.tf() * tf);
     else
-      painter->transform(m_pendingTransform);
+      painter->transform(m_extra->pendingTransform);
   }
 
   // rulelines shouldn't get bigger when we zoom in (one reason - so they don't look ugly at zooms slightly
@@ -1284,11 +1462,21 @@ void Element::applyStyle(SvgPainter* svgp) const
         Color color = painter->fillBrush().color().setAlphaF(svgp->extraState().fillOpacity);
         painter->setStrokeBrush(color);
         painter->setStrokeWidth(width > 0 && width*avgScale < 2 ? width : 2/avgScale);
-        painter->setFillBrush(Color::NONE);
-        painter->drawPath(*static_cast<SvgPath*>(node)->path());
-        painter->setStrokeBrush(Color::NONE);
-        painter->setFillBrush(Color::WHITE);
-        svgp->extraState().fillOpacity = 1;  // opaque to cover internal structure (subpaths)
+        SvgPainter::ExtraState& es = svgp->extraState();
+        if(!es.dashServer && !es.fillServer && !es.strokeServer) {
+          // outline and white fill in SvgPainter's one drawPath: path flattened once, stroke painted first;
+          //  strokeOpacity = 1 keeps the outline at the opacity the separate drawPath used
+          painter->setFillBrush(Color::WHITE);
+          painter->setStrokeUnderFill(true);
+          es.strokeOpacity = 1;
+        }
+        else {
+          painter->setFillBrush(Color::NONE);
+          painter->drawPath(*static_cast<SvgPath*>(node)->path());
+          painter->setStrokeBrush(Color::NONE);
+          painter->setFillBrush(Color::WHITE);
+        }
+        es.fillOpacity = 1;  // opaque to cover internal structure (subpaths)
       }
       else if(hasStroke && !hasFill) {
         // Stroke once with normal color and width + 2, again with white
@@ -1307,7 +1495,7 @@ void Element::applyStyle(SvgPainter* svgp) const
     painter->setStrokeBrush(Color::NONE);
     painter->setFillBrush(Color(255, 128, 0));
 
-    Point com = m_pendingTransform.inverse().map(m_com);
+    Point com = pendingTransform().inverse().map(m_com);
     if(node->hasTransform())
       com = node->getTransform().inverse().map(com);
 
