@@ -14,6 +14,8 @@
 //  View a bare 33 icon, overflow a bare 42 one.  The user wants the bar exactly as high as a toolbar rather
 //  than 64, so every one of those values is scaled by (toolbar row height)/64 and the proportions stay.
 static const Dim designBarHeight = 64;
+// The bar is a little shorter than a toolbar row (user: strip 10 percent off the first toolbar-height version).
+static const Dim barHeightFraction = 0.9;
 
 struct BarMetrics
 {
@@ -41,12 +43,12 @@ static const BarMetrics& metrics()
 {
   static BarMetrics m = [](){
     BarMetrics m;
-    m.barHeight = toolbarRowHeight();
+    m.barHeight = toolbarRowHeight() * barHeightFraction;
     Dim s = m.barHeight/designBarHeight;
     m.barPadV = 4*s;  m.barPadH = 12*s;  m.barGap = 4*s;
     m.homeSize = 56*s;  m.btnRadius = 12*s;  m.iconSize = 32*s;
     m.tabGap = 12*s;  m.tabHeight = 56*s;  m.tabPadH = 24*s;
-    m.closeSize = 32*s;  m.closeRadius = 8*s;  m.titleFontSize = 18*s;
+    m.closeSize = 32*s;  m.closeRadius = 8*s;  m.titleFontSize = 18*s/barHeightFraction;  // titles keep the size they had at full toolbar height
     m.tabMaxWidth = 601*s;  m.tabMinWidth = 96*s;
     m.viewIconSize = 33*s;  m.overflowIconSize = 42*s;
     m.bgOverdraw = 2;

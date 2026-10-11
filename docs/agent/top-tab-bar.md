@@ -2,7 +2,7 @@
 
 A full-width strip along the top of the window: the library (home) button, one tab per open document
 ([editor-tabs.md](editor-tabs.md)), and in the editor the View popup and the overflow menu. Designed in the
-Penpot file **"Tab Topbar"** (page "Topbar"); the proportions are that board's, but the bar is **one toolbar row
+Penpot file **"Tab Topbar"** (page "Topbar"); the proportions are that board's, but the bar is **ninety percent of a toolbar row (`barHeightFraction`)
 high** (the user prefers that to the board's 64), so every size is the board's value times `toolbarRowHeight()/64`.
 Code: `syncscribble/topbar.h/.cpp` (`TopBar`), placed by `MainWindow::setupUI()` (editor) and
 `TagDocList::createUI()` (library).
