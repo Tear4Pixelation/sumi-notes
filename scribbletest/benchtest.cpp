@@ -15,6 +15,9 @@
 
 #include <time.h>
 #include <unistd.h>
+#if defined(__GLIBC__)
+#include <malloc.h>
+#endif
 #include <algorithm>
 #include <numeric>
 
@@ -71,6 +74,10 @@ static void benchMem(const char* when)
 {
   benchOut(fstring("rss_%s", when).c_str(), benchProcStatus("VmRSS"), "kB");
   benchOut(fstring("hwm_%s", when).c_str(), benchProcStatus("VmHWM"), "kB");
+#if defined(__GLIBC__) && (__GLIBC__ > 2 || __GLIBC_MINOR__ >= 33)
+  // live heap: RSS keeps pages of freed memory, so a smaller heap can show up only here
+  benchOut(fstring("heap_%s", when).c_str(), mallinfo2().uordblks/1024.0, "kB");
+#endif
 }
 
 // mean and p95 of a list of samples, as "<name>_mean", "<name>_p95" (and the count once)

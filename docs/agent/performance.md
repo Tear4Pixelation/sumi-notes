@@ -37,7 +37,17 @@ interleaved runs on the 100-page benchtest:
 
 Not in benchtest: startup instructions with a document open -58%; saving a 114-page notebook after editing
 page 1 ~10 s -> 0.46 s (peak +1.4 GB -> +129 MB); thumbnails of image pages 15-25x faster; Element 328 -> 88
-bytes. Unchanged: html load/save (dominated by number formatting, `realToStr`), svgz load.
+bytes. Unchanged: html load (`strToReal`: its fraction loop is serial and bit-identity rules out
+reordering it; summing the integer digits as an integer measured no faster), svgz load.
+
+Second pass (opt-small): `realToStr` writes two digits at a time from a digit pair table, in place
+(byte-identical, `scribbletest/realtostrtest.cpp`), and numbers and path data skip the writer's escape scan
+(`XmlStreamWriter::writeAttributeRaw`): save -18% instructions, -22% CPU for both html and svgz. Thumbnails
+and other `Image::encodePNG()` output go through `encodePNGStriped` (see pdf-import.md), ~2x faster on a
+thumbnail, same pixels. Parsed paths are shrunk to fit (`Path2D::shrinkToFit`), which only matters for
+multi-segment or closed path data: ink as saved (`M` and one segment) is already reserved exactly, so the
+measured saving is ~107 kB of UI icons at startup. The stroke eraser gets the ruled eraser's cull
+(pen-and-tools.md, Interaction fast paths).
 
 Where each change lives and its traps: [canvas-layer.md](canvas-layer.md) (retained pan layer),
 [stroke-input.md](stroke-input.md) and [shapes.md](shapes.md) (incremental flat outline, curve-fit knots,

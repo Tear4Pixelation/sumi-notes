@@ -3661,6 +3661,121 @@ int ScribbleTest::interactCullTest()
   }
   scribbleMode->setMode(MODE_STROKE);
 
+  // *** stroke eraser (PathSelector::cannotHit): the cull changes nothing ***
+  // thin and wide strokes, long ones, strokes with a transform of their own (scaled, rotated), filled
+  //  outlines, and non-scaling strokes under a scale - their bounds are padded by the unscaled half width
+  //  while the hit test reaches the scaled one, so only the cull's half width pad keeps them (an element
+  //  hit with its bounds padded by just 1 missing the eraser - "edge" below - would be culled by a pad
+  //  without the half width)
+  scribbleDoc->newDocument();
+  page = scribbleArea->currPage;
+  struct ProbeTarget { Point pt; Dim reach; };
+  std::vector<ProbeTarget> targets;
+  for(int ii = 0; ii < 500; ++ii) {
+    Point a(20 + 900*rnd(), 20 + 1000*rnd());
+    Dim width = ii % 3 == 0 ? 0.5 + 3*rnd() : 0.5 + 40*rnd();
+    Point b = a + Point(160*rnd() - 80, 160*rnd() - 80)*(ii % 7 == 0 ? 5 : 1);
+    Dim kind = rnd(), scale = 1;
+    Element* s;
+    if(kind < 0.1) {  // filled outline, no stroke
+      SvgPath* node = new SvgPath();
+      node->path()->moveTo(a);
+      node->path()->lineTo(b);
+      node->path()->lineTo(a + Point(30*rnd() - 15, 60*rnd() + 5));
+      node->path()->closeSubpath();
+      node->setAttr<color_t>("fill", Color::BLACK);
+      node->setAttr<color_t>("stroke", Color::NONE);
+      s = new Element(node);
+      page->addStroke(s);
+      width = 0;
+    }
+    else
+      s = line(a, b, width);
+    if(kind >= 0.1 && kind < 0.3) {
+      scale = 0.4 + 2.6*rnd();
+      s->node->setTransform(Transform2D().scale(scale).translate(a.x*(1 - scale), a.y*(1 - scale)));
+    }
+    else if(kind >= 0.3 && kind < 0.4)
+      s->node->setTransform(Transform2D().rotate(6*rnd(), a));
+    else if(kind >= 0.4 && kind < 0.55) {
+      scale = 2 + 2*rnd();
+      s->node->setTransform(Transform2D().scale(scale).translate(a.x*(1 - scale), a.y*(1 - scale)));
+      s->node->setAttr<int>("vector-effect", Painter::NonScalingStroke);
+    }
+    targets.push_back({a, width*scale/2});
+  }
+
+  int nhitP = 0, nculledP = 0, nwrongP = 0, nmismatchP = 0, nedgeP = 0;
+  for(int rr = 0; rr < 600; ++rr) {
+    Dim radius = 1 + 15*rnd();
+    Point a;
+    if(rr % 2 == 0)
+      a = Point(900*rnd() + 50, 1000*rnd() + 50);
+    else {  // around the edge of what a stroke's end can reach
+      const ProbeTarget& tgt = targets[size_t(rnd()*targets.size()) % targets.size()];
+      Dim angle = 2*M_PI*rnd();
+      a = tgt.pt + Point(std::cos(angle), std::sin(angle))*((radius + tgt.reach)*(0.7 + 0.6*rnd()));
+    }
+    Point b = rr % 4 < 2 ? a : a + Point(60*rnd() - 30, 60*rnd() - 30);
+    std::unique_ptr<Selection> probe(new Selection(page, Selection::STROKEDRAW_NONE));
+    probe->selMode = Selection::SELMODE_PASSIVE;
+    PathSelector* selector = new PathSelector(probe.get());
+    selector->selectPath(b, radius);
+    selector->selectPath(a, radius);  // the capsule from b to a
+    std::set<Element*> got(probe->strokes.begin(), probe->strokes.end());
+    std::set<Element*> want;
+    Rect erasebox = Rect::corners(a, b).pad(radius);
+    for(Element* s : page->children()) {
+      bool hit = page->isEditable(s) && selector->selectHit(s);
+      if(hit) {
+        want.insert(s);
+        if(!s->bbox().pad(1).intersects(erasebox)) ++nedgeP;
+      }
+      if(selector->cannotHit(s)) {
+        ++nculledP;
+        if(selector->selectHit(s)) ++nwrongP;
+      }
+    }
+    nhitP += want.size();
+    if(got != want) ++nmismatchP;
+  }
+  check(nwrongP == 0, "the stroke eraser cull never skips an element the stroke eraser would take");
+  check(nmismatchP == 0, "a stroke eraser pass with the cull takes exactly the elements testing every one takes");
+  check(nhitP > 300 && nculledP > 100000 && nedgeP > 5, "the stroke eraser cull checks hit, culled and reached plenty of edges");
+
+  // and through the real stroke eraser, with and without the cull
+  {
+    // undo puts back copies, so what is left is compared by bounds, not by Element
+    int before = page->strokeCount();
+    std::multiset<std::string> left[3];
+    for(int pass = 0; pass < 3; ++pass) {
+      int cull = pass == 1 ? 1 : 0;
+      Selector::cullEnabled = cull != 0;
+      scribbleMode->setMode(MODE_ERASESTROKE);
+      for(int row = 0; row < 3; ++row) {
+        Point from(30, 150 + 300*row), to(900, 250 + 300*row);
+        at(from, press);
+        for(int ii = 1; ii <= 30; ++ii)
+          at(from + (to - from)*(ii/30.0), INPUTEVENT_MOVE);
+        at(to, release);
+      }
+      for(Element* s : page->children()) {
+        Rect b = s->bbox();
+        left[pass].insert(fstring("%.6f %.6f %.6f %.6f", b.left, b.top, b.right, b.bottom));
+      }
+      for(int row = 0; row < 3; ++row)
+        scribbleDoc->doUndoRedo(false);
+    }
+    Selector::cullEnabled = true;
+    char what[200];
+    snprintf(what, sizeof(what), "the stroke eraser erases the same strokes with the cull as without"
+        " (%d strokes, %d left without the cull, %d with, %d without again%s)", before, int(left[0].size()),
+        int(left[1].size()), int(left[2].size()), left[0] == left[2] ? "" : ", differently");
+    check(left[0] == left[1] && int(left[1].size()) < before, what);
+    check(page->strokeCount() == before, "undoing the stroke erase brings every stroke back");
+  }
+  scribbleMode->setMode(MODE_STROKE);
+
   // *** a dragged selection's bounds equal fresh ones ***
   scribbleDoc->newDocument();
   page = scribbleArea->currPage;

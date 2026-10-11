@@ -154,6 +154,10 @@ try-every-filter search, 0.6 s for a 300 DPI text page and 4.7 s for a scan. `en
   source pixmap, so the stripes are independent. Each stripe is its own IDAT chunk and all but the last end
   in a sync flush, so together they form one valid zlib stream; the Adler-32s are combined. Any PNG decoder
   reads the result. The stripes cost under 0.1% in size.
+- `Image::encodePNG()` (thumbnails, scans and screenshots saved into a document, a scaled or cropped image on
+  save, PNG export) uses it too, with a thread per 256K pixels: a 240 px page thumbnail stays on one thread,
+  where it encodes in about half stb's time at -2..+1% bytes. Striping a small image costs much more (+6-20%
+  on thumbnails), hence the threshold. Saved PNG bytes differ from what stb wrote; the pixels do not.
 
 `Renderer::renderPages` (which `importPdf` uses) renders page *n+1* on the importing thread while page *n*
 is encoded on another one. Only the encoder runs off that thread: it reads the pixmap's samples and nothing
