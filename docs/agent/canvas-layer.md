@@ -18,9 +18,12 @@ in-progress stroke, cursor, region handles) are never part of it.
    since the layer was drawn (whole device pixels - `doPan()` quantizes to `unitsPerPx`), draw the
    exposed strips plus the pending dirt. Every other frame (pen, eraser, selection, zoom) is drawn
    directly as before - the layer would only add a second nanovg frame and a composite - and its dirt is
-   folded into `layerDirtyDim` for the next pan (`layerDeferredFrame`). A pan that would need the whole
-   layer redrawn (first pan after a zoom, a jump) is also drawn directly; the next pan builds the layer
-   (`layerBuildNext`).
+   folded into `layerDirtyDim` for the next pan (`layerDeferredFrame`). A pan that moves the view more
+   than half (GL) or a quarter (SW) of its size since the last frame is drawn directly too: little
+   survives, and on SW the composite - nanovg_sw blends the image pixel by pixel - costs about as much
+   as drawing sparse content (callgrind: SW pan at 16 px/frame -91%, but thirds of the view +24% before
+   this rule). A pan that would need the whole layer redrawn (first pan after a zoom) is drawn
+   directly as well; the next pan builds the layer (`layerBuildNext`).
 3. `doPaintEvent()` composites the layer 1:1 over the device pixels wholly inside the view, then draws
    any fractional edge band directly (see traps), then `drawScreen()`.
 

@@ -174,7 +174,7 @@ private:
   bool layerValid = false;
   uint64_t layerFrame = 0;  // GUI frame the layer was last brought up to date for
   uint64_t layerDeferredFrame = 0;  // GUI frame drawn directly on purpose (not a pan), layer kept
-  Dim paintedScale = 0;  // mScale at the last doPaintEvent
+  Dim paintedScale = 0, paintedPanX = 0, paintedPanY = 0;  // mScale and pan at the last doPaintEvent
   bool layerBuildNext = false;  // a pan wanted a full layer redraw and was drawn directly; the next builds it
   Transform2D layerDevXf;  // painter transform (screen -> device) the layer was drawn for
   Transform2D layerXf;  // screen -> layer pixels

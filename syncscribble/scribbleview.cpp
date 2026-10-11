@@ -648,16 +648,29 @@ void ScribbleView::prepareLayer(Painter* p, const Rect& guiDirty)
   //  directly, as before: the layer would cost a second nanovg frame and the composite for nothing saved.
   //  Its changes are kept in Dim coordinates and drawn into the layer by the next pan (a zoom makes that
   //  a full redraw anyway, via mScale).
-  if(!layerPanned || mScale != paintedScale) {
+  auto deferToNextPan = [this](){
     if(dirtyRectDim.isValid())
       layerDirtyDim.rectUnion(dirtyRectDim);
     if(dirtyRectScreen.isValid())
       layerDirtyDim.rectUnion(screenToDim(Rect(dirtyRectScreen).rectIntersect(screenRect)));
     layerDeferredFrame = guiFrame;
+  };
+  if(!layerPanned || mScale != paintedScale) {
+    deferToNextPan();
     return;
   }
   int lx = int(std::floor(devRect.left + 0.001)), ly = int(std::floor(devRect.top + 0.001));
   int lw = int(std::ceil(devRect.right - 0.001)) - lx, lh = int(std::ceil(devRect.bottom - 0.001)) - ly;
+  // A pan that moves the view far since the last frame (a jump, a page scroll) is drawn directly too: little
+  //  of the layer survives, and the composite is not free - on GL a textured quad, but nanovg_sw blends
+  //  the image pixel by pixel, which costs about as much as drawing sparse content.  (Measured: SW gains
+  //  from small steps - 16 px per frame, -91% - and loses on thirds of the view, so SW takes a quarter.)
+  Dim maxStep = p->usesGPU() ? 0.5 : 0.25;
+  if(std::abs(panxoffset - paintedPanX)*paintXf.xscale() > maxStep*lw
+      || std::abs(panyoffset - paintedPanY)*paintXf.yscale() > maxStep*lh) {
+    deferToNextPan();
+    return;
+  }
   if(!layer)
     layer.reset(new CanvasLayer);
   bool fresh = layer->resize(lw, lh) || !layerValid;
@@ -811,6 +824,8 @@ void ScribbleView::doPaintEvent(Painter* painter, const Rect& dirty)
   paintXf = xf;
   paintScreenRect = screenRect;
   paintedScale = mScale;
+  paintedPanX = panxoffset;
+  paintedPanY = panyoffset;
   layerPanned = false;
 
   painter->setColorMap(colorMap);
