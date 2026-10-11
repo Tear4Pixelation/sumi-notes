@@ -168,6 +168,7 @@ public:
 
   void selectPath(Point p, Dim radius);
   bool selectHit(Element* s) override;
+  bool cannotHit(Element* s) override;
   Rect getBGBBox() override;
   void drawBG(Painter* painter) override;
 
@@ -177,6 +178,9 @@ private:
   Point selPos = Point(NaN, NaN);
   Point selPrev = Point(NaN, NaN);
   Dim selRadius;
+  // for cannotHit(): the elements' parent and its totalTransform(), fetched once per selectPath()
+  const SvgNode* cullParent = NULL;
+  Transform2D cullParentTf;
 };
 
 class RectSelector : public Selector

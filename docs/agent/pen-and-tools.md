@@ -585,6 +585,14 @@ itself pale, so alpha alone could not make it vivid.
   `ScribbleTest::interactCullTest()` compares against testing every element (`Selector::cullEnabled = false`).
   `freeEraseRuled()` likewise does its rect test before `isEditable()`/`regionAt()`. `Page::regionAt()` no
   longer builds the `regions()` vector on every call.
+- **The stroke eraser culls before the layer check, the same way.** `PathSelector::cannotHit()` is
+  `isNearSegment()`'s own first test - bounds padded by the half width + 1 against the capsule's box - on
+  the same values, so it is exact by construction: the stroke color decides whether there is a half width at
+  all (filled pen outlines have none, so they cost one attribute lookup), and a stroked path's
+  `totalTransform()` is the parent's, fetched once per `selectPath()`, times its own transform, which is how
+  `totalTransform()` computes it (bit-identical). Changing that first test in `isNearSegment()` means
+  changing `cannotHit()` with it. `interactCullTest()` compares both on 500 strokes (wide, transformed,
+  filled, non-scaling under a scale - only those need the half width pad) and fails with a pad of 1.
 
 # Stroke rendering fast paths (nanovg)
 

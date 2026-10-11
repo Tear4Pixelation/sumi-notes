@@ -93,6 +93,13 @@ standalone-buildable - see the command in its header. Its checks are the fail-op
 layer always being writable, z-order being independent of ids, ids never being reused across a save,
 and the serialization round trip including a name containing the separators.
 
+`scribbletest/realtostrtest.cpp` (standalone only, command in its header) keeps the original
+digit-at-a-time `realToStr` verbatim and checks that the current one (digit pair table, written in place)
+writes the same bytes - every number of every saved document goes through it. ~80 million comparisons by
+default (an argument sets millions): random bit patterns, ratios, decimal ties x.xxx5 and their neighbours,
+values near INT_MAX, -0, NaN, every prec 0-9, double and float. Printing the fraction digits of an
+integer-valued number fails it.
+
 `scribbletest/xmlwritertest.cpp` (standalone only, command in its header) checks that the streaming
 `XmlStreamWriter` (`usvg/svgxml.h`) prints byte for byte what the pugixml-DOM writer it replaced
 printed - every saved page goes through it. 20000 random documents with escapes, text and fragments
@@ -312,7 +319,8 @@ rect select / select all / move / undo / redo / delete, stroke and free erasers,
 and load as .html and .svgz, PDF import of a generated vector PDF (`SUMI_BENCH_PDF_PAGES`, default 2) and
 scrolling through it (`SUMI_BENCH_PDF_PACED=1` adds `pdf_paced_scroll_frame`: a fresh import scrolled with 150 ms
 idle before each step, where decoding ahead has time to work), startup to first
-frame, and VmRSS/VmHWM at several points. Each total also has a `_cpu` twin (main thread CPU time).
+frame, and VmRSS/VmHWM at several points (plus `heap_*`, glibc's live heap `mallinfo2().uordblks`: RSS
+keeps the pages of freed memory, so a smaller heap may only show there). Each total also has a `_cpu` twin (main thread CPU time).
 
 Traps, each found the hard way:
 - perftest calls `ScribbleApp::processEvents()`, a blocking `SDL_WaitEvent`, and never `layoutAndDraw()`:

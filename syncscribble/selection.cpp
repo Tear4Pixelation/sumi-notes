@@ -818,6 +818,24 @@ bool PathSelector::selectHit(Element* s)
   return isNearSegment(selPrev, selPos, selRadius, s->node);
 }
 
+// Exact: true only if isNearSegment() returns false at its first test, the bounds cull - the same test on
+//  the same values, run before the layer check, with the stroked path's totalTransform() made from the
+//  parent's, fetched once per event (computed as totalTransform() computes it, so bit-identical) instead of
+//  walking every element's parents.  Filled ink (the pens' outlines) needs neither: its half width is 0.
+bool PathSelector::cannotHit(Element* s)
+{
+  const SvgNode* node = s->node;
+  if(!cullParent || node->parent() != cullParent)
+    return false;
+  bool stroked = node->type() == SvgNode::PATH && node->getColorAttr("stroke", Color::NONE) != Color::NONE;
+  Dim halfWidth = 0;
+  if(stroked) {
+    Transform2D tf = node->hasTransform() ? cullParentTf * node->getTransform() : cullParentTf;
+    halfWidth = node->getFloatAttr("stroke-width", 1)*tf.avgScale()/2;
+  }
+  return !node->bounds().pad(halfWidth + 1).intersects(Rect::corners(selPrev, selPos).pad(selRadius));
+}
+
 void PathSelector::selectPath(Point p, Dim radius)
 {
   selRadius = radius;
@@ -826,6 +844,9 @@ void PathSelector::selectPath(Point p, Dim radius)
   //  once did, radius/2 apart) tests circles, which is slower and still has gaps at their edges
   selPrev = selPos.isNaN() ? p : selPos;
   selPos = p;
+  cullParent = selection->sourceNode ? selection->sourceNode->node : NULL;
+  cullParentTf = cullParent ? cullParent->totalTransform() : Transform2D();
+  // (only selectPath() runs doSelect() with this selector, so the two are always fresh there)
   selection->doSelect();
   bgDirty = true;
 }
