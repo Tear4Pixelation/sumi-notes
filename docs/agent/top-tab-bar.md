@@ -89,7 +89,7 @@ borderless path and the Android fullscreen path are untested.
 ## Overflow menu cleanup
 
 Now: (auto-adjust items) / Whiteboard (while syncing) / [New, Open, Save - only with `useDocList` off] /
-**Export >** / **Create Whiteboard...** (+ Open Whiteboard on iOS) / Page Setup / Theme / Preferences /
+**Export >** / Insert Document... / Insert PDF... / **Create Whiteboard...** (+ Open Whiteboard on iOS) / Page Setup / Theme / Preferences /
 Testing (debug).
 
 Export holds Export PDF (desktop) or Send PDF / Send Document / Send Page Image (mobile), the new
@@ -109,7 +109,7 @@ Removed, and where each still is:
 | Page: Expand Down, Expand Right | **nowhere** |
 | Page: Select Pages (`MODE_PAGESEL`) | **only Ctrl+Shift+P**; the sidebar's Pages select mode covers move/delete/export |
 | Document: Discard Changes | **only Ctrl+W** |
-| Document: Insert Document, Insert PDF (pages from another file) | **nowhere** - the "+" menu's Insert Document places a PDF page as an image, which is different |
+| Document: Insert Document, Insert PDF (pages from another file) | restored as top level overflow items after Export (no icons, as before); the "+" menu's Insert Document places a PDF page as an image, which is different |
 | Document: Import PDF; top level Import Document | library Import |
 | Insert Image, Scan Document | "+" menu (Insert Photo, Scan Document) |
 
