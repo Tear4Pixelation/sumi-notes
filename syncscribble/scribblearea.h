@@ -181,7 +181,7 @@ protected:
   void invalidateStroke(Element* s);
   void invalidatePage(Page* p);
   void setPageDims(Dim width, Dim height, bool pending = false);
-  void growPage(Rect bbox, Dim maxdx = -1, Dim maxdy = -1, bool pending = false);
+  void growPage(Rect bbox, Dim maxdx = -1, Dim maxdy = -1, bool pending = false, bool insSpace = false);
   void reqRepaint();
   void drawStrokeOnImage(Element* stroke);
   bool clearSelection();

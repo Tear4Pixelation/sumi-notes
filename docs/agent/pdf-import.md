@@ -56,7 +56,11 @@ profiles, base-14 font dumps) to git, so no host codegen step is needed.
 On the app side, `PdfImport::importPdf()` renders each page and puts the image in the page's *rule*
 (background) layer with `write-no-dup` and without `write-std-ruling` - the same convention as
 `scribbleres/pdf2write.sh`. That keeps the image unselectable/unerasable and makes
-`Page::loadSVG` treat the ruling as custom so it survives save/load. `ScribbleApp::doImportPdf()`
+`Page::loadSVG` treat the ruling as custom so it survives save/load. A page with an image in its rule layer
+(`Page::hasImageBackground()`: PDF, scanned page, Noteful image background) does not auto grow
+(`ScribbleArea::growPage`, `growDown`/`growRight`): it is the size of its image, so writing, moving or
+scaling near the edge must not add blank paper past it. Insert Space still grows it (the `insSpace`
+argument), as do Expand Down/Right. `ScribbleApp::doImportPdf()`
 writes a `.svgz` into the document library (next to the PDF when there is no library, or to `tempPath`
 for a `--out` conversion) and then opens it like any other document, which keeps undo, views
 and sync entirely out of the import path. `.pdf` paths are routed to the importer from

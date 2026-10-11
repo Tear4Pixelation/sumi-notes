@@ -542,8 +542,13 @@ void ScribbleArea::expandRight()
 }
 
 // seems like some of the code here belongs in Page class
-void ScribbleArea::growPage(Rect bbox, Dim maxdx, Dim maxdy, bool pending)
+void ScribbleArea::growPage(Rect bbox, Dim maxdx, Dim maxdy, bool pending, bool insSpace)
 {
+  // a page whose background is an image (PDF, scan) is the size of that image: writing near its edge
+  //  must not add blank paper past it.  Insert Space pushing content off the page still grows it, as do
+  //  Expand Down/Right
+  if(!insSpace && currPage->hasImageBackground())
+    return;
   Dim newwidth = -1;
   Dim newheight = -1;
   Dim xstep = currPage->xruling() > 0 ? currPage->xruling() : GROW_STEP;
@@ -3832,7 +3837,7 @@ void ScribbleArea::doMoveEvent(const InputEvent& event)
       Dim maxdy = tempSelection->strokes.back()->pendingTransform().yoffset();
       if(dy0 != maxdy) {
         setPageDims(initialPageSize.width(), initialPageSize.height(), true);
-        growPage(tempSelection->getBBox(), 0, std::max(Dim(0), maxdy), true);
+        growPage(tempSelection->getBBox(), 0, std::max(Dim(0), maxdy), true, true);
       }
     }
     else
@@ -4299,7 +4304,7 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
     // This probably should happen in real time (i.e. in moveEvent!)
     if(tempSelection->count() > 0) {
       tempSelection->commitTransform();
-      growPage(tempSelection->getBBox(), 0, std::max(Dim(0), prevPos.y - initialPos.y));
+      growPage(tempSelection->getBBox(), 0, std::max(Dim(0), prevPos.y - initialPos.y), false, true);
     }
     else
       setPageDims(-1, currPage->height() + (prevPos.y - initialPos.y));
@@ -4307,7 +4312,7 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
   case MODE_INSSPACEHORZ:
     if(tempSelection->count() > 0) {
       tempSelection->commitTransform();
-      growPage(tempSelection->getBBox(), std::max(Dim(0), prevPos.x - initialPos.x), 0);
+      growPage(tempSelection->getBBox(), std::max(Dim(0), prevPos.x - initialPos.x), 0, false, true);
     }
     else
       setPageDims(currPage->width() + (prevPos.x - initialPos.x), -1);
@@ -4318,7 +4323,7 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
       // this could be greater due to reflow
       Dim maxdy = tempSelection->strokes.back()->pendingTransform().yoffset();
       tempSelection->commitTransform();
-      growPage(tempSelection->getBBox(), 0, std::max(Dim(0), maxdy));
+      growPage(tempSelection->getBBox(), 0, std::max(Dim(0), maxdy), false, true);
     }
     else if(!gestureFrame.region)  // a region's lines say nothing about the page's height
       setPageDims(-1, currPage->height() + gestureFrame.yrulingOr(Page::BLANK_Y_RULING) * (prevLine - initialLine));

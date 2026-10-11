@@ -806,6 +806,17 @@ void Page::applyLayerState()
         SvgNode::NoneMode : SvgNode::BlockMode);
 }
 
+bool Page::hasImageBackground() const
+{
+  if(!ruleNode)
+    return false;
+  for(const SvgNode* node : ruleNode->children()) {
+    if(node->type() == SvgNode::IMAGE)
+      return true;
+  }
+  return false;
+}
+
 bool Page::isEditable(const Element* s) const
 {
   // a ruling region is not ink: it is reached only through its own "..." button, never by ink

@@ -123,6 +123,8 @@ public:
   Dim xruling() const { return props.xRuling; }
   Dim marginLeft() const { return props.marginLeft; }
   Rect rect() const { return Rect::ltwh(0, 0, width(), height()); }
+  // an image in the rule layer: an imported PDF or Noteful page, a scanned page
+  bool hasImageBackground() const;
   Color color() const { return props.color; }
   void draw(Painter* painter, const Rect& dirty, bool rulelines = true);
   // whether paper of this color comes out dark through the painter's color map (night mode) - where a
