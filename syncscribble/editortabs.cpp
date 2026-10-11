@@ -210,6 +210,17 @@ bool ScribbleApp::switchToTab(int idx, ScribbleArea* area)
   return true;
 }
 
+bool ScribbleApp::cycleTab(int step)
+{
+  int tabCount = tabs.size();
+  if(!tabsEnabled() || libraryShown() || !activeArea() || tabCount < 1)
+    return false;
+  int current = activeTabIndex();
+  // an untitled document is not a tab: forward goes to the first tab, back to the last
+  int next = current < 0 ? (step > 0 ? 0 : tabCount - 1) : ((current + step) % tabCount + tabCount) % tabCount;
+  return next != current && switchToTab(next);
+}
+
 bool ScribbleApp::closeTab(int idx)
 {
   if(idx < 0 || idx >= tabs.size())
