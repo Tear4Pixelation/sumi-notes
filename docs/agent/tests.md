@@ -63,6 +63,13 @@ edited in the selection's preset editor landing back in line heights, and a 144 
 `loadModes()`. Its toolbar checks fail three ways against the pre-fix toolbar, and the load check fails
 with the clamp removed.
 
+`ScribbleTest::penToolbarRefreshTest()` pins `PenToolbar::setPen()`'s early return (pen-and-tools.md,
+"Pen toolbar refresh"): two equal pens with garbage written into their padding compare equal (fails
+against the old `memcmp`; the garbage has to be written after construction, since -O2 merges the member
+stores and zeroes the padding, which made a first version pass either way), a refresh with an unchanged
+pen leaves the color box alone, a new color reaches it, and a recolored page reaches the width display with
+the pen unchanged (fails with the `ShownContext` check removed from the early return).
+
 The relative-width reference for a selection (`selectionLineHeight()`: patch pitch, plurality across regions, tie to earliest stroke) is pinned in `scribbletest/regiontest.cpp`; mutation-checked by returning the fallback.
 
 The page tag summary and the tag index's document cache are tested in `scribbletest/pagetagtest.cpp`
@@ -79,6 +86,12 @@ The layer table is tested the same way again in `scribbletest/layertest.cpp` (`r
 standalone-buildable - see the command in its header. Its checks are the fail-open rule, the current
 layer always being writable, z-order being independent of ids, ids never being reused across a save,
 and the serialization round trip including a name containing the separators.
+
+`scribbletest/xmlwritertest.cpp` (standalone only, command in its header) checks that the streaming
+`XmlStreamWriter` (`usvg/svgxml.h`) prints byte for byte what the pugixml-DOM writer it replaced
+printed - every saved page goes through it. 20000 random documents with escapes, text and fragments
+of every pugi node type, buffered and streamed. A broken `&gt;` escape or a wrong indent after a
+text fragment both fail it.
 
 - `ScribbleTest::layerTest()` - everything that needs a document: new content (including an
   **inserted image**) landing on the current layer, a later stroke on a lower layer stacking *under*
@@ -126,7 +139,11 @@ and the serialization round trip including a name containing the separators.
   place, a 40 MB budget gets a smaller page and counts it, a spent budget still gets the page at 72 DPI
   rather than dropping it, and `ImportSaver` leaves every written page unloaded while the file reloads
   with all three backgrounds. Mutation-tested: keeping pages decoded, never lowering the DPI, never
-  unloading, and capping MuPDF at only what is left each fail it.
+  unloading, and capping MuPDF at only what is left each fail it. Also ([pdf-import.md](pdf-import.md#speed-png-encoding-the-renderencode-overlap-decoding-ahead)):
+  four pages of different widths arrive in order through the render/encode overlap, `Image::encodePNGStriped`
+  is lossless for 1-4 channels with a padded stride, and a prefetched decode (`Image::prefetchDecode`, the
+  image moved meanwhile) gives the pixels a plain decode does. Mutation-tested: filtering a stripe's first row
+  against zeros and flipping a byte in the worker's pixels each fail it.
 
 - **Two-client sync (`--synctest`)** needs a real server: run stylusboard
   (github.com/styluslabs/stylusboard, Node; `npm install moment minimist` is enough without `--db`)
@@ -211,6 +228,11 @@ Marker multiply blending is tested by `ScribbleTest::markerBlendTest()` (unit-ch
 the software painter: details and mutation checks in [pen-and-tools.md](pen-and-tools.md#marker-multiplies-text-stays-dark).
 `test15_ref.html` carries `comp-op="multiply"` on its marker strokes since then.
 
+`ScribbleTest::imageSaveCacheTest()` (unit-check count) pins `SvgImage::saveCache`: a rescaled image is
+saved the same twice from the cache, and changed pixels (`fill()`, or edited then `invalidate()`d), a new
+crop or a new size are saved anew, byte-identical to a copy of the node that has no cache. Removing
+`contentId` from the cache key fails three of its checks.
+
 Persistent undo is tested by `ScribbleTest::undoPersistTest()` (unit-check count): edits covering
 strokes, a layer, a layer move, a page, an outline entry and a page deletion undo back to each recorded
 state after save and reopen, redo survives, and a file appended to externally opens with no history and
@@ -240,7 +262,9 @@ What it covers: full repaints, the perftest scenarios (now painted), a determini
 generated page of 300 handwritten words, drawn through the real input path, then replicated), scrolling through
 all of it, zoom, goto page, pen move latency on a full page (mean/p95/max per event, the event plus its frame),
 rect select / select all / move / undo / redo / delete, stroke and free erasers, 240 px page thumbnails, save
-and load as .html and .svgz, PDF import of a generated vector PDF and scrolling through it, startup to first
+and load as .html and .svgz, PDF import of a generated vector PDF (`SUMI_BENCH_PDF_PAGES`, default 2) and
+scrolling through it (`SUMI_BENCH_PDF_PACED=1` adds `pdf_paced_scroll_frame`: a fresh import scrolled with 150 ms
+idle before each step, where decoding ahead has time to work), startup to first
 frame, and VmRSS/VmHWM at several points. Each total also has a `_cpu` twin (main thread CPU time).
 
 Traps, each found the hard way:

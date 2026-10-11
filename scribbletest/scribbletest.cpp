@@ -1,6 +1,8 @@
 #include "scribbletest.h"
 #include <fstream>
 #include <set>
+#include <thread>
+#include <chrono>
 
 #include "usvg/svgparser.h"
 #include "application.h"
@@ -796,6 +798,86 @@ int ScribbleTest::pdfImportTest()
     scribbleDoc->newDocument();
   }
 
+  // pages come back in order although the next is rendered while the last is still being encoded
+  {
+    std::string sized = "%PDF-1.4\n1 0 obj <</Type/Catalog/Pages 2 0 R>> endobj\n"
+        "2 0 obj <</Type/Pages/Kids[3 0 R 4 0 R 5 0 R 6 0 R]/Count 4>> endobj\n"
+        "3 0 obj <</Type/Page/Parent 2 0 R/MediaBox[0 0 300 400]>> endobj\n"
+        "4 0 obj <</Type/Page/Parent 2 0 R/MediaBox[0 0 400 400]>> endobj\n"
+        "5 0 obj <</Type/Page/Parent 2 0 R/MediaBox[0 0 500 400]>> endobj\n"
+        "6 0 obj <</Type/Page/Parent 2 0 R/MediaBox[0 0 600 400]>> endobj\n"
+        "trailer <</Root 1 0 R>>\n%%EOF\n";
+    std::string sizedPath = pdfPath + "-order.pdf";
+    {
+      FileStream out(sizedPath.c_str(), "wb");
+      out.write(sized.data(), sized.size());
+    }
+    Document ordered;
+    PdfImport::Options opts;
+    opts.dpi = 100;
+    int seen = 0;
+    opts.onProgress = [&](int pageNum, int numPages) { return pageNum == seen++ && numPages == 4; };
+    bool inOrder = PdfImport::importPdf(&ordered, sizedPath.c_str(), opts) == 4 && ordered.numPages() == 4;
+    for(int ii = 0; inOrder && ii < 4; ++ii)
+      inOrder = std::abs(ordered.pages[ii]->width() - (300 + 100*ii)*PdfImport::UNITS_PER_POINT) < 0.5;
+    check(inOrder, "pages arrive in the PDF's order");
+    removeFile(sizedPath.c_str());
+  }
+
+  // the import's PNG encoder (stripes on threads): exactly the pixels given, for each channel count, with
+  //  stripe boundaries inside the image
+  {
+    const int w = 61, h = 517;
+    std::vector<unsigned char> samples(size_t(w*4 + 3)*h);
+    uint32_t seed = 12345;
+    for(size_t ii = 0; ii < samples.size(); ++ii) {
+      seed = seed*1103515245 + 12345;
+      // mostly smooth with some noise, so every filter type gets chosen somewhere
+      samples[ii] = (unsigned char)((ii % 7)*20 + (ii/(w*4))/3 + ((seed >> 16) & 0x7));
+    }
+    bool exact = true;
+    for(int channels = 1; channels <= 4 && exact; ++channels) {
+      ptrdiff_t stride = ptrdiff_t(w)*channels + 3;  // not tightly packed
+      Image::EncodeBuff png = Image::encodePNGStriped(samples.data(), w, h, channels, stride, 5);
+      Image decoded = Image::decodeBuffer(png.data(), png.size());
+      const unsigned char* rgba = decoded.width == w && decoded.height == h ? decoded.bytes() : NULL;
+      exact = rgba != NULL;
+      for(int y = 0; exact && y < h; ++y) {
+        for(int x = 0; exact && x < w; ++x) {
+          const unsigned char* in = &samples[y*stride + x*channels];
+          const unsigned char* out = &rgba[(size_t(y)*w + x)*4];
+          int gray = in[0], alpha = channels == 2 ? in[1] : channels == 4 ? in[3] : 255;
+          exact = channels <= 2 ? (out[0] == gray && out[1] == gray && out[2] == gray && out[3] == alpha)
+              : (out[0] == in[0] && out[1] == in[1] && out[2] == in[2] && out[3] == alpha);
+        }
+      }
+    }
+    check(exact, "the striped PNG encoder is lossless");
+  }
+
+  // decoding ahead on a worker gives the pixels a plain decode does, also when the image moves meanwhile
+  if(!page.encData.empty()) {
+    // encoded only, as a page is held (`page` itself was decoded above)
+    auto encodedPage = [&](){ return Image::decodeBuffer(page.encData.data(), page.encData.size()); };
+    Image copy = encodedPage();
+    Image fresh = encodedPage();
+    bool started = copy.prefetchDecode();
+    Image moved(std::move(copy));  // same encoded buffer, so the job still belongs to it
+    // give the worker time to finish, so the pixels really come from it (one not started yet is dropped
+    //  and the image decoded here, which would pass whatever the worker does)
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    unsigned char* ahead = moved.bytesOnce();
+    unsigned char* plain = fresh.bytesOnce();
+    check(started && ahead && plain && memcmp(ahead, plain, page.dataLen()) == 0, "a prefetched decode matches");
+    free(ahead);
+    free(plain);
+    // an image destroyed while its decode runs must not crash the worker (it decodes a copy)
+    {
+      Image gone = encodedPage();
+      gone.prefetchDecode();
+    }
+  }
+
   removeFile(pdfPath);
   removeFile(savedPath);
   return nbad;
@@ -958,6 +1040,79 @@ int ScribbleTest::penSelectionTest()
   check(drawPen->color.opaque() == Color(Color::RED).opaque(), "...and takes the selection's color");
 
   scribbleDoc->clearSelection();
+  scribbleMode->drawTool = oldDrawTool;
+  app->setPen(oldPen);
+  app->updatePenToolbar();
+  scribbleDoc->newDocument();
+  return nbad;
+}
+
+// MainWindow::refreshUI() pushes the pen into the toolbar after every stroke, and PenToolbar::setPen()
+//  returns early when nothing it draws has changed.  That early-out was dead for years: operator==
+//  compared the pen with memcmp, padding included, and identical pens built in different places
+//  differed there.
+int ScribbleTest::penToolbarRefreshTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: pen toolbar refresh: %s\n", what); }
+  };
+  // two equal pens with different garbage in their padding - this is what memcmp got wrong.  The garbage
+  //  is written after construction: -O2 merges the member stores into whole words, zeroing the padding,
+  //  so pens merely built over different buffers came out byte-identical and compared equal either way.
+  ScribblePen penA(Color::BLUE, 2.5, ScribblePen::TIP_ROUND, 0.5, 2);
+  ScribblePen penB(Color::BLUE, 2.5, ScribblePen::TIP_ROUND, 0.5, 2);
+  unsigned char* bytesB = reinterpret_cast<unsigned char*>(&penB);
+  size_t afterColor = offsetof(ScribblePen, color) + sizeof(Color);
+  size_t afterFlags = offsetof(ScribblePen, flags) + sizeof(penB.flags);
+  memset(bytesB + afterColor, 0xA5, offsetof(ScribblePen, width) - afterColor);
+  memset(bytesB + afterFlags, 0xA5, sizeof(ScribblePen) - afterFlags);
+  check(afterColor < offsetof(ScribblePen, width) || afterFlags < sizeof(ScribblePen),
+      "ScribblePen has padding (else this check tests nothing)");
+  check(penA == penB, "equal pens compare equal whatever their padding holds");
+  ScribblePen penC = penA;
+  penC.width = 2.6;
+  check(!(penA == penC), "...and a different width is a different pen");
+
+  ScribbleApp* app = scribbleDoc->app;
+  PenToolbar* toolbar = app ? app->penToolbar : NULL;
+  if(!toolbar) {
+    check(false, "no pen toolbar");
+    return nbad;
+  }
+  scribbleDoc->newDocument();
+  int oldDrawTool = scribbleMode->drawTool;
+  ScribblePen oldPen = *app->getPen();
+  scribbleMode->drawTool = ScribbleMode::DRAWTOOL_PEN;
+  scribbleMode->setMode(MODE_STROKE);
+
+  app->setPen(ScribblePen(Color::BLUE, 2));
+  app->updatePenToolbar();
+  check(toolbar->colorPicker->color() == Color(Color::BLUE), "the color box shows the pen's color");
+  // the box changed behind the toolbar's back stays changed through a refresh with the same pen: the
+  //  refresh after a stroke is the early-out, not a rewrite of the box
+  toolbar->colorPicker->setColor(Color::GREEN);
+  app->updatePenToolbar();
+  check(toolbar->colorPicker->color() == Color(Color::GREEN), "a refresh with an unchanged pen is skipped");
+  app->setPen(ScribblePen(Color::RED, 2));
+  app->updatePenToolbar();
+  check(toolbar->colorPicker->color() == Color(Color::RED), "...but a new color reaches the color box");
+
+  // same pen, recolored page: the width display draws the page, so the early-out must not hold it back
+  Page* page = toolbar->currentPage();  // the page the toolbar measures against
+  if(page) {
+    Color oldPageColor = page->props.color;
+    page->props.color = Color(0x20, 0x40, 0x60);
+    app->updatePenToolbar();
+    SvgNode* bg = toolbar->rulingPreview->node->selectFirst(".page-bg");
+    Color shown = bg ? bg->getColorAttr("fill") : Color(Color::INVALID_COLOR);
+    Color expected = ScribbleApp::displayColor(page->props.color);
+    if(!(shown == expected))
+      printf("page-bg fill %08X, expected %08X\n", shown.argb(), expected.argb());
+    check(shown == expected, "the width display follows the page color with the pen unchanged");
+    page->props.color = oldPageColor;
+  }
+
   scribbleMode->drawTool = oldDrawTool;
   app->setPen(oldPen);
   app->updatePenToolbar();
@@ -3382,6 +3537,188 @@ int ScribbleTest::shapeSnapTest()
 //  is relative to the eraser radius r and the line's half width, so the checks hold at any zoom.  Against
 //  the old code (centre line only, and a square-ended rectangle for the free eraser) the "edge" checks and
 //  the free eraser's "corner" check fail; the "not yet" checks guard against an eraser grown too eager.
+// The interaction fast paths must give exactly what the slow paths gave (see pen-and-tools.md, "Interaction
+//  fast paths"): RuledSelector::cannotHit() may only skip elements selectHit() rejects, so a ruled select
+//  or erase with the cull takes the same elements as testing every one; and the bounds a dragged
+//  selection's strokes carry (shifted, not recomputed) must equal a fresh computation.
+int ScribbleTest::interactCullTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: interaction cull: %s\n", what); }
+  };
+  auto at = [&](Point pagept, int ev) {
+    Point scr = scribbleArea->dimToScreen(scribbleArea->pageDimToDim(pagept));
+    ie(scr.x, scr.y, 0, pen, ev);
+  };
+  Page* page = NULL;
+  auto line = [&](Point a, Point b, Dim width) {
+    SvgPath* node = new SvgPath();
+    node->path()->moveTo(a);
+    node->path()->lineTo(b);
+    node->setAttr<color_t>("fill", Color::NONE);
+    setSvgStrokeColor(node, Color::BLACK);
+    node->setAttr<float>("stroke-width", width);
+    node->setAttr<int>("stroke-linecap", Painter::RoundCap);
+    node->addClass(Element::STROKE_PEN_CLASS);
+    Element* s = new Element(node);
+    page->addStroke(s);
+    return s;
+  };
+  uint32_t seed = 12345;
+  auto rnd = [&]() { seed = seed*1664525u + 1013904223u; return Dim(seed >> 8)/Dim(1u << 24); };
+
+  // *** ruled select/erase: the cull changes nothing ***
+  scribbleDoc->newDocument();
+  page = scribbleArea->currPage;
+  Element* region = scribbleArea->addRulingRegion(Rect::ltrb(450, 500, 800, 800));
+  check(region != NULL, "a ruling region can be added");
+  if(!region) return nbad;
+  RulingRegionParams params = region->regionParams();
+  params.yRuling = 30;
+  params.transform(Transform2D().rotate(0.3, Point(625, 650)));
+  scribbleArea->setSelRegionParams(params);
+  scribbleDoc->clearSelection();
+  const RulingFrame pageFrame(Point(0, page->pageFrame().origin.y), 0, 0, 40);
+  const RulingFrame regionFrame = region->regionParams().frame(region);
+
+  for(int ii = 0; ii < 400; ++ii) {
+    Point a(20 + 900*rnd(), 20 + 1000*rnd());
+    Dim kind = rnd();
+    Element* s;
+    if(kind < 0.55)  // a short stroke, decided by its com
+      s = line(a, a + Point(40*rnd() - 20, 30*rnd() - 15), 0.5 + 6*rnd());
+    else if(kind < 0.8)  // a tall one, decided by its points, ending anywhere around a quarter line out
+      s = line(a, a + Point(20*rnd() - 10, 50 + 90*rnd()), 0.5 + 12*rnd());
+    else {
+      // a com away from the box (grouped writing gets one), so the box alone does not decide it
+      s = line(a, a + Point(30*rnd() - 15, 20*rnd() - 10), 1 + 4*rnd());
+      s->setCom(s->bbox().center() + Point(0, 160*rnd() - 80));
+    }
+    (void)s;
+  }
+
+  int nhit = 0, nculled = 0, nwrongcull = 0, nmismatch = 0;
+  for(int ff = 0; ff < 2; ++ff) {
+    const RulingFrame& frame = ff == 0 ? pageFrame : regionFrame;
+    const Dim yr = frame.yRuling;
+    for(int rr = 0; rr < 40; ++rr) {
+      int line0 = int(30*rnd()) - 3;
+      int nlines = rr % 3 == 0 ? 1 + int(4*rnd()) : 1;
+      Dim x0 = 900*rnd() - 100, x1 = x0 + 50 + 600*rnd();
+      for(int mode = 0; mode < 2; ++mode) {
+        for(int same = 0; same < 2; ++same) {
+          std::unique_ptr<Selection> probe(new Selection(page, Selection::STROKEDRAW_NONE));
+          probe->selMode = Selection::SELMODE_PASSIVE;
+          probe->ruling = frame;
+          RuledSelector* selector = new RuledSelector(probe.get(), RuledSelector::COL_NONE);
+          selector->selMode = mode ? RuledSelector::SEL_OVERLAP : RuledSelector::SEL_CONTAINED;
+          selector->sameRulingOnly = same != 0;
+          selector->selectRuled(RuledRange(x0, line0*yr, x1, (line0 + nlines)*yr, 0, yr, frame));
+          std::set<Element*> got(probe->strokes.begin(), probe->strokes.end());
+          std::set<Element*> want;
+          for(Element* s : page->children()) {
+            bool hit = page->isEditable(s) && selector->selectHit(s);
+            if(hit) want.insert(s);
+            if(selector->cannotHit(s)) {
+              ++nculled;
+              if(selector->selectHit(s)) ++nwrongcull;
+            }
+          }
+          nhit += want.size();
+          if(got != want) ++nmismatch;
+        }
+      }
+    }
+  }
+  check(nwrongcull == 0, "the ruled cull never skips an element the ruled selector would take");
+  check(nmismatch == 0, "a ruled selection with the cull takes exactly the elements testing every one takes");
+  // a test that selected nothing, or culled nothing, would prove nothing
+  check(nhit > 200 && nculled > 10000, "the ruled cull checks hit and culled plenty of elements");
+
+  // the same through the real ruled eraser, with and without the cull: on the page's ruling and in the region
+  for(int ff = 0; ff < 2; ++ff) {
+    Point from = ff == 0 ? Point(30, page->pageFrame().origin.y + 5.5*40) : regionFrame.toPage(Point(10, 3.5*30));
+    Point to = ff == 0 ? Point(880, from.y) : regionFrame.toPage(Point(320, 3.5*30));
+    int before = page->strokeCount();
+    std::set<Element*> left[2];
+    for(int cull = 0; cull < 2; ++cull) {
+      Selector::cullEnabled = cull != 0;
+      scribbleMode->setMode(MODE_ERASERULED);
+      at(from, press);
+      for(int ii = 1; ii <= 8; ++ii)
+        at(from + (to - from)*(ii/8.0), INPUTEVENT_MOVE);
+      at(to, release);
+      for(Element* s : page->children()) left[cull].insert(s);
+      scribbleDoc->doUndoRedo(false);
+    }
+    Selector::cullEnabled = true;
+    char what[128];
+    snprintf(what, sizeof(what), "the ruled eraser on the %s erases the same strokes with the cull as without",
+        ff == 0 ? "page's ruling" : "tilted region");
+    check(left[0] == left[1] && int(left[1].size()) < before, what);
+    check(page->strokeCount() == before, "undoing the ruled erase brings every stroke back");
+  }
+  scribbleMode->setMode(MODE_STROKE);
+
+  // *** a dragged selection's bounds equal fresh ones ***
+  scribbleDoc->newDocument();
+  page = scribbleArea->currPage;
+  std::vector<Element*> strokes;
+  for(int ii = 0; ii < 12; ++ii)
+    strokes.push_back(line(Point(120 + 40*ii, 300 + 7*(ii % 3)), Point(150 + 40*ii, 340 - 5*(ii % 4)), 1 + ii));
+  // one with a transform of its own: the deferred move is applied in page space, not the node's
+  strokes.back()->node->setTransform(Transform2D().scale(1.5).translate(30, -40));
+  std::vector<Rect> origBounds;
+  for(Element* s : strokes) origBounds.push_back(s->bbox());
+  scribbleDoc->doCommand(ID_SELALL);
+  check(scribbleArea->currSelection && scribbleArea->currSelection->count() == int(strokes.size()),
+      "Select All takes every stroke");
+  auto freshBounds = [](Element* s) {
+    Rect cached = s->node->m_cachedBounds;
+    s->node->m_cachedBounds = Rect();
+    Rect b = s->node->bounds();
+    s->node->m_cachedBounds = cached;
+    return b;
+  };
+  auto boundsMatch = [&](const char* when) {
+    Dim worst = 0;
+    bool valid = true;
+    for(Element* s : strokes) {
+      Rect b = s->bbox(), f = freshBounds(s);
+      valid = valid && b.isValid();
+      worst = std::max({worst, std::abs(b.left - f.left), std::abs(b.top - f.top),
+          std::abs(b.right - f.right), std::abs(b.bottom - f.bottom)});
+    }
+    char what[128];
+    snprintf(what, sizeof(what), "%s, every stroke's bounds equal freshly computed ones (off by %g)", when, worst);
+    check(valid && worst < 1E-3, what);  // shifting and recomputing round differently (~1E-6)
+  };
+  Point grab = strokes[3]->bbox().center();
+  Point offset(0, 0);
+  at(grab, press);
+  for(int ii = 1; ii <= 6; ++ii) {
+    offset = Point(13.37*ii, -7.25*ii);
+    at(grab + offset, INPUTEVENT_MOVE);
+    // the frame's dirty rect is what reads (and caches) the bounds between moves
+    for(Element* s : strokes) s->bbox();
+  }
+  boundsMatch("mid-drag");
+  at(grab + offset, release);
+  boundsMatch("after the drag");
+  Point d0 = strokes[0]->bbox().origin() - origBounds[0].origin(), d5 = strokes[5]->bbox().origin() - origBounds[5].origin();
+  check(d0.x > 10 && std::abs(d0.x - d5.x) < 1E-6 && std::abs(d0.y - d5.y) < 1E-6, "the drag moved the strokes together");
+  scribbleDoc->doUndoRedo(false);
+  bool back = true;
+  for(size_t ii = 0; ii < strokes.size(); ++ii) {
+    Rect b = strokes[ii]->bbox();
+    back = back && std::abs(b.left - origBounds[ii].left) < 1E-6 && std::abs(b.top - origBounds[ii].top) < 1E-6;
+  }
+  check(back, "undoing the drag puts every stroke back where it was");
+  scribbleDoc->clearSelection();
+  return nbad;
+}
+
 int ScribbleTest::eraserHitTest()
 {
   int nbad = 0;
@@ -4074,6 +4411,55 @@ int ScribbleTest::insSpaceAxisTest()
   return nbad;
 }
 
+int ScribbleTest::imageSaveCacheTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: image save cache: %s\n", what); }
+  };
+  auto saved = [](SvgNode* node) {
+    MemStream strm;
+    SvgWriter::save(node, strm);
+    return std::string(strm.data(), strm.size());
+  };
+  float savedImageScale = SvgWriter::DEFAULT_SAVE_IMAGE_SCALED;
+  SvgWriter::DEFAULT_SAVE_IMAGE_SCALED = 1;  // savePicScaled
+  // 400 px shown 100 units wide: the writer shrinks it on every save
+  Image image(400, 400, Image::PNG);
+  unsigned int* pixels = image.pixels();
+  for(int y = 0; y < 400; ++y) {
+    for(int x = 0; x < 400; ++x)
+      pixels[y*400 + x] = 0xFF000000 | (x*255/399) | ((y*255/399) << 8) | (((x + y)%256) << 16);
+  }
+  std::unique_ptr<SvgImage> node(new SvgImage(std::move(image), Rect::wh(100, 100)));
+  std::string first = saved(node.get());
+  check(first.find("data:image/png;base64,") != std::string::npos, "the image is saved inline");
+  check(node->saveCache.contentId == node->m_image.contentId && !node->saveCache.data.empty(),
+      "a rescaled image is cached after a save");
+  check(saved(node.get()) == first, "an unchanged image is saved the same again");
+
+  // each change is saved anew, and a copy of the node (no cache) saves exactly the same bytes
+  node->m_image.fill(0xFF2040C0);  // fill() invalidates
+  std::string filled = saved(node.get());
+  check(filled != first, "changed pixels are saved, not the cached image");
+  check(saved(std::unique_ptr<SvgNode>(node->clone()).get()) == filled, "changed pixels: same bytes as uncached");
+  for(int y = 0; y < 400; ++y)
+    node->m_image.pixels()[y*400 + y] = 0xFFFFFFFF;
+  node->m_image.invalidate();
+  std::string diagonal = saved(node.get());
+  check(diagonal != filled, "pixels changed in place then invalidate()d are saved anew");
+  node->srcRect = Rect::ltrb(0, 0, 200, 400);
+  std::string cropped = saved(node.get());
+  check(cropped != diagonal, "a new crop is saved anew");
+  check(saved(std::unique_ptr<SvgNode>(node->clone()).get()) == cropped, "a crop: same bytes as uncached");
+  node->setSize(Rect::wh(40, 80));
+  std::string smaller = saved(node.get());
+  check(smaller != cropped, "a new displayed size is saved anew");
+  check(saved(std::unique_ptr<SvgNode>(node->clone()).get()) == smaller, "a new size: same bytes as uncached");
+  SvgWriter::DEFAULT_SAVE_IMAGE_SCALED = savedImageScale;
+  return nbad;
+}
+
 int ScribbleTest::rulingRegionTest()
 {
   int nbad = 0;
@@ -4504,6 +4890,7 @@ void ScribbleTest::runAll(bool runsynctest)
   nUnitFailed += dashStyleTest();
   nUnitFailed += penWidthPresetTest();
   nUnitFailed += penSelectionTest();
+  nUnitFailed += penToolbarRefreshTest();
   nUnitFailed += outlineTest();
   nUnitFailed += outlineNestTest();
   nUnitFailed += pageMoveTest();
@@ -4529,12 +4916,14 @@ void ScribbleTest::runAll(bool runsynctest)
   nUnitFailed += curveFitTest();
   nUnitFailed += shapeSnapTest();
   nUnitFailed += eraserHitTest();
+  nUnitFailed += interactCullTest();
   nUnitFailed += rulingRegionTest();
   nUnitFailed += reflowIndentTest();
   nUnitFailed += smartScaleTest();
   nUnitFailed += skippedLinesTest();
   nUnitFailed += insSpaceAxisTest();
   nUnitFailed += undoPersistTest();
+  nUnitFailed += imageSaveCacheTest();
   runAllTime = mSecSinceEpoch() - runAllTime;
   // restore global config
   srandpp(mSecSinceEpoch());

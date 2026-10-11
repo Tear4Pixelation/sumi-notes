@@ -130,6 +130,11 @@ public:
   virtual ~Selector();
 
   virtual bool selectHit(Element* s) = 0;
+  // a cheap test run before selectHit (and the layer check) for every element of the page: true only
+  //  when selectHit(s) would certainly be false, so the expensive tests are skipped for far away ink
+  virtual bool cannotHit(Element* s) { return false; }
+  // off only in ScribbleTest, to compare against testing every element
+  static bool cullEnabled;
   virtual Rect getBGBBox() { return Rect(); }
   virtual void shrink() {}
   virtual void drawBG(Painter* painter) {}
@@ -336,6 +341,7 @@ public:
   //void selectRuledBelow(int linenum);
   void findStops(Dim x, int linenum);
   bool selectHit(Element* s) override;
+  bool cannotHit(Element* s) override;
   void shrink() override;
   Rect getBGBBox() override;
   void drawBG(Painter* painter) override;

@@ -162,7 +162,17 @@ moved pages' order fails the multi-page check.
   until the canvas is clicked; Escape does leave select mode once focus is in the canvas or the sidebar.
 - No Select All in the bar (the user's list did not have it); the browser's bar has Select All/None.
 - Thumbnails omit the drop shadow and are not inverted in night mode; ruling lines are thin at this size.
-- Thumbnail memory is not capped: ~80 KB per rendered page at desktop scale.
+- Thumbnails are held as PNG bytes only (`encodedThumbnail()` in `sidebar.cpp`), in the cache and in the
+  cell, ~17 KB each; the decoded pixels exist only in the texture. Was the decoded image twice, ~80 KB each.
+  miniz's PNG writer at level 1, not `Image::encodePNG()`: stb's filter search took ~10 ms a thumbnail, about
+  three times the render. The cache drops thumbnails far from view past 8 MB (`pruneThumbnails()`).
+- Page scans are drawn into a thumbnail from a proxy (`Painter::useImageProxies`, `ulib/painter.cpp`): a
+  box filtered copy 2-4x the thumbnail's size, made once per image and kept JPEG/PNG encoded (16 MB LRU).
+  Decoding each scan at full size was ~60 ms of every image page's thumbnail; Mathe.svgz's 24 thumbnails went
+  from ~1.4-2 s to ~60-100 ms. The thumbnails look better than before, not just the same: drawing a 2480 px
+  scan straight into 200 px point-sampled it (no mipmaps), dropping grid lines and thickening others.
+  **Trap:** never set the flag on a painter whose output is saved as document content (`Image::scaled()`,
+  exports) - it changes pixels. The document's own thumbnail (`ScribbleArea::drawThumbnail`) uses it too.
 - PNG resolution follows `paintScale` (like Send Page Image), so a low-DPI screen gives ~150 DPI or less.
 - The iOS, Android and wasm export paths were written without building those platforms.
 - The outline view's row tap still calls `area->gotoPage` directly and can leave the page-number strip stale

@@ -223,6 +223,11 @@ protected:
   void drawWatermark(Painter* painter, Page* page, const Rect& dirty);  // for iOS IAP
   void drawImage(Painter* imgpaint, const Rect& dirty) override;
   void drawScreen(Painter* painter, const Rect& dirty) override;
+  void prefetchImages() override;
+  // the visible pages prefetchImages() last looked around
+  Page* prefetchFirst = NULL;
+  Page* prefetchLast = NULL;
+  int prefetchFirstNum = 0, prefetchLastNum = 0;
   const ColorMap* viewColorMap() override;
   bool usesCanvasLayer() const override { return true; }
   NightColorMap nightMap;

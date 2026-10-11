@@ -2,7 +2,9 @@
 #include <stdio.h>
 #include <string>
 //#include <sstream>
+#include <algorithm>
 #include "usvg/svgparser.h"
+#include "ulib/threadutil.h"
 #include "document.h"
 #include "basics.h"
 
@@ -138,6 +140,9 @@ Page* Document::pageForElement(const Element* s) const
 
 void Document::applyLayerState()
 {
+  // pages written while a layer is hidden carry display="none", so saveBgz() stops copying blocks
+  for(const LayerInfo& layer : layers.layers)
+    layersEverHidden = layersEverHidden || layer.hidden;
   // deliberately only the loaded pages - a page that has never been loaded gets its layer state
   //  from Page::loadSVG(), and loading the whole document to hide a layer is exactly the cost
   //  Document::outline() documents as a known gap for the same reason
@@ -273,6 +278,137 @@ bool Document::save(IOStream* outstrm, const char* thumb, saveflags_t flags)
   return ok;
 }
 
+// --- block gzip (svgz) save and load ---
+// A page block is an independent raw deflate stream (miniz_go/miniz_deflate_mem start a fresh compressor
+//  per block and end it with a full flush), so a block's compressed bytes are valid at any offset in the
+//  file and blocks can be compressed in any order.  saveBgz() relies on both:
+// - a page that is not loaded, not dirty, and would be written exactly where it was (same y, which is the
+//   only thing in its block that depends on the pages before it) has its old compressed block copied
+//   verbatim instead of being loaded, re-serialized and re-deflated - a partial save after editing an early
+//   page used to load every later page and keep them all resident;
+// - pages that are serialized are deflated on worker threads; blocks are still written in page order, so
+//   the file is byte-identical to a sequential save.
+// The copy is only made when re-serializing the page could not give different bytes - see canCopyBlock().
+
+// text XmlStreamWriter produces for Page::saveSVG's x and y: a float attribute, printed as an int if it is
+//  one, otherwise with 3 decimals (XmlStreamWriter::writeAttribute(const char*, double))
+static std::string svgzCoordStr(Dim val)
+{
+  double dval = float(val);
+  char buff[64];
+  int len = int(dval) == dval ? intToStr(buff, int(dval)) : realToStr(buff, dval, 3);
+  buff[len] = '\0';
+  return buff;
+}
+
+// attributes of a start tag written by XmlStreamWriter: ` name="value"` pairs, values with no raw '"'
+static bool startTagAttr(const std::string& tag, const char* name, std::string* value)
+{
+  size_t pos = tag.find_first_of(" />");
+  while(pos < tag.size() && tag[pos] == ' ') {
+    size_t eq = tag.find('=', pos);
+    if(eq == std::string::npos || eq + 1 >= tag.size() || tag[eq + 1] != '"') return false;
+    size_t end = tag.find('"', eq + 2);
+    if(end == std::string::npos) return false;
+    if(tag.compare(pos + 1, eq - pos - 1, name) == 0) {
+      *value = tag.substr(eq + 2, end - eq - 2);
+      return true;
+    }
+    pos = end + 1;
+  }
+  return false;
+}
+
+struct BgzBlock
+{
+  Page* page = NULL;
+  bool copied = false;  // compressed bytes taken verbatim from the old file
+  bool saveok = true;
+  std::vector<uint8_t> oldBytes;  // copied block
+  MemStream svg;  // serialized page, deflated into zbytes (possibly on a worker thread)
+  uint8_t* zbytes = NULL;
+  size_t zlen = 0;
+  int nout = 0;  // uncompressed length, or < 0 on deflate error
+  uint32_t ulen = 0;  // uncompressed length of a copied block
+  uint32_t crc = 0;  // CRC32 of this block's uncompressed bytes alone
+  std::future<void> done;
+
+  ~BgzBlock() { free(zbytes); }
+  const uint8_t* data() const { return copied ? oldBytes.data() : zbytes; }
+  size_t size() const { return copied ? oldBytes.size() : zlen; }
+  void compress(int level) { crc = 0; nout = miniz_deflate_mem(level, svg.data(), svg.size(), &zbytes, &zlen, &crc); }
+};
+
+static ThreadPool* bgzThreadPool()
+{
+#if PLATFORM_EMSCRIPTEN
+  return NULL;  // the wasm build has no threads
+#else
+  // never deleted: idle workers just wait, and joining them in a static destructor at exit buys nothing
+  static ThreadPool* pool = [](){
+    int ncores = int(std::thread::hardware_concurrency());
+    int nthreads = std::min(4, ncores - 1);
+    return nthreads > 0 ? new ThreadPool(nthreads) : (ThreadPool*)NULL;
+  }();
+  return pool;
+#endif
+}
+
+// Can page p's block in the current file be copied verbatim when it is written at y?  Only if
+//  re-serializing it would produce the same bytes: it must be unloaded (so unchanged since it was read)
+//  and clean, the file must hold its block, and the block must have been written at this y.  Hidden
+//  layers are written into the pages as display="none", so a document that has (or had) any is always
+//  re-serialized.  On success the old block is in blk, and the page has the exact size from the block's
+//  <svg> tag, as loading it would have given it (a later page's y adds these heights up).
+bool Document::canCopyBlock(Page* p, Dim y, BgzBlock& blk)
+{
+  if(p->loadStatus != Page::NOT_LOADED || p->dirtyCount != 0 || p->blockIdx < 1
+      || size_t(p->blockIdx) + 1 >= blockInfo.size() || !blockStream || layersEverHidden)
+    return false;
+  if(std::any_of(layers.layers.begin(), layers.layers.end(), [](const LayerInfo& l){ return l.hidden; }))
+    return false;
+  const bgz_block_info_t* info = &blockInfo[p->blockIdx];
+  if(info[1].offset <= info[0].offset || info[1].len_cum < info[0].len_cum)
+    return false;
+  size_t clen = info[1].offset - info[0].offset;
+  blk.oldBytes.resize(clen);
+  if(!blockStream->seek(info[0].offset) || blockStream->read(blk.oldBytes.data(), clen) != clen)
+    return false;
+  // the start tag is all we need: x, y, width, height
+  uint8_t* head = NULL;
+  long headlen = miniz_inflate_mem(blk.oldBytes.data(), clen, 4096, &head, 4096);
+  std::string tag = headlen > 0 ? std::string((const char*)head, headlen) : std::string();
+  free(head);
+  size_t tagend = tag.find('>');
+  if(tag.compare(0, 5, "<svg ") != 0 || tagend == std::string::npos || tag[tagend - 1] == '/')
+    return false;
+  tag.resize(tagend + 1);
+  std::string xstr, ystr;
+  if(!startTagAttr(tag, "x", &xstr) || !startTagAttr(tag, "y", &ystr)
+      || xstr != svgzCoordStr(SVGZ_BORDER) || ystr != svgzCoordStr(y))
+    return false;
+  std::string svgtag = tag + "</svg>";
+  std::unique_ptr<SvgDocument> sizedoc(SvgParser().parseString(svgtag.c_str(), int(svgtag.size())));
+  if(!sizedoc || sizedoc->width().isPercent() || sizedoc->height().isPercent())
+    return false;
+  Dim width = sizedoc->width().px(), height = sizedoc->height().px();
+  if(!(width > 0 && height > 0))
+    return false;
+  // the size a load would give the page (Page::loadSVG) - the footer's is rounded to whole pixels, so an
+  //  A4 page (1240.157 x 1753.937) never matches it; later pages' y and the footer are computed from this
+  if(width != p->props.width || height != p->props.height) {
+    p->props.width = width;
+    p->props.height = height;
+    p->svgDoc->setWidth(width);
+    p->svgDoc->setHeight(height);
+  }
+  blk.ulen = info[1].len_cum - info[0].len_cum;
+  // crc of the block alone, from the cumulative CRCs either side of it
+  blk.crc = info[1].crc32_cum ^ miniz_crc32_combine(info[0].crc32_cum, 0, blk.ulen);
+  blk.copied = true;
+  return true;
+}
+
 bool Document::saveBgz(IOStream* outstrm, const char* thumb, saveflags_t flags)
 {
   static size_t MAX_BLOCK_INFO_COUNT = 1024;  // MAX_BLOCK_INFO_COUNT*sizeof(bgz_block_info_t) must be < 64KB
@@ -289,10 +425,34 @@ bool Document::saveBgz(IOStream* outstrm, const char* thumb, saveflags_t flags)
     while(pagenum < pages.size() && pages[pagenum]->dirtyCount == 0 && pages[pagenum]->blockIdx == int(pagenum+1))
       ++pagenum;
   }
-  // make sure all pages beyond first dirty page are loaded
+  // writing from pagenum on, either in place after the unchanged blocks or as a whole new file
+  bool partial = (flags & SAVE_BGZ_PARTIAL) && outstrm == blockStream.get() && !blockInfo.empty();
+  Dim starty = 0;
+  if(partial) {
+    for(size_t ii = 0; ii < pagenum; ++ii)
+      starty += pages[ii]->props.height + 2*SVGZ_BORDER;
+  }
+
+  // Every page from pagenum on is either copied from the old file or loaded (and later serialized).  All
+  //  reading from the old file happens here, before anything is written: the save may overwrite it.  Pages
+  //  are decided in order since a page's y depends on the (possibly just loaded) heights before it.
+  std::vector<std::unique_ptr<BgzBlock>> blocks;
+  std::vector<Page*> loadedForSave;
   bool loadok = true;
-  for(size_t ii = pagenum; ii < pages.size(); ++ii)
-    loadok = pages[ii]->ensureLoaded(false) && loadok;
+  Dim y = starty;
+  for(size_t ii = pagenum; ii < pages.size(); ++ii) {
+    Page* p = pages[ii];
+    blocks.emplace_back(new BgzBlock);
+    blocks.back()->page = p;
+    if(!canCopyBlock(p, y, *blocks.back())) {
+      blocks.back()->copied = false;
+      blocks.back()->oldBytes = std::vector<uint8_t>();
+      if(p->loadStatus == Page::NOT_LOADED)
+        loadedForSave.push_back(p);
+      loadok = p->ensureLoaded(false) && loadok;
+    }
+    y += p->props.height + 2*SVGZ_BORDER;
+  }
   if(!loadok && !(flags & SAVE_FORCE))
     return false;
 
@@ -300,22 +460,29 @@ bool Document::saveBgz(IOStream* outstrm, const char* thumb, saveflags_t flags)
   if(!(flags & SAVE_BGZ_PARTIAL) || outstrm != blockStream.get())
     blockInfo.clear();
 
-  MemStream tempstrm(4 << 20);  // 4 MB
-  minigz_io_t ztempstrm(tempstrm);
   minigz_io_t zoutstrm(*outstrm);
+  uint8_t* zbuf = NULL;
+  size_t zlen = 0;
+  auto writeBlock = [&](const char* text, size_t textlen, int lv) {
+    zlen = 0;
+    int n = miniz_deflate_mem(lv, text, textlen, &zbuf, &zlen, &crc_32);
+    if(n >= 0 && outstrm->write(zbuf, zlen) != zlen)
+      n = -1;
+    return n;
+  };
 
   uint32_t fileSize = blockInfo.empty() ? 0 : blockInfo.back().offset;  // excluding 8 byte gzip footer
   if(blockInfo.empty()) {  // || pagenum+1 >= blockInfo.size()  -- should never happen
     // writing entire file
     outstrm->truncate(0);
-    if(!outstrm->is_open())
+    if(!outstrm->is_open()) {
+      free(zbuf);
       return false;
+    }
     bgz_header(zoutstrm, MAX_BLOCK_INFO_COUNT*sizeof(bgz_block_info_t));
     blockInfo.push_back({uint32_t(outstrm->tell()), crc_32, len, 0});
-    tempstrm << SVGZ_HEADER;
-    tempstrm.seek(0);
-    nout = miniz_go(level | MINIZ_GZ_NO_FINISH, ztempstrm, zoutstrm, &crc_32);
-    if(nout < 0) return false;
+    nout = writeBlock(SVGZ_HEADER, strlen(SVGZ_HEADER), level | MINIZ_GZ_NO_FINISH);
+    if(nout < 0) { free(zbuf); return false; }
     len += (uint32_t)nout;
     blockInfo.push_back({uint32_t(outstrm->tell()), crc_32, len, 0});
   }
@@ -333,29 +500,67 @@ bool Document::saveBgz(IOStream* outstrm, const char* thumb, saveflags_t flags)
     }
   }
 
-  bool ok = true;
-  for(; pagenum < pages.size(); ++pagenum) {
-    Page* p = pages[pagenum];
-    tempstrm.truncate(0);  //MemStream tempstrm;
-    ok = p->saveSVG(tempstrm, SVGZ_BORDER, totalheight) && ok;
-    tempstrm.seek(0);
-    nout = miniz_go(level | MINIZ_GZ_NO_FINISH, ztempstrm, zoutstrm, &crc_32);
-    if(nout < 0) return false;
-    len += (uint32_t)nout;
-    blockInfo.push_back({uint32_t(outstrm->tell()), crc_32, len, 0});
-
-    if(ok) {
-      p->blockIdx = blockInfo.size() - 2;  // needed to handle page deletions properly
-      p->dirtyCount = 0;
-      //p->autoSavedDirtyCount = Page::NOT_AUTO_SAVED;
+  // Serialize pages here (the page tree is not thread-safe) and deflate them on the pool; write finished
+  //  blocks in order.  At most a few blocks are in flight, bounding the extra memory.
+  ThreadPool* pool = bgzThreadPool();
+  const size_t maxInFlight = 6;
+  size_t svgSizeHint = 64 << 10;
+  size_t nextWrite = 0;
+  bool ok = true, writeok = true;
+  auto writeNext = [&]() {
+    BgzBlock* blk = blocks[nextWrite++].get();
+    if(!blk->copied && blk->done.valid())
+      blk->done.wait();
+    if(!blk->copied && blk->nout < 0)
+      writeok = false;
+    else if(writeok) {
+      if(outstrm->write(blk->data(), blk->size()) != blk->size())
+        writeok = false;
+      uint32_t ulen = blk->copied ? blk->ulen : uint32_t(blk->nout);
+      crc_32 = miniz_crc32_combine(crc_32, blk->crc, ulen);
+      len += ulen;
+      blockInfo.push_back({uint32_t(outstrm->tell()), crc_32, len, 0});
+      Page* p = blk->page;
+      if(blk->saveok) {
+        p->blockIdx = blockInfo.size() - 2;  // needed to handle page deletions properly
+        p->dirtyCount = 0;
+        //p->autoSavedDirtyCount = Page::NOT_AUTO_SAVED;
+      }
+    }
+    // release memory now rather than at the end
+    blk->oldBytes = std::vector<uint8_t>();
+    blk->svg = MemStream();
+    free(blk->zbytes);
+    blk->zbytes = NULL;
+  };
+  for(size_t ii = 0; ii < blocks.size(); ++ii, ++pagenum) {
+    BgzBlock* blk = blocks[ii].get();
+    Page* p = blk->page;
+    if(!blk->copied) {
+      blk->svg.reserve(svgSizeHint);  // pages tend to be alike: skip most of the doubling reallocs
+      blk->saveok = p->saveSVG(blk->svg, SVGZ_BORDER, totalheight);
+      svgSizeHint = blk->svg.size() + blk->svg.size()/4;
+      ok = blk->saveok && ok;
+      if(pool)
+        blk->done = pool->enqueue([blk, level](){ blk->compress(level | MINIZ_GZ_NO_FINISH); });
+      else
+        blk->compress(level | MINIZ_GZ_NO_FINISH);
     }
     totalheight += p->props.height + 2*SVGZ_BORDER;
     maxwidth = std::max(maxwidth, p->props.width);
+    // blocks after ii are not serialized yet; copied ones among them go out once ii reaches them
+    while(nextWrite <= ii && (blocks[nextWrite]->copied || ii + 1 - nextWrite >= maxInFlight))
+      writeNext();
+  }
+  while(nextWrite < blocks.size())
+    writeNext();
+  if(!writeok) {
+    free(zbuf);
+    return false;
   }
 
   // final block is thumbnail, config, and CSS for browser
-  //MemStream tempstrm;
-  tempstrm.truncate(0);
+  MemStream tempstrm;
   tempstrm << "<defs id=\"write-defs\">\n";
   if(thumb)  // style='display:none;' ... not needed inside <defs>
     tempstrm << "<image id=\"thumbnail\" xlink:href=\"data:image/png;base64," << thumb << "\"/>\n\n";
@@ -375,8 +580,8 @@ bool Document::saveBgz(IOStream* outstrm, const char* thumb, saveflags_t flags)
     cfgnode.print(xmlWriter, "  ");
   tempstrm << fstring(SVGZ_CSS, maxwidth + 2*SVGZ_BORDER, totalheight + SVGZ_BORDER) << "</defs>\n</svg>\n";
 
-  tempstrm.seek(0);
-  nout = miniz_go(level, ztempstrm, zoutstrm, &crc_32);  // final block
+  nout = writeBlock(tempstrm.data(), tempstrm.size(), level);  // final block
+  free(zbuf);
   if(nout < 0) return false;
   len += (uint32_t)nout;
   blockInfo.push_back({uint32_t(outstrm->tell()), crc_32, len, 0});
@@ -392,15 +597,47 @@ bool Document::saveBgz(IOStream* outstrm, const char* thumb, saveflags_t flags)
     dirtyCount = 0;
   if(ok && outstrm != blockStream.get())
     blockStream.reset(outstrm);
+  // Pages this save had to load only to write them go back to unloaded: they are clean, now in the file
+  //  just written, and nothing can hold them - a page anything displays or edits was already loaded.
+  //  Otherwise a save after editing page 1 of a long document leaves the whole document resident, and the
+  //  mobile low-memory handler (which saves) would grow memory exactly when asked to shrink it.
+  if(ok && outstrm == blockStream.get()) {
+    for(Page* p : loadedForSave) {
+      if(p->loadStatus == Page::LOAD_OK && p->dirtyCount == 0 && p->blockIdx >= 0)
+        p->unload();
+    }
+  }
   return ok;
 }
 
 bool Document::loadBgzPage(Page* page)
 {
-  MemStream inf_block(4 << 20);
-  bool ok = bgz_read_block(minigz_io_t(*blockStream.get()), &blockInfo[page->blockIdx], minigz_io_t(inf_block));
-
-  SvgDocument* doc = SvgParser().parseString(
+  const bgz_block_info_t* info = &blockInfo[page->blockIdx];
+  // read the compressed block and inflate it straight into a buffer of the known size, rather than through
+  //  a 4 MB MemStream and miniz_go's two 1 MB chunk buffers
+  bool ok = false;
+  SvgDocument* doc = NULL;
+  if(info[1].offset > info[0].offset && info[1].len_cum >= info[0].len_cum) {
+    size_t clen = info[1].offset - info[0].offset;
+    std::vector<uint8_t> block(clen);
+    if(blockStream->seek(info[0].offset) && blockStream->read(block.data(), clen) == clen) {
+      uint8_t* svg = NULL;
+      long svglen = miniz_inflate_mem(block.data(), clen, info[1].len_cum - info[0].len_cum, &svg);
+      if(svglen >= 0) {
+        block = std::vector<uint8_t>();
+        ok = miniz_crc32(info[0].crc32_cum, svg, svglen) == info[1].crc32_cum;
+        doc = SvgParser().parseString((const char*)svg, int(svglen),
+            XmlStreamReader::BufferInPlace | XmlStreamReader::ParseDefault);
+        free(svg);
+        return doc && page->loadSVG(doc) && ok;
+      }
+      free(svg);
+    }
+  }
+  // fall back to the streaming reader, which tolerates a block info that does not match the data
+  MemStream inf_block;
+  ok = bgz_read_block(minigz_io_t(*blockStream.get()), &blockInfo[page->blockIdx], minigz_io_t(inf_block));
+  doc = SvgParser().parseString(
       inf_block.data(), inf_block.size(), XmlStreamReader::BufferInPlace | XmlStreamReader::ParseDefault);
   return doc && page->loadSVG(doc) && ok;
 }

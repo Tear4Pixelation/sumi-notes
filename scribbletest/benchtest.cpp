@@ -508,11 +508,11 @@ void ScribbleTest::benchTest()
     benchFrame();
   }
 
-  // erasers swept across full pages: whole-stroke and free (stroke splitting) erase
+  // erasers swept across full pages: whole-stroke, free (stroke splitting) and ruled (line by line) erase
   {
-    const int modes[] = {MODE_ERASESTROKE, MODE_ERASEFREE};
-    const char* names[] = {"big_erase_stroke", "big_erase_free"};
-    for(int mm = 0; mm < 2; ++mm) {
+    const int modes[] = {MODE_ERASESTROKE, MODE_ERASEFREE, MODE_ERASERULED};
+    const char* names[] = {"big_erase_stroke", "big_erase_free", "big_erase_ruled"};
+    for(int mm = 0; mm < 3; ++mm) {
       scribbleArea->gotoPos(std::min(30 + mm, npages - 1), Point(-10, -10));
       benchFrame();
       scribbleMode->setMode(modes[mm]);
@@ -580,7 +580,9 @@ void ScribbleTest::benchTest()
 
   // PDF import: a generated vector PDF, rasterized at the default resolution
   if(PdfImport::isAvailable()) {
-    const int pdfpages = 2;  // ~3 s a page at the default 300 DPI
+    // SUMI_BENCH_PDF_PAGES for a longer import; the metric keeps its name
+    const char* envpdf = getenv("SUMI_BENCH_PDF_PAGES");
+    const int pdfpages = envpdf ? std::max(1, atoi(envpdf)) : 2;
     std::string pdf = benchMakePdf(pdfpages);
     {
       FileStream out(pdffile.c_str(), "wb");
@@ -613,6 +615,32 @@ void ScribbleTest::benchTest()
       frames.push_back(benchNowMs() - f0);
     }
     benchStats("pdf_scroll_frame", frames);
+    // SUMI_BENCH_PDF_PACED=1: the same at reading pace - 150 ms idle before each step, time the frames only -
+    //  on a fresh import, as the pass above left every page's texture cached.  A page scrolled onto then
+    //  has had its image decoded ahead (ScribbleArea::prefetchImages); above, the next page is visible
+    //  a frame or two after it is first asked for.
+    if(getenv("SUMI_BENCH_PDF_PACED")) {
+      scribbleDoc->newDocument();
+      benchFrame();
+      {
+        Document scratch;
+        PdfImport::Options opts;
+        if(PdfImport::importPdf(&scratch, pdffile.c_str(), opts) > 0)
+          scribbleDoc->insertPagesFrom(&scratch);
+      }
+      benchFrame();
+      std::vector<double> paced;
+      scribbleArea->gotoPos(0, Point(-10, -10));
+      benchFrame();
+      for(int ii = 0; ii < 400 && scribbleArea->getCurrPageNum() < scribbleDoc->document->numPages() - 1; ++ii) {
+        usleep(150*1000);
+        double f0 = benchNowMs();
+        scribbleArea->scrollBy(0, -step);
+        benchFrame();
+        paced.push_back(benchNowMs() - f0);
+      }
+      benchStats("pdf_paced_scroll_frame", paced);
+    }
     scribbleMode->setMode(MODE_STROKE);
   }
 

@@ -216,6 +216,28 @@ Known gaps: undoing a dotted style leaves the round cap it set; the width item's
 pattern clearly at thin widths. Tested by `ScribbleTest::dashStyleTest()` (mutation-checked: no
 conversion, no dash scaling).
 
+# Pen toolbar refresh after every stroke
+
+`MainWindow::refreshUI()` runs after every stroke and edit and ends in `PenToolbar::setPen()`, nearly
+always with the same pen. The full path rewrites the color box (hex text, preview, four slider gradients
+and thumbs), the width display and every swatch - about 110K instructions a stroke, 1.8% of the perftest.
+Its early return was dead for years: `ScribblePen::operator==` was a `memcmp`, and the struct's padding
+(after `color`, after `flags`) holds whatever the copy or temporary left there, so identical pens compared
+different. It is now member by member - **a new pen member must be added to `operator==`**, and never go
+back to `memcmp` (`savePen()`'s recent-pens dedupe depended on it too and was failing the same way).
+
+With the early return working it must not swallow anything else the full path draws, so it also keys on
+`PenToolbar::ShownContext`: the active document (the swatches' palette follows it - a switch to a tab
+already in memory does not run `loadConfig()`/`refreshPalette()`), the mode, and the current page's
+colors and `lineHeight()` (width display, relative widths). It skips `updateSingles()` too unless the
+selection's line style moved, keeping only the spin-box resync. Anything else the toolbar shows has to be
+refreshed by whoever changes it: `themeApplied()`/`loadConfig()` call `refreshPalette()`, night mode calls
+`refreshDisplayColors()`, a new single swatch/width resets `singlesDashStyle`. Below it, ugui's
+`ColorEditBox`/`ColorSliders::setColor()`, `TextEdit::setText()` and usvg's `SvgTspan::setText()` return
+early on an unchanged value (each comparing its own state; `TextEdit` only when it already has no
+selection and the cursor at 0, which is what `setText` would leave). Pinned by
+`ScribbleTest::penToolbarRefreshTest()`. Perftest: `MainWindow::refreshUI` 213M -> 54M Ir.
+
 # Pen and selection
 
 The pen and a selection share the one `PenToolbar` (one `pen`, one `mode`), so something has to say
@@ -301,6 +323,36 @@ real radius: crossing a 600-long two-point line in one move, touching only a wid
 edge, ink diagonally past the eraser's end, and where the free eraser's cut lands) and standalone by
 `scribbletest/erasetest.cpp` (`runEraseTests()`). Against the old code the edge checks of both erasers,
 the diagonal check of the free eraser and the cut position fail.
+
+# Element memory
+
+Per-stroke state that ordinary ink never has lives in `Element::Extra` behind one pointer (`m_extra`):
+the pending transform (+ `applyPending`), the pen point cache, `ShapeParams` and `RulingRegionParams`.
+`Element` went from 328 to 88 bytes. `extra()` allocates it, `trimExtra()` frees it once everything in it
+is default (an identity pending transform counts as default whatever `applyPending` says). Traps:
+
+- **Never trim while holding a reference into it.** `applyTransform()` holds `Extra& ext` across
+  `setShapeParams()`, `setRegionParams()`, `dropShape()` and `rebuildShapePath()`, so none of those trims;
+  trimming happens in `commitTransform()`, `resetTransform()`, `scaleWidth()`, `releasePenPoints()`.
+- **The pen point cache** (`toPenPoints()`, 40 B per centre-line point) is built by erasing and by scaling
+  filled pens. It is needed while a gesture runs - mid-erase the path has several subpaths that
+  `toPenPoints()` cannot pair up, and a live resize/reset round-trips through it - and used to be kept
+  for good after any erase, resize or width change (an erased stroke's pieces held 2x their point memory).
+  `releasePenPoints()` now drops it when the gesture or selection is over: erase pieces in
+  `getEraseSubPaths()`, `Selection::clear()`/`deleteStrokes()`, and `commitTransform()`/`scaleWidth()`
+  on an element no selection holds (undo, sync). It only drops a cache that `toPenPoints()` gives back from
+  the path (within 1e-6; in practice ~3e-13): a round pen segment so thin that `addArc()` drew its cap as a
+  line has no curve for `toPenPoints()` to find, and there the cache is the only true copy and stays.
+  Consequence: an edit after a dropped cache starts from the path, so a saved coordinate can differ from
+  the old build's in the last written digit where it sits on a rounding tie - exactly what the old build
+  did after a reload. `clone()` still copies the cache.
+- **`__comx`/`__comy`** are no longer kept in `node->attrs` when their place in the file is fixed by what
+  follows them (`stripComAttrs()`: nothing but attributes `serializeAttr()` writes after them -
+  `__rr*`, `__layer`, `__timestamp`, `__shape*` - at least one, none before). `serializeAttr()` then writes
+  them from `m_com` through `SvgWriter::extraAttrs` just before the first of those, so files stay byte
+  for byte the same; `m_comStripped` remembers this. Anything else keeps the old store-on-save path,
+  since baseline order there depends on when the attributes were first appended. Code that reads
+  `__comx` from a node after load must use `Element::com()` instead.
 
 # Select touching
 
@@ -512,3 +564,49 @@ itself pale, so alpha alone could not make it vivid.
   hide text. Night mode is a render-time `ColorMap` (see night-mode.md) and maps whatever colour is stored.
 - Verified in agent-display (Debug build) with a marker stroke over a pen line on lined paper: clearly
   saturated pink, line fully visible. Themed variants were not screenshotted.
+
+# Interaction fast paths (selection drag, ruled erase)
+
+- **Dragging a selection shifts cached bounds instead of recomputing them.** `Element::applyTransform()` with a
+  pure translate on a path whose pending transform is itself a pure deferred translate (or none) moves
+  `node->m_cachedBounds` by the offset after `invalidate()`. The node stays `BOUNDS_DIRTY` and the parents'
+  bounds are cleared, so the dirty rect still unites old and new. This is exact because `Element::applyStyle()`
+  applies the pending transform in root space, which is the space bounds are cached in. It is not exact for
+  scale, rotation, crops, groups, regions or a pending transform the painter does not apply, so those keep the
+  full invalidate. Without it a drag recomputed every moved stroke's styled bounds once per input event (63%
+  of a full page drag). Shifted and recomputed boxes can differ by about 1E-6 from rounding. The commit on
+  release recomputes them.
+- **Ruled select/erase culls before testing.** `Selection::doSelect()` asks `Selector::cannotHit()` before
+  the layer check and `selectHit()`. `RuledSelector::cannotHit()` rejects an element only if its frame box
+  misses the range's rows padded by a quarter line plus 1, *and* its com is outside them too. Small strokes
+  are decided by com, which grouping can move outside the box. Groups are never culled. In a tilted frame the
+  pad also gets half the stroke width (`localElementBBox()` pads the path's own box). Changing
+  `containedRuled()`/`overlapRuled()` so that a hit no longer needs one of those means changing the cull too.
+  `ScribbleTest::interactCullTest()` compares against testing every element (`Selector::cullEnabled = false`).
+  `freeEraseRuled()` likewise does its rect test before `isEditable()`/`regionAt()`. `Page::regionAt()` no
+  longer builds the `regions()` vector on every call.
+
+# Stroke rendering fast paths (nanovg)
+
+Pan and scroll frames are almost all path submission and flattening, so the per-point path is trimmed.
+Each of these must stay **pixel-identical** (checked by screenshot AE=0 on GL and `--glRender=0`):
+
+- `Painter::drawPath` hands each run of MoveTo/LineTo to `nvgPolylined()` (one call per run, not one
+  `nvgLineTo` per point). It must round each double to float *before* transforming, use the same
+  `x*t[0] + y*t[2] + t[4]` expression as `nvgTransformPoint`, and leave `commandx/y` at the last
+  untransformed point, exactly as `nvg__appendCommands` does.
+- `nvg__flattenPaths` handles a run of LINETOs inline (same `distTol` duplicate-point test as
+  `nvg__addPoint`); `nvg__expandFill` computes the fill bounds while writing the segments, so `nvgFill`
+  skips `nvg__calcBounds` (strokes still use it - their bounds come from the expanded stroke vertices).
+- A selected pen stroke (STROKEDRAW_SEL, a filled path) used to be submitted and flattened twice: the
+  coloured outline in `Element::applyStyle`, then the white fill in `SvgPainter::_draw`. Now applyStyle
+  sets the white fill plus `Painter::setStrokeUnderFill(true)` and `_draw`'s single `drawPath` strokes
+  first, then fills the same flattened path (`nvgStroke` restores the path cache). `strokeOpacity` is set
+  to 1 so `_draw` takes its one-pass branch at the opacity the old outline used. Paths with a dash
+  array or a fill/stroke paint server keep the old two-pass code.
+- vtex: when a flush's edges fit in one layer, the edge texture is specified with only the rows holding
+  edges (height < 256) instead of a whole 1 MB layer. It is still re-specified *with its data* every
+  flush. Allocating once and updating with `glTexSubImage3D` (in place, or after orphaning with a NULL
+  `glTexImage3D`) cut the Ir but made Move Selection ~2x and pan ~16% slower in wall and CPU time on
+  NVIDIA (driver sync / clear) - measured, don't redo it. The per-call `type`/`nedges`/`offset` uniforms
+  are set only when they change.

@@ -68,6 +68,8 @@ void Selection::clear()
     for(Element* node : strokes) {
       node->setSelected(NULL);
       node->resetTransform();
+      // the pen points were kept for this selection's transforms (Element::commitTransform())
+      node->releasePenPoints();
     }
   }
   strokes.clear();
@@ -77,6 +79,7 @@ void Selection::deleteStrokes()
 {
   for(Element* s : strokes) {
     s->setSelected(NULL);
+    s->releasePenPoints();  // undo keeps a deleted stroke, and it can rebuild them
     page->removeStroke(s);
   }
   // delete our list of now invalid strokes
@@ -207,6 +210,9 @@ void Selection::doSelect()
   }
   // set selected flag for selected strokes and add to list
   for(Element* node : sourceNode->children()) {
+    // the cull only skips elements selectHit() would reject anyway (ScribbleTest::eraseCullTest)
+    if(Selector::cullEnabled && selector->cannotHit(node))
+      continue;
     // An element on a locked or hidden layer is not selectable, and this one test is what makes the
     //  stroke eraser and the ruled eraser respect a lock too: both are implemented as selections
     //  (see the notes at the top of this file), so neither needs a check of its own.
@@ -753,6 +759,8 @@ void Clipboard::saveSVG(std::ostream& file)
 // note that failure to define all virtual methods may result in
 //  "undefined reference to vtable" errors attributed to the constructor and destructor
 
+bool Selector::cullEnabled = true;
+
 Selector::Selector(Selection* _selection) : selection(_selection)
 {
   selection->selector = this;
@@ -775,8 +783,10 @@ Selector::~Selector()
 //  filled one anywhere inside its outline, and every segment counts, not just the vertices.
 static bool isNearSegment(Point a, Point b, Dim radius, SvgNode* node)
 {
-  const Transform2D tf = node->totalTransform();
+  // totalTransform() walks the parents, so it is only fetched once it is needed: for a stroked path's
+  //  width before the cull, otherwise after it
   bool stroked = node->type() == SvgNode::PATH && node->getColorAttr("stroke", Color::NONE) != Color::NONE;
+  Transform2D tf = stroked ? node->totalTransform() : Transform2D();
   Dim halfWidth = stroked ? node->getFloatAttr("stroke-width", 1)*tf.avgScale()/2 : 0;
   // bounds() is only a cull, so pad it by the half width in case it is the geometry's alone; both rects
   //  are padded since either can have zero area (a tap, a horizontal line)
@@ -795,6 +805,8 @@ static bool isNearSegment(Point a, Point b, Dim radius, SvgNode* node)
 
   const Path2D& path = *static_cast<SvgPath*>(node)->path();
   Path2D flat = path.isSimple() ? path : path.toFlat();
+  if(!stroked)
+    tf = node->totalTransform();
   if(!tf.isIdentity())
     flat.transform(tf);
   bool filled = node->getColorAttr("fill", Color::NONE) != Color::NONE;
@@ -1166,6 +1178,31 @@ static bool overlapRuled(const RuledRange& range, Element* s)
     }
   }
   return false;
+}
+
+// Every way containedRuled()/overlapRuled() can return true needs the element's box in the frame to reach
+//  the range's rows (within the quarter line both allow a tall stroke to stick out), or, for a stroke
+//  shorter than 1.75 lines, its com to lie in them - com, not box, since a grouped stroke's com can be
+//  moved outside its box.  A group is decided by its children, whose coms can be anywhere: never culled.
+bool RuledSelector::cannotHit(Element* s)
+{
+  const RuledRange& r = selRange;
+  if(s->isMultiStroke() || !(r.yruling > 0))
+    return false;
+  Rect pagebox = s->bbox();
+  if(!pagebox.isValid())
+    return false;
+  Dim pad = 0.25*r.yruling + 1;
+  // in a tilted frame localElementBBox() boxes the path's own points and pads that by half the stroke
+  //  width, which can reach that far past the frame box of the page bbox
+  if(r.frame.isRotated())
+    pad += s->node->getFloatAttr("stroke-width", 0)/2;
+  Dim lo = r.ymin - pad, hi = r.ymax + pad;
+  Rect box = r.frame.localBBox(pagebox);
+  if(box.bottom >= lo && box.top <= hi)
+    return false;
+  Point c = r.frame.toLocal(s->com());
+  return !(c.y >= lo && c.y <= hi);
 }
 
 bool RuledSelector::selectHit(Element* s)

@@ -35,6 +35,18 @@ else
   CFLAGS += -O2 -DNDEBUG
   BUILDDIR ?= Release
   SANITIZE ?= 0
+  # link time optimization (release only; LTO=0 turns it off, in a clean build directory):
+  #  measured -4.3% instructions in app code over benchtest and -3.7% .text.  -flto=auto runs the
+  #  LTRANS jobs in parallel (GCC >= 10; clang treats it as full LTO).  The per-object -Os that MuPDF
+  #  gets (Makefile) survives: GCC records optimization options per function.  -g at link keeps debug
+  #  info for the LTRANS output.  See docs/agent/pdf-import.md for the one MuPDF object built without LTO.
+  #  make does not track flags: objects compiled before LTO was turned on are plain objects and the
+  #  link silently is not LTO (and the reverse), so switch LTO only in a clean build directory.
+  LTO ?= 1
+  ifneq ($(LTO), 0)
+    CFLAGS += -flto=auto
+    LDFLAGS += -flto=auto -O2 -g
+  endif
 endif
 
 ifneq ($(SANITIZE), 0)

@@ -833,4 +833,5 @@ void ScribbleView::doPaintEvent(Painter* painter, const Rect& dirty)
   //painter->endFrame();
   dirtyRectScreen = Rect();
   ++frameCount;
+  prefetchImages();
 }

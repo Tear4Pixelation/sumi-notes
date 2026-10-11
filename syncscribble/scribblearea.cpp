@@ -157,6 +157,7 @@ void ScribbleArea::drawThumbnail(Image* dest)
   bool thumbtest = cfg->Int("saveThumbnail") == 2;
   int srgb = thumbtest ? Painter::SRGB_AWARE : 0;  // disable sRGB for better contrast
   Painter thumbpaint(Painter::PAINT_SW | srgb, dest);
+  thumbpaint.useImageProxies = true;  // a page scan is drawn from a small copy, not decoded at full size
   thumbpaint.beginFrame();
   thumbpaint.save();
   // aliasing in thumbnails is quite noticible on high-DPI displays
@@ -2668,13 +2669,16 @@ void ScribbleArea::freeEraseRuled(Dim xmin, Dim xmax, int line)
   auto strokes = currPage->children();
   for(auto ii = strokes.begin(); ii != strokes.end();) {
     Element* s = *ii++;
+    // the rect test first: it is the cheapest of these and rejects almost every element
+    if(s->isSelected(tempSelection) || !erasebox.intersects(s->bbox()))
+      continue;
     if(!currPage->isEditable(s))
       continue;  // see freeErase()
     // ink belongs to the ruling it sits on, as for RuledSelector::selectHit; pieces this gesture already
     //  cut are exempt, since cutting can move a piece's centre across a region's edge
     if(!s->isSelected(freeErasePieces) && currPage->regionAt(s->com()) != gestureFrame.region)
       continue;
-    if(!s->isSelected(tempSelection) && erasebox.intersects(s->bbox())) {
+    {
       if(s->isSelected(freeErasePieces)) {
         touched = s->freeErase(band) || touched;
       }
@@ -4054,8 +4058,10 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
     Rect r = currStroke->node->m_renderedBounds;
     // DRAW_UNDER means under the other ink on this layer, not under the whole page: going under a
     //  lower layer would put the stroke outside its own layer's run and break the stacking
-    Element* under = currPage->layerFirstElement(scribbleDoc->document->layers.currentId);
-    if(currPen()->hasFlag(ScribblePen::DRAW_UNDER) && under)
+    // (only looked up for a draw-under pen: it walks the whole page)
+    Element* under = currPen()->hasFlag(ScribblePen::DRAW_UNDER) ?
+        currPage->layerFirstElement(scribbleDoc->document->layers.currentId) : NULL;
+    if(under)
       currPage->addStroke(currStroke, under);
     else if(currPage->getDirty().isValid())  // we expect page to usually be clean, so this call is cheap
       currPage->addStroke(currStroke);
@@ -4857,6 +4863,57 @@ void ScribbleArea::drawImage(Painter* painter, const Rect& dirty)
       w += pg->width() + pageSpacing;
     if((viewMode == VIEWMODE_VERT && h > dirty.bottom) || (viewMode == VIEWMODE_HORZ && w > dirty.right))
       break;
+  }
+}
+
+// The page images of imported PDFs and scans (300 DPI PNG, kept encoded) were decoded on the UI thread the
+//  first time they were drawn: a 50-130 ms frame each time a page scrolled into view.  So once the visible
+//  pages change, the page next to them in the direction of travel (the following one after a jump) is
+//  loaded and its big undecoded images handed to a worker (Image::prefetchDecode), and drawing them later
+//  only uploads the texture.  Nothing changes on screen.  One page, not both neighbours: the decoded pixels
+//  (~35 MB a page) are held until drawn.
+void ScribbleArea::prefetchImages()
+{
+  if(!Painter::cachingPainter || numPages() < 1)
+    return;  // without a texture cache every draw decodes anyway
+  int first = currPageNum, last = currPageNum;
+  if(viewMode != VIEWMODE_SINGLE) {
+    Rect view = screenToDim(screenRect);
+    first = dimToPageNum(Point(view.left, view.top));
+    last = dimToPageNum(Point(view.right, view.bottom));
+  }
+  // by page rather than number, so another document showing the same numbers still gets its turn
+  Page* firstPage = page(first);
+  Page* lastPage = page(last);
+  if(firstPage == prefetchFirst && lastPage == prefetchLast)
+    return;
+  // scrolled back: the view moved up but still shares a page with the last one (a jump guesses forward)
+  bool backward = prefetchFirst && first < prefetchFirstNum && last >= prefetchFirstNum;
+  prefetchFirst = firstPage;
+  prefetchLast = lastPage;
+  prefetchFirstNum = first;
+  prefetchLastNum = last;
+  // a page's images: the rule layer (PDF and scan backgrounds) and pictures among the strokes
+  auto prefetchNode = [](SvgNode* node) {
+    if(node->type() != SvgNode::IMAGE)
+      return;
+    const Image* image = static_cast<SvgImage*>(node)->image();
+    if(image->width*image->height >= 512*512 && !Painter::isImageCached(*image))
+      image->prefetchDecode();
+  };
+  int pagenum = backward ? first - 1 : last + 1;
+  Page* pg = pagenum >= 0 ? page(pagenum) : NULL;
+  if(!pg || !pg->ensureLoaded(false))  // as Page::draw() would load it
+    return;
+  for(SvgContainerNode* layer : {pg->ruleNode, pg->contentNode}) {
+    if(!layer) continue;
+    for(SvgNode* node : layer->children()) {
+      prefetchNode(node);
+      if(SvgContainerNode* group = node->asContainerNode()) {
+        for(SvgNode* child : group->children())
+          prefetchNode(child);
+      }
+    }
   }
 }
 

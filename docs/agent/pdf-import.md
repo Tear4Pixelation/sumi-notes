@@ -17,8 +17,19 @@ profiles, base-14 font dumps) to git, so no host codegen step is needed.
     extraction, subsetting, signatures, forms and a dozen output formats. Worth ~1.4 MB. These
     flags live at the *end* of `syncscribble/Makefile` because `Makefile.mac/.ios/.wasm/.msvc`
     assign `CFLAGS` with `=`, which would discard anything set before the platform include.
+  - On Android, gc-sections only works because `libmain.so` exports nothing but `SDL_main` and
+    `JNI_OnLoad` (`-fvisibility=hidden` + `android/libmain.map` version script, Makefile Android
+    branch): every exported dynamic symbol is a GC root, and before this all ~3200 MuPDF globals
+    plus FreeType's `FT_*` API (forced default-visible by `FT_EXPORT`) were exported. A native
+    looked up by name (a `Java_*` function, a `dlsym` target) must be added to `libmain.map`, or it
+    fails at runtime, not at link time.
   - `-Os` for MuPDF's objects only, via a target-specific `CFLAGS` override next to those flags.
     MuPDF runs once per page at import, never in the drawing or input path. Worth ~0.55 MB.
+  - Release builds use LTO (`Makefile.unix` `-flto=auto`, `Makefile.msvc` `/GL` + `/LTCG`; `LTO=0`
+    turns it off). `load-jpx.c` alone is built `-fno-lto`: with `FZ_ENABLE_JPX=0` its stub
+    `fz_load_jpx_info()` lacks the declared `defcs` parameter (upstream bug), which LTO reports as
+    `-Wlto-type-mismatch`. Excluding the object avoids carrying a local patch in the mupdf
+    submodule, which CI clones from upstream.
   - `NO_CJK` (see below). Worth ~0.85 MB.
   - Considered and declined: the base-14 URW font data is ~0.58 MB. `TOFU_BASE14` would drop it, but
     then PDFs that reference Helvetica/Times/Courier *without embedding them* need a substitute
@@ -52,6 +63,10 @@ and sync entirely out of the import path. `.pdf` paths are routed to the importe
 `doOpenDocument()` (doc list, drag-drop, Android intents) and from the command-line `argDoc` branch.
 Note the import temporarily forces `SvgWriter::DEFAULT_SAVE_IMAGE_SCALED = 0` (in `ImportSaver::save`),
 otherwise `savePicScaled` resamples the pages back down to 150 DPI and discards the chosen `pdfImportDPI`.
+Since `Document::saveBgz` copies unloaded, clean pages' compressed blocks verbatim (see the comment
+above `canCopyBlock()`), a later ordinary save only resamples the pages it actually loads; an imported
+page nobody opened keeps its import resolution. Before, editing page 1 and saving re-serialized (and so
+resampled) every later page.
 
 Import runs synchronously on the UI thread, so nothing is drawn until it returns: a `showNotify()`
 set before it never appeared and the app looked frozen. `ProgressBox` (`scribbleapp.cpp`, also used
@@ -93,6 +108,24 @@ page; `pdfImportLossy`/JPEG changed nothing, it only picks the format at save ti
 Result: the 31-page scanned `Geschichte.pdf` stays flat at ~187 MB (was 477 MB and climbing), Noteful
 peaks at 148 MB (was 395). Quality is unchanged - same pixel sizes and formats.
 
+After the import, in the app:
+
+- **Saves.** With `savePicScaled` on (the default), every ordinary save after the import resamples each page
+  image to one pixel per unit (the first such save is the one that throws away `pdfImportDPI`, see above).
+  That decode + resample + JPEG encode was ~98% of a save (2.6-3.6 s for Mathe.svgz's 11 scans, 9 s for a
+  114-page notebook). `SvgImage::saveCache` now keeps the bytes the writer produced, keyed by
+  `Image::contentId` (new on every constructor and `invalidate()`), the crop and the scaled size, so only
+  the first save pays: ~150 ms / ~630 ms after. The saved bytes are identical. **Trap:** code that changes an
+  image's pixels in place must call `invalidate()` (it already had to, for the texture), or the old pixels
+  are saved. Pinned by `ScribbleTest::imageSaveCacheTest()`. `Image::cropped()` no longer leaves a crop's
+  source decoded in RAM (it kept ~35 MB per cropped scan for good).
+- **Textures.** The caching painter's image textures are evicted least recently used past
+  `Painter::maxCachedBytes` (512 MB desktop, 128 MB iOS/Android/wasm, set in `application.cpp`), but never
+  one drawn in the last 8 frames - it used to drop *every* texture at once, and with a cap below the visible
+  set it re-uploaded every image every frame (going back and forth between two scan pages under a 64 MB cap:
+  4.1 s for 40 frames before, 0.72 s after, the same as with no cap). A page that is unloaded frees its
+  images' textures (`Image::~Image` -> `invalidateImage`).
+
 **Limit memory** (Import popup, `importLimitMemory` + `importMemoryLimitMB`, 128 MB-2 GB): a
 `MemoryBudget` counts what the import *holds* - its input (`setInput`, a whole notebook), each
 `Renderer`'s MuPDF allocations (exact, through a tracking `fz_alloc_context`) and its in-memory PDF, and
@@ -106,6 +139,50 @@ not at all, and the limit gives way by that much. MuPDF reacts to a failed alloc
 cache and retrying, then throws; that fails the one page (logged), never the app. The app reports
 reduced pages in a message box (`reportReducedPages`, not for `--out`). 128 MB holds the 300 DPI pages
 of both test files with at most one reduced; at 48 MB every page still imports, at >= 94 DPI.
+
+## Speed: PNG encoding, the render/encode overlap, decoding ahead
+
+80-90% of an import used to be stb's PNG writer: miniz level 8 (512 match probes) behind stb's
+try-every-filter search, 0.6 s for a 300 DPI text page and 4.7 s for a scan. `encodePixmap` now calls
+`Image::encodePNGStriped` (ulib/image.cpp) instead:
+
+- Same per-row filter choice as stb (least sum of absolute values), in loops that vectorize.
+- 192 probes with lazy matching rather than 512. Measured +0.2% bytes on text pages and +3.9% on scans, and
+  *pixels identical*. Fewer probes cost scans a lot: 128 probes is +5.7%, level 3 is +11%, and a fixed Up
+  filter is +13% on text. zlib (it is linked for MuPDF) was no better than miniz at equal size.
+- Stripes of rows deflated independently on up to 8 threads. A filter only reads the row above in the
+  source pixmap, so the stripes are independent. Each stripe is its own IDAT chunk and all but the last end
+  in a sync flush, so together they form one valid zlib stream; the Adler-32s are combined. Any PNG decoder
+  reads the result. The stripes cost under 0.1% in size.
+
+`Renderer::renderPages` (which `importPdf` uses) renders page *n+1* on the importing thread while page *n*
+is encoded on another one. Only the encoder runs off that thread: it reads the pixmap's samples and nothing
+else. The MuPDF context (created with NULL locks), the page and dropping the pixmap all stay on the
+renderer's thread, so MuPDF's threading rules hold without cloned contexts. **Under a memory limit
+(`budget->limited()`) pages run one at a time again**: `peakBytesPerPixel` assumes a single page in flight,
+and overlapping holds two pixmaps. Pages still go to `onPage` and `ImportSaver::pageDone` in order.
+Measured on a busy 12-core machine, base -> new: 25-page LaTeX PDF 17.7 s -> 4.2 s, 6-page 300 DPI scan
+32.7 s -> 5.7 s (CPU 16.5 -> 9.8 s and 30.4 -> 17.5 s). Rendering several pages at once would need
+`fz_clone_context`, locks and display lists, and was not done: after this change rendering is a small share
+for text PDFs.
+
+**Decoding ahead.** A page image is kept encoded, so the first draw of a page used to decode its 300 DPI
+PNG on the UI thread, a 50-130 ms frame. `ScribbleArea::prefetchImages()` runs after every paint (hooked in
+`ScribbleView::doPaintEvent`). When the visible pages change, it loads the page next to them in the
+direction of travel (the following page after a jump) and calls `Image::prefetchDecode()` on its large
+images that have no texture yet (`Painter::isImageCached`). One worker thread decodes a copy of the bytes.
+`Image::bytesOnce()`, which `Painter::drawImage` already calls, takes the result, or waits for it if the
+decode is still running. A job keyed by the encoded buffer's address survives a move of the Image.
+**`invalidate()` (so the destructor too) must drop the job before that buffer is freed or reused.** At
+most 2 decoded pages are held (~35 MB each). There are no worker threads on wasm. Measured with
+`SUMI_BENCH_PDF_PACED=1` (benchtest, reading pace): pdf scroll frame p95 162 -> 22 ms. The plain
+`pdf_scroll_frame` scrolls a third of a screen per frame with no idle time, so the next page is needed one
+frame after it is asked for, while its decode is still running. On this oversubscribed machine a worker
+decode took ~1.5x as long as one on the drawing thread, so waiting for it could cost more than decoding
+there. Once both speeds have been timed, `bytesOnce()` decodes the page itself when the worker's expected
+remaining time is longer than that. Interleaved runs measured that fling metric as roughly neutral within the
+noise: base p95 median 121 ms, new 148 ms, both ranging 100-540 ms. Guessing the worker's speed before its
+first decode had been timed made it worse, because the abandoned decode keeps the CPU busy.
 
 ## Insert PDF (into the open document)
 

@@ -678,6 +678,12 @@ int SDL_main(int argc, char* argv[])
   nvgSetFontStash(nvgContext, Painter::fontStash);
   Painter* painter = new Painter(nvgContext);
   Painter::cachingPainter = painter;
+  // image textures (page scans: ~35 MB each for A4 at 300 DPI) count against the process on mobile, where
+  //  GPU memory is shared and jetsam / the low memory killer act on the total, and on wasm they are JS heap;
+  //  the cache evicts least recently used ones beyond this (ulib/painter.cpp)
+#if PLATFORM_IOS || PLATFORM_ANDROID || PLATFORM_EMSCRIPTEN
+  Painter::maxCachedBytes = 128*1024*1024;
+#endif
   Application::painter = painter;
   if(Application::glRender) {  //useFramebuffer
     nvglFB = nvgluCreateFramebuffer(nvgContext, 0, 0, NVGLU_NO_NVG_IMAGE | nvglFBFlags);

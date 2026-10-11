@@ -132,8 +132,13 @@ std::vector<Element*> Page::regions() const
 
 Element* Page::regionAt(Point pos) const
 {
+  // the loop of regions() without building its vector: this runs per element in the ruled erasers
   Element* hit = NULL;
-  for(Element* s : regions()) {
+  if(!contentNode || !contentNode->hasExt())
+    return hit;
+  for(Element* s : children()) {
+    if(!s->isRulingRegion())
+      break;
     // later regions draw over earlier ones, so the last one containing pos is the one you see
     Point local = s->node->hasTransform() ? s->node->getTransform().inverse().map(pos) : pos;
     if(s->regionParams().contains(local))
@@ -423,8 +428,8 @@ bool Page::saveSVG(IOStream& file, Dim x, Dim y)
     svgDoc->setAttr("x", x);
     svgDoc->setAttr("y", y);
   }
-  // write SVG
-  XmlStreamWriter xmlwriter;
+  // write SVG - streamed straight to file, no intermediate DOM
+  XmlStreamWriter xmlwriter(file);
   SvgWriter(xmlwriter).serialize(svgDoc.get());
   xmlwriter.save(file);
   svgDoc->removeAttr("x");
@@ -744,6 +749,10 @@ Element* Page::layerInsertPos(int layer) const
   if(!document)
     return NULL;
   int z = document->layers.zIndexOf(layer);
+  // zIndexOf() never exceeds the top index, so nothing goes above the top layer - skip the walk over the
+  //  page (every pen-up on a one-layer document, and drawing on the top layer, ends here)
+  if(z >= 0 && z == document->layers.size() - 1)
+    return NULL;
   for(Element* s : children()) {
     if(document->layers.zIndexOf(s->layer()) > z)
       return s;

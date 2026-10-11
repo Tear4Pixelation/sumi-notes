@@ -31,10 +31,16 @@ ifneq ($(DEBUG), 0)
   LDFLAGS += /DEBUG
   BUILDDIR ?= Debug
 else
-  # /GL + /LTCG for dist?
   CFLAGS += /O2 /Zi /DNDEBUG
   LDFLAGS += /DEBUG /INCREMENTAL:NO /OPT:REF /OPT:ICF
   BUILDDIR ?= Release
+  # whole program optimization (LTO=0 to turn off); MSVC does no cross-TU inlining without it.
+  #  /GL objects need /LTCG at link; MuPDF's per-object /O1 (Makefile) is kept per function.
+  LTO ?= 1
+  ifneq ($(LTO), 0)
+    CFLAGS += /GL
+    LDFLAGS += /LTCG
+  endif
 endif
 
 # disable optimizations which make profiling difficult, esp. inlining
