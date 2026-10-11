@@ -107,6 +107,50 @@ cache and retrying, then throws; that fails the one page (logged), never the app
 reduced pages in a message box (`reportReducedPages`, not for `--out`). 128 MB holds the 300 DPI pages
 of both test files with at most one reduced; at 48 MB every page still imports, at >= 94 DPI.
 
+## Speed: PNG encoding, the render/encode overlap, decoding ahead
+
+80-90% of an import used to be stb's PNG writer: miniz level 8 (512 match probes) behind stb's
+try-every-filter search, 0.6 s for a 300 DPI text page and 4.7 s for a scan. `encodePixmap` now calls
+`Image::encodePNGStriped` (ulib/image.cpp) instead:
+
+- Same per-row filter choice as stb (least sum of absolute values), in loops that vectorize.
+- 192 probes with lazy matching rather than 512. Measured +0.2% bytes on text pages and +3.9% on scans, and
+  *pixels identical*. Fewer probes cost scans a lot: 128 probes is +5.7%, level 3 is +11%, and a fixed Up
+  filter is +13% on text. zlib (it is linked for MuPDF) was no better than miniz at equal size.
+- Stripes of rows deflated independently on up to 8 threads. A filter only reads the row above in the
+  source pixmap, so the stripes are independent. Each stripe is its own IDAT chunk and all but the last end
+  in a sync flush, so together they form one valid zlib stream; the Adler-32s are combined. Any PNG decoder
+  reads the result. The stripes cost under 0.1% in size.
+
+`Renderer::renderPages` (which `importPdf` uses) renders page *n+1* on the importing thread while page *n*
+is encoded on another one. Only the encoder runs off that thread: it reads the pixmap's samples and nothing
+else. The MuPDF context (created with NULL locks), the page and dropping the pixmap all stay on the
+renderer's thread, so MuPDF's threading rules hold without cloned contexts. **Under a memory limit
+(`budget->limited()`) pages run one at a time again**: `peakBytesPerPixel` assumes a single page in flight,
+and overlapping holds two pixmaps. Pages still go to `onPage` and `ImportSaver::pageDone` in order.
+Measured on a busy 12-core machine, base -> new: 25-page LaTeX PDF 17.7 s -> 4.2 s, 6-page 300 DPI scan
+32.7 s -> 5.7 s (CPU 16.5 -> 9.8 s and 30.4 -> 17.5 s). Rendering several pages at once would need
+`fz_clone_context`, locks and display lists, and was not done: after this change rendering is a small share
+for text PDFs.
+
+**Decoding ahead.** A page image is kept encoded, so the first draw of a page used to decode its 300 DPI
+PNG on the UI thread, a 50-130 ms frame. `ScribbleArea::prefetchImages()` runs after every paint (hooked in
+`ScribbleView::doPaintEvent`). When the visible pages change, it loads the page next to them in the
+direction of travel (the following page after a jump) and calls `Image::prefetchDecode()` on its large
+images that have no texture yet (`Painter::isImageCached`). One worker thread decodes a copy of the bytes.
+`Image::bytesOnce()`, which `Painter::drawImage` already calls, takes the result, or waits for it if the
+decode is still running. A job keyed by the encoded buffer's address survives a move of the Image.
+**`invalidate()` (so the destructor too) must drop the job before that buffer is freed or reused.** At
+most 2 decoded pages are held (~35 MB each). There are no worker threads on wasm. Measured with
+`SUMI_BENCH_PDF_PACED=1` (benchtest, reading pace): pdf scroll frame p95 162 -> 22 ms. The plain
+`pdf_scroll_frame` scrolls a third of a screen per frame with no idle time, so the next page is needed one
+frame after it is asked for, while its decode is still running. On this oversubscribed machine a worker
+decode took ~1.5x as long as one on the drawing thread, so waiting for it could cost more than decoding
+there. Once both speeds have been timed, `bytesOnce()` decodes the page itself when the worker's expected
+remaining time is longer than that. Interleaved runs measured that fling metric as roughly neutral within the
+noise: base p95 median 121 ms, new 148 ms, both ranging 100-540 ms. Guessing the worker's speed before its
+first decode had been timed made it worse, because the abandoned decode keeps the CPU busy.
+
 ## Insert PDF (into the open document)
 
 Document menu > **Insert PDF...** (all platforms; disabled when read-only in sync or without PDF support) adds

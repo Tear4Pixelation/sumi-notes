@@ -4860,6 +4860,57 @@ void ScribbleArea::drawImage(Painter* painter, const Rect& dirty)
   }
 }
 
+// The page images of imported PDFs and scans (300 DPI PNG, kept encoded) were decoded on the UI thread the
+//  first time they were drawn: a 50-130 ms frame each time a page scrolled into view.  So once the visible
+//  pages change, the page next to them in the direction of travel (the following one after a jump) is
+//  loaded and its big undecoded images handed to a worker (Image::prefetchDecode), and drawing them later
+//  only uploads the texture.  Nothing changes on screen.  One page, not both neighbours: the decoded pixels
+//  (~35 MB a page) are held until drawn.
+void ScribbleArea::prefetchImages()
+{
+  if(!Painter::cachingPainter || numPages() < 1)
+    return;  // without a texture cache every draw decodes anyway
+  int first = currPageNum, last = currPageNum;
+  if(viewMode != VIEWMODE_SINGLE) {
+    Rect view = screenToDim(screenRect);
+    first = dimToPageNum(Point(view.left, view.top));
+    last = dimToPageNum(Point(view.right, view.bottom));
+  }
+  // by page rather than number, so another document showing the same numbers still gets its turn
+  Page* firstPage = page(first);
+  Page* lastPage = page(last);
+  if(firstPage == prefetchFirst && lastPage == prefetchLast)
+    return;
+  // scrolled back: the view moved up but still shares a page with the last one (a jump guesses forward)
+  bool backward = prefetchFirst && first < prefetchFirstNum && last >= prefetchFirstNum;
+  prefetchFirst = firstPage;
+  prefetchLast = lastPage;
+  prefetchFirstNum = first;
+  prefetchLastNum = last;
+  // a page's images: the rule layer (PDF and scan backgrounds) and pictures among the strokes
+  auto prefetchNode = [](SvgNode* node) {
+    if(node->type() != SvgNode::IMAGE)
+      return;
+    const Image* image = static_cast<SvgImage*>(node)->image();
+    if(image->width*image->height >= 512*512 && !Painter::isImageCached(*image))
+      image->prefetchDecode();
+  };
+  int pagenum = backward ? first - 1 : last + 1;
+  Page* pg = pagenum >= 0 ? page(pagenum) : NULL;
+  if(!pg || !pg->ensureLoaded(false))  // as Page::draw() would load it
+    return;
+  for(SvgContainerNode* layer : {pg->ruleNode, pg->contentNode}) {
+    if(!layer) continue;
+    for(SvgNode* node : layer->children()) {
+      prefetchNode(node);
+      if(SvgContainerNode* group = node->asContainerNode()) {
+        for(SvgNode* child : group->children())
+          prefetchNode(child);
+      }
+    }
+  }
+}
+
 void ScribbleArea::drawScreen(Painter* painter, const Rect& dirty)
 {
   // we want the option of not having to redraw strokes while selection is being

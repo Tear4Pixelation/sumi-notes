@@ -67,6 +67,8 @@ protected:
 
   virtual void drawImage(Painter* imgpaint, const Rect& dirty) {}
   virtual void drawScreen(Painter* painter, const Rect& dirty) {}
+  // after each paint: get ready what the next ones may need (ScribbleArea: page images to decode)
+  virtual void prefetchImages() {}
   // render-time color transform for night mode; NULL draws the document's own colors
   virtual const ColorMap* viewColorMap() { return NULL; }
   virtual void doPan(Dim dx, Dim dy);
