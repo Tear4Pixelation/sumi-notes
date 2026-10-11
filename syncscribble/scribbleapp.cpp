@@ -968,6 +968,11 @@ bool ScribbleApp::keyPressEvent(SDL_Event* event)
 {
   SDL_Keycode key = event->key.keysym.sym;
   ScribbleInput::pressedKey = 0;  // will only be set to new key if not handled
+  // Ctrl+Tab / Ctrl+Shift+Tab cycle the editor tabs (the Control key on the Mac too, as in browsers)
+  if(key == SDLK_TAB && (event->key.keysym.mod & KMOD_CTRL) && !(event->key.keysym.mod & KMOD_ALT)) {
+    cycleTab((event->key.keysym.mod & KMOD_SHIFT) ? -1 : 1);
+    return true;
+  }
   switch(key) {
   case SDLK_ESCAPE:
     // tags being placed (docs/agent/page-tags.md) ride on a hovering pointer, which never presses the
