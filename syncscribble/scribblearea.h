@@ -232,6 +232,31 @@ protected:
   bool usesCanvasLayer() const override { return true; }
   NightColorMap nightMap;
 
+  // Selection drag layer (docs/agent/canvas-layer.md): a big selection dragged by its handle-free move is
+  //  drawn once into the float layer and moved, the canvas layer drawn without it; released, everything is
+  //  drawn normally again.  selFloat while that is on; the rest is what it needs to put things right after.
+  bool floatWanted() override;
+  Rect floatBoundsDim() override;
+  Point floatOffsetDim() override;
+  void drawFloat(Painter* painter) override;
+  bool wantSelFloat();
+  void startSelFloat();
+  void endSelFloat();
+  bool selFloat = false;
+  const Selection* selFloatSel = NULL;
+  int selFloatPageNum = -1;
+  int selFloatRevision = 0;  // the page's revision at the start: a change from elsewhere during the drag
+  Rect selFloatOrig;  // page coords: the selection's bbox where the drag started
+  Rect selFloatDrawn;  // ... where the float layer was last drawn
+  Rect selFloatDiscarded;  // page dirt left out because only the floating selection moved
+  Rect selFloatScreen;  // the float layer's area last reported to overlayDirtyScreen
+public:
+  // selections of at least this many elements (counting a group's members) are dragged through the float
+  //  layer; < 0 never (tests compare against that)
+  static int selLayerMinStrokes;
+  bool selFloatActive() const { return selFloat; }
+protected:
+
   int currMode;
   Point prevPos;
   Point initialPos;

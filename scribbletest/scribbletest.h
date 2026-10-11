@@ -118,7 +118,8 @@ public:
   // Import PDF file sizes/times per resolution, and whole-document resaves (benchtest.cpp, env SUMI_PDFSIZE_*)
   void pdfSizeTest();
   void simplifyBench();  // scribbletest/simplifybench.cpp, --simplifybenchtest
-  int layerCompare(const char* name);
+  int layerCompare(const char* name, int ignoreBelow = 1);
+  int selDragLayerTest(BenchRng& rng);
   void inputTest();
   void syncSlaveMsg(std::string msg, int level);
 

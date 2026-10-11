@@ -13,6 +13,8 @@ const int ScribbleView::IMAGEBUFFER_BORDER = 200;
 Dim ScribbleView::unitsPerPx = 1;
 uint64_t ScribbleView::guiFrame = 0;
 bool ScribbleView::testDirectPaint = false;
+bool ScribbleView::testSkipFloat = false;
+bool ScribbleView::testHideFloat = false;
 std::vector<ScribbleView*> ScribbleView::allViews;
 
 // constants for pan/zoom behavior (these should be reviewed w/ new 150 dpi input reference)
@@ -268,7 +270,7 @@ bool ScribbleView::isVisible(const Rect& r) const
 
 void ScribbleView::reqRepaint()
 {
-  if(!dirtyRectDim.isValid() && !dirtyRectScreen.isValid() && !layerPanned)
+  if(!dirtyRectDim.isValid() && !dirtyRectScreen.isValid() && !layerPanned && !overlayDirtyScreen.isValid())
     return;
   Rect dirty = dirtyRectDim;
   dirty.rectIntersect(viewportRect);
@@ -617,6 +619,7 @@ void ScribbleView::prepareLayers(Painter* p, const Rect& guiDirty)
     if(view->layer && !view->isShown()) {
       view->layer.reset();  // e.g. a hidden tab's view: free the memory, it is redrawn in full when shown
       view->layerValid = false;
+      view->resetFloat();
     }
     else if(view->usesCanvasLayer())
       view->prepareLayer(p, guiDirty);
@@ -655,7 +658,10 @@ void ScribbleView::prepareLayer(Painter* p, const Rect& guiDirty)
       layerDirtyDim.rectUnion(screenToDim(Rect(dirtyRectScreen).rectIntersect(screenRect)));
     layerDeferredFrame = guiFrame;
   };
-  if(!layerPanned || mScale != paintedScale) {
+  // ... except while float content is moved (a dragged selection): the canvas layer is drawn without it,
+  //  and the frame is only the two layers composited, plus whatever else changed
+  const bool floating = floatWanted();
+  if(!floating && (!layerPanned || mScale != paintedScale)) {
     deferToNextPan();
     return;
   }
@@ -666,8 +672,8 @@ void ScribbleView::prepareLayer(Painter* p, const Rect& guiDirty)
   //  the image pixel by pixel, which costs about as much as drawing sparse content.  (Measured: SW gains
   //  from small steps - 16 px per frame, -91% - and loses on thirds of the view, so SW takes a quarter.)
   Dim maxStep = p->usesGPU() ? 0.5 : 0.25;
-  if(std::abs(panxoffset - paintedPanX)*paintXf.xscale() > maxStep*lw
-      || std::abs(panyoffset - paintedPanY)*paintXf.yscale() > maxStep*lh) {
+  if(!floating && (std::abs(panxoffset - paintedPanX)*paintXf.xscale() > maxStep*lw
+      || std::abs(panyoffset - paintedPanY)*paintXf.yscale() > maxStep*lh)) {
     deferToNextPan();
     return;
   }
@@ -694,7 +700,7 @@ void ScribbleView::prepareLayer(Painter* p, const Rect& guiDirty)
 
   // A layer that has to be drawn in full saves nothing this frame - a jump (go to page) is often a single
   //  pan - so the first such pan is drawn directly and the layer is built by the next one
-  if(fresh && !layerBuildNext) {
+  if(fresh && !layerBuildNext && !floating) {
     layerBuildNext = true;
     layerValid = false;
     layerDirtyDim = Rect();
@@ -739,7 +745,9 @@ void ScribbleView::prepareLayer(Painter* p, const Rect& guiDirty)
     // the dirty rect passed down must be larger than the clip, as in doPaintEvent(): by 2 pixels, since
     //  nanovg_sw's integer bounds are inclusive and it paints a row or column past the clip - with a
     //  tighter dirty rect, the page fill would land there without the (culled) rule lines on top
+    drawingLayerContent = floating;
     drawImage(lp, screenToDim(layerToScreen.mapRect(Rect(r).pad(2))));
+    drawingLayerContent = false;
   });
 
   layerValid = true;
@@ -758,6 +766,87 @@ void ScribbleView::prepareLayer(Painter* p, const Rect& guiDirty)
   layerColorMap = cmap;
   layerColorKey = ckey;
   layerDirtyDim = Rect();
+  // without the float layer, the canvas layer lacks the float content: draw this frame directly
+  if(floating && !prepareFloat(p))
+    layerFrame = 0;
+}
+
+void ScribbleView::resetFloat(bool keep)
+{
+  floatValid = false;
+  if(!keep)
+    floatLayer.reset();
+}
+
+// Float layer: the float content (floatBoundsDim(), drawFloat()) drawn once, at the canvas layer's
+//  transform, into a transparent layer covering its device bbox - clipped to the view plus half the view's
+//  size around it, so a selection much bigger than the view does not need a huge texture - and then only
+//  moved: composited each frame at the device pixel offset the content has moved by since (rounded, so
+//  it stays sharp; the exact position is drawn on release).  Drawn again when that offset would expose a
+//  part the layer does not cover, or zoom, painter transform or night mode map change.
+bool ScribbleView::prepareFloat(Painter* p)
+{
+  static constexpr int FLOAT_PAD = 3;  // device px around the content's bounds, for antialiasing
+  const ColorMap* cmap = viewColorMap();
+  int ckey = cmap ? cmap->imageKey() : 0;
+  Rect devView = paintXf.mapRect(screenRect);
+  Rect bounds = floatBoundsDim();
+  Rect devBounds = bounds.isValid() ? paintXf.mapRect(dimToScreen(bounds)).pad(FLOAT_PAD) : Rect();
+  // what has to be covered: the content, give or take the rounding of the offset (< 1 px of the pad)
+  Rect needed = bounds.isValid() ? paintXf.mapRect(dimToScreen(bounds)).pad(1) : Rect();
+  needed.rectIntersect(Rect(devView).pad(1));
+  Point anchor = paintXf.map(dimToScreen(floatOffsetDim()));
+  if(floatValid && floatLayer && paintXf == floatXf && mScale == floatScale && cmap == floatColorMap
+      && ckey == floatColorKey) {
+    int dx = int(std::lround(anchor.x - floatAnchor.x)), dy = int(std::lround(anchor.y - floatAnchor.y));
+    Rect covered = floatEmpty ? Rect() : Rect::ltwh(floatX + dx, floatY + dy, floatLayer->width, floatLayer->height);
+    if(!needed.isValid() || needed.width() <= 0 || needed.height() <= 0 || covered.contains(needed)) {
+      floatCompX = floatX + dx;
+      floatCompY = floatY + dy;
+      floatEmpty = floatEmpty || !needed.isValid() || needed.width() <= 0 || needed.height() <= 0;
+      floatFrame = guiFrame;
+      return true;
+    }
+  }
+  floatValid = true;
+  floatXf = paintXf;
+  floatScale = mScale;
+  floatColorMap = cmap;
+  floatColorKey = ckey;
+  floatAnchor = anchor;
+  floatFrame = guiFrame;
+  Rect area = Rect(devBounds).rectIntersect(Rect(devView).pad(devView.width()/2, devView.height()/2));
+  int lx = 0, ly = 0, lw = 0, lh = 0;
+  if(area.isValid()) {
+    lx = int(std::floor(area.left));  ly = int(std::floor(area.top));
+    lw = int(std::ceil(area.right)) - lx;  lh = int(std::ceil(area.bottom)) - ly;
+  }
+  floatEmpty = lw <= 0 || lh <= 0;
+  if(floatEmpty) {
+    floatLayer.reset();  // nothing of it is anywhere near the view
+    return true;
+  }
+  if(!floatLayer)
+    floatLayer.reset(new CanvasLayer(true));
+  floatLayer->resize(lw, lh);
+  if(!floatLayer->isValid()) {
+    floatLayer.reset();
+    floatValid = false;
+    return false;
+  }
+  floatX = floatCompX = lx;
+  floatY = floatCompY = ly;
+  Transform2D xf = paintXf;
+  xf.translate(-lx, -ly);
+  floatLayer->render(p, {Rect::wh(lw, lh)}, [&](Painter* lp, const Rect& r){
+    lp->setTransform(xf);
+    lp->translate(xorigin + panxoffset, yorigin + panyoffset);
+    lp->scale(mScale, mScale);
+    lp->setsRGBAdjAlpha(false);
+    lp->setColorMap(cmap);
+    drawFloat(lp);
+  });
+  return true;
 }
 
 void ScribbleView::doPaintEvent(Painter* painter, const Rect& dirty)
@@ -790,6 +879,7 @@ void ScribbleView::doPaintEvent(Painter* painter, const Rect& dirty)
     Transform2D devToScreen = xf.inverse();
     bool fractional[4] = { inner.top > outer.top, inner.bottom < outer.bottom,
         inner.left > outer.left, inner.right < outer.right };
+    const bool floating = floatFrame == guiFrame && floatValid;
     for(int ii = 0; ii < 4; ++ii) {
       const Rect& strip = strips[ii];
       if(!fractional[ii] || strip.width() <= 0 || strip.height() <= 0 || !strip.intersects(dirtyDev))
@@ -803,7 +893,16 @@ void ScribbleView::doPaintEvent(Painter* painter, const Rect& dirty)
       painter->setColorMap(colorMap);
       // dirty clamped to the view as in the direct path: its unantialiased background fill stops at the
       //  view's fractional edge, leaving what is under the view in the rest of that pixel
+      drawingLayerContent = floating;
       drawImage(painter, screenToDim(devToScreen.mapRect(Rect(strip).pad(2)).rectIntersect(dirtyRectScreen)));
+      drawingLayerContent = false;
+      painter->restore();
+    }
+    // the float content, on top of everything in the canvas (z-order is not kept while it floats)
+    if(floating && !floatEmpty && floatLayer && !testSkipFloat) {
+      painter->save();
+      painter->setTransform(Transform2D());
+      floatLayer->composite(painter, floatCompX, floatCompY);
       painter->restore();
     }
   }
@@ -832,6 +931,7 @@ void ScribbleView::doPaintEvent(Painter* painter, const Rect& dirty)
   drawScreen(painter, dirtyRectScreen);
   //painter->endFrame();
   dirtyRectScreen = Rect();
+  overlayDirtyScreen = Rect();
   ++frameCount;
   prefetchImages();
 }

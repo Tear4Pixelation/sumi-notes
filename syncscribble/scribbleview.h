@@ -68,6 +68,10 @@ public:
   static void prepareLayers(Painter* p, const Rect& guiDirty);
   // tests: paint every view directly, leaving the canvas layers untouched (ScribbleTest::canvasLayerTest)
   static bool testDirectPaint;
+  // tests: leave the float layer out of the frame, showing the canvas layer under it
+  static bool testSkipFloat;
+  // tests: direct drawing leaves the float content out too (what the canvas layer under it should hold)
+  static bool testHideFloat;
 
 protected:
   friend class ScribbleWidget;
@@ -82,6 +86,23 @@ protected:
   virtual void pageSizeChanged();
   // a view keeping a retained copy of its drawImage() output, which a pan shifts instead of redrawing
   virtual bool usesCanvasLayer() const { return false; }
+  // Float layer (prepareFloat()): content that moves as a whole for a while (ScribbleArea: a dragged
+  //  selection) is drawn once into its own transparent layer and composited over the canvas layer at its
+  //  current offset, rounded to whole device pixels; while drawingLayerContent is set, drawImage() must
+  //  leave it out.  floatWanted() turns it on; changes to where it is go to overlayDirtyScreen, not the
+  //  content dirty rects, since the canvas layer under it does not change.
+  virtual bool floatWanted() { return false; }
+  // where the float content is now, in Dim coordinates (including any stroke widening), and how far it
+  //  has been moved, in Dim; drawFloat() draws it at its current position (painter as for drawImage())
+  virtual Rect floatBoundsDim() { return Rect(); }
+  virtual Point floatOffsetDim() { return Point(0, 0); }
+  virtual void drawFloat(Painter* painter) {}
+  // the float layer is drawn again by the next frame that uses it (and its memory freed if !keep)
+  void resetFloat(bool keep = false);
+  bool drawingLayerContent = false;
+  // repainted by the GUI, but not drawn into the canvas layer: only the float layer or drawScreen()
+  //  overlays changed there
+  Rect overlayDirtyScreen;
 
   void doPaintEvent(Painter* qpainter, const Rect& dirty = Rect());
   void doResizeEvent(const Rect& newsize);
@@ -169,6 +190,7 @@ protected:
   bool layerPanned = false;
 private:
   void prepareLayer(Painter* p, const Rect& guiDirty);
+  bool prepareFloat(Painter* p);
   bool isShown() const;
 
   std::unique_ptr<CanvasLayer> layer;
@@ -185,6 +207,18 @@ private:
   Dim layerPanX = 0, layerPanY = 0, layerScale = 0, layerXorigin = 0, layerYorigin = 0;
   const ColorMap* layerColorMap = NULL;
   int layerColorKey = 0;
+  // float layer: drawn for floatXf/floatScale/color map at floatX/Y (device px) with the content's device
+  //  anchor at floatAnchor; composited this frame (floatFrame) at floatCompX/Y
+  std::unique_ptr<CanvasLayer> floatLayer;
+  bool floatValid = false;
+  bool floatEmpty = false;  // nothing of it is in the view: nothing to composite
+  uint64_t floatFrame = 0;
+  int floatX = 0, floatY = 0, floatCompX = 0, floatCompY = 0;
+  Point floatAnchor;
+  Transform2D floatXf;
+  Dim floatScale = 0;
+  const ColorMap* floatColorMap = NULL;
+  int floatColorKey = 0;
   // painter transform and size at the last doPaintEvent, and how many paints in a row it has not changed
   Transform2D paintXf;
   Rect paintScreenRect;

@@ -314,6 +314,15 @@ void ScribbleTest::benchTest()
       benchFrame();
     }
     benchTotal("perf_move_selection", t0, c0);
+    // ... which paints only after each release (100 moves, then a frame); a drag paints every move: the
+    //  selection drag layer's case (canvas-layer.md), and the frame including its start and drop
+    {
+      std::vector<double> latency;
+      t0 = benchNowMs(); c0 = benchCpuMs();
+      benchDrag(Point(400, 400), Point(520, 490), 30, pen, &latency);
+      benchTotal("perf_drag_selection", t0, c0);
+      benchStats("perf_drag_sel_event", latency);
+    }
     doCommand(ID_CANCEL);
     // perftest pans 2000 frames; over these 1521 dense strokes a frame costs tens of ms, so 150 here
     scribbleMode->setMode(MODE_PAN);
