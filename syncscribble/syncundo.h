@@ -41,6 +41,12 @@ public:
   //  whole saved history instead of saving one that silently skips a step.
   virtual void persist(UndoPersistWriter& out);
   virtual UndoHistoryItem* inverse() { return NULL; }
+  // Rough heap held by this item for UndoHistory's memory cap (docs/agent/undo-persistence.md, "In-memory
+  //  cap"): the item itself plus content only the history keeps alive, i.e. a deleted stroke or page.
+  //  Computed once, when the item is added, so it must be cheap and must not depend on undo state.
+  virtual size_t memSize() const { return ITEM_BYTES; }
+  // object + allocator header + its slot in hist; a small item is 24-80 bytes
+  static constexpr size_t ITEM_BYTES = 64;
 
   static constexpr unsigned int HEADER                 = 0x00000001;
   static constexpr unsigned int STROKE_ITEM            = 0x00000002;
@@ -77,6 +83,9 @@ class UndoGroupHeader : public UndoHistoryItem {
 public:
   int pageNum;
   UndoGroupHeader(int pagenum) : pageNum(pagenum), uuid(0) {}
+  // memSize() of this header and every item of its group, summed as they are added; UndoHistory's
+  //  running total is the sum of these, so it stays right however the group's items change later
+  size_t bytes = ITEM_BYTES;
   // in the future, this could include name of action to be undone
   unsigned int type() const override { return HEADER; }
 
@@ -122,6 +131,7 @@ protected:
 public:
   StrokeDeletedItem(Element* s_, Page* p_, Element* _next) : StrokeUndoItem(s_, p_), next(_next) {}
   ADDRM_UNDO_ITEM_METHODS
+  size_t memSize() const override;
   unsigned int type() const override { return STROKE_DELETED_ITEM; }
 };
 
@@ -148,6 +158,7 @@ public:
   ShapeChangedItem(Element* s_, Page* p_, const ShapeParams& params_)
       : StrokeUndoItem(s_, p_), params(params_) {}
   UNDO_ITEM_METHODS
+  size_t memSize() const override { return sizeof(*this) + params.points.size()*sizeof(Point); }
   unsigned int type() const override { return SHAPE_CHANGE_ITEM; }
 };
 
@@ -266,6 +277,7 @@ public:
   PageDeletedItem(Page* p_, int pagenum_, Document* document_)
       : DocumentUndoItem(p_, pagenum_, document_) {}
   ADDRM_UNDO_ITEM_METHODS
+  size_t memSize() const override;
   unsigned int type() const override { return PAGE_DELETED_ITEM; }
 };
 
@@ -313,14 +325,16 @@ public:
   unsigned int type() const override { return THEME_CHANGE_ITEM; }
 };
 
-// undo list can easily get very big ... if we just limit to fixed number of items, we would have
-//  to set that number unnecessarily low ... maybe instead we could limit size ... we'd need layers
-//  and strokes to keep track of their sizes
+// The history is capped by both step count and estimated memory (trimFront(); ScribbleDoc::endAction()
+//  applies the undoMaxSteps / undoMaxKB config values) - see docs/agent/undo-persistence.md
 
 
 // would be nice to have some limited branching of undo history, but we'd need a simple interface
 // ... full-blown tree view is way too complicated (http://e-texteditor.com/blog/2006/making-undo-usable)
 class UndoHistory {
+#ifdef SCRIBBLE_TEST
+  friend class ScribbleTest;
+#endif
   friend class ScribbleSync;
   friend class UndoPersist;  // reads and rebuilds hist/pos for the on-disk history
   friend class ScribbleArea;  // used for recent stroke select ... we should instead provide methods
@@ -344,7 +358,19 @@ public:
   size_t undoSteps() const;
   size_t redoSteps() const;
   bool undoable() const;
-  size_t histPos() const { return pos; }
+  // pos counted from the start of the session, i.e. including steps trimFront() has dropped since, so a
+  //  saved value still compares equal only if no step was added or undone in between (ScribbleApp::penChanged)
+  size_t histPos() const { return pos + frontTrimmed; }
+  // Drops the oldest whole steps, oldest first, while there are more than maxSteps steps or their
+  //  memSize() total exceeds maxBytes.  Never drops a step at or beyond `floor` (an index into hist; sync
+  //  passes what the server has not acknowledged yet) or beyond pos, and always keeps the newest undo
+  //  step.  Returns the number of items removed from the front: hist indices held elsewhere (ScribbleSync's
+  //  rcvdPos/sentPos, ScribbleArea::recentStrokeSelPos) must be shifted down by it.
+  size_t trimFront(size_t maxSteps, size_t maxBytes, size_t floor = SIZE_MAX);
+  size_t stepCount() const { return histSteps; }
+  size_t heldBytes() const { return histBytes; }
+  // recomputes the step count and byte totals after hist was rebuilt directly (UndoPersist::restore)
+  void recount();
   static UUID_t newUuid();
 
   enum { MULTIPAGE = 0x40000000 };  // flag to OR with pagenum to indicate multiple pages are dirtied
@@ -354,6 +380,10 @@ private:
   size_t pos;
   unsigned int inAction;
   int actionPageNum;
+  size_t histSteps = 0;  // number of HEADER items in hist
+  size_t histBytes = 0;  // sum of their UndoGroupHeader::bytes
+  size_t frontTrimmed = 0;  // items trimFront() has removed so far
+  size_t openGroup = 0;  // index of the header of the group addItem() is filling (valid while inAction > 1)
   void clearUndone(bool undone = true);
 };
 

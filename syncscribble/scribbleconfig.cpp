@@ -164,6 +164,11 @@ void ScribbleConfig::init()
   //  bounds a step that deletes pages full of images.  0 for either disables it.
   cfg["undoPersistSteps"] = 50;
   cfg["undoPersistMaxKB"] = 4096;
+  // in-memory undo cap (same doc, "In-memory cap"): the oldest steps are dropped once a document's history
+  //  has more than undoMaxSteps steps or holds more than about undoMaxKB, whichever comes first; deleted
+  //  strokes and pages are what the KB estimate is for.  0 for either removes that limit.
+  cfg["undoMaxSteps"] = 1000;
+  cfg["undoMaxKB"] = 10240;
   // save thumbnail to HTML file - currently only disabled when running tests
   cfg["saveThumbnail"] = 1;
   // always use first page for thumbnail (so it serves as a title page)

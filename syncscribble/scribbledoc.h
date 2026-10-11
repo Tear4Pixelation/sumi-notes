@@ -148,6 +148,7 @@ public:
   void pageCountChanged(int pagenum, int prevpages = -1);
   void startAction(int pagenum);
   void endAction();
+  void trimHistory();
   void clearSelection();
   void deleteSelection();
   Rect dirtyPage(int pagenum);

@@ -306,6 +306,22 @@ void ScribbleSync::syncClearUndone()
   }
 }
 
+// Our own items only - received items are applied and discarded, never added to the history - and the
+//  server keeps the log for peers, so nothing ever asks for a step again once the server has echoed it
+//  (rcvdPos) and it is sent (sentPos; also what keeps strokemap free of strokes a trimmed delete frees).
+//  With sync off (never connected, or disconnected for good) positions are stale and the next session
+//  starts from whatever history is left, as it does after an ordinary open.
+size_t ScribbleSync::historyTrimFloor() const
+{
+  return syncState == SYNC_OFF ? SIZE_MAX : std::min(rcvdPos, sentPos);
+}
+
+void ScribbleSync::historyTrimmed(size_t nitems)
+{
+  rcvdPos = rcvdPos > nitems ? rcvdPos - nitems : 0;
+  sentPos = sentPos > nitems ? sentPos - nitems : 0;
+}
+
 UUID_t ScribbleSync::strToUuid(const char* str)
 {
   return strtoull(str, NULL, 0);

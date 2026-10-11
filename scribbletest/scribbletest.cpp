@@ -3399,6 +3399,122 @@ int ScribbleTest::undoPersistTest()
   return nbad;
 }
 
+int ScribbleTest::undoCapTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: undo cap: %s\n", what); }
+  };
+  UndoHistory* hist = NULL;
+  auto drawStroke = [&](Dim y) {
+    scribbleMode->setMode(MODE_STROKE);
+    ie(120, y, 0, pen, press);  ie(200, y + 2, 0, pen);  ie(300, y, 0, pen);  ie(0, 0, 0, pen, release);
+  };
+  auto strokes = [&]() { return scribbleArea->currPage->strokeCount(); };
+  auto undoAll = [&]() { int n = 0; while(hist->canUndo()) { scribbleDoc->doUndoRedo(false); ++n; } return n; };
+  auto redoAll = [&]() { int n = 0; while(hist->canRedo()) { scribbleDoc->doUndoRedo(true); ++n; } return n; };
+  // largest stroke centre y on the page, to tell whether the stroke an undo removed came back
+  auto maxY = [&]() {
+    Dim y = -1;
+    for(Element* s : scribbleArea->currPage->children())
+      y = std::max(y, s->bbox().center().y);
+    return y;
+  };
+  auto newDoc = [&]() {
+    scribbleDoc->newDocument();
+    hist = scribbleDoc->history;
+    scribbleDoc->app->setPen(ScribblePen(Color::BLACK, 2, ScribblePen::TIP_ROUND));
+  };
+
+  // --- step cap, with the shipped default of 1000 ---
+  newDoc();
+  check(scribbleDoc->cfg->Int("undoMaxSteps", 0) == 1000 && scribbleDoc->cfg->Int("undoMaxKB", 0) == 10240,
+      "defaults are 1000 steps and 10 MB");
+  const int nsteps = 1012;
+  for(int ii = 0; ii < nsteps; ++ii)
+    drawStroke(20 + (ii % 40)*10);
+  check(strokes() == nsteps, "every stroke is drawn");
+  check(hist->stepCount() == 1000 && hist->undoSteps() == 1000, "history holds at most 1000 steps");
+  check(hist->heldBytes() < 1000*1024, "...and their byte estimate is small for plain strokes");
+  check(hist->hist.size() <= 1000*3, "...and the oldest steps' items are gone, not just uncounted");
+  Dim ylast = maxY();
+  scribbleDoc->doUndoRedo(false);
+  check(strokes() == nsteps - 1, "undo of the newest step removes one stroke");
+  scribbleDoc->doUndoRedo(true);
+  check(strokes() == nsteps && maxY() == ylast, "redo puts it back");
+  check(undoAll() == 1000, "exactly 1000 undos are possible");
+  check(strokes() == nsteps - 1000, "the oldest 12 strokes can no longer be undone");
+  check(redoAll() == 1000 && strokes() == nsteps, "and all 1000 redo");
+  check(hist->stepCount() == 1000, "undo and redo do not change the count");
+
+  // --- byte cap: each step deletes a stroke, which only the history then keeps alive ---
+  newDoc();
+  const int capkb = 16;
+  scribbleDoc->cfg->set("undoMaxSteps", 0);  // no step limit, so only bytes can trim
+  scribbleDoc->cfg->set("undoMaxKB", capkb);
+  for(int ii = 0; ii < 200; ++ii) {
+    drawStroke(100);
+    doCommand(ID_SELALL);
+    doCommand(ID_DELSEL);
+  }
+  check(strokes() == 0, "every stroke drawn was deleted");
+  check(hist->heldBytes() <= size_t(capkb)*1024, "held bytes stay under undoMaxKB");
+  check(hist->stepCount() < 400 && hist->stepCount() > 10, "so the oldest of the 400 steps were dropped");
+  size_t running = hist->heldBytes(), runSteps = hist->stepCount();
+  hist->recount();
+  check(hist->heldBytes() == running && hist->stepCount() == runSteps, "running totals match a recount");
+  scribbleDoc->doUndoRedo(false);
+  check(strokes() == 1, "undo of the newest delete brings its stroke back");
+  scribbleDoc->doUndoRedo(true);
+  check(strokes() == 0, "redo deletes it again");
+  // a single step bigger than the cap is kept: an action that cannot be undone at all is worse
+  scribbleDoc->cfg->set("undoMaxKB", 1);
+  for(int ii = 0; ii < 30; ++ii)
+    drawStroke(20 + ii*10);
+  doCommand(ID_SELALL);
+  doCommand(ID_DELSEL);
+  check(hist->stepCount() == 1 && hist->heldBytes() > 1024, "an oversized newest step is kept alone");
+  scribbleDoc->doUndoRedo(false);
+  check(strokes() == 30, "...and still undoes");
+
+  // --- sync: steps the server has not acknowledged are never dropped, and its indices follow the trim ---
+  newDoc();
+  scribbleDoc->cfg->set("undoMaxSteps", 5);
+  for(int ii = 0; ii < 8; ++ii)
+    drawStroke(20 + ii*10);
+  check(hist->stepCount() == 5, "a lowered step cap applies");
+  // a bare session (no connection) in which the oldest 3 of the 5 steps were sent and echoed back
+  ScribbleSync* sync = new ScribbleSync(scribbleDoc);
+  sync->history = hist;
+  sync->syncState = ScribbleSync::SYNC_DISCONNECTED;
+  size_t acked = 0;
+  for(int nhdr = 0; acked < hist->hist.size(); ++acked) {
+    if(hist->hist[acked]->isA(UndoHistoryItem::HEADER) && nhdr++ == 3) break;
+  }
+  UndoGroupHeader* ackedHdr = static_cast<UndoGroupHeader*>(hist->hist[acked]);
+  ackedHdr->uuid = 0x1234;
+  sync->rcvdPos = sync->sentPos = acked;
+  scribbleDoc->scribbleSync = sync;
+  for(int ii = 0; ii < 6; ++ii)
+    drawStroke(120 + ii*10);
+  check(hist->stepCount() == 8, "unacknowledged steps hold the history above the step cap");
+  check(sync->rcvdPos == 0 && sync->sentPos == 0 && hist->hist[0] == ackedHdr,
+      "only acknowledged steps were dropped, and sync's positions moved with them");
+  check(ackedHdr->uuid == 0x1234, "rcvdPos still points at the same step's header");
+  // once the server has echoed everything, the next action trims down to the cap
+  sync->rcvdPos = sync->sentPos = hist->pos;
+  drawStroke(400);
+  check(hist->stepCount() == 5, "after acknowledgement the cap applies again");
+  check(sync->rcvdPos == sync->sentPos && sync->rcvdPos < hist->hist.size()
+      && hist->hist[sync->rcvdPos]->isA(UndoHistoryItem::HEADER), "positions stay on a step boundary");
+  sync->syncState = ScribbleSync::SYNC_OFF;
+  scribbleDoc->scribbleSync = NULL;
+  delete sync;
+
+  scribbleDoc->newDocument();
+  return nbad;
+}
+
 int ScribbleTest::shapeSnapTest()
 {
   int nbad = 0;
@@ -4983,6 +5099,7 @@ void ScribbleTest::runAll(bool runsynctest)
   nUnitFailed += skippedLinesTest();
   nUnitFailed += insSpaceAxisTest();
   nUnitFailed += undoPersistTest();
+  nUnitFailed += undoCapTest();
   nUnitFailed += imageSaveCacheTest();
   runAllTime = mSecSinceEpoch() - runAllTime;
   // restore global config

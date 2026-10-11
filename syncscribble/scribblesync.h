@@ -30,6 +30,11 @@ public:
   bool canUndo();
   void sendHist(bool force = false);  // public so that it can be called manually when automatic send is disabled
   void syncClearUndone();
+  // UndoHistory::trimFront() support (docs/agent/undo-persistence.md, "In-memory cap"): history before
+  //  this index has been sent and acknowledged by the server, so dropping it loses nothing a session
+  //  needs; historyTrimmed() shifts our indices into hist after the front was dropped
+  size_t historyTrimFloor() const;
+  void historyTrimmed(size_t nitems);
   std::string getDocPath() const { return syncServer + "/" + docName; }
   const std::vector<std::string>& clients() const { return clientList; }
   void processRecvBuff();

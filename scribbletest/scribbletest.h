@@ -103,6 +103,9 @@ public:
   //  entry and a page deletion undo back step by step after save and reopen, redo survives too, and a
   //  file changed behind the sidecar's back opens with no history at all
   int undoPersistTest();
+  // in-memory undo cap (docs/agent/undo-persistence.md, "In-memory cap"): step and byte limits hold, the
+  //  newest steps still undo and redo, the oldest are gone, and sync's unacknowledged steps are never dropped
+  int undoCapTest();
   void performanceTest();
   // broad benchmark printing "BENCH <name>: <value> <unit>" lines (benchtest.cpp, tools/perf-bench.sh)
   void benchTest();

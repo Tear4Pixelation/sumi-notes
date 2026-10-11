@@ -874,6 +874,7 @@ int UndoPersist::restore(ScribbleDoc* sd)
   }
 
   history->hist = std::move(items);
+  history->recount();
   history->pos = history->hist.size();
   // pos goes to the header of the first redo step
   int headersSeen = 0;
