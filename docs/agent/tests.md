@@ -258,7 +258,9 @@ the test modes: a plain Release build has none (`basics.h` defines `SCRIBBLE_TES
 `make USE_SYSTEM_SDL=1 BENCH=1` (Release flags plus `SCRIBBLE_TEST=1`, into `Bench/`), which is perf-bench's
 default `--build`. One run takes about 35 s on this machine when it is quiet.
 
-What it covers: full repaints, the perftest scenarios (now painted), a deterministic 100 page document (one
+What it covers: full repaints, the perftest scenarios (now painted; `perf_move_selection` paints only after
+each of its press-move-release drags, so `perf_drag_selection`/`perf_drag_sel_event` drags the 1521 strokes
+with a frame per move - the selection drag layer's case, canvas-layer.md), a deterministic 100 page document (one
 generated page of 300 handwritten words, drawn through the real input path, then replicated), scrolling through
 all of it, zoom, goto page, pen move latency on a full page (mean/p95/max per event, the event plus its frame),
 rect select / select all / move / undo / redo / delete, stroke and free erasers, 240 px page thumbnails, save

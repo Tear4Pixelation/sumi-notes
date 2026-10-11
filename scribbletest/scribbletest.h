@@ -108,7 +108,8 @@ public:
   void benchTest();
   // retained canvas layer vs direct drawing, pixel for pixel (canvaslayertest.cpp)
   void canvasLayerTest();
-  int layerCompare(const char* name);
+  int layerCompare(const char* name, int ignoreBelow = 1);
+  int selDragLayerTest(BenchRng& rng);
   void inputTest();
   void syncSlaveMsg(std::string msg, int level);
 

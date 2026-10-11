@@ -667,6 +667,7 @@ void ScribbleArea::dirtyShotRegion()
 
 bool ScribbleArea::clearSelection()
 {
+  endSelFloat();
   clearShotRegion();
   if(!currSelection) {
     scribbleDoc->clearSelection();
@@ -3769,6 +3770,7 @@ void ScribbleArea::doMoveEvent(const InputEvent& event)
     // if pos is outside page, draw selection on overlay - we don't use overlay to draw selection inside
     //  page to preserve z-order (relative to unselected strokes)
     if(!currPage->rect().contains(pos) || !screenRect.contains(rawpos)) {
+      endSelFloat();  // on the overlay instead (the strokes are hidden)
       currSelection->setOffset(dx, dy);
       // if we encounter further issues here, consider using a copy of selection (cloning strokes) for overlay
       currSelection->setDrawType(Selection::STROKEDRAW_NONE);
@@ -3791,6 +3793,8 @@ void ScribbleArea::doMoveEvent(const InputEvent& event)
       dx = d.x;
       dy = d.y;
     }
+    if(!selFloat && (dx != 0 || dy != 0) && wantSelFloat())
+      startSelFloat();
     currSelection->setOffset(dx, dy);
     break;
   case MODE_INSSPACEVERT:
@@ -4157,6 +4161,7 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
   case MODE_MOVESELRULED:
   {
     // NOTE: move sel modes must handle undo (startAction, endAction) explicitly!
+    endSelFloat();  // drawn normally again from here
     // remove from overlay
     currSelection->setDrawType(regionSelector ? Selection::STROKEDRAW_NORMAL : Selection::STROKEDRAW_SEL);
     app->overlayWidget->drawSelection(NULL);
@@ -4669,16 +4674,43 @@ void ScribbleArea::reqRepaint()
 {
   //scribbleDoc->dirtyPage(currPageNum); ... this has to be done for all views before reqRepaint!
   // see if we need to redraw selection background
+  // a selection drag ended by anything but its release (cancel, mode change, the selection replaced)
+  if(selFloat && !floatWanted())
+    endSelFloat();
   Rect newbg = currSelection ? currSelection->getBGBBox() : Rect();
-  if((currSelection && currSelection->xchgBGDirty(false)) || newbg != selBGRect)
-    dirtyScreen(selBGRect.rectUnion(newbg));
+  if((currSelection && currSelection->xchgBGDirty(false)) || newbg != selBGRect) {
+    // the background is a drawScreen() overlay: while the selection floats, it is not canvas content
+    if(selFloat)
+      overlayDirtyScreen.rectUnion(dimToScreen(pageDimToDim(selBGRect.rectUnion(newbg))));
+    else
+      dirtyScreen(selBGRect.rectUnion(newbg));
+  }
   selBGRect = newbg;
+  if(selFloat) {
+    // the float layer's area (prepareFloat() pads by 3 device px and rounds the offset)
+    Rect bounds = floatBoundsDim();
+    Rect fr = bounds.isValid() ? dimToScreen(bounds).pad(5*unitsPerPx) : Rect();
+    if(fr != selFloatScreen) {
+      overlayDirtyScreen.rectUnion(selFloatScreen).rectUnion(fr);
+      selFloatScreen = fr;
+    }
+  }
   ScribbleView::reqRepaint();
 }
 
 void ScribbleArea::dirtyPage(int pagenum, Rect dirty)
 {
   //Rect dirty = page(pagenum)->getDirty();
+  // the floating selection's strokes moving leave the canvas under them as it was: their dirt is the union
+  //  of where each was last drawn and is now, inside where the drag started, was last drawn and is
+  if(selFloat && pagenum == selFloatPageNum && pagenum == currPageNum && currSelection == selFloatSel) {
+    Rect moved = selFloatOrig;
+    moved.rectUnion(selFloatDrawn).rectUnion(currSelection->getBBox()).pad(4);
+    if(moved.contains(dirty)) {
+      selFloatDiscarded.rectUnion(dirty);
+      return;
+    }
+  }
   dirty = (pagenum == currPageNum) ? pageDimToDim(dirty) : dirty.translate(getPageOrigin(pagenum));
   // pad by 2 units in Dim space since stroke bbox does not include widening of selected stroke
   // TODO: it would be better to do this in StrokeGroup if STROKEDRAW_SEL; also why 2 instead of 1???
@@ -4800,8 +4832,146 @@ const ColorMap* ScribbleArea::viewColorMap()
   return &nightMap;
 }
 
+// Selection drag layer.  A big selection dragged by a move used to redraw every selected stroke each
+//  frame (twice in the selected style).  Now, from the first move of the drag, it is drawn once into the
+//  float layer (ScribbleView::prepareFloat) and the canvas layer is drawn without it; a frame then only
+//  composites the two.  Moving it changes nothing in the canvas: the page dirt its strokes make is left out
+//  of this view (dirtyPage(), kept in selFloatDiscarded) and the float layer's old and new areas go to
+//  overlayDirtyScreen.  endSelFloat() - on release, or once anything else ends the drag - dirties the start
+//  and end positions as content, so everything is drawn normally again, and what was left out too if the
+//  page was changed from elsewhere meanwhile.  Visible while it floats: the selection is on top of other
+//  ink (z-order) and offset to whole device pixels.  See docs/agent/canvas-layer.md.
+// SUMI_SEL_LAYER_MIN overrides it (-1: never), for A/B comparisons
+int ScribbleArea::selLayerMinStrokes = getenv("SUMI_SEL_LAYER_MIN") ? atoi(getenv("SUMI_SEL_LAYER_MIN")) : 48;
+
+static const Selection* floatHiddenSel = NULL;
+
+static bool skipFloatingNode(const SvgNode* node)
+{
+  // only document nodes are drawn while this is set; their extension is always an Element
+  return node->hasExt() && static_cast<const Element*>(node->ext(false))->selection() == floatHiddenSel;
+}
+
+// elements that a comp-op (marker multiply) would blend with what is under them: not in a layer of their own
+static bool selBlendsWithBackdrop(Element* s)
+{
+  if(s->node->getAttr("comp-op") || Element::isLegacyMarker(s->node))
+    return true;
+  if(s->isMultiStroke()) {
+    for(Element* child : s->children()) {
+      if(selBlendsWithBackdrop(child))
+        return true;
+    }
+  }
+  return false;
+}
+
+bool ScribbleArea::wantSelFloat()
+{
+  if(selLayerMinStrokes < 0 || !currSelection || regionSelector || currSelPageNum != currPageNum
+      || currSelection->page != currPage || currSelection->drawType() != Selection::STROKEDRAW_SEL
+      || currPage->scaleFactor != 1 || !Application::painter || !widget)
+    return false;
+  int n = 0;
+  for(Element* s : currSelection->strokes) {
+    if(selBlendsWithBackdrop(s))
+      return false;
+    int members = 0;
+    if(s->isMultiStroke()) {
+      for(Element* child : s->children()) { (void)child; ++members; }
+    }
+    n += std::max(1, members);
+  }
+  return n >= selLayerMinStrokes;
+}
+
+void ScribbleArea::startSelFloat()
+{
+  // what changed before the drag goes to every view as usual; from here the page's dirt is the drag's
+  scribbleDoc->dirtyPage(currPageNum);
+  selFloat = true;
+  selFloatSel = currSelection;
+  selFloatPageNum = currPageNum;
+  selFloatRevision = currPage->revision;
+  selFloatOrig = currSelection->getBBox();
+  selFloatDrawn = selFloatOrig;
+  selFloatDiscarded = Rect();
+  selFloatScreen = Rect();
+  resetFloat(true);
+  // the canvas under the selection, now without it
+  if(selFloatOrig.isValid())
+    dirtyRectDim.rectUnion(pageDimToDim(selFloatOrig).pad(2 + 4*unitsPerPx/mScale));
+}
+
+void ScribbleArea::endSelFloat()
+{
+  if(!selFloat)
+    return;
+  selFloat = false;
+  resetFloat();
+  overlayDirtyScreen.rectUnion(selFloatScreen);
+  selFloatScreen = Rect();
+  if(currSelection != selFloatSel || currPageNum != selFloatPageNum || !currPage) {
+    repaintAll(true);  // gone or elsewhere: no bbox to go by
+    return;
+  }
+  // the selected strokes are drawn into the canvas again: where they are now and where they started
+  Dim pad = 2 + 4*unitsPerPx/mScale;
+  Rect dirty = selFloatOrig;
+  dirty.rectUnion(currSelection->getBBox());
+  if(currPage->revision != selFloatRevision)
+    dirty.rectUnion(selFloatDiscarded);  // a change from elsewhere may be in what was left out
+  if(dirty.isValid())
+    dirtyRectDim.rectUnion(pageDimToDim(dirty).pad(pad));
+  // and its background and handles in full: a repaint edge across the rotate handle's stem leaves it
+  //  drawn twice on the row nanovg_sw paints past the clip
+  dirtyScreen(Rect(selBGRect).rectUnion(currSelection->getBGBBox()));
+  selFloatDiscarded = Rect();
+}
+
+bool ScribbleArea::floatWanted()
+{
+  return selFloat && currSelection == selFloatSel && currPageNum == selFloatPageNum
+      && (currMode == MODE_MOVESELFREE || currMode == MODE_MOVESELRULED)
+      && currSelection->drawType() == Selection::STROKEDRAW_SEL;
+}
+
+Rect ScribbleArea::floatBoundsDim()
+{
+  // + 2 for the selected style's widening, as dirtyPage() pads
+  Rect bbox = currSelection ? currSelection->getBBox() : Rect();
+  return bbox.isValid() ? pageDimToDim(bbox).pad(2) : Rect();
+}
+
+Point ScribbleArea::floatOffsetDim()
+{
+  return currSelection ? currSelection->getOffset() : Point(0, 0);
+}
+
+void ScribbleArea::drawFloat(Painter* painter)
+{
+  if(!currSelection)
+    return;
+  selFloatDrawn = currSelection->getBBox();
+  // as drawImage() and Page::draw() draw the page; in page order, as there
+  painter->translate(currPageXOrigin, currPageYOrigin);
+  painter->setDarkBackdrop(Page::drawsDark(painter, currPage->ruleNode ? currPage->props.color : Color(Color::WHITE)));
+  for(Element* s : currSelection->sourceNode->children()) {
+    if(s->isSelected(currSelection))
+      SvgPainter(painter).drawNode(s->node);
+  }
+}
+
 void ScribbleArea::drawImage(Painter* painter, const Rect& dirty)
 {
+  // the canvas layer under a floating selection is drawn without it
+  struct SkipFloating {
+    bool on;
+    SkipFloating(bool b, const Selection* sel) : on(b) {
+      if(on) { floatHiddenSel = sel; SvgPainter::skipNode = skipFloatingNode; }
+    }
+    ~SkipFloating() { if(on) { SvgPainter::skipNode = NULL; floatHiddenSel = NULL; } }
+  } skipFloating((drawingLayerContent || testHideFloat) && floatWanted(), currSelection);
   // draw the gray background - UI chrome, not document, so it bypasses the night mode map; night mode
   //  still wants the dark gray around dark pages whatever the UI theme is
   painter->save();

@@ -221,8 +221,9 @@ bool CanvasLayer::resize(int w, int h)
 #ifndef NO_PAINTER_GL
     // NEAREST: the layer is only ever drawn 1:1 at whole device pixels; same (sRGB) format as nvglFB
     fb[0] = nvgluCreateFramebuffer(vg, w, h, nvglFBFlags | NVG_IMAGE_NEAREST);
-    fb[1] = nvgluCreateFramebuffer(vg, w, h, nvglFBFlags | NVG_IMAGE_NEAREST);
-    ok = fb[0] && fb[1];
+    // a transparent layer is never shifted, so needs no second texture
+    fb[1] = transparent ? NULL : nvgluCreateFramebuffer(vg, w, h, nvglFBFlags | NVG_IMAGE_NEAREST);
+    ok = fb[0] && (fb[1] || transparent);
 #endif
   }
   else {
@@ -244,7 +245,7 @@ bool CanvasLayer::resize(int w, int h)
 void CanvasLayer::shift(int dx, int dy)
 {
   int w = width, h = height;
-  if(!isValid() || (dx == 0 && dy == 0) || std::abs(dx) >= w || std::abs(dy) >= h)
+  if(!isValid() || transparent || (dx == 0 && dy == 0) || std::abs(dx) >= w || std::abs(dy) >= h)
     return;
   // source rect of what survives, in top-down rows
   int x0 = std::max(0, -dx), x1 = std::min(w, w - dx);
@@ -292,22 +293,32 @@ void CanvasLayer::render(Painter* p, const std::vector<Rect>& rects, const std::
     return;
   Rect savedDeviceRect = p->deviceRect;
   p->deviceRect = Rect::wh(width, height);
-  if(!Application::glRender)
-    nvgswSetFramebuffer(vg, pixels, width, height, swScreenRShift, swScreenGShift, swScreenBShift, 24);
-  p->beginFrame();
   Rect bbox;
+  for(const Rect& r : rects)
+    bbox.rectUnion(r);
+  bbox.rectIntersect(Rect::wh(width, height));
+  if(!Application::glRender) {
+    if(transparent && bbox.isValid()) {
+      int x0 = int(bbox.left), x1 = int(bbox.right), y0 = int(bbox.top), y1 = int(bbox.bottom);
+      for(int y = y0; y < y1; ++y)
+        memset(pixels + (size_t(y)*width + x0)*4, 0, size_t(x1 - x0)*4);
+    }
+    nvgswSetFramebuffer(vg, pixels, width, height, swScreenRShift, swScreenGShift, swScreenBShift, 24);
+  }
+  p->beginFrame();
   for(const Rect& r : rects) {
     p->save();
     p->setClipRect(r);
     draw(p, r);
     p->restore();
-    bbox.rectUnion(r);
   }
   if(Application::glRender) {
 #ifndef NO_PAINTER_GL
     int prev = nvgluBindFramebuffer((NVGLUframebuffer*)fb[cur]);
     // GL scissor limits fill to the union; the painter clip above is exact per rect
     nvgluSetScissor(int(bbox.left), height - int(bbox.bottom), int(bbox.width()), int(bbox.height()));
+    if(transparent)
+      nvgluClear(nvgRGBA(0, 0, 0, 0));  // within the scissor
     p->endFrame();
     nvgluSetScissor(0, 0, 0, 0);
     nvgluBindFBO(prev);
@@ -315,10 +326,43 @@ void CanvasLayer::render(Painter* p, const std::vector<Rect>& rects, const std::
   }
   else {
     p->endFrame();
+    if(transparent && bbox.isValid())
+      unpremultiplySW(bbox, p->sRGB());
     if(swScreenPixels)
       nvgswSetFramebuffer(vg, swScreenPixels, swScreenW, swScreenH, swScreenRShift, swScreenGShift, swScreenBShift, 24);
   }
   p->deviceRect = savedDeviceRect;
+}
+
+// nanovg_sw blends as if the destination were premultiplied, so drawing over transparent pixels leaves
+//  premultiplied color - but it reads every image, NOCOPY ones as they are, as straight alpha.  Composited
+//  as is, antialiased edges would be multiplied by their alpha twice (thin, dark edges; worst for light ink
+//  on dark paper).  So the partly covered pixels are divided by their alpha, in the space nanovg_sw blended
+//  in: linear for an sRGB painter (its gamma, 2.31), the stored values otherwise.
+void CanvasLayer::unpremultiplySW(const Rect& r, bool linear)
+{
+  static constexpr float SW_GAMMA = 2.31f;  // nanovg_sw.h sRGBgamma
+  static float toLinear[256];
+  static bool inited = false;
+  if(!inited) {
+    for(int ii = 0; ii < 256; ++ii)
+      toLinear[ii] = std::pow(ii/255.0f, SW_GAMMA);
+    inited = true;
+  }
+  int x0 = int(r.left), x1 = int(r.right), y0 = int(r.top), y1 = int(r.bottom);
+  for(int y = y0; y < y1; ++y) {
+    unsigned char* px = pixels + (size_t(y)*width + x0)*4;
+    for(int x = x0; x < x1; ++x, px += 4) {
+      int alpha = px[3];  // alpha shift 24 (nvgswSetFramebuffer above)
+      if(alpha == 0 || alpha == 255)
+        continue;
+      for(int c = 0; c < 3; ++c) {
+        int straight = linear ?
+            int(0.5f + 255*std::pow(std::min(1.0f, toLinear[px[c]]*255/alpha), 1/SW_GAMMA)) : (px[c]*255 + alpha/2)/alpha;
+        px[c] = (unsigned char)std::min(255, straight);
+      }
+    }
+  }
 }
 
 bool Application::readFramebuffer(std::vector<unsigned char>& out, int& w, int& h)

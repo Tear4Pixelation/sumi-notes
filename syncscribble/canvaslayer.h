@@ -11,9 +11,12 @@ struct NVGcontext;
 //  (nanovg frames cannot nest), then composited into that frame 1:1 as one image.  GL: two FBO textures in
 //  the screen framebuffer's format, ping-ponged by shift(); SW: one pixel buffer in the screen's byte order.
 //  Implemented in application.cpp, which owns the GL/SW framebuffer setup.
+//  A transparent layer (ScribbleView's float layer: a dragged selection) has one texture, starts each
+//  render() by clearing the rects' bounding box to transparent, and is composited with alpha.
 class CanvasLayer
 {
 public:
+  CanvasLayer(bool isTransparent = false) : transparent(isTransparent) {}
   ~CanvasLayer();
   // (re)allocate for w x h device pixels; true if the contents are now undefined
   bool resize(int w, int h);
@@ -28,9 +31,11 @@ public:
 
   int width = 0;
   int height = 0;
+  const bool transparent;
 
 private:
   void release();
+  void unpremultiplySW(const Rect& r, bool linear);
 
   NVGcontext* vg = NULL;
   void* fb[2] = {NULL, NULL};  // GL: NVGLUframebuffer*
