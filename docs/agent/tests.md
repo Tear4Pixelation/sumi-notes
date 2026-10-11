@@ -239,6 +239,11 @@ state after save and reopen, redo survives, and a file appended to externally op
 loses its sidecar. `runAll()` turns persistence off for everything else. Mutation-checked four ways; see
 [undo-persistence.md](undo-persistence.md#tests).
 
+The in-memory undo cap is tested by `ScribbleTest::undoCapTest()` (unit-check count): the 1000 step default,
+a byte cap over draw+delete steps, an oversized newest step kept, and sync's unacknowledged steps never
+dropped (on a bare `ScribbleSync`). 12 checks fail with trimming disabled, 3 with the sync floor ignored; see
+[undo-persistence.md](undo-persistence.md#in-memory-cap).
+
 ## SpinBox typed numbers (`ScribbleTest::spinBoxTest`)
 
 In-app check (needs only the theme). Pins `SpinBox::updateValueFromText` in ugui: 0 in every form (`0`, `00`,

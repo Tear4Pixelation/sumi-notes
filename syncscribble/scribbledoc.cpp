@@ -1813,4 +1813,25 @@ void ScribbleDoc::endAction()
   history->endAction();
   if(scribbleSync)
     scribbleSync->sendHist();
+  trimHistory();
+}
+
+// The in-memory undo cap (docs/agent/undo-persistence.md, "In-memory cap"): oldest steps go first once
+//  there are more than undoMaxSteps or they hold more than undoMaxKB.  After sendHist(), so steps this
+//  action just sent can count as sent.
+void ScribbleDoc::trimHistory()
+{
+  int maxsteps = cfg->Int("undoMaxSteps", 1000);
+  int maxkb = cfg->Int("undoMaxKB", 10240);
+  size_t floor = scribbleSync ? scribbleSync->historyTrimFloor() : SIZE_MAX;
+  size_t removed = history->trimFront(maxsteps > 0 ? size_t(maxsteps) : SIZE_MAX,
+      maxkb > 0 ? size_t(maxkb) << 10 : SIZE_MAX, floor);
+  if(!removed)
+    return;
+  if(scribbleSync)
+    scribbleSync->historyTrimmed(removed);
+  for(ScribbleArea* view : views) {
+    if(view->recentStrokeSelPos >= 0)
+      view->recentStrokeSelPos = std::max(0, view->recentStrokeSelPos - int(removed));
+  }
 }

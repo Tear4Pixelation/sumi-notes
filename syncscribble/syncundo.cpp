@@ -97,6 +97,35 @@ void StrokeDeletedItem::discard(bool undone)
     s->deleteNode();
 }
 
+// Heap estimate for the memory cap: node object + Element + allocator headers as a flat guess, then what
+//  scales - the attribute vector, path points and commands, image pixels and encoded data - recursing into
+//  groups.  Attribute strings, penPoints and allocator slack are ignored.  Calibrated on a 5000 stroke
+//  erase session (flat pen) against the heap the uncapped history actually grew by.  Costs one look at
+//  each node's own vectors, once, when the step is recorded.
+static size_t nodeMemSize(const SvgNode* node)
+{
+  size_t bytes = 384 + node->attrs.capacity()*sizeof(SvgAttr);
+  if(const SvgContainerNode* container = node->asContainerNode()) {
+    for(const SvgNode* child : const_cast<SvgContainerNode*>(container)->children())
+      bytes += nodeMemSize(child);
+  }
+  else if(node->type() == SvgNode::PATH || node->type() == SvgNode::RECT) {  // SvgPath and SvgRect
+    const Path2D& path = static_cast<const SvgPath*>(node)->m_path;
+    bytes += path.points.capacity()*sizeof(Point) + path.commands.capacity()*sizeof(Path2D::PathCommand);
+  }
+  else if(node->type() == SvgNode::IMAGE) {
+    const SvgImage* image = static_cast<const SvgImage*>(node);
+    const Image& img = image->m_image;
+    bytes += img.encData.capacity() + image->saveCache.data.capacity() + (img.data ? size_t(img.dataLen()) : 0);
+  }
+  return bytes;
+}
+
+size_t StrokeDeletedItem::memSize() const
+{
+  return ITEM_BYTES + (s && s->node ? nodeMemSize(s->node) : 0);
+}
+
 // StrokeChangedItem - record change of stroke properties (color, width)
 void StrokeChangedItem::swapProps()
 {
@@ -333,6 +362,12 @@ void PageDeletedItem::discard(bool undone)
     delete p;
 }
 
+// a page that was never loaded holds no SVG tree, only its small metadata
+size_t PageDeletedItem::memSize() const
+{
+  return ITEM_BYTES + 1024 + (p && p->svgDoc ? nodeMemSize(p->svgDoc.get()) : 0);
+}
+
 void PageAddedItem::undo()
 {
   DocumentUndoItem::undo();
@@ -383,9 +418,16 @@ void UndoHistory::addItem(UndoHistoryItem* undoItem)
     if(inAction == 1) {
       if(pos < hist.size())
         clearUndone();
+      openGroup = hist.size();
       hist.push_back(new UndoGroupHeader(actionPageNum));
+      ++histSteps;
+      histBytes += hist.back()->memSize();
     }
     undoItem->commit();
+    // nothing removes or reorders hist while an action is open, so openGroup is still its header
+    size_t itembytes = undoItem->memSize();
+    static_cast<UndoGroupHeader*>(hist[openGroup])->bytes += itembytes;
+    histBytes += itembytes;
     hist.push_back(undoItem);
     pos = hist.size();
     inAction++;
@@ -402,10 +444,70 @@ void UndoHistory::clearUndone(bool undone)
 {
   // must discard newer entries before older ones
   while(hist.size() > pos) {  //unsigned int ii = pos; ii < hist.size(); ii++) {
+    if(hist.back()->isA(UndoHistoryItem::HEADER)) {
+      --histSteps;
+      histBytes -= static_cast<UndoGroupHeader*>(hist.back())->bytes;
+    }
     hist.back()->discard(undone);
     if(!hist.back()->isA(UndoHistoryItem::DISABLED_ITEM))
       delete hist.back();
     hist.pop_back();
+  }
+}
+
+size_t UndoHistory::trimFront(size_t maxSteps, size_t maxBytes, size_t floor)
+{
+  floor = std::min(floor, pos);
+  size_t end = 0;  // hist[0, end) is what goes: whole groups, so hist[end] is always a header
+  size_t steps = histSteps, bytes = histBytes;
+  while((steps > maxSteps || bytes > maxBytes) && end < hist.size()) {
+    size_t next = end + 1;
+    while(next < hist.size() && !hist[next]->isA(UndoHistoryItem::HEADER))
+      ++next;
+    // next >= pos: this group is the newest undo step - keep it even if it alone exceeds maxBytes (a deleted
+    //  page full of images), since an action that cannot be undone at all is worse than the memory
+    if(next > floor || next >= pos)
+      break;
+    --steps;
+    bytes -= static_cast<UndoGroupHeader*>(hist[end])->bytes;
+    end = next;
+  }
+  if(end == 0)
+    return 0;
+  // Oldest first, as not undone (discard(false)): a deleted stroke or page in these steps is owned by
+  //  its delete item and freed here.  No kept step can refer to it - it left the document in a step
+  //  before every kept one, and only undoing that step could bring it back.  DisabledUndoItems are
+  //  ScribbleSync's shared static placeholder.
+  for(size_t ii = 0; ii < end; ++ii) {
+    hist[ii]->discard(false);
+    if(!hist[ii]->isA(UndoHistoryItem::DISABLED_ITEM))
+      delete hist[ii];
+  }
+  hist.erase(hist.begin(), hist.begin() + end);
+  pos -= end;
+  histSteps = steps;
+  histBytes = bytes;
+  frontTrimmed += end;
+  return end;
+}
+
+void UndoHistory::recount()
+{
+  histSteps = 0;
+  histBytes = 0;
+  UndoGroupHeader* group = NULL;
+  for(UndoHistoryItem* item : hist) {
+    if(item->isA(UndoHistoryItem::HEADER)) {
+      group = static_cast<UndoGroupHeader*>(item);
+      group->bytes = group->memSize();
+      ++histSteps;
+      histBytes += group->bytes;
+    }
+    else if(group) {
+      size_t itembytes = item->memSize();
+      group->bytes += itembytes;
+      histBytes += itembytes;
+    }
   }
 }
 

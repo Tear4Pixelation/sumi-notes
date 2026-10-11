@@ -131,6 +131,60 @@ Layer, lock Layer 1, Delete Current Page, Ctrl+S, kill the app, reopen: Ctrl+Z b
 back, then unlocked Layer 1, removed Layer 2, and so on to the original document; a file appended to by
 another program opened with the undo button disabled and its sidecar deleted.
 
+## In-memory cap
+
+Separate from the on-disk caps above: the live `UndoHistory` keeps at most **`undoMaxSteps` (1000)
+steps or about `undoMaxKB` (10240 KB) of estimated memory**, whichever is hit first, dropping the oldest
+whole steps. 0 for either removes that limit. Before this the history grew for the whole session, and
+every stroke the eraser cut or a delete removed stayed alive in it (measured: +14 MB of heap over a
+5000 stroke draw-and-erase session; capped, flat at +0.06 MB once 1000 steps are reached, and with only
+the byte cap active it levels off at ~10 MB of estimate / ~9 MB of real heap).
+
+- **Where**: `ScribbleDoc::trimHistory()`, called from `ScribbleDoc::endAction()` *after* `sendHist()`,
+  so it runs once per finished action, never in the middle of one, during undo/redo, or during a
+  `ButtonDragTimeline` drag. `UndoHistory::trimFront()` does the work.
+- **Memory is an estimate, kept as a running total.** Each item's `memSize()` is taken once, when
+  `addItem()` records it, and summed into its group's `UndoGroupHeader::bytes`; `histBytes` is the sum of
+  those. Only content the history alone keeps alive counts beyond a flat 64 bytes per item: a deleted
+  stroke (`StrokeDeletedItem`) or page (`PageDeletedItem`), estimated from the node tree's point,
+  attribute and image buffers (`nodeMemSize()` in `syncundo.cpp`, within ~3% of real heap growth on a
+  flat-pen erase session). Undone *added* strokes are not counted, though the redo side owns them -
+  trimming only ever touches the undo side, and the redo side is gone at the next action anyway. Totals
+  are per group, so `ScribbleSync::removeItems()` disabling items later leaves them merely stale, never
+  inconsistent. Anything that rebuilds `hist` directly must call `recount()` (`UndoPersist` restore does).
+- **Oldest first, as not undone** (`discard(false)`): that frees the deleted strokes and pages those steps
+  own. Safe because such content left the document in a step older than every kept one; only undoing that
+  step could bring it back, and it is gone. Same contiguity argument as the persisted history.
+- **The newest undo step is always kept**, even when it alone is over the byte cap (deleting a page full
+  of images): an action that cannot be undone at all is worse than the memory. Redo steps are never
+  trimmed.
+- **Indices into `hist` held elsewhere shift.** `trimFront()` returns the number of items removed;
+  `trimHistory()` moves `ScribbleSync::rcvdPos/sentPos` and every view's
+  `ScribbleArea::recentStrokeSelPos` down by it. `UndoHistory::histPos()` now returns pos *plus* the
+  items trimmed so far, so `ScribbleApp::penChanged`'s saved `historyPos` keeps meaning "no step added or
+  undone since". A new holder of a hist index must be added to `trimHistory()`.
+- **Sync**: received items are applied and discarded, never put into the history, and the server keeps
+  the log for peers - so a step is safe to drop once it is sent and the server has echoed it. While a
+  `ScribbleSync` is not `SYNC_OFF`, the floor is `min(rcvdPos, sentPos)` (`historyTrimFloor()`): nothing at
+  or after it is dropped, which also keeps `strokemap` from pointing at a stroke a trimmed delete freed
+  (sending the delete erases it from the map first). While connecting, both are 0, so nothing is trimmed
+  until the session has sent the history; a long-disconnected session lets the history grow past the cap
+  until it reconnects. `startSession()` undoes to the oldest *kept* step and sends pages in that state,
+  exactly as after opening a document with that history.
+- **Saved state**: a page whose saved state lies in or before the trimmed steps keeps a non-zero
+  `dirtyCount` forever (those increments can no longer be undone), which is right - it can no longer be
+  returned to the saved state by undo.
+- Not verified against a live sync server (none is available here; `--synctest` needs Stylus Labs'
+  server). `undoCapTest()` drives a bare `ScribbleSync` instead: it checks the floor holds, that only
+  acknowledged steps go, that `rcvdPos` still names the same header (by uuid) after the shift, and that
+  the cap applies once everything is acknowledged.
+
+`ScribbleTest::undoCapTest()`: 1012 strokes with the shipped defaults (1000 steps kept, 1000 undos then
+1000 redos, the oldest 12 strokes stay), a byte cap of 16 KB over 200 draw+delete pairs (bytes stay under,
+a recount matches the running totals, the newest delete undoes and redoes), an oversized newest step kept
+alone, and the sync floor above. Against an uncapped history 12 of its checks fail; ignoring the sync floor
+fails 3.
+
 ## Building the crash journal on this
 
 The journal (append each step on pen-up, replay after a crash) can reuse the record format as is:
