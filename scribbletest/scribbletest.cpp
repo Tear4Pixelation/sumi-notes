@@ -1709,6 +1709,51 @@ int ScribbleTest::zeroSizeLayoutTest()
   return nbad;
 }
 
+// nanovg_gl (iOS) resets a fill's winding buffer only inside the fill's bounds quad (bounds +/- 0.5 px), while
+//  the winding pass covers, per segment, its x extent +/- 0.55 px from its lowest end + 0.55 up to the path's
+//  top - 0.55 (the vertex shader in nanovg_gl.h).  nanovg hands the renderer bounds clipped to the scissor, so
+//  a ruling line through a small dirty rect left winding in the buffer above and below it: thin columns of
+//  half-drawn top bar and floating toolbar on the iPad.  Application::windingFillBounds() must give bounds
+//  whose quad contains every winding quad; the clipped bounds nanovg passes (the old behaviour) do not.
+int ScribbleTest::windingFillBoundsTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: winding fill bounds: %s\n", what); }
+  };
+  // a stroked vertical ruling line from the page top (y = -300, under the top bar) to y = 900, as its
+  //  outline: four segments, deliberately not end to end (stroke outlines are not), with an extra x
+  //  extent only in a segment's start point
+  NVGvertex segs[4] = {
+    { 100.3f, -300.f, 101.3f, -300.f },
+    { 101.3f, 900.f, 101.3f, -300.f },
+    { 100.3f, 900.f, 101.3f, 900.f },
+    { 99.9f, -300.f, 100.3f, 900.f },
+  };
+  NVGpath path = {};
+  path.fill = segs;
+  path.nfill = 4;
+  path.bounds[0] = 100.3f;  path.bounds[1] = -300.f;  path.bounds[2] = 101.3f;  path.bounds[3] = 900.f;  // from x1,y1 only
+  // drawn through a dirty rect 400..420 high: nanovg clips the bounds to it
+  const float clipped[4] = { 100.3f, 400.f, 101.3f, 420.f };
+  float out[4];
+  Application::windingFillBounds(&path, 1, clipped, out);
+  bool covered = true;
+  for(const NVGvertex& seg : segs) {
+    float qx0 = std::min(seg.x0, seg.x1) - 0.55f, qx1 = std::max(seg.x0, seg.x1) + 0.55f;
+    float qy0 = path.bounds[1] - 0.55f, qy1 = std::max(seg.y0, seg.y1) + 0.55f;
+    covered = covered && qx0 >= out[0] - 0.5f && qx1 <= out[2] + 0.5f && qy0 >= out[1] - 0.5f && qy1 <= out[3] + 0.5f;
+  }
+  check(covered, "the fill quad contains every winding quad (a clipped quad leaves winding behind)");
+  // and stays tight: not more than a pixel beyond the segments
+  check(out[0] > 99.9f - 1 && out[2] < 101.3f + 1 && out[1] > -301 && out[3] < 901, "the bounds stay within a pixel of the path");
+  // a fill with nothing to accumulate keeps nanovg's bounds
+  NVGpath empty = {};
+  Application::windingFillBounds(&empty, 1, clipped, out);
+  check(out[0] == clipped[0] && out[3] == clipped[3], "an empty path keeps the clipped bounds");
+  return nbad;
+}
+
 // The Pages view renders thumbnails on a 1 ms timer, one thumbnail per event-loop turn.  Closing the sidebar
 //  used to forget the timer's handle without removing the timer (hiding a widget does not drop its timers),
 //  so every reopen started another renderer beside the old ones; a floating sidebar closes on every press
@@ -5431,6 +5476,7 @@ void ScribbleTest::runAll(bool runsynctest)
   nUnitFailed += penCancelTest();
   nUnitFailed += timerBacklogTest();
   nUnitFailed += zeroSizeLayoutTest();
+  nUnitFailed += windingFillBoundsTest();
   nUnitFailed += thumbRendererTest();
   nUnitFailed += shapeTapEditTest();
   nUnitFailed += zoomSnapTest();

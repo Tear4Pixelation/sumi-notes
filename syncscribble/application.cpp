@@ -416,6 +416,60 @@ void CanvasLayer::composite(Painter* p, int x, int y)
   nvgRestore(ctx);
 }
 
+// nanovg_gl (the iOS renderer, framebuffer fetch) fills a path in two passes: each segment adds its signed
+//  area to a winding buffer over a quad from the segment up to the path's top (pathYMin), 0.55 px wider than
+//  the segment all round; then one quad over the fill's bounds reads the winding into coverage and resets it
+//  to 0.  nanovg clips those bounds to the scissor, the winding quads it does not clip, so whatever a path
+//  adds outside its clip (a ruling line running from the page top down through a small dirty rect, a page
+//  scrolled under the top bar) stays in the buffer and corrupts the next fill drawn there - a thin column of
+//  missing or doubled pixels in the top bar, a tab or a floating toolbar, frames later.  The image atomic
+//  method (desktop GL without vtex) indexes its buffer by the bounds, so there the excess lands in another
+//  call's slots.  The fix: fill bounds that cover every winding quad - the segments' own extent, padded past
+//  the 0.55 px - so the read pass resets every pixel the winding pass touched.  Colour is unchanged: the
+//  read pass multiplies by the scissor mask, 0 outside the clip, and by coverage, 0 outside the path, and the
+//  GL scissor (the frame's dirty rect) still bounds the work.
+void Application::windingFillBounds(const NVGpath* paths, int npaths, const float* clipped, float* out)
+{
+  float xmin = 1e30f, ymin = 1e30f, xmax = -1e30f, ymax = -1e30f;
+  for(int i = 0; i < npaths; ++i) {
+    const NVGpath& path = paths[i];
+    if(path.nfill <= 0)
+      continue;
+    ymin = std::min(ymin, path.bounds[1]);  // the shader's pathYMin: the top of every winding quad
+    // both ends of each segment: stroke outline segments are not emitted end to end
+    for(int j = 0; j < path.nfill; ++j) {
+      const NVGvertex& seg = path.fill[j];
+      xmin = std::min(xmin, std::min(seg.x0, seg.x1));
+      xmax = std::max(xmax, std::max(seg.x0, seg.x1));
+      ymin = std::min(ymin, std::min(seg.y0, seg.y1));
+      ymax = std::max(ymax, std::max(seg.y0, seg.y1));
+    }
+  }
+  if(xmin > xmax) {  // nothing to accumulate
+    std::copy(clipped, clipped + 4, out);
+    return;
+  }
+  // the fill quad is bounds +/- 0.5, a winding quad its segment's extent +/- 0.55
+  const float pad = 0.1f;
+  out[0] = xmin - pad;
+  out[1] = ymin - pad;
+  out[2] = xmax + pad;
+  out[3] = ymax + pad;
+}
+
+#if !USE_NANOVG_VTEX && !defined(NO_PAINTER_GL)
+static void (*nvglRenderFillClipped)(void* uptr, NVGpaint* paint, NVGcompositeOperationState op,
+    NVGscissor* scissor, int flags, const float* bounds, const NVGpath* paths, int npaths) = NULL;
+
+static void nvglRenderFillWinding(void* uptr, NVGpaint* paint, NVGcompositeOperationState op,
+    NVGscissor* scissor, int flags, const float* bounds, const NVGpath* paths, int npaths)
+{
+  float fillBounds[4];
+  Application::windingFillBounds(paths, npaths, bounds, fillBounds);
+  nvglRenderFillClipped(uptr, paint, op, scissor, flags, fillBounds, paths, npaths);
+}
+#endif
+
 static int sdlEventFilter(void* app, SDL_Event* event)
 {
 #if PLATFORM_LINUX
@@ -647,6 +701,14 @@ int SDL_main(int argc, char* argv[])
         if(!cfgFlags) cfgFlags |= NVGL_NO_FB_FETCH;
 #endif
         nvgContext = glLoadOK ? nvglCreate(nvgFlags | cfgFlags | (SCRIBBLE_DEBUG ? NVGL_DEBUG : 0)) : NULL;
+#if !USE_NANOVG_VTEX
+        // every fill's read pass must reset all the winding it accumulated (windingFillBounds)
+        if(nvgContext) {
+          NVGparams* params = nvgInternalParams(nvgContext);
+          nvglRenderFillClipped = params->renderFill;
+          params->renderFill = nvglRenderFillWinding;
+        }
+#endif
         // This will cause SDL_GL_SwapWindow to stall for vsync, so we'd want to call it on a separate thread
         //if(SDL_GL_SetSwapInterval(-1) == 0) PLATFORM_LOG("Adaptive vsync enabled\n");
         //else if(SDL_GL_SetSwapInterval(1) == 0) PLATFORM_LOG("Non-adpative vsync enabled\n");

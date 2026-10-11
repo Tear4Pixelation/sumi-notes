@@ -245,6 +245,14 @@ heading blue. See [night-mode.md](night-mode.md).
   the layout transform must stay finite and the node must move there. Verified to fail (both checks) against
   the old svggui.cpp, which divided by the zero width (UBSan `float-divide-by-zero`) and left the transform
   inf/NaN for good; reading the bounds then asserts, so the check only does that when the transform is finite.
+- `ScribbleTest::windingFillBoundsTest()` - `Application::windingFillBounds()` for a ruling line's outline
+  drawn through a small clip: the fill quad (bounds +/- 0.5) must contain every winding quad nanovg_gl's vertex
+  shader draws (segment extent +/- 0.55 up to the path top), from both segment ends, and stay within a pixel.
+  Verified to fail ("covered") with nanovg's clipped bounds passed through, the old behaviour (standalone
+  harness; the in-app run currently aborts earlier, in `test7`, see below).
+- **`--test` aborts in `test7` on master 0208769** (also without this change): `Cached bounds are wrong` for a
+  `path.write-stroke-pen` in `Selection::getBBox()` from `ScribbleArea::doMoveEvent`, so no later check runs.
+  Not investigated here.
 
 Marker multiply blending is tested by `ScribbleTest::markerBlendTest()` (unit-check count), rendered with
 the software painter: details and mutation checks in [pen-and-tools.md](pen-and-tools.md#marker-multiplies-text-stays-dark).

@@ -60,6 +60,11 @@ in-progress stroke, cursor, region handles) are never part of it.
   the layer is rendered with the surface's channel shifts (`setScreenSWFramebuffer`).
 - **GL shift**: sRGB conversion is turned off during the blit so it is a raw copy.
 
+- **Thin clips are hard on nanovg_gl (iOS).** The edge strips draw `drawImage()` through a band a pixel
+  high, and every ruling line or page image crossing it runs its winding quads up to the page top - through
+  the top bar and the floating toolbars. Before `Application::windingFillBounds()` that winding was left
+  behind (top-tab-bar.md, Traps). The clip and order here were checked and are right; it was the renderer.
+
 ## Not bit-exact, by design
 
 Shifted content was rasterized at another offset, and rasterizing is not invariant under whole-pixel
