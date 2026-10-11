@@ -84,6 +84,64 @@ gives, an integer grid only allows a handful of segment directions. `CurveFitFil
   fixtures are polylines through the input points. Baseline after this change is unchanged - 0 failed
   tests, 0 failed unit checks, 16 failed thumbnails.
 
+# Simplifying the finished stroke (pen-up)
+
+`strokesimplify.cpp/.h`, pref `strokeSimplify` (Input group of the config dialog): **Off / Invisible /
+Balanced / Aggressive, default Invisible**. Runs once per stroke in `ScribbleArea` at pen-up
+(`StrokeBuilder::simplifyFinished()`, right after `finish()` and the centre of mass), never on the live
+path, so pen-to-ink latency is unchanged. Only new strokes drawn with the pen: loaded documents, Noteful
+import, shapes (`commitSnapShape()` breaks out before `finish()`; their geometry is parametric and already
+minimal) and the ephemeral pen are never touched. Off returns before doing anything, so it is bit-identical
+to the code before this existed.
+
+- **The trap: simplify the final geometry, with a deviation bound, never the input.** Simplifying samples
+  before the curve fit (or with a loose distance tolerance) is what gives round strokes straight facets -
+  the user tried exactly that once. This runs after the curve fit, on what is drawn, and keeps only
+  original points (nothing is moved).
+- **Two bounds per dropped point** (Douglas-Peucker): deviation `<= tol`, and deviation
+  `<= chordLength*maxTurn/8`. On an arc the sagitta of a chord L is L^2/(8R) and it subtends L/R, so the
+  second caps the turn between kept chords at `maxTurn` *whatever the radius* - that is what keeps a small
+  loop round at 1100%, where a distance bound alone happily leaves a polygon. It is also what limits
+  Aggressive: loosening the turn cap 12 -> 16 deg buys only 5% more points and shows kinks at 11x.
+- **Per pen kind.** Flat (default pen, filled outline): the outline is simplified pair by pair (point i
+  pairs with size-1-i, the layout `Element::toPenPoints()` relies on), each side against its own chord, and
+  the cap pairs are always kept - so the eraser, width change and Resize Handwriting see a normal flat
+  outline. Round/chisel with variable width (an outline per segment): the builder's own centre line and
+  widths are simplified with error = distance + |width error|/2 and the subpaths rebuilt - from
+  `points`/`widths`, not `toPenPoints()`, which misreads the stray moveTo a repeated point leaves; repeated
+  points split the stroke into runs as `addPoint()` drew it. Stroked (constant width): the polyline.
+  Dashed strokes are left alone (the dashes are laid out along the path length, and chords are shorter).
+- **Tolerances** (document units; 1 unit = 1 logical px at 100%, max zoom 1100%):
+
+  | preset | tol | maxTurn | at 11x |
+  |---|---|---|---|
+  | Invisible | 0.01 | 6 deg | 0.11 px (0.33 device px on a 3x screen) |
+  | Balanced | 0.04 | 10 deg | 0.44 px; 0.04-0.08 px at 1-2x |
+  | Aggressive | 0.10 | 12 deg | 1.1 px; 0.1 px at 1x |
+
+- **Measured** (`--simplifybenchtest`, `scribbletest/simplifybench.cpp`: real notebooks replayed through the
+  curve fit, rendered with 4x4 supersampled cairo; cairo's own AA steps in 17/255 = 1/15 pixel rows and
+  shows phantom differences without supersampling). Max pixel difference /255 at 1x / 4x / 11x:
+  Invisible 5 / 13 / 34, Balanced 16 / 54 / 135, Aggressive 34 / 118 / 254. Invisible's 34 is the 0.11 px
+  edge shift itself. Point reduction depends almost entirely on sample density: the user's Write-era
+  notebooks (sparse samples 2-3.5 units apart, ~15 deg turn per sample) -3.5 / -10 / -18% points (svgz
+  -1 / -3 / -6%); the same handwriting at Pencil density (0.5 units, float positions) -42 / -63 / -70%
+  (svgz -21 / -36 / -41%, flat pen -24 / -42 / -49%); integer-lattice mouse input -17 / -33 / -41%.
+  The perftest spiral turns 90 deg per sample, so it gains only 2% (8.99 -> 8.79 MB): don't judge this by
+  it. Cost: median 0.01 ms per stroke, 0.5 ms for a 1300-sample stroke (best of 20).
+- **Save format note:** path data is written as 3 decimal *relative* coordinates, and the rounding
+  accumulates along a path, so a reloaded long stroke wanders by ~0.005-0.02 units. That is the same order
+  as Invisible's tolerance and has nothing to do with it (fewer points actually means less drift); the
+  bench compares absolute-coordinate saves for this reason.
+- **Tests:** `scribbletest/simplifytest.cpp` (standalone, no GL) pins the bounds, kept-point subset, caps,
+  the turn cap on circles of radius 1-300 and Off as a no-op; `strokeSimplifyTest()` drives every pen kind
+  through the real builders and the drawn pen-up path (Off bit-identical, bound per preset, centre of mass
+  unchanged, erase into pieces, undo/redo exact, width change, save/reload). Both checked to fail with the
+  tolerance tripled. `scribbletest.cpp` sets `strokeSimplify` to 0 like `inputCurveFit` (the `testN_ref`
+  fixtures); the whole suite run with it forced to Invisible differs only in the drawn paths of fixtures
+  2, 14 and 15.
+- Not the same thing as `inputSimplify` (old, default 0): that one runs live, per point, on the stream.
+
 # Sub-pixel input on Linux (experimental, off by default)
 
 Hand-drawn curves render as runs of straight segments. The cause was measured, not guessed

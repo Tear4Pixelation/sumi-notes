@@ -106,6 +106,9 @@ const char* prefInfoXML = R"#(
       title="Simplification" description="Simplification threshold in 0.05 pixel steps" />
   <pref name="inputCurveFit" type="int" min="0" max="4" group="Input"
       title="Curve fitting" description="Fit strokes to a smooth curve, compensating for whole-pixel input; 0 disables, 4 is strongest" />
+  <pref name="strokeSimplify" type="int" group="Input"
+      enum="Off;Invisible;Balanced;Aggressive"
+      title="Stroke simplification" description="Store fewer points for each finished stroke; Invisible cannot be seen even at maximum zoom" />
   <pref name="useWintab" type="bool" group="Input"
       title="Use Wintab if available" description="Use Wacom Wintab tablet interface" exclude="mobile,linux,mac" />
 

@@ -4036,6 +4036,10 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
     if(gestureFrame.isRotated() && currStroke->isPathElement())
       currStroke->setCom(StrokeBuilder::calcCom(currStroke->node, static_cast<SvgPath*>(currStroke->node)->path(),
           gestureFrame.localTransform(), gestureFrame.pageTransform()));
+    // pen-up simplification (strokesimplify.h), after the centre of mass so line assignment is measured on
+    //  the stroke as drawn.  Only ever here, on a finished new stroke - never live, never on loaded documents
+    if(!currPen()->hasFlag(ScribblePen::EPHEMERAL))
+      scribbleDoc->strokeBuilder->simplifyFinished(currStroke, strokeSimplifyPreset(cfg->Int("strokeSimplify")));
     scribbleDoc->updateCurrStroke(scribbleDoc->strokeBuilder->getDirty());
     delete scribbleDoc->strokeBuilder;  // we now own the stroke
     scribbleDoc->strokeBuilder = NULL;

@@ -139,7 +139,7 @@ relevant file before changing that area.
 - [performance.md](docs/agent/performance.md) - how to measure (`BENCH=1`, `perf-bench.sh --mode benchtest`, callgrind), results of the Oct 2026 optimization pass, open behavior-change decisions
 - [navigation.md](docs/agent/navigation.md) - wheel/zoom/pan, sdl2-compat `preciseX/Y`, `SDL_Event = {}`, modifier tracking, testing scroll in agent-display
 - [touch-input.md](docs/agent/touch-input.md) - finger path through SvgGui `MULTITOUCH` to `ScribbleInput`, `isTouchAccepted()` as the gate stuck states end at, pen cancel (fingers ignored until the pen returns), pinch vs two finger tap, unconfirmed pinch/palm hypotheses
-- [stroke-input.md](docs/agent/stroke-input.md) - `CurveFitFilter` (measurements, failed Bezier fit), experimental Linux sub-pixel input
+- [stroke-input.md](docs/agent/stroke-input.md) - `CurveFitFilter` (measurements, failed Bezier fit), pen-up stroke simplification (presets, tolerances, the facet trap), experimental Linux sub-pixel input
 - [tests.md](docs/agent/tests.md) - standalone test binaries (scan, shape, color, layer) and what each in-app `ScribbleTest` check pins
 - [ui-floating-bar.md](docs/agent/ui-floating-bar.md) - **the reference UI component**: floating action bar (rounded container of FAB-sized buttons replacing the FABs in a mode), exact padding/radii/colors, card selection marks, top inset - build new floating UI like this
 - [agent-display.md](docs/agent/agent-display.md) - two displays (Wayland pointer vs Xwayland keys) and the traps when driving the app

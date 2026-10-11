@@ -102,6 +102,12 @@
   <string name="pref_pressurescale">Pen pressure scaling</string>
   <string name="pref_smoothing">Smoothing</string>
   <string name="pref_simplification">Simplification</string>
+  <string name="pref_strokesimplify">Stroke simplification</string>
+  <string name="pref_strokesimplify_desc">Store fewer points for each finished stroke; Invisible cannot be seen even at maximum zoom</string>
+  <string name="pref_strokesimplify_off">Off</string>
+  <string name="pref_strokesimplify_invisible">Invisible</string>
+  <string name="pref_strokesimplify_balanced">Balanced</string>
+  <string name="pref_strokesimplify_aggressive">Aggressive</string>
   <string name="pref_uisection">User Interface</string>
   <string name="pref_changesrestart">Changes may not take effect until Sumi is restarted.</string>
   <string name="pref_returnprevtool">Return to previous tool</string>

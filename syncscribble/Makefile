@@ -12,6 +12,7 @@ SOURCES = \
   resources.cpp \
   basics.cpp \
   strokebuilder.cpp \
+  strokesimplify.cpp \
   shape.cpp \
   shaperec.cpp \
   rulingregion.cpp \
