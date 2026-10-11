@@ -30,7 +30,7 @@
 // the same place scribbleres/pdf2write.sh has always put PDF page images, and it is the right one:
 // the rule layer is the page background, so the image cannot be selected, dragged or erased by
 // accident, while everything in the content layer (i.e. the user's ink) draws on top of it.
-static const char* PDF_BACKGROUND_CLASS = "write-pdf-background";
+const char* PdfImport::BACKGROUND_CLASS = "write-pdf-background";
 
 size_t PdfImport::MemoryBudget::remaining(size_t inUse) const
 {
@@ -72,7 +72,9 @@ PdfImport::ImportSaver::ImportSaver(Document* document, const std::string& path,
 bool PdfImport::ImportSaver::save(const char* thumb)
 {
   // savePicScaled would resample the page images down to one pixel per Write unit (i.e. 150 DPI),
-  //  throwing away exactly the resolution the import was asked for
+  //  throwing away exactly the resolution the import was asked for.  PDF pages are exempt anyway
+  //  (BACKGROUND_CLASS); this still covers what else an import writes - Noteful's photos and pictures -
+  //  which keep their pixels until the first ordinary save that rewrites their page, as before
   float savedImageScale = SvgWriter::DEFAULT_SAVE_IMAGE_SCALED;
   SvgWriter::DEFAULT_SAVE_IMAGE_SCALED = 0;
   // the first write creates the file; the later ones write from the first page not yet in it, plus the
@@ -683,7 +685,7 @@ int PdfImport::importPdf(Document* doc, const char* filename, const Options& opt
     Page* page = new Page(props);
     // the ctor generated a rule layer holding just the .pagerect; add the page image over it
     SvgImage* background = new SvgImage(std::move(img), Rect::ltwh(0, 0, width, height));
-    background->addClass(PDF_BACKGROUND_CLASS);
+    background->addClass(BACKGROUND_CLASS);
     page->ruleNode->addChild(background);
     // Mark the ruling as custom so a page-size change doesn't regenerate the layer and drop the
     // image.  Dropping "write-std-ruling" is what makes that stick across save/load - Page::loadSVG

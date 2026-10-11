@@ -108,6 +108,8 @@ public:
   void benchTest();
   // retained canvas layer vs direct drawing, pixel for pixel (canvaslayertest.cpp)
   void canvasLayerTest();
+  // Import PDF file sizes/times per resolution, and whole-document resaves (benchtest.cpp, env SUMI_PDFSIZE_*)
+  void pdfSizeTest();
   int layerCompare(const char* name);
   void inputTest();
   void syncSlaveMsg(std::string msg, int level);

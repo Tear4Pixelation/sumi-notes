@@ -766,6 +766,66 @@ int ScribbleTest::pdfImportTest()
     backgrounds = backgrounds && loaded->ensureLoaded(false) && loaded->ruleNode && loaded->ruleNode->selectFirst("image");
   check(backgrounds, "every page has its background image");
 
+  // A PDF page keeps the resolution it was imported at through ordinary saves that rewrite its page, with
+  //  "Reduce image size" on - it used to come back at ~150 DPI from the first one - while a picture without
+  //  the PDF background class is still reduced to its size in the document
+  {
+    float savedScale = SvgWriter::DEFAULT_SAVE_IMAGE_SCALED;
+    const char* savedClass = SvgWriter::NO_RESAMPLE_CLASS;
+    SvgWriter::DEFAULT_SAVE_IMAGE_SCALED = 1;  // savePicScaled on a 1x screen: one pixel per unit
+    SvgWriter::NO_RESAMPLE_CLASS = PdfImport::BACKGROUND_CLASS;  // as ScribbleApp::loadConfig sets it
+    std::string hiresPath = pdfPath + "-300.svgz", save1 = pdfPath + "-save1.svgz", save2 = pdfPath + "-save2.svgz";
+    const int fullWidth = int(595*scale + 0.5);
+    {
+      Document doc;
+      PdfImport::ImportSaver saver(&doc, hiresPath);
+      PdfImport::Options opts;
+      opts.dpi = 300;
+      opts.saver = &saver;
+      check(PdfImport::importPdf(&doc, pdfPath.c_str(), opts) == 3 && saver.finish(), "300 DPI import saved");
+    }
+    // pixel widths of page 0's rule layer images: the background, then the picture added below
+    auto ruleImageWidths = [](const std::string& path) {
+      std::vector<int> widths;
+      Document doc;
+      if(doc.load(new FileStream(path.c_str(), "rb")) == Document::LOAD_OK && doc.numPages() > 0
+          && doc.pages[0]->ensureLoaded(false) && doc.pages[0]->ruleNode) {
+        for(SvgNode* node : doc.pages[0]->ruleNode->select("image"))
+          widths.push_back(static_cast<SvgImage*>(node)->m_image.width);
+      }
+      return widths;
+    };
+    // two ordinary saves, each rewriting every page (dirty pages are never copied verbatim)
+    Document doc;
+    bool loaded = doc.load(new FileStream(hiresPath.c_str(), "rb")) == Document::LOAD_OK && doc.numPages() == 3
+        && doc.pages[0]->ensureLoaded(false);
+    check(loaded, "300 DPI import reloads");
+    if(loaded) {
+      Image picture(800, 800);
+      memset(picture.bytes(), 0xFF, size_t(800)*800*4);
+      doc.pages[0]->ruleNode->addChild(new SvgImage(std::move(picture), Rect::ltwh(0, 0, 200, 200)));
+      const char* paths[] = {save1.c_str(), save2.c_str()};
+      for(const char* path : paths) {
+        for(Page* docPage : doc.pages) {
+          docPage->ensureLoaded(false);
+          ++docPage->dirtyCount;
+        }
+        check(doc.save(new FileStream(path, "wb+"), NULL, Document::SAVE_FORCE | (Document::saveflags_t(2) << 24)),
+            "ordinary save of the imported document");
+      }
+      std::vector<int> widths1 = ruleImageWidths(save1), widths2 = ruleImageWidths(save2);
+      check(widths1.size() == 2 && std::abs(widths1[0] - fullWidth) <= 1 && widths2.size() == 2
+          && std::abs(widths2[0] - fullWidth) <= 1, "a PDF page keeps its import resolution across two saves");
+      check(widths1.size() == 2 && widths1[1] == 200 && widths2.size() == 2 && widths2[1] == 200,
+          "a picture without the PDF class is still reduced to its size in the document");
+    }
+    SvgWriter::DEFAULT_SAVE_IMAGE_SCALED = savedScale;
+    SvgWriter::NO_RESAMPLE_CLASS = savedClass;
+    removeFile(hiresPath.c_str());
+    removeFile(save1.c_str());
+    removeFile(save2.c_str());
+  }
+
   // Insert PDF: the pages go into the open document after the current page, as one undo step
   // (the same two calls as ScribbleApp::insertPdfPages, which needs the app's active document)
   {

@@ -655,3 +655,143 @@ void ScribbleTest::benchTest()
   if(exitAfterTest)
     exit(0);
 }
+
+// pdfsizetest - file size, time and memory of Import PDF at several resolutions, and of a save that rewrites
+//  every page (what an edit on each page does; the first such save of an old build resampled the pages).
+//  Not part of benchtest: it reads real files.  Run headless like benchtest; prints "PDFSIZE ..." lines.
+//  SUMI_PDFSIZE_FILES  ':'-separated PDFs, each imported at every resolution of
+//  SUMI_PDFSIZE_DPIS   ':'-separated DPIs (default 150:300)
+//  SUMI_PDFSIZE_DOCS   ':'-separated .svgz documents, each loaded and saved whole to a new file
+//  SUMI_PDFSIZE_REPS   saves per document (default 3); SUMI_PDFSIZE_OUT output directory (required)
+static double pdfSizeProcCpuMs()
+{
+  timespec ts;
+  clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &ts);
+  return ts.tv_sec*1000.0 + ts.tv_nsec/1.0E6;
+}
+
+static long long pdfSizeFileBytes(const std::string& path)
+{
+  FILE* file = fopen(path.c_str(), "rb");
+  if(!file) return -1;
+  fseek(file, 0, SEEK_END);
+  long long size = ftell(file);
+  fclose(file);
+  return size;
+}
+
+// pixel size of the first page's background image (no decode needed) and how many pages have one
+static void pdfSizeImageStats(Document& doc, int* imgw, int* imgh, int* nimages)
+{
+  *imgw = *imgh = *nimages = 0;
+  for(Page* page : doc.pages) {
+    if(!page->ensureLoaded(false) || !page->ruleNode) continue;
+    SvgNode* node = page->ruleNode->selectFirst("image");
+    if(!node) continue;
+    SvgImage* img = static_cast<SvgImage*>(node);
+    if(*nimages == 0) { *imgw = img->m_image.width; *imgh = img->m_image.height; }
+    ++*nimages;
+  }
+}
+
+// mark every page dirty, then save the whole document to outPath; wall ms returned, CPU ms of all threads
+static double pdfSizeResave(Document& doc, const std::string& outPath, double* cpuMs)
+{
+  for(Page* page : doc.pages) {
+    page->ensureLoaded(false);
+    ++page->dirtyCount;
+  }
+  ++doc.dirtyCount;
+  removeFile(outPath.c_str());
+  double t0 = benchNowMs(), c0 = pdfSizeProcCpuMs();
+  // compressLevel 2, as the app's saves (documentlist.cpp)
+  bool ok = doc.save(new FileStream(outPath.c_str(), "wb+"), NULL,
+      Document::SAVE_FORCE | (Document::saveflags_t(2) << 24));
+  *cpuMs = pdfSizeProcCpuMs() - c0;
+  double ms = benchNowMs() - t0;
+  if(!ok) fprintf(stderr, "PDFSIZE error saving %s\n", outPath.c_str());
+  return ms;
+}
+
+void ScribbleTest::pdfSizeTest()
+{
+  const char* outdir = getenv("SUMI_PDFSIZE_OUT");
+  auto envList = [](const char* name, const char* dflt) {
+    const char* val = getenv(name);
+    return splitStr<std::vector>(val ? val : dflt, ':', true);
+  };
+  const int reps = getenv("SUMI_PDFSIZE_REPS") ? std::max(1, atoi(getenv("SUMI_PDFSIZE_REPS"))) : 3;
+  fprintf(stderr, "PDFSIZE save_image_scale %.3f\n", SvgWriter::DEFAULT_SAVE_IMAGE_SCALED);
+  for(const std::string& pdf : envList("SUMI_PDFSIZE_FILES", "")) {
+    if(!outdir) break;
+    std::string base = FSPath(pdf).baseName();
+    for(const std::string& dpistr : envList("SUMI_PDFSIZE_DPIS", "150:300")) {
+      int dpi = atoi(dpistr.c_str());
+      std::string imported = fstring("%s/%s-%d.svgz", outdir, base.c_str(), dpi);
+      removeFile(imported.c_str());
+      double t0 = benchNowMs(), c0 = pdfSizeProcCpuMs();
+      int npages = -1;
+      {
+        Document importDoc;
+        PdfImport::ImportSaver saver(&importDoc, imported, NULL, 2);
+        PdfImport::Options opts;
+        opts.dpi = dpi;
+        opts.saver = &saver;
+        npages = PdfImport::importPdf(&importDoc, pdf.c_str(), opts);
+        if(npages > 0 && !saver.finish())
+          npages = -1;
+      }
+      double importMs = benchNowMs() - t0, importCpu = pdfSizeProcCpuMs() - c0;
+      long long importBytes = pdfSizeFileBytes(imported);
+      int imgw = 0, imgh = 0, nimg = 0;
+      Document doc;
+      doc.load(new FileStream(imported.c_str(), "rb"));
+      pdfSizeImageStats(doc, &imgw, &imgh, &nimg);
+      // decode one page image: what a page on screen holds (RGBA), and how long that takes
+      double decodeMs = 0;
+      SvgNode* first = !doc.pages.empty() && doc.pages[0]->ruleNode ? doc.pages[0]->ruleNode->selectFirst("image") : NULL;
+      if(first) {
+        const Image& img = static_cast<SvgImage*>(first)->m_image;
+        double d0 = benchNowMs();
+        Image decoded = Image::decodeBuffer(img.encData.data(), img.encData.size());
+        decoded.bytes();  // decodeBuffer only reads the header
+        decodeMs = benchNowMs() - d0;
+      }
+      fprintf(stderr, "PDFSIZE import %s dpi %d pages %d bytes %lld per_page %lld ms %.0f cpu_ms %.0f"
+          " img %dx%d decoded_bytes %lld decode_ms %.1f\n", base.c_str(), dpi, npages, importBytes,
+          npages > 0 ? importBytes/npages : 0, importMs, importCpu, imgw, imgh, (long long)imgw*imgh*4, decodeMs);
+      // two rewrites of every page, as two editing sessions would do (a save moves doc to its new file)
+      for(int pass = 1; pass <= 2; ++pass) {
+        std::string resaved = fstring("%s/%s-%d-resave%d.svgz", outdir, base.c_str(), dpi, pass);
+        double cpu = 0, ms = pdfSizeResave(doc, resaved, &cpu);
+        Document again;
+        again.load(new FileStream(resaved.c_str(), "rb"));
+        pdfSizeImageStats(again, &imgw, &imgh, &nimg);
+        fprintf(stderr, "PDFSIZE resave%d %s dpi %d bytes %lld ms %.0f cpu_ms %.0f img %dx%d\n", pass,
+            base.c_str(), dpi, pdfSizeFileBytes(resaved), ms, cpu, imgw, imgh);
+      }
+    }
+  }
+  for(const std::string& path : envList("SUMI_PDFSIZE_DOCS", "")) {
+    if(!outdir) break;
+    std::string base = FSPath(path).baseName();
+    Document doc;
+    double t0 = benchNowMs();
+    doc.load(new FileStream(path.c_str(), "rb"));
+    for(Page* page : doc.pages)
+      page->ensureLoaded(false);
+    fprintf(stderr, "PDFSIZE docload %s pages %d bytes %lld ms %.0f\n", base.c_str(), doc.numPages(),
+        pdfSizeFileBytes(path), benchNowMs() - t0);
+    for(int rep = 0; rep < reps; ++rep) {
+      // alternate between two names: a save moves the document to the file it wrote
+      std::string resaved = fstring("%s/%s-resaved%d.svgz", outdir, base.c_str(), rep % 2);
+      double cpu = 0, ms = pdfSizeResave(doc, resaved, &cpu);
+      fprintf(stderr, "PDFSIZE docsave %s rep %d bytes %lld ms %.0f cpu_ms %.0f\n", base.c_str(), rep,
+          pdfSizeFileBytes(resaved), ms, cpu);
+    }
+  }
+  fprintf(stderr, "PDFSIZE_DONE\n");
+  fflush(stderr);
+  if(exitAfterTest)
+    exit(0);
+}

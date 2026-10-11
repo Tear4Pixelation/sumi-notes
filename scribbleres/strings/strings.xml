@@ -357,6 +357,11 @@
   <string name="pref_toptabbar_off">Off</string>
   <string name="pref_toptabbar_library">Library only</string>
   <string name="pref_toptabbar_both">Library + Writing</string>
+  <string name="pref_pdfimportdpi">PDF import resolution</string>
+  <string name="pref_pdfimportdpi_desc">DPI at which PDF pages are rendered on import; kept on save</string>
+  <string name="pref_pdfimportdpi_150">Standard (150 DPI)</string>
+  <string name="pref_pdfimportdpi_300">High (300 DPI)</string>
+  <string name="pref_enum_other">Other (%d)</string>
   <string name="menu_webview">Show Web View</string>
   <string name="menu_exportdocs">Backup Documents</string>
   <string name="menu_addbookmark">Bookmark</string>

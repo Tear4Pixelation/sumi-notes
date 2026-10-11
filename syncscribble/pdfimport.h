@@ -21,6 +21,12 @@ namespace PdfImport {
 // Write uses 150 units per inch as its reference resolution; PDF is 72 points per inch.
 static constexpr Dim UNITS_PER_POINT = 150.0/72.0;
 
+// class of a page background rendered from a PDF (Import PDF, Insert PDF, Noteful's PDF backgrounds).  The
+//  app makes it SvgWriter::NO_RESAMPLE_CLASS: such an image keeps the resolution it was imported at
+//  (pdfImportDPI) through every save, where "Reduce image size" (savePicScaled) used to resample it to
+//  ~150 DPI the first time a save rewrote its page - and only those pages, so a document ended up mixed.
+extern const char* BACKGROUND_CLASS;
+
 // How much memory an import may hold (the "Limit memory" option of the Import menu): its input (a
 //  notebook is read whole), MuPDF's allocations, which are counted exactly, and the page images not yet
 //  written - none, once an ImportSaver writes each page as it is made.  What is counted is what the

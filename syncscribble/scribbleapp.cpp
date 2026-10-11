@@ -550,6 +550,8 @@ static int tabUnloadCheckMs(int timeoutSecs);
 void ScribbleApp::loadConfig()
 {
   SvgWriter::DEFAULT_SAVE_IMAGE_SCALED = cfg->Bool("savePicScaled") ? std::max(Dim(1), gui->paintScale) : 0;
+  // ... except PDF page backgrounds, which keep the resolution they were imported at (pdfImportDPI)
+  SvgWriter::NO_RESAMPLE_CLASS = PdfImport::BACKGROUND_CLASS;
   Element::ERASE_IMAGES = cfg->Bool("eraseOnImage");
   // this should really be per-document, but stick here for now while we consider auto-detecting value
   Page::BLANK_Y_RULING = cfg->Float("blankYRuling");
@@ -4347,6 +4349,11 @@ std::string ScribbleApp::runTest(std::string runtype)
   else if(runtype == "benchtest") {
     ScribbleTest test(activeDoc(), bookmarkArea, scribbleMode);
     test.benchTest();
+    return test.resultStr;
+  }
+  else if(runtype == "pdfsizetest") {
+    ScribbleTest test(activeDoc(), bookmarkArea, scribbleMode);
+    test.pdfSizeTest();
     return test.resultStr;
   }
   else if(runtype == "canvaslayertest") {

@@ -51,24 +51,32 @@ void ConfigDialog::init()
         for(std::string& s : enumNames)
           s = _(s.c_str());  // apply i18n
       }
+      std::vector<int> vals;
+      int currIndex = -1;
+      if(!cfg->isString(name) && pref.attribute("enumvals")) {
+        int currval = cfg->Int(name);
+        for(const std::string& s : splitStr<std::vector>(pref.attribute("enumvals").as_string(), ';', true)) {
+          vals.push_back(atoi(s.c_str()));
+          if(vals.back() == currval)
+            currIndex = int(vals.size()) - 1;
+        }
+        // a value set some other way (an older version's free entry, the command line) is offered as it is,
+        //  so OK does not silently replace it with the first preset
+        if(currIndex < 0) {
+          enumNames.push_back(fstring(_("Other (%d)"), currval));
+          vals.push_back(currval);
+          currIndex = int(vals.size()) - 1;
+        }
+      }
       ComboBox* cb = createComboBox(enumNames);
       if(cfg->isString(name))  // type == "string"
         cb->setText(cfg->String(name));
-      else {
-        int currval = cfg->Int(name);
-        if(pref.attribute("enumvals")) {
-          auto strvals = splitStr<std::vector>(pref.attribute("enumvals").as_string(), ';', true);
-          std::vector<int> vals;
-          for(const std::string& s : strvals) {
-            vals.push_back(atoi(s.c_str()));
-            if(vals.back() == currval)
-              cb->setIndex(vals.size() - 1);
-          }
-          cb->setUserData<std::vector<int>>(vals);
-        }
-        else
-          cb->setIndex(currval);
+      else if(!vals.empty()) {
+        cb->setIndex(currIndex);
+        cb->setUserData<std::vector<int>>(vals);
       }
+      else
+        cb->setIndex(cfg->Int(name));
       p = cb;
     }
     else if(type == "bool") {

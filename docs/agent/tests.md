@@ -144,6 +144,10 @@ text fragment both fail it.
   is lossless for 1-4 channels with a padded stride, and a prefetched decode (`Image::prefetchDecode`, the
   image moved meanwhile) gives the pixels a plain decode does. Mutation-tested: filtering a stripe's first row
   against zeros and flipping a byte in the worker's pixels each fail it.
+  A 300 DPI import keeps its page width (2479 px) across two saves that rewrite every page with "Reduce image
+  size" on (`DEFAULT_SAVE_IMAGE_SCALED` = 1), while an 800 px picture without `PdfImport::BACKGROUND_CLASS` on
+  a 200 unit rect still comes back at 200 px. Verified to fail with `SvgWriter::NO_RESAMPLE_CLASS` unset
+  (the old behavior: the page came back at ~1240 px).
 
 - **Two-client sync (`--synctest`)** needs a real server: run stylusboard
   (github.com/styluslabs/stylusboard, Node; `npm install moment minimist` is enough without `--db`)
@@ -282,3 +286,12 @@ Traps, each found the hard way:
 
 Env: `SUMI_BENCH_PAGES` (default 100), `SUMI_BENCH_VSYNC=1`, `SUMI_BENCH_KEEP=1` (leaves the generated
 files in `$TMPDIR/sumi-bench-<pid>`).
+
+**`--pdfsizetest`** (also in benchtest.cpp, not part of benchtest since it reads real files): imports each PDF of
+`SUMI_PDFSIZE_FILES` (':'-separated) at each DPI of `SUMI_PDFSIZE_DPIS` (default `150:300`) into
+`SUMI_PDFSIZE_OUT`, then saves the result twice with every page rewritten; and loads each document of
+`SUMI_PDFSIZE_DOCS` and saves it whole `SUMI_PDFSIZE_REPS` times (default 3). Prints `PDFSIZE ...` lines: file
+size and size per page, import wall/CPU time (CPU of all threads), the page image's pixel size before and after
+each save, the decoded size and decode time of one page image, and save times. Run it like benchtest
+(headless cage, `--library` on a scratch dir); pass `--savePicScaled 0` to time compression alone. Results of
+the PDF resolution change are in [pdf-import.md](pdf-import.md#resolution-on-save-and-file-size).

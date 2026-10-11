@@ -61,12 +61,8 @@ writes a `.svgz` into the document library (next to the PDF when there is no lib
 for a `--out` conversion) and then opens it like any other document, which keeps undo, views
 and sync entirely out of the import path. `.pdf` paths are routed to the importer from
 `doOpenDocument()` (doc list, drag-drop, Android intents) and from the command-line `argDoc` branch.
-Note the import temporarily forces `SvgWriter::DEFAULT_SAVE_IMAGE_SCALED = 0` (in `ImportSaver::save`),
-otherwise `savePicScaled` resamples the pages back down to 150 DPI and discards the chosen `pdfImportDPI`.
-Since `Document::saveBgz` copies unloaded, clean pages' compressed blocks verbatim (see the comment
-above `canCopyBlock()`), a later ordinary save only resamples the pages it actually loads; an imported
-page nobody opened keeps its import resolution. Before, editing page 1 and saving re-serialized (and so
-resampled) every later page.
+The page image carries the class `write-pdf-background` (`PdfImport::BACKGROUND_CLASS`), which keeps its
+resolution through every save - see [Resolution on save](#resolution-on-save-and-file-size).
 
 Import runs synchronously on the UI thread, so nothing is drawn until it returns: a `showNotify()`
 set before it never appeared and the app looked frozen. `ProgressBox` (`scribbleapp.cpp`, also used
@@ -77,6 +73,55 @@ queues events, so nothing re-enters while the window keeps answering the composi
 the size of its first layout, hence the fixed-width sizer rect: without it longer messages were
 squashed horizontally. There is no separate "Saving..." step any more: each page is written as it is
 made (below), so the end of an import only writes the closing block and the thumbnail.
+
+## Resolution on save and file size
+
+**PDF page images keep their import resolution (`pdfImportDPI`) through every save.** Before, "Reduce image
+size" (`savePicScaled`, on by default) resampled every image larger than its size in the document to one pixel
+per unit times `paintScale` (`SvgWriter::DEFAULT_SAVE_IMAGE_SCALED`, set in `ScribbleApp::loadConfig`; the
+check is in `SvgWriter::_serialize(SvgImage*)`) - ~150 DPI on a 1x screen. The import itself was exempt
+(`ImportSaver::save` sets the scale to 0 around its writes), but the first ordinary save that *rewrote* a page
+resampled it, and since the verbatim block copy (`canCopyBlock()`) only rewritten pages were affected, so
+documents ended up mixed 150/300 DPI. Now `SvgWriter::NO_RESAMPLE_CLASS` (usvg) is set to
+`write-pdf-background` and such images are written as the bytes they were imported as, never decoded.
+Tagged: Import PDF and Insert PDF pages (always had the class) and, new, Noteful backgrounds rendered from the
+notebook's PDF. **Not** tagged, so still reduced exactly as before: photos/scans (scan pages, Insert Image,
+Noteful photo backgrounds and pictures), a PDF page inserted *as an image* (Insert Document), and images of
+notebooks imported before Noteful backgrounds got the class. `ImportSaver`'s scale override stays for those
+Noteful photos. Pages an old build already reduced stay reduced; there is no convert-to-150 command (deferred).
+Trap: dropping the class from the importer, or the `NO_RESAMPLE_CLASS` assignment in `loadConfig`, brings the
+resampling back silently - `pdfImportTest` catches both.
+
+Preferences > Document List > **PDF import resolution**: Standard (150 DPI) / High (300 DPI), default 300 (an
+`enum`/`enumvals` combo). A value set some other way (older free entry, command line) shows as "Other (N)" so OK
+does not replace it.
+
+Measured with `--pdfsizetest` (tests.md), level-2 svgz, 1x screen. Size after import = size after any number
+of saves now; "old 300 after a save" is what the old build left once every page had been rewritten:
+
+| PDF | pages | 150 DPI | 300 DPI | 300/150 | old 300 after a save |
+|---|---|---|---|---|---|
+| text-heavy glossary, A4 (0.26 MB) | 12 | 2.75 MB (229 KB/page) | 5.60 MB (467 KB/page) | 2.0x | 3.66 MB |
+| blackboard photos, A4 (40 MB) | 20 | 7.95 MB (398 KB/page) | 19.85 MB (992 KB/page) | 2.5x | 8.89 MB |
+| 16:9 slides (1.9 MB) | 25 | 12.6 MB (504 KB/page) | 34.2 MB (1.37 MB/page) | 2.7x | 13.6 MB |
+
+A page resampled 300 -> 150 compresses worse than one rendered at 150 (3.66 vs 2.75 MB above). Decoded page
+(RGBA, also what the GL texture holds): A4 8.7 MB at 150, 34.8 MB at 300; a slide 5.1 / 20.3 MB; up to two pages
+are held decoded ahead (`prefetchImages`). Import CPU (all threads) 300 vs 150: text 4.3 vs 1.4 s, photos 20.0 vs
+8.8 s, slides 21.0 vs 5.5 s. The first save that rewrote all pages of a 300 DPI import took 5.6 / 12.8 / 19.5 s
+(decode + resample + PNG encode); it is now 0.1 / 0.2 / 0.7 s.
+
+## svgz compression level per page block
+
+`compressLevel` (doc config, default 2) is the deflate level of a save. `bgzBlockLevel()` (document.cpp) uses
+level 1 instead for a page block that holds >= 64 KiB of base64 image data making up >= 3/4 of the block -
+base64 of PNG/JPEG gives deflate's matcher nothing, the gain is Huffman coding, which level 1 does as well.
+Anything without such an image (every stroke-only document) is written byte for byte as before; an explicitly
+chosen level other than 2 is respected; any inflater reads either. Measured (`--pdfsizetest --savePicScaled 0`,
+whole-document save, median of 5, CPU of all threads): 20 photo pages 1504 -> 447 ms (+0.03% bytes), 25 slides
+2628 -> 792 ms (-0.5%), 12 text pages at 300 DPI 396 -> 125 ms (+1.2%), two real notebooks with ink and pictures
+285 -> 232 ms (+0.05%) and 240 -> 96 ms (-0.04%). Imports use it too (each page block is written by the same
+save).
 
 ## Memory (shared with Noteful import)
 

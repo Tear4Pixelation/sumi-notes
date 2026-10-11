@@ -151,8 +151,9 @@ const char* prefInfoXML = R"#(
   <pref name="libraryPath" type="string" level="1" group="Document List" exclude="ios"
       title="Library folder" description="Where documents are kept; changing it moves them" />
 
-  <pref name="pdfImportDPI" type="int" min="72" max="600" group="Document List"
-      title="PDF import resolution" description="DPI at which PDF pages are rendered on import" />
+  <pref name="pdfImportDPI" type="int" group="Document List"
+      enum="Standard (150 DPI);High (300 DPI)" enumvals="150;300"
+      title="PDF import resolution" description="DPI at which PDF pages are rendered on import; kept on save" />
   <pref name="pdfImportLossy" type="bool" level="1" group="Document List"
       title="Compress imported PDF pages" description="Smaller files, but blurrier text" />
 

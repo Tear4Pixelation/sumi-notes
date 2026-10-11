@@ -46,13 +46,14 @@ paths, vtex upload), [themes.md](themes.md) (literal cusp table), [pdf-import.md
 speed, verbatim svgz block copy, Android exports), [page-management.md](page-management.md) (thumbnail
 proxies and cache), [sidebar.md](sidebar.md), [layers.md](layers.md), [tests.md](tests.md).
 
+Decided later: PDF page images keep `pdfImportDPI` through saves (no more resampling to ~150 DPI), and
+image-dominated svgz page blocks are deflated at level 1 - both in [pdf-import.md](pdf-import.md#resolution-on-save-and-file-size).
+
 ## Open decisions (behavior changes deliberately not made)
 
 - Curve-fit output is never simplified (`inputSimplify` = 0), so documents are ~77% larger than needed;
   simplifying changes stored geometry within tolerance.
-- The first ordinary save after a PDF import resamples its pages to ~150 DPI, discarding `pdfImportDPI`.
 - In-memory undo history is unbounded.
-- svgz compression level 1 for image-heavy blocks would be ~4x faster for ~2% larger files.
 - Dragging a large selection could use a cached layer, but that changes z-order during the drag.
 - Unchanged pages of notebooks written by older builds are now copied verbatim on partial save instead of
   being re-normalized (ruling rounding, image resampling); output is semantically identical but not

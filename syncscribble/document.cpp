@@ -319,6 +319,37 @@ static bool startTagAttr(const std::string& tag, const char* name, std::string* 
   return false;
 }
 
+// Deflate level for one page block: level 2 (the default compressLevel) drops to 1 when the block is mostly
+//  base64 image data.  That is already-compressed PNG/JPEG bytes in a 64-letter alphabet: deflate's string
+//  matching finds next to nothing in it at any level, and what it gains (about 25%) comes from Huffman
+//  coding, which level 1 does just as well.  Measured on image pages: level 1 ~4x faster (534 vs 2316 ms)
+//  for ~2% more bytes (63.1% vs 61.7% of the input).  On ink, level 2 is worth its cost (27.5% vs 31.8%),
+//  so a block switches only when the images are at least 3/4 of it - pages are either a PDF/scan/photo
+//  background with some ink on top (>90% image) or ink with at most a small picture, so the threshold is
+//  not delicate - and hold at least 64 KiB of image data, below which the time does not matter.  A page
+//  without an inline image is never affected, so a stroke-only document saves byte for byte as before;
+//  deflate output at any level is read by any inflater, old versions included.
+static int bgzBlockLevel(int level, const char* text, size_t len)
+{
+  if((level & 0x0F) != 2)
+    return level;  // an explicitly chosen compressLevel is respected
+  static const char key[] = "data:image/";
+  const size_t keylen = sizeof(key) - 1;
+  const char* end = text + len;
+  const char* pos = text;
+  size_t imagebytes = 0;
+  // memchr + memcmp rather than memmem, which MSVC lacks; the payload itself is skipped in one memchr
+  while(size_t(end - pos) > keylen && (pos = (const char*)memchr(pos, 'd', end - pos - keylen))) {
+    if(memcmp(pos, key, keylen) != 0) { ++pos; continue; }
+    const char* attrend = (const char*)memchr(pos, '"', end - pos);
+    if(!attrend) attrend = end;
+    const char* comma = (const char*)memchr(pos, ',', attrend - pos);
+    if(comma) imagebytes += attrend - (comma + 1);
+    pos = attrend;
+  }
+  return imagebytes >= (64 << 10) && imagebytes >= len - len/4 ? (level & ~0x0F) | 1 : level;
+}
+
 struct BgzBlock
 {
   Page* page = NULL;
@@ -336,7 +367,11 @@ struct BgzBlock
   ~BgzBlock() { free(zbytes); }
   const uint8_t* data() const { return copied ? oldBytes.data() : zbytes; }
   size_t size() const { return copied ? oldBytes.size() : zlen; }
-  void compress(int level) { crc = 0; nout = miniz_deflate_mem(level, svg.data(), svg.size(), &zbytes, &zlen, &crc); }
+  void compress(int level) {
+    crc = 0;
+    level = bgzBlockLevel(level, (const char*)svg.data(), svg.size());
+    nout = miniz_deflate_mem(level, svg.data(), svg.size(), &zbytes, &zlen, &crc);
+  }
 };
 
 static ThreadPool* bgzThreadPool()

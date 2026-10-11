@@ -215,6 +215,7 @@ static Page* createPage(const Noteful::Notebook& notebook, const Noteful::Page& 
 
   std::string error;
   Image background(0, 0);
+  bool renderedFromPdf = false;
   if(!src.assetId.empty()) {
     PdfImport::Renderer& renderer = pdfCache->renderer;
     // the asset is copied out of the notebook only when it is not the PDF already open
@@ -247,6 +248,7 @@ static Page* createPage(const Noteful::Notebook& notebook, const Noteful::Page& 
       }
     }
     if(pdfCache->assetId == src.assetId && renderer.isOpen()) {
+      renderedFromPdf = true;
       background = renderer.render(src.assetPage, opts.dpi, opts.lossy ? Image::JPEG : Image::PNG, NULL, NULL, part);
       if(background.isNull())
         error = renderer.error();
@@ -259,6 +261,10 @@ static Page* createPage(const Noteful::Notebook& notebook, const Noteful::Page& 
   }
   SvgImage* image = new SvgImage(std::move(background), bounds);
   image->addClass(NOTEFUL_BACKGROUND_CLASS);
+  // a PDF page rendered at pdfImportDPI keeps that resolution through later saves, as Import PDF's do;
+  //  a photo or scan background is resampled by "Reduce image size" like any other picture
+  if(renderedFromPdf)
+    image->addClass(PdfImport::BACKGROUND_CLASS);
   page->ruleNode->addChild(image);
   // as for PDF import: custom ruling survives save/load and page size changes, and is not copied to
   //  the next page added after this one
