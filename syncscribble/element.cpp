@@ -698,12 +698,13 @@ void Element::applyTransform(const ScribbleTransform& tf)
   //  moves its styled bounds by exactly tf's offset (Element::applyStyle applies the pending transform in
   //  root space, the space bounds are cached in), so shift the cached bounds below instead of leaving them
   //  to be recomputed for every dirty rect while a selection is dragged (see pen-and-tools.md)
-  Rect shiftedBounds;
-  if(node->type() == SvgNode::PATH && tf.isTranslate() && tf.internalScale[0] == 1 && tf.internalScale[1] == 1
+  // (this runs per stroke per move event, so it is kept to plain compares - see perf_move_selection)
+  const Rect oldBounds = node->m_cachedBounds;
+  const bool shiftBounds = tf.isTranslate() && tf.internalScale[0] == 1 && tf.internalScale[1] == 1
       && m_pendingTransform.isTranslate() && m_pendingTransform.internalScale[0] == 1
       && m_pendingTransform.internalScale[1] == 1 && (m_applyPending || m_pendingTransform.isIdentity())
-      && node->m_cachedBounds.isValid())
-    shiftedBounds = Rect(node->m_cachedBounds).translate(tf.xoffset(), tf.yoffset());
+      && oldBounds.left <= oldBounds.right && oldBounds.top <= oldBounds.bottom  // Rect::isValid()
+      && node->type() == SvgNode::PATH;
   m_pendingTransform = tf * m_pendingTransform;
   m_applyPending = false;  // will be set to true if none of special cases below apply
   if(!m_com.isNaN())
@@ -790,8 +791,10 @@ void Element::applyTransform(const ScribbleTransform& tf)
     m_applyPending = true;
   // invalidate() above still marked the node BOUNDS_DIRTY and cleared the parents' bounds, so the dirty
   //  rect unites the old rendered bounds with these
-  if(m_applyPending && shiftedBounds.isValid())
-    node->m_cachedBounds = shiftedBounds;
+  if(shiftBounds && m_applyPending) {
+    const Dim dx = tf.xoffset(), dy = tf.yoffset();
+    node->m_cachedBounds = Rect::ltrb(oldBounds.left + dx, oldBounds.top + dy, oldBounds.right + dx, oldBounds.bottom + dy);
+  }
 }
 
 void Element::commitTransform()
