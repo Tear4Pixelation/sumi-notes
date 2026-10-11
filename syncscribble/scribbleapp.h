@@ -215,6 +215,8 @@ public:
   int activeTabIndex() const;
   // show tab `idx` in `area` (the active pane by default), saving the document it replaces first
   bool switchToTab(int idx, ScribbleArea* area = NULL);
+  // Ctrl+Tab / Ctrl+Shift+Tab: the next (step 1) or previous (step -1) tab in the active pane, wrapping
+  bool cycleTab(int step);
   // save the tab's document and close it; every pane showing it moves to a neighbouring tab, or to the
   //  library when it was the last
   bool closeTab(int idx);

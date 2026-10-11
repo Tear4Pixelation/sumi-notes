@@ -30,6 +30,10 @@ document (a temp copy) is never a tab.
   (`tabInsertAnchor`). LOAD_FATAL puts the old document back where it was.
 - `switchToTab()` = `maybeSave()` on the document being left (switching away is a save point; savePrompt
   and the untitled prompt behave as they always did) + `showTabInArea()`.
+- Ctrl+Tab / Ctrl+Shift+Tab (`cycleTab()`, checked at the top of `ScribbleApp::keyPressEvent`, before the
+  action shortcuts) switch the active pane to the next / previous tab, wrapping; from an untitled document
+  forward goes to the first tab, back to the last. Control on the Mac too, as browsers do. Not while the
+  library is shown. Verified in the agent display.
 - `showTabInArea()` attaches *before* loading: `ScribbleDoc::openDocument` positions its views and repaints
   the bookmarks of the active pane's document, which must not be NULL meanwhile. A tab kept in memory gets
   `checkExtModified(doc)` after it is shown - verified: touching a loaded background tab's file and
