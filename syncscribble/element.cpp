@@ -1445,11 +1445,21 @@ void Element::applyStyle(SvgPainter* svgp) const
         Color color = painter->fillBrush().color().setAlphaF(svgp->extraState().fillOpacity);
         painter->setStrokeBrush(color);
         painter->setStrokeWidth(width > 0 && width*avgScale < 2 ? width : 2/avgScale);
-        painter->setFillBrush(Color::NONE);
-        painter->drawPath(*static_cast<SvgPath*>(node)->path());
-        painter->setStrokeBrush(Color::NONE);
-        painter->setFillBrush(Color::WHITE);
-        svgp->extraState().fillOpacity = 1;  // opaque to cover internal structure (subpaths)
+        SvgPainter::ExtraState& es = svgp->extraState();
+        if(!es.dashServer && !es.fillServer && !es.strokeServer) {
+          // outline and white fill in SvgPainter's one drawPath: path flattened once, stroke painted first;
+          //  strokeOpacity = 1 keeps the outline at the opacity the separate drawPath used
+          painter->setFillBrush(Color::WHITE);
+          painter->setStrokeUnderFill(true);
+          es.strokeOpacity = 1;
+        }
+        else {
+          painter->setFillBrush(Color::NONE);
+          painter->drawPath(*static_cast<SvgPath*>(node)->path());
+          painter->setStrokeBrush(Color::NONE);
+          painter->setFillBrush(Color::WHITE);
+        }
+        es.fillOpacity = 1;  // opaque to cover internal structure (subpaths)
       }
       else if(hasStroke && !hasFill) {
         // Stroke once with normal color and width + 2, again with white

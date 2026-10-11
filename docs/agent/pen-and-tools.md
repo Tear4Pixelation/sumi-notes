@@ -564,3 +564,28 @@ itself pale, so alpha alone could not make it vivid.
   hide text. Night mode is a render-time `ColorMap` (see night-mode.md) and maps whatever colour is stored.
 - Verified in agent-display (Debug build) with a marker stroke over a pen line on lined paper: clearly
   saturated pink, line fully visible. Themed variants were not screenshotted.
+
+# Stroke rendering fast paths (nanovg)
+
+Pan and scroll frames are almost all path submission and flattening, so the per-point path is trimmed.
+Each of these must stay **pixel-identical** (checked by screenshot AE=0 on GL and `--glRender=0`):
+
+- `Painter::drawPath` hands each run of MoveTo/LineTo to `nvgPolylined()` (one call per run, not one
+  `nvgLineTo` per point). It must round each double to float *before* transforming, use the same
+  `x*t[0] + y*t[2] + t[4]` expression as `nvgTransformPoint`, and leave `commandx/y` at the last
+  untransformed point, exactly as `nvg__appendCommands` does.
+- `nvg__flattenPaths` handles a run of LINETOs inline (same `distTol` duplicate-point test as
+  `nvg__addPoint`); `nvg__expandFill` computes the fill bounds while writing the segments, so `nvgFill`
+  skips `nvg__calcBounds` (strokes still use it - their bounds come from the expanded stroke vertices).
+- A selected pen stroke (STROKEDRAW_SEL, a filled path) used to be submitted and flattened twice: the
+  coloured outline in `Element::applyStyle`, then the white fill in `SvgPainter::_draw`. Now applyStyle
+  sets the white fill plus `Painter::setStrokeUnderFill(true)` and `_draw`'s single `drawPath` strokes
+  first, then fills the same flattened path (`nvgStroke` restores the path cache). `strokeOpacity` is set
+  to 1 so `_draw` takes its one-pass branch at the opacity the old outline used. Paths with a dash
+  array or a fill/stroke paint server keep the old two-pass code.
+- vtex: when a flush's edges fit in one layer, the edge texture is specified with only the rows holding
+  edges (height < 256) instead of a whole 1 MB layer. It is still re-specified *with its data* every
+  flush. Allocating once and updating with `glTexSubImage3D` (in place, or after orphaning with a NULL
+  `glTexImage3D`) cut the Ir but made Move Selection ~2x and pan ~16% slower in wall and CPU time on
+  NVIDIA (driver sync / clear) - measured, don't redo it. The per-call `type`/`nedges`/`offset` uniforms
+  are set only when they change.
