@@ -467,6 +467,20 @@ $(filter %/load-jpx.o,$(patsubst %,$(OBJDIR)/%.o,$(basename $(MUPDF_REL_SRC)))):
 endif
 endif
 
+# -O3 for ulib/image.cpp only: it compiles stb_image_write, whose PNG filter loop
+# (stbiw__encode_png_line, run for every PDF page image and thumbnail) GCC vectorizes only at -O3.
+# Measured: that function 3.76G -> 0.97G instructions over benchtest, PDF import CPU -4.5%; output is
+# byte-identical (integer code, and -O3 enables no fast-math).  Tried on nanovg.c too: no gain, so not.
+# Release only - a target-specific -O3 would otherwise override a debug build's -O0.  MSVC's /O2 is
+# already its maximum, and ndk-build has no per-object flags here.
+ifeq ($(DEBUG),0)
+ifneq ($(OS),Windows_NT)
+ifeq ($(BUILD_SHARED_LIBRARY),)
+$(OBJDIR)/../ulib/image.o: CFLAGS += -O3
+endif
+endif
+endif
+
 # MuPDF (used for PDF import) lives in a submodule that has submodules of its own, most of which -
 # tesseract, leptonica, curl, zxing - we do not build.  A plain `git clone --recurse-submodules`
 # would fetch all of them, so init just the ones mupdf.mk actually compiles:
