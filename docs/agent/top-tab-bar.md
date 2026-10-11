@@ -149,6 +149,19 @@ Removed, and where each still is:
   `Timer*` is kept: closing the library window drops its timers while its `TopBar` lives on, so each call
   that sees a change sets its own timer and `rebuild()` re-checks the state. While the window has never
   been shown (no `SvgGui`: setupUI, the library's first `TagDocList::setup()`) the rebuild is immediate.
+- **Stripes through the bar and the floating toolbars on the iPad were the renderer, not the bar.**
+  iOS is the only platform on nanovg_gl's framebuffer fetch path (`USE_NANOVG_VTEX` is off there). A fill
+  adds winding per segment over quads up to the path's top, but reads and resets it only inside its bounds,
+  which nanovg clips to the scissor; winding added outside the clip stayed and corrupted the next fill
+  there. Every vertical ruling line drawn through a small clip (a dirty rect, a canvas layer edge strip)
+  left a column under the bar and the toolbars: missing or doubled pixels at ruling pitch, a page image
+  turned overlay icons into white boxes, frames later (tab switch, button release). Fixed app-side by
+  `Application::windingFillBounds()` (application.cpp, wraps `renderFill`), pinned by
+  `ScribbleTest::windingFillBoundsTest()`. Reproduced on Linux with `USE_NANOVG_VTEX` set to 0, where the
+  image atomic method shows it as thickened rule ends and stray dots; gone with the fix. **Not run on the
+  iPad.** Also still in nanovgXC: the winding texture (`GL_R32I`) is cleared with `glClearBufferfv`,
+  undefined for an integer buffer (`glClearBufferiv` is right); it is recreated whenever the viewport size
+  changes, which the canvas layer's view-sized frames now do on every layer render.
 - The test library must not be `Debug/library`: that is also the desktop debug build's fallback library,
   and the startup move from fallback into library deletes the marker when both are the same folder
   (pre-existing, not this feature's; only an agent fixture would set it up that way).
