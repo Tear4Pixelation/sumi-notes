@@ -52,7 +52,7 @@ private:
     bool active;
   };
 
-  Button* createIconButton(const char* icon, Dim hitWidth, Dim iconSize, const char* tooltip);
+  Button* createIconButton(const char* icon, Dim iconSize, const char* tooltip);
   TabCell createTab(const std::string& path, bool active);
   std::string tabState() const;
   void rebuild(bool force);

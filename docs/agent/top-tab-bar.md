@@ -2,7 +2,8 @@
 
 A full-width strip along the top of the window: the library (home) button, one tab per open document
 ([editor-tabs.md](editor-tabs.md)), and in the editor the View popup and the overflow menu. Designed in the
-Penpot file **"Tab Topbar"** (page "Topbar"); the sizes are that board's, 1:1, as the library's are.
+Penpot file **"Tab Topbar"** (page "Topbar"); the proportions are that board's, but the bar is **one toolbar row
+high** (the user prefers that to the board's 64), so every size is the board's value times `toolbarRowHeight()/64`.
 Code: `syncscribble/topbar.h/.cpp` (`TopBar`), placed by `MainWindow::setupUI()` (editor) and
 `TagDocList::createUI()` (library).
 
@@ -20,7 +21,13 @@ Code: `syncscribble/topbar.h/.cpp` (`TopBar`), placed by `MainWindow::setupUI()`
 `MainWindow::applyTopBarMode()` applies it at startup and on Preferences OK (`reloadConfig`); the library's
 bar follows it in `TagDocList::setup()`, i.e. on its next opening.
 
-## Anatomy (Penpot values)
+## Anatomy (Penpot values, before scaling)
+
+`metrics()` in `topbar.cpp` (`BarMetrics`) holds every size. The bar height is `toolbarRowHeight()`: the
+background rect of ugui's `#toolbutton` (theme.cpp), i.e. the height of the regular toolbar's row (42 units),
+read from the theme by instantiating one button, not copied. Scale `s = 42/64`: padding 4 12 -> 2.6 7.9,
+home 56 -> 36.8, radius 12 -> 7.9, icon 32 -> 21, tab padding 24 -> 15.8, title 18 -> 11.8, View/overflow
+icons 33/42 -> 21.7/27.6. Everything below is the board's value; multiply by `s`.
 
 ```
  bar      fill --dark, padding 4 12 (+ topInset above, see below), items 4 apart, centred
@@ -123,8 +130,14 @@ Removed, and where each still is:
   stopped short of the row's bottom padding, and that strip was never painted: it kept tab titles from
   the previous padding. The rect has an explicit height (the whole bar, padding included).
 - **The bar overdraws 2 units downward** (`bgOverdraw`, negative bottom margin, so the layout height is
-  still 64): 64 units is not a whole number of pixels at most scales (0.76 px/unit here), and the shared
+  unchanged): the bar height is not a whole number of pixels at most scales (0.76 px/unit here), and the shared
   pixel row was antialiased from both sides over stale pixels. Whatever follows paints over the overlap.
+- **Every bar button's hover/press rect is a `homeSize` square.** `createIconButton` used to size it icon wide
+  by `homeSize` high, so View (33) and overflow (42) lit up as tall rectangles; the icon (any size) is centred
+  in the square, the rect no longer follows it. Home, tab, close and the two buttons were each checked hovered
+  and pressed: all square or the tab's rounded rect (close is a rounded square inside the active tab).
+- **The row is `box-anchor="top hfill"`.** Without `top` the box layout centres it, and with the status bar
+  padding on (extra top margin) it sat half the padding too low (content spilled below the bar).
 - **Changing the bar's height repaints the canvas from a 1 ms timer** (`orientationChanged`): the canvas
   only repaints what it believes changed, and the strip it gained kept the bar's old pixels.
 - **`TopBar::refresh()` rebuilds on a 1 ms timer once the window is shown, never synchronously.**
