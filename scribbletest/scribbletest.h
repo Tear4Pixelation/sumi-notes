@@ -62,6 +62,8 @@ public:
   // a periodic timer slower than its own period does not hold back other timers (SvgGui::processTimers)
   int timerBacklogTest();
   int zeroSizeLayoutTest();
+  // nanovg_gl fills: the read pass's quad covers every winding quad (no winding left behind outside a clip)
+  int windingFillBoundsTest();
   // closing and reopening the sidebar's Pages view leaves one thumbnail renderer, not one per opening
   int thumbRendererTest();
   // shape edit mode without the Select tool: a finger tap on a shape selects it, a tap elsewhere and the

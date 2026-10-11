@@ -10,6 +10,7 @@ class SvgGui;
 class Window;
 class Dialog;
 struct SDL_Window;
+struct NVGpath;
 
 class Application
 {
@@ -27,6 +28,8 @@ public:
   static void finish() { runApplication = false; }
   // tests: the last frame painted, RGBA (SW: the screen's byte order), top row first
   static bool readFramebuffer(std::vector<unsigned char>& out, int& w, int& h);
+  // nanovg_gl fills: bounds whose fill quad covers every winding quad of the paths (application.cpp)
+  static void windingFillBounds(const NVGpath* paths, int npaths, const float* clipped, float* out);
 
 //private:
   static bool runApplication;
