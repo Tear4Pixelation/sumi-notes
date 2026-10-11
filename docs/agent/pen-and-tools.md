@@ -531,6 +531,9 @@ Each of these must stay **pixel-identical** (checked by screenshot AE=0 on GL an
   first, then fills the same flattened path (`nvgStroke` restores the path cache). `strokeOpacity` is set
   to 1 so `_draw` takes its one-pass branch at the opacity the old outline used. Paths with a dash
   array or a fill/stroke paint server keep the old two-pass code.
-- vtex: the edge texture is allocated only when it has to grow and only the rows holding edges are
-  uploaded (`glTexSubImage3D`); it was re-specified with whole 1 MB layers every frame. The per-call
-  `type`/`nedges`/`offset` uniforms are set only when they change.
+- vtex: when a flush's edges fit in one layer, the edge texture is specified with only the rows holding
+  edges (height < 256) instead of a whole 1 MB layer. It is still re-specified *with its data* every
+  flush. Allocating once and updating with `glTexSubImage3D` (in place, or after orphaning with a NULL
+  `glTexImage3D`) cut the Ir but made Move Selection ~2x and pan ~16% slower in wall and CPU time on
+  NVIDIA (driver sync / clear) - measured, don't redo it. The per-call `type`/`nedges`/`offset` uniforms
+  are set only when they change.
