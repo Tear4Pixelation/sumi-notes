@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 #include <functional>
 #include "resources.h"
 
@@ -24,6 +25,8 @@ public:
   static int execDialog(Dialog* dialog);
   static void asyncDialog(Dialog* dialog, const std::function<void(int)>& callback = NULL);
   static void finish() { runApplication = false; }
+  // tests: the last frame painted, RGBA (SW: the screen's byte order), top row first
+  static bool readFramebuffer(std::vector<unsigned char>& out, int& w, int& h);
 
 //private:
   static bool runApplication;

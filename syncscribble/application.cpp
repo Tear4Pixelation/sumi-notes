@@ -5,6 +5,7 @@
 #include "ugui/svggui.h"
 #include "scribbleapp.h"
 #include "scribbleview.h"
+#include "canvaslayer.h"
 #include "scribbleconfig.h"
 #include "sumiwindowicon.h"
 
@@ -161,6 +162,214 @@ static void poolWait()
   for(auto& future : swFutures)
     future.wait();
   swFutures.clear();
+}
+
+// the screen's SW framebuffer, recorded so a CanvasLayer render can switch to its own buffer and back
+static void* swScreenPixels = NULL;
+static int swScreenW = 0, swScreenH = 0, swScreenRShift = 0, swScreenGShift = 8, swScreenBShift = 16;
+
+static void setScreenSWFramebuffer(void* pixels, int w, int h, int rshift, int gshift, int bshift)
+{
+  swScreenPixels = pixels;  swScreenW = w;  swScreenH = h;
+  swScreenRShift = rshift;  swScreenGShift = gshift;  swScreenBShift = bshift;
+  nvgswSetFramebuffer(Application::painter->vg, pixels, w, h, rshift, gshift, bshift, 24);
+}
+
+// CanvasLayer (canvaslayer.h)
+
+CanvasLayer::~CanvasLayer()
+{
+  release();
+}
+
+void CanvasLayer::release()
+{
+  // GL objects belong to the context: once the painter is gone (app exit) they are left to the context
+  bool alive = vg && Application::painter && Application::painter->vg == vg;
+#ifndef NO_PAINTER_GL
+  for(void*& f : fb) {
+    if(f && alive)
+      nvgluDeleteFramebuffer((NVGLUframebuffer*)f);
+    f = NULL;
+  }
+#endif
+  if(image >= 0 && alive)
+    nvgDeleteImage(vg, image);
+  image = -1;
+  free(pixels);
+  pixels = NULL;
+  width = height = 0;
+  cur = 0;
+}
+
+bool CanvasLayer::resize(int w, int h)
+{
+  Painter* p = Application::painter;
+  if(!p || w <= 0 || h <= 0) {
+    release();
+    return true;
+  }
+  int fmt = Application::glRender ? nvglFBFlags :
+      (swScreenRShift | swScreenGShift << 8 | swScreenBShift << 16) + (1 << 30);
+  if(w == width && h == height && fmt == format && vg == p->vg)
+    return false;
+  release();
+  vg = p->vg;
+  format = fmt;
+  bool ok = false;
+  if(Application::glRender) {
+#ifndef NO_PAINTER_GL
+    // NEAREST: the layer is only ever drawn 1:1 at whole device pixels; same (sRGB) format as nvglFB
+    fb[0] = nvgluCreateFramebuffer(vg, w, h, nvglFBFlags | NVG_IMAGE_NEAREST);
+    fb[1] = nvgluCreateFramebuffer(vg, w, h, nvglFBFlags | NVG_IMAGE_NEAREST);
+    ok = fb[0] && fb[1];
+#endif
+  }
+  else {
+    pixels = (unsigned char*)malloc(size_t(w)*h*4);
+    // NOCOPY: nanovg_sw reads the buffer as it is when the frame renders, in the framebuffer's byte order
+    if(pixels)
+      image = nvgCreateImageRGBA(vg, w, h, NVG_IMAGE_NOCOPY | NVG_IMAGE_NEAREST | NVG_IMAGE_PREMULTIPLIED, pixels);
+    ok = image > 0;
+  }
+  if(!ok) {
+    release();
+    return true;
+  }
+  width = w;
+  height = h;
+  return true;
+}
+
+void CanvasLayer::shift(int dx, int dy)
+{
+  int w = width, h = height;
+  if(!isValid() || (dx == 0 && dy == 0) || std::abs(dx) >= w || std::abs(dy) >= h)
+    return;
+  // source rect of what survives, in top-down rows
+  int x0 = std::max(0, -dx), x1 = std::min(w, w - dx);
+  int y0 = std::max(0, -dy), y1 = std::min(h, h - dy);
+  if(Application::glRender) {
+#ifndef NO_PAINTER_GL
+    NVGLUframebuffer* src = (NVGLUframebuffer*)fb[cur];
+    NVGLUframebuffer* dst = (NVGLUframebuffer*)fb[1 - cur];
+    GLint prevRead = 0, prevDraw = 0;
+    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &prevRead);
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &prevDraw);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, src->fbo);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, dst->fbo);
+    nvgluSetScissor(0, 0, 0, 0);
+    // a raw copy: with sRGB conversion on, the blit could decode and re-encode
+    if(nvglFBFlags & NVG_IMAGE_SRGB)
+      nvgluSetFramebufferSRGB(0);
+    // GL rows are bottom-up: top-down row y is GL row h-1-y, so moving content down (dy > 0) is -dy in GL
+    glBlitFramebuffer(x0, h - y1, x1, h - y0, x0 + dx, h - y1 - dy, x1 + dx, h - y0 - dy,
+        GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    if(nvglFBFlags & NVG_IMAGE_SRGB)
+      nvgluSetFramebufferSRGB(1);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, prevRead);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, prevDraw);
+    cur = 1 - cur;
+#endif
+  }
+  else {
+    // in place: rows in the order that never overwrites a row still to be read; memmove within a row
+    size_t stride = size_t(w)*4, nbytes = size_t(x1 - x0)*4;
+    if(dy > 0) {
+      for(int y = y1 - 1; y >= y0; --y)
+        memmove(pixels + (y + dy)*stride + (x0 + dx)*4, pixels + y*stride + x0*4, nbytes);
+    }
+    else {
+      for(int y = y0; y < y1; ++y)
+        memmove(pixels + (y + dy)*stride + (x0 + dx)*4, pixels + y*stride + x0*4, nbytes);
+    }
+  }
+}
+
+void CanvasLayer::render(Painter* p, const std::vector<Rect>& rects, const std::function<void(Painter*, const Rect&)>& draw)
+{
+  if(!isValid() || rects.empty())
+    return;
+  Rect savedDeviceRect = p->deviceRect;
+  p->deviceRect = Rect::wh(width, height);
+  if(!Application::glRender)
+    nvgswSetFramebuffer(vg, pixels, width, height, swScreenRShift, swScreenGShift, swScreenBShift, 24);
+  p->beginFrame();
+  Rect bbox;
+  for(const Rect& r : rects) {
+    p->save();
+    p->setClipRect(r);
+    draw(p, r);
+    p->restore();
+    bbox.rectUnion(r);
+  }
+  if(Application::glRender) {
+#ifndef NO_PAINTER_GL
+    int prev = nvgluBindFramebuffer((NVGLUframebuffer*)fb[cur]);
+    // GL scissor limits fill to the union; the painter clip above is exact per rect
+    nvgluSetScissor(int(bbox.left), height - int(bbox.bottom), int(bbox.width()), int(bbox.height()));
+    p->endFrame();
+    nvgluSetScissor(0, 0, 0, 0);
+    nvgluBindFBO(prev);
+#endif
+  }
+  else {
+    p->endFrame();
+    if(swScreenPixels)
+      nvgswSetFramebuffer(vg, swScreenPixels, swScreenW, swScreenH, swScreenRShift, swScreenGShift, swScreenBShift, 24);
+  }
+  p->deviceRect = savedDeviceRect;
+}
+
+bool Application::readFramebuffer(std::vector<unsigned char>& out, int& w, int& h)
+{
+  w = int(painter->deviceRect.width());
+  h = int(painter->deviceRect.height());
+  if(w <= 0 || h <= 0)
+    return false;
+  out.resize(size_t(w)*h*4);
+  if(glRender) {
+#ifndef NO_PAINTER_GL
+    if(!nvglFB)
+      return false;
+    int prev = nvgluBindFramebuffer(nvglFB);
+    glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, out.data());
+    nvgluBindFBO(prev);
+    std::vector<unsigned char> row(size_t(w)*4);
+    for(int y = 0; y < h/2; ++y) {
+      unsigned char* a = &out[size_t(y)*w*4];
+      unsigned char* b = &out[size_t(h - 1 - y)*w*4];
+      memcpy(row.data(), a, row.size());  memcpy(a, b, row.size());  memcpy(b, row.data(), row.size());
+    }
+    return true;
+#endif
+    return false;
+  }
+  if(!swScreenPixels || swScreenW != w || swScreenH != h)
+    return false;
+  memcpy(out.data(), swScreenPixels, out.size());
+  return true;
+}
+
+void CanvasLayer::composite(Painter* p, int x, int y)
+{
+  if(!isValid())
+    return;
+  int img = image;
+#ifndef NO_PAINTER_GL
+  if(Application::glRender)
+    img = nvgluGetImageHandle((NVGLUframebuffer*)fb[cur]);
+#endif
+  NVGcontext* ctx = p->vg;
+  nvgSave(ctx);
+  nvgResetTransform(ctx);
+  nvgShapeAntiAlias(ctx, 0);
+  nvgGlobalAlpha(ctx, 1);
+  nvgBeginPath(ctx);
+  nvgRect(ctx, x, y, width, height);
+  nvgFillPaint(ctx, nvgImagePattern(ctx, x, y, width, height, 0, img, 1.0f));
+  nvgFill(ctx);
+  nvgRestore(ctx);
 }
 
 static int sdlEventFilter(void* app, SDL_Event* event)
@@ -486,6 +695,8 @@ int SDL_main(int argc, char* argv[])
   SvgGui* svgGui = new SvgGui();
   Application::gui = svgGui;
   svgGui->setWindowStylesheet(std::unique_ptr<SvgCssStylesheet>(createStylesheet()));
+  // canvases render their retained content layers here, before the frame that composites them begins
+  svgGui->onBeforeDraw = [](Painter* p, const Rect& dirty) { ScribbleView::prepareLayers(p, dirty); };
 
   // maybe increase dpi by 1.5x if screen larger than 15 inches?
   Dim dpi = ScribbleApp::cfg->Int("screenDPI");
@@ -524,6 +735,7 @@ int SDL_main(int argc, char* argv[])
   delete scribbleApp;
   delete svgGui;
   delete painter;
+  Application::painter = NULL;
   if(nvglFB)
     nvgluDeleteFramebuffer(nvglFB);
   if(swThreadPool)
@@ -567,7 +779,7 @@ void Application::layoutAndDrawSW()
   bool sizeChanged = swFB && (fbWidth != swBlitter->width || fbHeight != swBlitter->height);
   if(!swFB || sizeChanged)
     swFB = realloc(swFB, fbWidth*fbHeight*4);
-  nvgswSetFramebuffer(painter->vg, swFB, fbWidth, fbHeight, 0, 8, 16, 24);
+  setScreenSWFramebuffer(swFB, fbWidth, fbHeight, 0, 8, 16);
 
   Rect dirty = tracedGuiLayoutAndDraw(fbWidth, fbHeight);
   if(!dirty.isValid())
@@ -622,7 +834,7 @@ void Application::layoutAndDrawSW()
   int fbWidth = sdlSurface->w;
   int fbHeight = sdlSurface->h;
   SDL_PixelFormat* fmt = sdlSurface->format;
-  nvgswSetFramebuffer(painter->vg, sdlSurface->pixels, fbWidth, fbHeight, fmt->Rshift, fmt->Gshift, fmt->Bshift, 24);
+  setScreenSWFramebuffer(sdlSurface->pixels, fbWidth, fbHeight, fmt->Rshift, fmt->Gshift, fmt->Bshift);
   //SDL_FillRect(sdlSurface, NULL, SDL_MapRGB(sdlSurface->format, 255, 255, 255));
 
   Rect dirty = tracedGuiLayoutAndDraw(fbWidth, fbHeight);

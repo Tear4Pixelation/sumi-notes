@@ -31,6 +31,7 @@
 #include "widthpresettest.cpp"
 #include "jumphistorytest.cpp"
 #include "benchtest.cpp"
+#include "canvaslayertest.cpp"
 #include "pentoolbar.h"
 
 // Ideally, these tests should be run under valgrind to help check for memory leaks

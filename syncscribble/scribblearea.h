@@ -224,6 +224,7 @@ protected:
   void drawImage(Painter* imgpaint, const Rect& dirty) override;
   void drawScreen(Painter* painter, const Rect& dirty) override;
   const ColorMap* viewColorMap() override;
+  bool usesCanvasLayer() const override { return true; }
   NightColorMap nightMap;
 
   int currMode;

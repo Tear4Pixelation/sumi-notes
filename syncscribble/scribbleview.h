@@ -6,6 +6,7 @@
 #include "scribbleconfig.h"
 #include "scribblemode.h"
 #include "scribbleinput.h"
+#include "canvaslayer.h"
 
 struct InputPoint;
 class ScribbleWidget;
@@ -15,7 +16,7 @@ class ScribbleView
 friend class ScribbleInput;
 public:
   ScribbleView();
-  virtual ~ScribbleView() {}
+  virtual ~ScribbleView();
 
   virtual void loadConfig(ScribbleConfig* _cfg);
   //Dim getPreScale() const { return preScale; }
@@ -62,6 +63,12 @@ public:
 
   static Dim unitsPerPx;
 
+  // called by SvgGui before each frame begins (Application::SDL_main): every shown view that uses a canvas
+  //  layer brings it up to date for the frame - see prepareLayer()
+  static void prepareLayers(Painter* p, const Rect& guiDirty);
+  // tests: paint every view directly, leaving the canvas layers untouched (ScribbleTest::canvasLayerTest)
+  static bool testDirectPaint;
+
 protected:
   friend class ScribbleWidget;
 
@@ -71,6 +78,8 @@ protected:
   virtual const ColorMap* viewColorMap() { return NULL; }
   virtual void doPan(Dim dx, Dim dy);
   virtual void pageSizeChanged();
+  // a view keeping a retained copy of its drawImage() output, which a pan shifts instead of redrawing
+  virtual bool usesCanvasLayer() const { return false; }
 
   void doPaintEvent(Painter* qpainter, const Rect& dirty = Rect());
   void doResizeEvent(const Rect& newsize);
@@ -153,4 +162,32 @@ protected:
   Dim timerPeriod = 50;  // in ms
 
   static const int IMAGEBUFFER_BORDER;
+
+  // retained canvas layer (prepareLayer()); a pan sets layerPanned instead of dirtying the whole screen
+  bool layerPanned = false;
+private:
+  void prepareLayer(Painter* p, const Rect& guiDirty);
+  bool isShown() const;
+
+  std::unique_ptr<CanvasLayer> layer;
+  Rect layerDirtyDim;  // content changed since the layer was drawn, in Dim (pan-independent) coordinates
+  bool layerValid = false;
+  uint64_t layerFrame = 0;  // GUI frame the layer was last brought up to date for
+  uint64_t layerDeferredFrame = 0;  // GUI frame drawn directly on purpose (not a pan), layer kept
+  Dim paintedScale = 0;  // mScale at the last doPaintEvent
+  bool layerBuildNext = false;  // a pan wanted a full layer redraw and was drawn directly; the next builds it
+  Transform2D layerDevXf;  // painter transform (screen -> device) the layer was drawn for
+  Transform2D layerXf;  // screen -> layer pixels
+  int layerX = 0, layerY = 0;  // device pixel of the layer's top left
+  Rect layerInner;  // device pixels wholly inside the view: the layer is composited there, the fractional edges are drawn directly
+  Dim layerPanX = 0, layerPanY = 0, layerScale = 0, layerXorigin = 0, layerYorigin = 0;
+  const ColorMap* layerColorMap = NULL;
+  int layerColorKey = 0;
+  // painter transform and size at the last doPaintEvent, and how many paints in a row it has not changed
+  Transform2D paintXf;
+  Rect paintScreenRect;
+  int paintStable = 0;
+
+  static uint64_t guiFrame;
+  static std::vector<ScribbleView*> allViews;
 };

@@ -218,7 +218,8 @@ Rect ScribbleWidget::bounds(SvgPainter* svgp) const
 
 Rect ScribbleWidget::dirtyRect() const
 {
-  const Rect& dirty = scribbleView->dirtyRectScreen;
+  // after a pan the whole view is repainted (the canvas layer is shifted, not redrawn: ScribbleView::doPan)
+  const Rect& dirty = scribbleView->layerPanned ? scribbleView->screenRect : scribbleView->dirtyRectScreen;
   return dirty.isValid() ? m_layoutTransform.mapRect(dirty) : Rect();
 }
 

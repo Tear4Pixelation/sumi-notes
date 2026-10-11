@@ -1,4 +1,6 @@
 #include "scribbleview.h"
+#include <algorithm>
+#include <cmath>
 #include "usvg/svgpainter.h"
 #include "scribblewidget.h"
 
@@ -9,6 +11,9 @@ const Dim ScribbleView::zoomSteps[] = {0.1, 0.125, 0.15, 0.2, 0.25, 0.3, 0.4, 0.
 const unsigned int ScribbleView::DEFAULT_ZOOM_IDX = 12;  // default zoom = 1
 const int ScribbleView::IMAGEBUFFER_BORDER = 200;
 Dim ScribbleView::unitsPerPx = 1;
+uint64_t ScribbleView::guiFrame = 0;
+bool ScribbleView::testDirectPaint = false;
+std::vector<ScribbleView*> ScribbleView::allViews;
 
 // constants for pan/zoom behavior (these should be reviewed w/ new 150 dpi input reference)
 // const int and constexpr int are the same, but not so for floats (!)
@@ -42,6 +47,12 @@ ScribbleView::ScribbleView()
   // just pick some random but valid size to start
   screenRect = Rect::wh(100, 100);
   scribbleInput.reset(new ScribbleInput(this));
+  allViews.push_back(this);
+}
+
+ScribbleView::~ScribbleView()
+{
+  allViews.erase(std::remove(allViews.begin(), allViews.end(), this), allViews.end());
 }
 
 // should be called from child class constructor and whenever config changes
@@ -257,7 +268,7 @@ bool ScribbleView::isVisible(const Rect& r) const
 
 void ScribbleView::reqRepaint()
 {
-  if(!dirtyRectDim.isValid() && !dirtyRectScreen.isValid())
+  if(!dirtyRectDim.isValid() && !dirtyRectScreen.isValid() && !layerPanned)
     return;
   Rect dirty = dirtyRectDim;
   dirty.rectIntersect(viewportRect);
@@ -303,9 +314,15 @@ void ScribbleView::doPan(Dim dx, Dim dy)
   rawyoffset = std::max(minOriginY, std::min(rawyoffset + dy, maxOriginY));
   if(quantize(rawxoffset, unitsPerPx) == panxoffset && quantize(rawyoffset, unitsPerPx) == panyoffset)
     return;
+  // The canvas layer moves with the view (prepareLayer() shifts it and draws only the strip uncovered), so
+  //  instead of dirtying the whole screen: what was already dirty is kept in Dim coordinates - its screen
+  //  position is about to change - and layerPanned asks the GUI for a full repaint (ScribbleWidget::dirtyRect)
+  if(dirtyRectScreen.isValid())
+    layerDirtyDim.rectUnion(screenToDim(Rect(dirtyRectScreen).rectIntersect(screenRect)));
   panxoffset = quantize(rawxoffset, unitsPerPx);  //totalxoffset - xorigin;
   panyoffset = quantize(rawyoffset, unitsPerPx);  //totalyoffset - yorigin;
-  dirtyRectScreen = screenRect;
+  dirtyRectScreen = Rect();
+  layerPanned = true;
   viewportRect = screenToDim(screenRect.toSize());
   // note that we use rawyoffset here since panyoffset could be slightly out of range
   Dim scrpos = maxOriginY > minOriginY ? (maxOriginY - rawyoffset)/(maxOriginY - minOriginY) : -1;
@@ -577,41 +594,224 @@ void ScribbleView::updateImage(Rect dirty)
 // 1. First try switching drawImage to repaint entire screen in paintEvent
 // 2. Then try not using dirty rect in updateImage
 
+bool ScribbleView::isShown() const
+{
+  if(!widget || !widget->window())
+    return false;
+  for(const SvgNode* n = widget->node; n; n = n->parent()) {
+    if(n->displayMode() == SvgNode::NoneMode)
+      return false;
+  }
+  const auto& wins = widget->window()->gui()->windows;
+  return std::find(wins.begin(), wins.end(), widget->window()) != wins.end();
+}
+
+void ScribbleView::prepareLayers(Painter* p, const Rect& guiDirty)
+{
+  ++guiFrame;
+  // SUMI_NO_CANVAS_LAYER=1: draw every view directly, as before the layer existed (for A/B comparisons)
+  static const bool disabled = getenv("SUMI_NO_CANVAS_LAYER") && atoi(getenv("SUMI_NO_CANVAS_LAYER")) > 0;
+  if(disabled || testDirectPaint)
+    return;
+  for(ScribbleView* view : allViews) {
+    if(view->layer && !view->isShown()) {
+      view->layer.reset();  // e.g. a hidden tab's view: free the memory, it is redrawn in full when shown
+      view->layerValid = false;
+    }
+    else if(view->usesCanvasLayer())
+      view->prepareLayer(p, guiDirty);
+  }
+}
+
+// Retained canvas layer: drawImage() output, kept from frame to frame in a texture (GL) or pixel buffer (SW)
+//  the size of the view in device pixels.  Panning used to redraw every visible stroke each frame; now the
+//  layer is shifted by the pan - always whole device pixels, since doPan() quantizes the offsets to
+//  unitsPerPx - and only the uncovered strip is drawn, plus whatever content was dirtied.  doPaintEvent()
+//  then draws the layer 1:1 and the drawScreen() overlays on top, which are never part of the layer.
+// Invalidation: dirtyRectDim and dirtyRectScreen are the only ways content changes reach the view (the
+//  GUI only knows ScribbleWidget::dirtyRect()), and both are drawn into the layer here, or folded into
+//  layerDirtyDim by a frame that does not use the layer; a pan folds the pending screen dirty rect into
+//  layerDirtyDim before the offsets change.  See docs/agent/canvas-layer.md.  Zoom, a new size or position,
+//  and a different night mode map (pointer or generation) redraw the whole layer.  Anything unexpected -
+//  the painter transform at paint time not matching, a view painted that was not prepared - falls back to
+//  drawing directly, as before, and redraws the whole layer the next time.
+void ScribbleView::prepareLayer(Painter* p, const Rect& guiDirty)
+{
+  if(!widget || paintStable < 1 || paintScreenRect != screenRect || paintXf.isRotating())
+    return;
+  Rect devRect = paintXf.mapRect(screenRect);
+  // only a view the frame will repaint: its device rect against the frame's dirty rect (window coords)
+  Rect guiDev = Rect(guiDirty).scale(1/unitsPerPx);
+  if(!guiDev.intersects(Rect(devRect).pad(4)))
+    return;
+  // Only a pure pan is drawn through the layer.  Any other frame - a pen stroke, eraser, zoom - is drawn
+  //  directly, as before: the layer would cost a second nanovg frame and the composite for nothing saved.
+  //  Its changes are kept in Dim coordinates and drawn into the layer by the next pan (a zoom makes that
+  //  a full redraw anyway, via mScale).
+  if(!layerPanned || mScale != paintedScale) {
+    if(dirtyRectDim.isValid())
+      layerDirtyDim.rectUnion(dirtyRectDim);
+    if(dirtyRectScreen.isValid())
+      layerDirtyDim.rectUnion(screenToDim(Rect(dirtyRectScreen).rectIntersect(screenRect)));
+    layerDeferredFrame = guiFrame;
+    return;
+  }
+  int lx = int(std::floor(devRect.left + 0.001)), ly = int(std::floor(devRect.top + 0.001));
+  int lw = int(std::ceil(devRect.right - 0.001)) - lx, lh = int(std::ceil(devRect.bottom - 0.001)) - ly;
+  if(!layer)
+    layer.reset(new CanvasLayer);
+  bool fresh = layer->resize(lw, lh) || !layerValid;
+  if(!layer->isValid()) {
+    layer.reset();
+    layerValid = false;
+    return;
+  }
+  Transform2D xf = paintXf;
+  xf.translate(-lx, -ly);
+  const ColorMap* cmap = viewColorMap();
+  int ckey = cmap ? cmap->imageKey() : 0;
+  if(xf != layerXf || mScale != layerScale || xorigin != layerXorigin || yorigin != layerYorigin
+      || cmap != layerColorMap || ckey != layerColorKey)
+    fresh = true;
+  // pan since the layer was drawn, in device pixels - whole pixels unless something unexpected happened
+  Dim fdx = (panxoffset - layerPanX)*xf.xscale(), fdy = (panyoffset - layerPanY)*xf.yscale();
+  int dx = int(std::lround(fdx)), dy = int(std::lround(fdy));
+  if(std::abs(fdx - dx) > 0.01 || std::abs(fdy - dy) > 0.01 || std::abs(dx) >= lw || std::abs(dy) >= lh)
+    fresh = true;
+
+  // A layer that has to be drawn in full saves nothing this frame - a jump (go to page) is often a single
+  //  pan - so the first such pan is drawn directly and the layer is built by the next one
+  if(fresh && !layerBuildNext) {
+    layerBuildNext = true;
+    layerValid = false;
+    layerDirtyDim = Rect();
+    layerDeferredFrame = guiFrame;
+    return;
+  }
+  layerBuildNext = false;
+  Rect full = Rect::wh(lw, lh);
+  std::vector<Rect> rects;
+  if(fresh)
+    rects.push_back(full);
+  else {
+    if(dx != 0 || dy != 0) {
+      layer->shift(dx, dy);
+      if(dx > 0) rects.push_back(Rect::ltrb(0, 0, dx, lh));
+      else if(dx < 0) rects.push_back(Rect::ltrb(lw + dx, 0, lw, lh));
+      if(dy > 0) rects.push_back(Rect::ltrb(0, 0, lw, dy));
+      else if(dy < 0) rects.push_back(Rect::ltrb(0, lh + dy, lw, lh));
+    }
+    Rect view = screenToDim(screenRect);
+    Rect dirtyDim = Rect(layerDirtyDim).rectIntersect(view);
+    dirtyDim.rectUnion(Rect(dirtyRectDim).rectIntersect(view));
+    Rect dirtyScr = dirtyDim.isValid() ? dimToScreen(dirtyDim) : Rect();
+    dirtyScr.rectUnion(Rect(dirtyRectScreen).rectIntersect(screenRect));
+    if(dirtyScr.isValid()) {
+      // as the GUI does, pad by a unit, then out to whole pixels
+      Rect r = xf.mapRect(dirtyScr.pad(1));
+      r = Rect::ltrb(std::floor(r.left), std::floor(r.top), std::ceil(r.right), std::ceil(r.bottom));
+      r.rectIntersect(full);
+      if(r.isValid() && r.width() > 0 && r.height() > 0)
+        rects.push_back(r);
+    }
+  }
+
+  Transform2D layerToScreen = xf.inverse();
+  layer->render(p, rects, [&](Painter* lp, const Rect& r){
+    lp->setTransform(xf);
+    lp->translate(xorigin + panxoffset, yorigin + panyoffset);
+    lp->scale(mScale, mScale);
+    lp->setsRGBAdjAlpha(false);  // as ScribbleWidget::draw() sets it for the view
+    lp->setColorMap(cmap);
+    // the dirty rect passed down must be larger than the clip, as in doPaintEvent(): by 2 pixels, since
+    //  nanovg_sw's integer bounds are inclusive and it paints a row or column past the clip - with a
+    //  tighter dirty rect, the page fill would land there without the (culled) rule lines on top
+    drawImage(lp, screenToDim(layerToScreen.mapRect(Rect(r).pad(2))));
+  });
+
+  layerValid = true;
+  layerFrame = guiFrame;
+  layerDevXf = paintXf;
+  layerXf = xf;
+  layerX = lx;
+  layerY = ly;
+  layerInner = Rect::ltrb(std::ceil(devRect.left - 0.001), std::ceil(devRect.top - 0.001),
+      std::floor(devRect.right + 0.001), std::floor(devRect.bottom + 0.001));
+  layerPanX = panxoffset;
+  layerPanY = panyoffset;
+  layerScale = mScale;
+  layerXorigin = xorigin;
+  layerYorigin = yorigin;
+  layerColorMap = cmap;
+  layerColorKey = ckey;
+  layerDirtyDim = Rect();
+}
+
 void ScribbleView::doPaintEvent(Painter* painter, const Rect& dirty)
 {
-#ifdef QT_CORE_LIB
-  int imgwidth = getViewWidth() + 2*IMAGEBUFFER_BORDER;
-  int imgheight = getViewHeight() + 2*IMAGEBUFFER_BORDER;
-  if(imgPaint->getSize() != Rect::ltwh(0, 0, imgwidth, imgheight)) {
-    delete imgPaint;
-    delete contentImage;
-    contentImage = new Image(imgwidth, imgheight);
-    imgPaint = new Painter(contentImage);
-    xorigin += panxoffset + IMAGEBUFFER_BORDER;
-    yorigin += panyoffset + IMAGEBUFFER_BORDER;
-    panxoffset = -IMAGEBUFFER_BORDER;
-    panyoffset = -IMAGEBUFFER_BORDER;
-    // viewportRect is in Dim space
-    viewportRect = imageToDim(imgPaint->getSize());
-    dirtyRectDim = viewportRect;
-    dirtyRectScreen = screenRect;
-  }
-  else
-    scrollImage();
-
-  updateImage(dirtyRectDim);
-#endif
-
   dirtyRectDim = Rect();
   dirtyRectScreen = dirty.isValid() ? Rect(dirty).rectIntersect(screenRect) : screenRect;
   //painter->clipRect(screenRect);  -- this is done by ScribbleWidget
-  painter->save();
-  painter->translate(xorigin + panxoffset, yorigin + panyoffset);
-  painter->scale(mScale, mScale);
   const ColorMap* colorMap = viewColorMap();
-  painter->setColorMap(colorMap);
-  drawImage(painter, screenToDim(dirtyRectScreen));
-  painter->restore();
+  Transform2D xf = painter->getTransform();
+  if(!testDirectPaint && layer && layerValid && layerFrame == guiFrame && xf == layerDevXf && colorMap == layerColorMap) {
+    // The layer is composited only over device pixels wholly inside the view.  Where an edge falls inside
+    //  a pixel (fractional paintScale), the band of partial pixels is drawn directly: the direct path's
+    //  unantialiased background stops partway and leaves what is under the view there, which a
+    //  composited layer pixel would not match.  Each band reaches outside the view, so on that side only
+    //  the widget's own clip applies, as when drawing directly.  (nanovg_sw also bleeds a row past the
+    //  widget clip when drawing directly, depending on float rounding; that is outside the view.)
+    Rect outer = Rect::ltwh(layerX, layerY, layer->width, layer->height);
+    Rect inner = layerInner;
+    painter->save();
+    painter->setTransform(Transform2D());
+    painter->clipRect(inner);
+    layer->composite(painter, layerX, layerY);
+    painter->restore();
+    const Dim m = 4;
+    Rect strips[4] = { Rect::ltrb(outer.left - m, outer.top - m, outer.right + m, inner.top),
+        Rect::ltrb(outer.left - m, inner.bottom, outer.right + m, outer.bottom + m),
+        Rect::ltrb(outer.left - m, inner.top, inner.left, inner.bottom),
+        Rect::ltrb(inner.right, inner.top, outer.right + m, inner.bottom) };
+    Rect dirtyDev = xf.mapRect(dirtyRectScreen).pad(1);
+    Transform2D devToScreen = xf.inverse();
+    bool fractional[4] = { inner.top > outer.top, inner.bottom < outer.bottom,
+        inner.left > outer.left, inner.right < outer.right };
+    for(int ii = 0; ii < 4; ++ii) {
+      const Rect& strip = strips[ii];
+      if(!fractional[ii] || strip.width() <= 0 || strip.height() <= 0 || !strip.intersects(dirtyDev))
+        continue;
+      painter->save();
+      painter->setTransform(Transform2D());
+      painter->clipRect(strip);
+      painter->setTransform(xf);
+      painter->translate(xorigin + panxoffset, yorigin + panyoffset);
+      painter->scale(mScale, mScale);
+      painter->setColorMap(colorMap);
+      // dirty clamped to the view as in the direct path: its unantialiased background fill stops at the
+      //  view's fractional edge, leaving what is under the view in the rest of that pixel
+      drawImage(painter, screenToDim(devToScreen.mapRect(Rect(strip).pad(2)).rectIntersect(dirtyRectScreen)));
+      painter->restore();
+    }
+  }
+  else {
+    painter->save();
+    painter->translate(xorigin + panxoffset, yorigin + panyoffset);
+    painter->scale(mScale, mScale);
+    painter->setColorMap(colorMap);
+    drawImage(painter, screenToDim(dirtyRectScreen));
+    painter->restore();
+    // unless deferred on purpose (not a pan), the layer missed this frame's changes or another transform
+    if(!testDirectPaint && layerDeferredFrame != guiFrame) {
+      layerDirtyDim = Rect();
+      layerValid = false;
+    }
+  }
+  paintStable = (xf == paintXf && screenRect == paintScreenRect) ? paintStable + 1 : 0;
+  paintXf = xf;
+  paintScreenRect = screenRect;
+  paintedScale = mScale;
+  layerPanned = false;
 
   painter->setColorMap(colorMap);
   drawScreen(painter, dirtyRectScreen);

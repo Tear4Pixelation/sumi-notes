@@ -99,6 +99,9 @@ public:
   void performanceTest();
   // broad benchmark printing "BENCH <name>: <value> <unit>" lines (benchtest.cpp, tools/perf-bench.sh)
   void benchTest();
+  // retained canvas layer vs direct drawing, pixel for pixel (canvaslayertest.cpp)
+  void canvasLayerTest();
+  int layerCompare(const char* name);
   void inputTest();
   void syncSlaveMsg(std::string msg, int level);
 
