@@ -1,0 +1,13 @@
+/* Linker version script for libmain.so (syncscribble/Makefile, Android branch).  Exports exactly the
+   two symbols looked up by name: SDL_main (dlsym'd by SDL's nativeRunMain) and JNI_OnLoad (found by
+   the JVM, which then binds the jni* natives with RegisterNatives).  Everything else - including
+   FreeType's FT_* API, which FT_EXPORT forces to default visibility, and libc++ template
+   instantiations - stays local, so it is no GC root for --gc-sections.  A new native looked up by
+   name (a Java_* function, another dlsym target) must be added here. */
+{
+  global:
+    SDL_main;
+    JNI_OnLoad;
+  local:
+    *;
+};
