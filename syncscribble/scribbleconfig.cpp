@@ -76,6 +76,9 @@ void ScribbleConfig::init()
   //  of 3 off the whole-pixel lattice noise in the input (1/3, 1/9, 1/27, 1/81) at the cost of one more
   //  sample of lag and more rounding of genuinely sharp corners.  0 disables.
   cfg["inputCurveFit"] = 2;
+  // pen-up simplification of each new stroke (strokesimplify.h): 0 Off, 1 Invisible (default: within
+  //  0.01 units, sub-pixel even at maximum zoom), 2 Balanced, 3 Aggressive
+  cfg["strokeSimplify"] = 1;
   // Linux on sdl2-compat: use the Wayland backend when a Wayland compositor is present instead of the
   //  X11 backend sdl2-compat picks (which runs under Xwayland and delivers whole-pixel pointer positions).
   //  Off by default: the switch currently segfaults at startup - see CLAUDE.md "Sub-pixel input on Linux"

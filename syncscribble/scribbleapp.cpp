@@ -4356,6 +4356,11 @@ std::string ScribbleApp::runTest(std::string runtype)
     test.pdfSizeTest();
     return test.resultStr;
   }
+  else if(runtype == "simplifybenchtest") {
+    ScribbleTest test(activeDoc(), bookmarkArea, scribbleMode);
+    test.simplifyBench();
+    return test.resultStr;
+  }
   else if(runtype == "canvaslayertest") {
     ScribbleTest test(activeDoc(), bookmarkArea, scribbleMode);
     test.canvasLayerTest();

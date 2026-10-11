@@ -87,6 +87,9 @@ public:
   // the curve fit must take the whole-pixel lattice out of the stroke without moving it off the path
   // the samples came from, at both dense and sparse (mouse-rate) sample spacing
   int curveFitTest();
+  // pen-up simplification: Off bit-identical, every preset within its tolerance for every pen kind, and a
+  //  simplified stroke still erases, undoes, takes a new width and survives save/reload
+  int strokeSimplifyTest();
   // hold-to-snap: a held stroke becomes a shape, the rest of the gesture scales it, and the shape as
   // recognized is its own undo step; a held scratch-out erases what it covers
   int shapeSnapTest();
@@ -113,6 +116,7 @@ public:
   void canvasLayerTest();
   // Import PDF file sizes/times per resolution, and whole-document resaves (benchtest.cpp, env SUMI_PDFSIZE_*)
   void pdfSizeTest();
+  void simplifyBench();  // scribbletest/simplifybench.cpp, --simplifybenchtest
   int layerCompare(const char* name);
   void inputTest();
   void syncSlaveMsg(std::string msg, int level);

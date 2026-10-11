@@ -5,6 +5,7 @@
 
 #include "page.h"
 #include "scribblepen.h"
+#include "strokesimplify.h"
 
 // abstractions for Stroke construction with support for filtering
 
@@ -44,6 +45,11 @@ public:
   Path2D* getPath() { return stroke; }
   virtual Rect getDirty() { return element->bbox(); }
   Element* finish();  // caller assumes ownership of returned Element
+  // Pen-up simplification of the stroke finish() just returned (see strokesimplify.h): call it after
+  //  finish() and before the builder is deleted, while `elem` is still that stroke.  Uses the builder's
+  //  own centre line and widths, never the live path.  Returns true if the path changed (bounds already
+  //  invalidated); with params disabled it does nothing, so Off is bit-identical to no call at all.
+  virtual bool simplifyFinished(Element* elem, const StrokeSimplifyParams& params) { return false; }
 
   static StrokeBuilder* create(const ScribblePen& pen);
   static Point calcCom(SvgNode* node, Path2D* path);
@@ -64,6 +70,7 @@ class StrokedStrokeBuilder : public StrokeBuilder
 public:
   StrokedStrokeBuilder(const ScribblePen& pen);
   Rect getDirty() override;
+  bool simplifyFinished(Element* elem, const StrokeSimplifyParams& params) override;
 
 protected:
   void addPoint(const StrokePoint& pt) override;
@@ -71,6 +78,7 @@ protected:
 
 private:
   Dim width;
+  bool dashed;
   Rect dirty;
 };
 
@@ -78,6 +86,7 @@ class FilledStrokeBuilder : public StrokeBuilder {
 public:
   FilledStrokeBuilder(const ScribblePen& _pen);
   Rect getDirty() override;
+  bool simplifyFinished(Element* elem, const StrokeSimplifyParams& params) override;
 
   static void addRoundSubpath(Path2D& path, Point pt1, Dim w1, Point pt2, Dim w2);
   static void addChiselSubpath(Path2D& path, Point pt1, Dim w1, Point pt2, Dim w2);

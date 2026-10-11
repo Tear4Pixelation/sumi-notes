@@ -276,6 +276,7 @@ protected:
   ~Element() override {}
 
 private:
+  friend class ScribbleTest;  // strokeSimplifyTest() and simplifyBench() read the pen points back
   std::vector<PenPoint> toPenPoints();
   void fromPenPoints(const std::vector<PenPoint>& pts);
 

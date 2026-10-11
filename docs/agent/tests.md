@@ -24,6 +24,12 @@ The smart scale layout ([smart-scale.md](smart-scale.md)) is tested the same way
 `scribbletest/smartscaletest.cpp` (`runSmartScaleTests()`; command in its header); the gesture end to end
 (one undo step, later content pulled up) in `ScribbleTest::smartScaleTest()`.
 
+Pen-up stroke simplification ([stroke-input.md](stroke-input.md)): `scribbletest/simplifytest.cpp`
+(`runSimplifyTests()`; command in its header) for the geometry, `ScribbleTest::strokeSimplifyTest()` for
+every pen kind through the real builders and pen-up path. `--simplifybenchtest` (`simplifybench.cpp`,
+env `SUMI_SIMPLIFY_IN/OUT/FIRST/PAGES/SPACING/JITTER/LATTICE/PEN`) is a measurement, not a test: it
+replays a notebook copy through the curve fit and saves it once per preset for size and render comparison.
+
 The shape math is tested the same way in `scribbletest/shapetest.cpp` (`runShapeTests()`), which likewise
 builds and runs standalone - see the command in that file's header. On top of it,
 two checks that do need the application, both running after the `testN` loop and reporting through the

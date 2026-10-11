@@ -21,6 +21,7 @@
 // document scanning math; unlike everything else here it needs neither GL nor a document
 #include "scantest.cpp"
 #include "shapetest.cpp"
+#include "simplifytest.cpp"
 #include "colortest.cpp"
 #include "layertest.cpp"
 #include "tabstest.cpp"
@@ -34,6 +35,7 @@
 #include "jumphistorytest.cpp"
 #include "benchtest.cpp"
 #include "canvaslayertest.cpp"
+#include "simplifybench.cpp"
 #include "pentoolbar.h"
 
 // Ideally, these tests should be run under valgrind to help check for memory leaks
@@ -64,6 +66,7 @@ ScribbleTest::ScribbleTest(const std::string& path)
   // disable input smoothing
   scribbleConfig->set("inputSmoothing", 0);
   scribbleConfig->set("inputCurveFit", 0);  // reference output is a polyline through the input points
+  scribbleConfig->set("strokeSimplify", 0);  // ... every one of them - simplifyTest() turns it on itself
   // the hold timer runs off the wall clock; shapeSnapTest() turns it on and fires it by hand
   scribbleConfig->set("shapeSnapDelay", 0.0f);
   // include thumbnail in test output as a check of rendering
@@ -3214,7 +3217,7 @@ int ScribbleTest::shapeRoundTripTest()
   check(page->strokeCount() == 1, "exactly one element should have been added");
   if(page->strokeCount() != 1)
     return nbad;
-  Element* shape = *page->children().begin();
+  Element* shape = (*page->children().begin());
   check(shape->isShape(), "the new element should carry a shape descriptor");
   check(shape->shapeParams().id == SHAPE_BOX, "the new element should be a box");
   if(!shape->isShape())
@@ -3238,7 +3241,7 @@ int ScribbleTest::shapeRoundTripTest()
   check(page->strokeCount() == 1, "the reloaded page should hold one element");
   if(page->strokeCount() != 1)
     return nbad;
-  shape = *page->children().begin();
+  shape = (*page->children().begin());
   check(shape->isShape() && shape->shapeParams().id == SHAPE_BOX,
       "the reloaded element should still be a box");
   check(approxEq(shape->shapeParams().rect(), descriptorRect, 1e-3),
@@ -3511,6 +3514,211 @@ int ScribbleTest::undoCapTest()
   scribbleDoc->scribbleSync = NULL;
   delete sync;
 
+  scribbleDoc->newDocument();
+  return nbad;
+}
+
+// Pen-up stroke simplification (strokesimplify.h, docs/agent/stroke-input.md).  The geometry itself is
+//  pinned by runSimplifyTests(); this drives the real builders and the real pen-up path:
+//  - every pen kind (flat pressure/direction/speed, round, round pressure, chisel highlighter, dashed),
+//    built through the curve fit like a drawn stroke: Off is bit-identical to no simplification at all,
+//    and each preset keeps every point of the original outline/centre line within its tolerance
+//  - drawn with the pref on: fewer points, the same centre of mass (line assignment unchanged), and the
+//    stroke still erases into pieces, undoes and redoes exactly, and survives save and reload
+// Checked to fail against a broken bound (tolerance tripled in chordBound()).
+int ScribbleTest::strokeSimplifyTest()
+{
+  int nbad = 0;
+  char what[256];
+  auto check = [&](bool ok, const char* msg) {
+    if(!ok) { ++nbad; printf("FAIL: stroke simplify: %s\n", msg); }
+  };
+  auto pathPoints = [](Element* s) { return static_cast<SvgPath*>(s->node)->path()->points; };
+  auto samePoints = [](const std::vector<Point>& a, const std::vector<Point>& b) {
+    return a.size() == b.size() && (a.empty() || memcmp(a.data(), b.data(), a.size()*sizeof(Point)) == 0);
+  };
+  // a line of loopy handwriting ("eeee") with the pressure swelling and fading, sampled on the whole-unit
+  //  lattice like real input, so the curve fit densifies it the way it does a drawn stroke
+  auto feed = [](StrokeBuilder* builder) {
+    builder->addFilter(new CurveFitFilter(CURVEFIT_TOL, 2));
+    for(int ii = 0; ii <= 260; ++ii) {
+      Dim t = ii*0.06;
+      Dim x = std::floor(200 + 6*t + 7*std::cos(t*1.7) + 0.5), y = std::floor(300 - 9*std::sin(t*1.7) + 0.5);
+      builder->addInputPoint(StrokePoint(x, y, 0.55 + 0.2*std::sin(t*0.9) + 0.2*std::sin(t*3.1), 0, 0, Timestamp(ii*8)));
+    }
+  };
+  auto build = [&](const ScribblePen& penSpec, int preset, bool* changed) {
+    StrokeBuilder* builder = StrokeBuilder::create(penSpec);
+    feed(builder);
+    Element* s = builder->finish();
+    bool ch = builder->simplifyFinished(s, strokeSimplifyPreset(preset));
+    if(changed) *changed = ch;
+    delete builder;
+    return s;
+  };
+  // the centre line and width per point, as Element::toPenPoints() reads it back - the representation the
+  //  eraser and Resize Handwriting work on
+  auto centreLine = [](Element* s, std::vector<Point>& pts, std::vector<Dim>& widths) {
+    pts.clear(); widths.clear();
+    for(const PenPoint& pp : s->toPenPoints()) { pts.push_back(pp.p); widths.push_back(pp.dr.dist()); }
+  };
+
+  struct PenCase { const char* name; ScribblePen pen; };
+  const PenCase pens[] = {
+    {"flat pressure", ScribblePen(Color::BLACK, 1.6, ScribblePen::TIP_FLAT | ScribblePen::WIDTH_PR, 0.9, 2.0)},
+    {"flat direction", ScribblePen(Color::BLACK, 3.0, ScribblePen::TIP_FLAT | ScribblePen::WIDTH_PR | ScribblePen::WIDTH_DIR, 0.8, 2.0, 0, 45)},
+    {"flat speed", ScribblePen(Color::BLACK, 1.8, ScribblePen::TIP_FLAT | ScribblePen::WIDTH_SPEED, 0.7, 0, 0.5, 0)},
+    {"round", ScribblePen(Color::BLACK, 4.0, ScribblePen::TIP_ROUND)},
+    {"round pressure", ScribblePen(Color::BLACK, 2.0, ScribblePen::TIP_ROUND | ScribblePen::WIDTH_PR, 0.8, 2.0)},
+    {"highlighter", ScribblePen(Color(255, 127, 255, 127), 34, ScribblePen::TIP_CHISEL | ScribblePen::DRAW_UNDER)},
+    {"dashed", ScribblePen(Color::BLACK, 2.0, ScribblePen::TIP_ROUND, 0, 0, 0, 0, 4, 4)},
+  };
+  for(const PenCase& pc : pens) {
+    bool changed = true;
+    Element* ref = build(pc.pen, SIMPLIFY_OFF, &changed);
+    std::vector<Point> refPts = pathPoints(ref);
+    // the builder is deterministic, so a second unsimplified build is today's output to compare against
+    Element* again = build(pc.pen, SIMPLIFY_OFF, NULL);
+    snprintf(what, sizeof(what), "%s: Off is not bit-identical to the unsimplified stroke", pc.name);
+    check(!changed && samePoints(refPts, pathPoints(again)), what);
+    again->deleteNode();
+    std::vector<Point> refLine, line;
+    std::vector<Dim> refW, w;
+    centreLine(ref, refLine, refW);
+    const bool filledFlat = ref->node->hasClass(Element::FLAT_PEN_CLASS);
+    const bool stroked = ref->node->hasClass(Element::STROKE_PEN_CLASS);
+    for(int preset = SIMPLIFY_INVISIBLE; preset <= SIMPLIFY_AGGRESSIVE; ++preset) {
+      StrokeSimplifyParams params = strokeSimplifyPreset(preset);
+      const Dim tol = params.tol*(1 + 1E-6) + 1E-9;
+      Element* s = build(pc.pen, preset, &changed);
+      std::vector<Point> pts = pathPoints(s);
+      if(pc.pen.dash > 0) {
+        snprintf(what, sizeof(what), "%s: a dashed stroke is left alone (its dashes follow the path length)", pc.name);
+        check(!changed && samePoints(refPts, pts), what);
+        s->deleteNode();
+        continue;
+      }
+      snprintf(what, sizeof(what), "%s preset %d: %d -> %d points, expected fewer", pc.name, preset, int(refPts.size()), int(pts.size()));
+      check(changed && pts.size() < refPts.size(), what);
+      Dim worst = 0;
+      if(filledFlat || stroked) {
+        // kept points are original points; every original point within tol of the new outline
+        std::vector<Point> ring = pts;
+        if(filledFlat) ring.push_back(ring.front());
+        for(const Point& p : refPts) {
+          Dim best = 1E30;
+          for(size_t ii = 1; ii < ring.size(); ++ii)
+            best = std::min(best, distToSegment(ring[ii-1], ring[ii], p));
+          worst = std::max(worst, best);
+        }
+        size_t jj = 0;
+        for(size_t ii = 0; ii < refPts.size() && jj < pts.size(); ++ii)
+          if(memcmp(&refPts[ii], &pts[jj], sizeof(Point)) == 0) ++jj;
+        snprintf(what, sizeof(what), "%s preset %d: kept points are not original points", pc.name, preset);
+        check(jj == pts.size(), what);
+      }
+      else {
+        // round and chisel: an outline per segment, so compare centre line + width
+        centreLine(s, line, w);
+        for(size_t ii = 0; ii < refLine.size(); ++ii) {
+          Dim best = 1E30;
+          for(size_t k = 1; k < line.size(); ++k) {
+            Point d = line[k] - line[k-1];
+            Dim len2 = dot(d, d);
+            Dim t = len2 > 0 ? std::min(Dim(1), std::max(Dim(0), dot(refLine[ii] - line[k-1], d)/len2)) : 0;
+            best = std::min(best, (refLine[ii] - (line[k-1] + t*d)).dist()
+                + std::abs(refW[ii] - (w[k-1] + t*(w[k] - w[k-1])))/2);
+          }
+          worst = std::max(worst, best);
+        }
+      }
+      snprintf(what, sizeof(what), "%s preset %d: moved the stroke by %.5f, over the %.3f tolerance", pc.name, preset, worst, params.tol);
+      check(worst <= tol, what);
+      s->deleteNode();
+    }
+    ref->deleteNode();
+  }
+
+  // the real pen-up path, with the pref
+  auto drawLoops = [&](int preset) {
+    scribbleDoc->cfg->set("strokeSimplify", preset);
+    scribbleDoc->cfg->set("inputCurveFit", 2);
+    scribbleMode->setMode(MODE_STROKE);
+    scribbleDoc->app->setPen(ScribblePen(Color::BLACK, 1.6, ScribblePen::TIP_FLAT | ScribblePen::WIDTH_PR, 0.9, 2.0));
+    for(int ii = 0; ii <= 200; ++ii) {
+      Dim t = ii*0.06;
+      ie(std::floor(200 + 8*t + 9*std::cos(t*1.7) + 0.5), std::floor(300 - 12*std::sin(t*1.7) + 0.5),
+          0.4 + 0.3*std::sin(t), pen, ii == 0 ? press : 0);
+    }
+    ie(0, 0, 0, pen, release);
+    scribbleDoc->cfg->set("inputCurveFit", 0);
+    scribbleDoc->cfg->set("strokeSimplify", 0);
+    Element* last = NULL;
+    for(Element* s : scribbleArea->currPage->children()) last = s;
+    return last;
+  };
+  scribbleDoc->newDocument();
+  doCommand(ID_RESETZOOM);
+  Element* dense = drawLoops(SIMPLIFY_OFF);
+  std::vector<Point> densePts = dense ? pathPoints(dense) : std::vector<Point>();
+  Point denseCom = dense ? dense->com() : Point();
+  scribbleDoc->newDocument();
+  doCommand(ID_RESETZOOM);
+  Element* simp = drawLoops(SIMPLIFY_INVISIBLE);
+  check(dense && simp, "drawing a stroke");
+  if(!dense || !simp) return nbad;
+  std::vector<Point> simpPts = pathPoints(simp);
+  snprintf(what, sizeof(what), "drawn with Invisible: %d -> %d points, expected fewer", int(densePts.size()), int(simpPts.size()));
+  check(simpPts.size() < densePts.size(), what);
+  check(simp->com() == denseCom, "the centre of mass (which line the stroke is on) is measured before simplifying");
+  printf("stroke simplify: drawn flat pen stroke %d -> %d points with Invisible\n", int(densePts.size()), int(simpPts.size()));
+
+  // save and reload
+  const char* tmpdir = getenv("TMPDIR") ? getenv("TMPDIR") : "/tmp";
+  std::string file = std::string(tmpdir) + "/sumi-simplify-test.html";
+  check(scribbleDoc->saveDocument(file.c_str()), "saving the document");
+  check(scribbleDoc->openDocument(file.c_str()) == Document::LOAD_OK, "reloading the document");
+  Element* loaded = NULL;
+  for(Element* s : scribbleArea->currPage->children()) loaded = s;
+  // path data is written as 3 decimal relative coordinates, so the reloaded points wander by a few
+  //  thousandths along the stroke (the rounding accumulates) - that is the save format, not simplification
+  bool sameShape = loaded && pathPoints(loaded).size() == simpPts.size();
+  for(size_t ii = 0; sameShape && ii < simpPts.size(); ++ii)
+    sameShape = (pathPoints(loaded)[ii] - simpPts[ii]).dist() < 0.02;
+  check(sameShape, "a simplified stroke survives save and reload");
+  remove(file.c_str());
+
+  // erase through the middle: two pieces, each still a well formed flat outline; undo restores it exactly
+  Page* page = scribbleArea->currPage;
+  Rect box = page->strokeCount() ? (*page->children().begin())->bbox() : Rect();
+  std::vector<Point> before = loaded ? pathPoints(loaded) : std::vector<Point>();
+  scribbleMode->setMode(MODE_ERASEFREE);
+  Point top = scribbleArea->dimToScreen(scribbleArea->pageDimToDim(Point(box.center().x, box.top - 5)));
+  Point bottom = scribbleArea->dimToScreen(scribbleArea->pageDimToDim(Point(box.center().x, box.bottom + 5)));
+  ie(top.x, top.y, 0, pen, press);
+  for(int ii = 1; ii <= 20; ++ii)
+    ie(top.x, top.y + (bottom.y - top.y)*ii/20, 0, pen, INPUTEVENT_MOVE);
+  ie(bottom.x, bottom.y, 0, pen, release);
+  snprintf(what, sizeof(what), "erasing across a simplified stroke leaves pieces (%d strokes)", page->strokeCount());
+  check(page->strokeCount() >= 2, what);
+  bool wellFormed = true;
+  for(Element* s : page->children())
+    wellFormed = wellFormed && s->isPathElement() && pathPoints(s).size() % 2 == 0 && pathPoints(s).size() >= 4;
+  check(wellFormed, "...each a paired flat outline");
+  scribbleDoc->doUndoRedo(false);
+  Element* restored = page->strokeCount() == 1 ? (*page->children().begin()) : NULL;
+  check(restored && samePoints(pathPoints(restored), before), "undoing the erase restores the simplified stroke exactly");
+  scribbleDoc->doUndoRedo(true);
+  check(page->strokeCount() >= 2, "redo erases it again");
+
+  // a width change rebuilds the outline from the pen points: it has to stay a paired outline
+  scribbleDoc->doUndoRedo(false);
+  scribbleArea->selectAll();
+  StrokeProperties wider(Color::INVALID_COLOR, 3.2);
+  scribbleArea->setStrokeProperties(wider);
+  restored = page->strokeCount() == 1 ? (*page->children().begin()) : NULL;
+  check(restored && pathPoints(restored).size() == before.size() && restored->bbox().width() > box.width(),
+      "a simplified stroke takes a new width");
   scribbleDoc->newDocument();
   return nbad;
 }
@@ -4907,7 +5115,7 @@ void ScribbleTest::runAll(bool runsynctest)
   int nThumbsFailed = 0;
   int nUnitFailed = runScanTests() + runShapeTests() + runColorTests() + runLayerTests() + runLibraryTests()
       + runRegionTests() + runNotefulTests() + runPageTagTests() + runWidthPresetTests() + runTabTests()
-      + runJumpHistoryTests() + runEraseTests() + runSmartScaleTests();
+      + runJumpHistoryTests() + runEraseTests() + runSmartScaleTests() + runSimplifyTests();
   std::vector<std::string> slFailed;
   void (ScribbleTest::*tests[])() = {
     &ScribbleTest::test0,
@@ -5090,6 +5298,7 @@ void ScribbleTest::runAll(bool runsynctest)
   nUnitFailed += pageTagTest();
   nUnitFailed += docStateSyncTest();
   nUnitFailed += curveFitTest();
+  nUnitFailed += strokeSimplifyTest();
   nUnitFailed += shapeSnapTest();
   nUnitFailed += eraserHitTest();
   nUnitFailed += interactCullTest();

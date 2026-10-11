@@ -89,7 +89,7 @@ StrokeBuilder* StrokeBuilder::create(const ScribblePen& pen)
 
 // builder for stroked (non-pressure sensitive) stroke
 
-StrokedStrokeBuilder::StrokedStrokeBuilder(const ScribblePen& pen) : width(pen.width)
+StrokedStrokeBuilder::StrokedStrokeBuilder(const ScribblePen& pen) : width(pen.width), dashed(pen.dash > 0)
 {
   SvgPath* svgPath = new SvgPath();
   stroke = svgPath->path();
@@ -133,6 +133,17 @@ void StrokedStrokeBuilder::removePoints(int n)
     dirty.rectUnion(stroke->point(ii));
   stroke->resize(newsize);
   element->node->invalidate(false);
+}
+
+// A dashed stroke is left alone: its dash pattern is laid out along the path length, and a chord is
+//  shorter than the arc it replaces, so the dashes would drift along the stroke by an amount no local
+//  deviation bound controls.
+bool StrokedStrokeBuilder::simplifyFinished(Element* elem, const StrokeSimplifyParams& params)
+{
+  if(!params.enabled() || dashed || !simplifyPolyline(*stroke, params))
+    return false;
+  elem->node->invalidate(false);
+  return true;
 }
 
 Rect StrokedStrokeBuilder::getDirty()
@@ -499,6 +510,55 @@ void FilledStrokeBuilder::removePoints(int n)
     }
     assembleFlatStroke();
   }
+}
+
+// Flat: the outline itself is simplified pair by pair (both sides bounded), so kept points are the
+//  original outline points and the cap pairs are untouched.  Round and chisel: their outline is a subpath
+//  per segment, so the centre line + widths are simplified and the subpaths rebuilt - from the builder's
+//  own points/widths, not Element::toPenPoints(), which misreads the stray moveTo a repeated point leaves.
+// The rebuild mirrors addPoint(): a segment for each pair of consecutive points that differ (a repeated
+//  point draws nothing and splits the stroke into runs, simplified separately with their ends kept), plus
+//  the first point's dot when the second point repeated it (addPoint() only clears that dot on a second
+//  point that moves).
+bool FilledStrokeBuilder::simplifyFinished(Element* elem, const StrokeSimplifyParams& params)
+{
+  if(!params.enabled())
+    return false;
+  if(style == Flat) {
+    if(!flatAssembled || !simplifyFlatOutline(*stroke, params))
+      return false;
+    flatAssembled = false;
+    elem->node->invalidate(false);
+    return true;
+  }
+  size_t n = points.size();
+  if(n < 3 || widths.size() != n)
+    return false;
+  std::vector<std::pair<size_t, size_t>> segs;  // kept segments as (from, to) indices
+  size_t nOrigSegs = 0;
+  for(size_t s = 0; s < n;) {
+    size_t e = s;
+    while(e + 1 < n && points[e + 1] != points[e]) ++e;
+    if(e > s) {
+      nOrigSegs += e - s;
+      std::vector<Point> runPts(points.begin() + s, points.begin() + e + 1);
+      std::vector<double> runW(widths.begin() + s, widths.begin() + e + 1);
+      std::vector<int> kept = simplifyWidthPoints(runPts, runW, params);
+      for(size_t k = 1; k < kept.size(); ++k)
+        segs.emplace_back(s + kept[k-1], s + kept[k]);
+    }
+    s = e + 1;
+  }
+  if(segs.size() >= nOrigSegs)
+    return false;
+  stroke->clear();
+  auto addSub = (style == Round) ? &FilledStrokeBuilder::addRoundSubpath : &FilledStrokeBuilder::addChiselSubpath;
+  if(points[1] == points[0])
+    addSub(*stroke, points[0], widths[0], points[0], widths[0]);
+  for(const auto& seg : segs)
+    addSub(*stroke, points[seg.first], widths[seg.first], points[seg.second], widths[seg.second]);
+  elem->node->invalidate(false);
+  return true;
 }
 
 Rect FilledStrokeBuilder::getDirty()
