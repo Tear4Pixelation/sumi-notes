@@ -61,6 +61,7 @@ public:
   int penCancelTest();
   // a periodic timer slower than its own period does not hold back other timers (SvgGui::processTimers)
   int timerBacklogTest();
+  int zeroSizeLayoutTest();
   // closing and reopening the sidebar's Pages view leaves one thumbnail renderer, not one per opening
   int thumbRendererTest();
   // shape edit mode without the Select tool: a finger tap on a shape selects it, a tap elsewhere and the

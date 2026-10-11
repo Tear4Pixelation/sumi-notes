@@ -644,6 +644,7 @@ int ScribbleTest::notefulArchiveTest()
     size_t size = 0;
     mz_zip_writer_finalize_heap_archive(&zip, &bytes, &size);
     writeBytes(base.child("export.zip"), std::string((const char*)bytes, size));
+    mz_free(bytes);  // finalize_heap_archive hands the buffer over; writer_end does not free it
     mz_zip_writer_end(&zip);
   }
   NotefulImport::ArchiveOptions noFolders;
@@ -1678,6 +1679,33 @@ int ScribbleTest::timerBacklogTest()
     gui->removeTimer(quickTimer);
   if(!slowDone)
     gui->removeTimer(slowTimer);
+  return nbad;
+}
+
+// ugui's Widget::setLayoutBounds() scaled a node from its current size to the size layout gave it, and a
+//  node of zero width (an empty container, such as the top bar's tab strip before it has tabs) got an
+//  infinite scale: its layout transform, and so its bounds, were inf/NaN from then on.  Here a group whose
+//  only content is a zero-width rect is laid out somewhere else and wider: it must move there, finite.
+int ScribbleTest::zeroSizeLayoutTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: zero size layout: %s\n", what); }
+  };
+  Widget* widget = new Widget(new SvgG());
+  widget->containerNode()->addChild(new SvgRect(Rect::ltwh(10, 10, 0, 20)));
+  check(widget->node->bounds().isValid() && widget->node->bounds().width() == 0, "fixture: valid bounds, zero width");
+  widget->setLayoutBounds(Rect::ltwh(30, 10, 100, 20));
+  const Transform2D& tf = widget->layoutTransform();
+  bool finite = true;
+  for(real coeff : tf.m)
+    finite = finite && std::isfinite(coeff);
+  check(finite, "the layout transform stays finite");
+  // bounds() asserts on the invalid rect a NaN transform makes, so only asked for when it is finite
+  Rect after = finite ? widget->node->bounds() : Rect();
+  check(after.isValid() && std::abs(after.left - 30) < 1E-3 && std::abs(after.top - 10) < 1E-3,
+      "the node is moved to where layout put it");
+  delete widget->node;
   return nbad;
 }
 
@@ -5287,6 +5315,7 @@ void ScribbleTest::runAll(bool runsynctest)
   nUnitFailed += twoFingerTapTest();
   nUnitFailed += penCancelTest();
   nUnitFailed += timerBacklogTest();
+  nUnitFailed += zeroSizeLayoutTest();
   nUnitFailed += thumbRendererTest();
   nUnitFailed += shapeTapEditTest();
   nUnitFailed += zoomSnapTest();

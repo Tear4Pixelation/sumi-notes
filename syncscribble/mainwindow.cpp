@@ -2747,6 +2747,9 @@ void MainWindow::setupActions()
     overflowPopup->addAction(actionSave);
   }
   overflowPopup->addSubmenu(_("Export"), exportmenu);
+  // pages from another file, into this document (the "+" menu's Insert Document is a different feature)
+  overflowPopup->addAction(actionInsertDocument);
+  overflowPopup->addAction(actionInsert_PDF);
   if(IS_DEBUG || !PLATFORM_IOS || cfg->String("syncServer", "")[0]) {
     overflowPopup->addAction(actionShare_Document);
 #if PLATFORM_IOS

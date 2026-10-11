@@ -1,0 +1,11 @@
+# LeakSanitizer suppressions for the Debug (SANITIZE=1) build - third-party leaks only.
+# Use: LSAN_OPTIONS=suppressions=$PWD/tools/sanitizers/lsan.supp (see docs/agent/tests.md, "Sanitizers")
+# Every entry here was seen with no Sumi/ugui/usvg/ulib frame between the allocation and the library.
+
+# NVIDIA's GL driver: context creation/destruction keeps ~2 MB it never frees (glXCreateContextAttribsARB,
+#  glXDestroyContext, glnvg__renderFlush -> driver)
+leak:libnvidia-glcore.so
+leak:libGLX_nvidia.so
+leak:libnvidia-glsi.so
+# libdbus, reached from glXChooseVisual
+leak:libdbus-1.so

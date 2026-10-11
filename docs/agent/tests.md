@@ -233,6 +233,11 @@ heading blue. See [night-mode.md](night-mode.md).
   reopened four times, the sidebar owns at most one timer, and none once closed (counted in
   `SvgGui::timers`, no `processTimers()` in between). Mutation-checked: with `setOpen(false)` only clearing
   `thumbTimer` again, both checks fail. Background in [page-management.md](page-management.md#thumbnails).
+- `ScribbleTest::zeroSizeLayoutTest()` - ugui's `Widget::setLayoutBounds()` given a node of zero width (a
+  group holding only a zero-width rect, the shape of the top bar's empty tab strip) and a wider destination:
+  the layout transform must stay finite and the node must move there. Verified to fail (both checks) against
+  the old svggui.cpp, which divided by the zero width (UBSan `float-divide-by-zero`) and left the transform
+  inf/NaN for good; reading the bounds then asserts, so the check only does that when the transform is finite.
 
 Marker multiply blending is tested by `ScribbleTest::markerBlendTest()` (unit-check count), rendered with
 the software painter: details and mutation checks in [pen-and-tools.md](pen-and-tools.md#marker-multiplies-text-stays-dark).
@@ -253,6 +258,33 @@ The in-memory undo cap is tested by `ScribbleTest::undoCapTest()` (unit-check co
 a byte cap over draw+delete steps, an oversized newest step kept, and sync's unacknowledged steps never
 dropped (on a bare `ScribbleSync`). 12 checks fail with trimming disabled, 3 with the sync floor ignored; see
 [undo-persistence.md](undo-persistence.md#in-memory-cap).
+
+## Sanitizers and valgrind
+
+The Debug build is ASan + UBSan (`SANITIZE=1`, `Makefile.unix`), and **a Debug build runs the whole
+`ScribbleTest` suite again on exit** (`application.cpp`, after the window closes), so a clean quit
+(Ctrl+Q) of any interactive session ends with a test run and the leak check. Suppressions for third-party
+noise are in `tools/sanitizers/`: `lsan.supp` (NVIDIA GL driver, libdbus) and `ubsan.supp` (miniz's
+deliberate unaligned access, stb_image_write's negative shift). A session that logs to files:
+
+```
+AGENT_DISPLAY_NAME=sanitize \
+ASAN_OPTIONS=log_path=/tmp/sumi-asan,fast_unwind_on_malloc=0 \
+LSAN_OPTIONS=suppressions=$PWD/tools/sanitizers/lsan.supp \
+UBSAN_OPTIONS=print_stacktrace=1,suppressions=$PWD/tools/sanitizers/ubsan.supp \
+  tools/agent-display.sh run --debug
+```
+
+UBSan reports go to the session log (`$RUNDIR/session.log`), once per source location; ASan/LSan reports to
+`/tmp/sumi-asan.<pid>`. After suppressions, the leak report at exit is only *indirect* leaks (about 0.3-1.3 MB):
+UI trees alive until exit (the reused library window, toolbars, the stylesheet) - parent/child pointers make
+an unreachable tree a cycle, which LSan counts as indirect. Look for a **direct** leak, or for an allocation
+site whose count grows with how often something was done. `stop` kills the app, so it reports nothing;
+quit with `key ctrl+q` and wait for the process to exit (the exit tests take a minute or two under ASan).
+
+The standalone tests above build and run clean under `-fsanitize=address,undefined` and under valgrind
+memcheck (`-g -O1`, `valgrind --leak-check=full --error-exitcode=99`): build each with the command in its
+header plus those flags.
 
 ## SpinBox typed numbers (`ScribbleTest::spinBoxTest`)
 
