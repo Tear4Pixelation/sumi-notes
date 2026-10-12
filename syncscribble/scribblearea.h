@@ -478,7 +478,7 @@ protected:
   void discardStrokeBuilder();
   void scaleSnapShape(Point pos);
   void commitSnapShape();
-  int scratchOut(const std::vector<Point>& area, bool ownAction = true);
+  int scratchOut(const std::vector<Point>& area);
 
   // for groupStrokes
   std::vector<Element*> recentStrokes;

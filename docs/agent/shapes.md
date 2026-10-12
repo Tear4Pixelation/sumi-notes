@@ -218,10 +218,22 @@ were all refused. 240 Hz sampling by itself cost nothing.
   are still on the page. **A scratch-out over nothing is recorded the same way**: `scratchOutOnLift()`
   returns true for any detection, not only when it selected something, so the scribble is committed and
   then removed as the same two undo steps (it used to stay on the page as plain ink, one step, and a
-  detection could not be told from a miss). The *held*
-  scratch-out (`snapStroke`) is unchanged: one step, no ink. Tested in `shapeSnapTest()` (the
+  detection could not be told from a miss). Tested in `shapeSnapTest()` (the
   stroke-count checks fail both against the old drop-the-ink code and against the keep-the-scribble code;
   the over-nothing count and step checks fail against the stays-ink code).
+- **The held scratch-out is the same three states - this was the bug reported twice.** Every fix above
+  touched only the *lift* path (`doReleaseEvent`); the *held* one (`snapStroke()` -> `scratchOut()`, fired
+  by the hold timer with the pen still down) kept calling `discardStrokeBuilder()` and erasing in a single
+  step, so with the default hold delay a deliberate scribble-and-hold had no "scribble over everything"
+  state to undo to. `scratchOut(area)` now selects first, takes over the stroke builder, commits the
+  scribble as ink in its own action (step 1), then deletes the selection plus the scribble in a second
+  action (step 2); over nothing it is the same two steps. No action is open when the timer fires (the
+  release that follows is `MODE_NONE`, not undoable), so it opens and closes both itself - each
+  `endAction()` calls `sendHist()`, so sync peers get the two steps as two ordinary groups, and
+  `ButtonDragTimeline` shows two ticks because it counts `HEADER`s. **Any new scratch-out entry point must
+  do the same**: select before the scribble is on the page, commit the ink, end the action, erase in a
+  new one. Tested in `shapeSnapTest()` (held block: step count, 3 strokes after one undo, redo both ways);
+  those checks fail against the one-step code.
 - **Long scratch-outs are judged more loosely.** Real ones over a line of text (25-45 reversals, loops,
   arches, spikes) always have a short pass or a turn over the gap limit: pass length and gap ignore
   their worst 20-25%, and long strokes get a wider turn limit. On lift, don't start that rule below 24
@@ -260,7 +272,7 @@ were all refused. 240 Hz sampling by itself cost nothing.
   rounding toggles are *not* applied - they are armed for the shape tool, not for handwriting.
 - **Scratch-out** erases every element whose bbox *centre* is inside the scratch-out's hull (an overlap
   test would take strokes it merely grazed), through `Selection::doSelect()` so locked and hidden layers
-  are respected, as one undo step. Images are never taken. It happens the moment the hold fires; the rest
+  are respected, as two undo steps (the scribble as ink, then the erase - see above). Images are never taken. It happens the moment the hold fires; the rest
   of the gesture is `MODE_NONE`.
 - **The shape is not left selected** after the pen lifts, unlike the shape tool's `shapeEditAfterDraw`:
   `clearSelOnly` is on by default, so a selection would swallow the next handwriting stroke.

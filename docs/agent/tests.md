@@ -252,7 +252,11 @@ heading blue. See [night-mode.md](night-mode.md).
   harness; the in-app run currently aborts earlier, in `test7`, see below).
 - **`--test` aborts in `test7` on master 0208769** (also without this change): `Cached bounds are wrong` for a
   `path.write-stroke-pen` in `Selection::getBBox()` from `ScribbleArea::doMoveEvent`, so no later check runs.
-  Not investigated here.
+  Not investigated here. `SCRIBBLE_TEST_UNIT_ONLY=1 tools/agent-display.sh test` skips the numbered document
+  tests and goes straight to the unit checks; as of 5654e38 those then abort the same way in
+  `interactCullTest()` (after `shapeSnapTest()`). An abort throws away stdout still in the buffer, so a
+  check's `FAIL:` lines from before it can vanish - add a temporary `fflush(stdout)` after the check you
+  care about rather than reading "no FAIL" as a pass.
 
 Marker multiply blending is tested by `ScribbleTest::markerBlendTest()` (unit-check count), rendered with
 the software painter: details and mutation checks in [pen-and-tools.md](pen-and-tools.md#marker-multiplies-text-stays-dark).
