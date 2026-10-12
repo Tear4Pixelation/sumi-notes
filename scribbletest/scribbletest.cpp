@@ -1919,6 +1919,98 @@ int ScribbleTest::shapeTapEditTest()
   return nbad;
 }
 
+// A lone finger tap on empty canvas with something on the clipboard offers Paste at the tap point
+//  (ScribbleArea::scheduleTapPaste).  The popup itself is shown by a timer once no second tap, pen or
+//  pan has followed; tapPasteValid() is that decision, and pasteAtTap() is what the popup's item runs.
+int ScribbleTest::tapPasteTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: tap paste: %s\n", what); }
+  };
+  const int touch = INPUTSOURCE_TOUCH;
+  ScribbleInput* input = scribbleArea->scribbleInput.get();
+  const inputmode_t wasSingle = input->singleTouchMode, wasMulti = input->multiTouchMode;
+  auto fingerTap = [&](Dim x, Dim y) { ie(x, y, 1, touch, press);  ie(x, y, 0, touch, release); };
+  auto penDrag = [&](Dim x0, Dim y0, Dim x1, Dim y1) {
+    ie(x0, y0, 0.5, pen, press);  ie((x0 + x1)/2, (y0 + y1)/2, 0.5, pen);  ie(x1, y1, 0.5, pen);
+    ie(0, 0, 0, pen, release);
+  };
+  scribbleDoc->newDocument();
+  input->singleTouchMode = INPUTMODE_PAN;
+  input->multiTouchMode = INPUTMODE_PAN;
+  scribbleMode->setMode(MODE_STROKE);
+  scribbleDoc->app->setPen(ScribblePen(Color::BLACK, 2, ScribblePen::TIP_ROUND));
+  ScribbleApp* app = scribbleDoc->app;
+  // event timestamps have millisecond resolution, so let one tick pass between a tap and what follows it
+  auto tick = [](){ std::this_thread::sleep_for(std::chrono::milliseconds(4)); };
+  auto armed = [&]() { return scribbleArea->tapPasteTime != 0; };
+
+  // empty clipboard: nothing is scheduled
+  app->clipboard.reset();
+  scribbleArea->tapPasteTime = 0;
+  fingerTap(500, 600);
+  check(!armed(), "an empty clipboard schedules nothing");
+
+  // put a stroke on the clipboard
+  penDrag(100, 320, 300, 330);
+  scribbleDoc->doCommand(ID_SELALL);
+  scribbleDoc->doCommand(ID_COPYSEL);
+  scribbleDoc->clearSelection();
+  scribbleMode->setMode(MODE_STROKE);  // selecting all switched to the Select tool
+  check(app->clipboard && app->clipboard->count() == 1, "the clipboard holds the stroke");
+  int strokes = scribbleArea->currPage->strokeCount();
+
+  // a lone tap on empty canvas arms the popup and it stays valid
+  fingerTap(500, 600);
+  check(armed() && scribbleArea->tapPasteValid(), "a lone tap on empty canvas offers Paste");
+  Point armedPos = scribbleArea->tapPastePos;
+  // a second press (the start of a double tap) invalidates the first tap's popup
+  tick();
+  ie(500, 600, 1, touch, press);
+  check(!scribbleArea->tapPasteValid(), "a second press cancels the popup");
+  ie(500, 600, 0, touch, release);
+  // a pen press after the tap invalidates it
+  fingerTap(500, 700);
+  Timestamp tapTime = scribbleArea->tapPasteTime;
+  tick();
+  penDrag(100, 400, 200, 400);
+  check(tapTime != 0 && !scribbleArea->tapPasteValid(), "a pen stroke after the tap cancels the popup");
+  // a pan after the tap invalidates it
+  fingerTap(500, 700);
+  check(scribbleArea->tapPasteValid(), "armed again");
+  tick();
+  ie(400, 500, 1, touch, press);  ie(400, 400, 1, touch);  ie(400, 300, 1, touch);  ie(400, 300, 0, touch, release);
+  check(!scribbleArea->tapPasteValid(), "a pan after the tap cancels the popup");
+  // a two finger tap is undo and offers nothing
+  scribbleArea->tapPasteTime = 0;
+  mtinput(INPUTEVENT_PRESS, 200, 200, INPUTEVENT_NONE, 0, 0);
+  mtinput(INPUTEVENT_MOVE, 201, 200, INPUTEVENT_PRESS, 260, 200);
+  mtinput(INPUTEVENT_RELEASE, 201, 201, INPUTEVENT_MOVE, 260, 201);
+  mtinput(INPUTEVENT_NONE, 0, 0, INPUTEVENT_RELEASE, 260, 201);
+  check(!armed(), "a two finger tap does not offer Paste");
+  // a pen tap does not
+  scribbleArea->tapPasteTime = 0;
+  ie(500, 650, 0.5, pen, press);  ie(0, 0, 0, pen, release);
+  check(!armed(), "a pen tap does not offer Paste");
+
+  // choosing Paste puts the clipboard at the tap
+  fingerTap(500, 600);
+  check(armed(), "armed for the paste");
+  strokes = scribbleArea->currPage->strokeCount();
+  scribbleArea->pasteAtTap();
+  check(scribbleArea->currPage->strokeCount() == strokes + 1, "Paste adds the clipboard's stroke");
+  Rect pasted = scribbleArea->currSelection ? scribbleArea->currSelection->getBBox() : Rect();
+  Point where = scribbleArea->dimToPageDim(scribbleArea->screenToDim(Point(500, 600)));
+  check(scribbleArea->currSelection && pasted.center().dist(where) < 60, "pasted at the tap location");
+  (void)armedPos;
+
+  scribbleDoc->clearSelection();
+  input->singleTouchMode = wasSingle;
+  input->multiTouchMode = wasMulti;
+  return nbad;
+}
+
 int ScribbleTest::zoomSnapTest()
 {
   int nbad = 0;
@@ -5296,6 +5388,7 @@ int ScribbleTest::rulingRegionTest()
 void ScribbleTest::runAll(bool runsynctest)
 {
   nFailed = 0;
+//TMPHACK
   // the fixtures save and reopen documents and must not pick up (or leave) persisted undo histories;
   //  undoPersistTest() turns it on for itself
   bool undoPersistWas = UndoPersist::enabled;
@@ -5479,6 +5572,7 @@ void ScribbleTest::runAll(bool runsynctest)
   nUnitFailed += windingFillBoundsTest();
   nUnitFailed += thumbRendererTest();
   nUnitFailed += shapeTapEditTest();
+  nUnitFailed += tapPasteTest();
   nUnitFailed += zoomSnapTest();
   nUnitFailed += currentPageTest();
   nUnitFailed += fitSnapPageTest();

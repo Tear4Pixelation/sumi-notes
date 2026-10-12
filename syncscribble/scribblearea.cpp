@@ -4,6 +4,7 @@
 #include "scribbledoc.h"
 #include "scribbleapp.h"
 #include "screenshot.h"
+#include "mainwindow.h"
 #include "scribblewidget.h"
 #include "strokebuilder.h"
 #include "bookmarkview.h"
@@ -2320,11 +2321,68 @@ bool ScribbleArea::doTouchTap(Point pos)
     selectTapped(target);
     return true;
   }
-  if(!currSelection)
+  if(!currSelection) {
+    // empty canvas; false so a second tap still counts as a double tap
+    if(pagenum < numPages())
+      scheduleTapPaste(gpos);
     return false;
+  }
   clearSelection();
   uiChanged(UIState::SelChange);
   return true;
+}
+
+static constexpr int TAP_PASTE_DELAY_MS = 560;  // just past ScribbleInput's MAX_DBLCLICK_TIME (500)
+
+void ScribbleArea::scheduleTapPaste(Point gpos)
+{
+  if(!app->clipboard || app->clipboard->count() < 1 || placingTags())
+    return;
+  tapPasteTime = scribbleInput->initPointerTime;
+  tapPastePos = gpos;
+  tapPasteTimer = ScribbleApp::gui->setTimer(TAP_PASTE_DELAY_MS, NULL, tapPasteTimer, [this]() {
+    tapPasteTimer = NULL;
+    showTapPaste();
+    return 0;
+  });
+}
+
+// initPointerTime is reset by every new press from any source, so if it is not the tap's, something
+//  touched the screen since (second tap, pan, pinch, pen) and the tap was not a lone one
+bool ScribbleArea::tapPasteValid() const
+{
+  return tapPasteTime != 0 && scribbleInput->initPointerTime == tapPasteTime
+      && scribbleInput->scribbling == ScribbleInput::NOT_SCRIBBLING && !currSelection
+      && app->clipboard && app->clipboard->count() > 0;
+}
+
+void ScribbleArea::showTapPaste()
+{
+  if(!tapPasteValid())
+    return;
+  if(!tapPasteMenu) {
+    tapPasteMenu = createMenu(Menu::FLOATING, false);  // kept: a fresh Menu per show has crashed before
+    tapPasteMenu->addItem(_("Paste"), [this](){ pasteAtTap(); });
+    // showContextMenu() positions against the menu's parent, so it must be in the tree (as selPopup is)
+    ScribbleApp::win->selectFirst("#main-container")->addWidget(tapPasteMenu);
+  }
+  ScribbleApp::gui->showContextMenu(tapPasteMenu, screenToGlobal(dimToScreen(tapPastePos)), NULL, false);
+}
+
+void ScribbleArea::pasteAtTap()
+{
+  if(!app->clipboard || app->clipboard->count() < 1)
+    return;
+  Clipboard* clipboard = app->clipboard.get();
+  if(clipboard->content->firstChild()->hasClass("write-page")) {
+    doPaste(clipboard, app->clipboardPage, app->clipboardFlags);  // whole pages have no point to go to
+  }
+  else {
+    doPasteAt(clipboard, tapPastePos, PasteFlags(app->clipboardFlags | PasteCenter | PasteOffsetExisting
+        | PasteRulingShift | PasteUndoable));
+  }
+  uiChanged(UIState::Paste);
+  doRefresh();
 }
 
 // consolidated fn for setting properties of current selection, including hyperref and bookmark creation
