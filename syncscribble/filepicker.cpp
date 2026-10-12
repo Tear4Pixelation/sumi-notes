@@ -350,7 +350,10 @@ static Status pick(bool save, const char* title, const std::string& name, const 
   std::vector<std::string> extv = extList(exts);
   if(!extv.empty()) {
     std::vector<std::string> globs;
-    for(const StringRef& glob : splitStringRef(StringRef(globList(extv, " ", true)), " ", true))
+    // keep the joined string alive: the StringRefs point into it, and a temporary in the
+    //  range-for initializer is destroyed before the loop body runs
+    std::string globStr = globList(extv, " ", true);
+    for(const StringRef& glob : splitStringRef(StringRef(globStr), " ", true))
       globs.push_back(glob.toString());
     std::string label = globList(extv, ", ", false);
     appendOption(&options, "filters", "a(sa(us))", [&](DBusMessageIter* val){
