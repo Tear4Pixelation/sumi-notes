@@ -62,7 +62,7 @@ placed more finely than a fingertip can point. Making it follow the finger again
 Dialog layout: Back (arrow) and Cancel (cross) are in a header around the title, not the bottom row - the
 template's `.window-title` node is moved into that row rather than recreated, so it keeps its theme
 styling. The bottom row holds only the ways forward: Next on the corner step, **Add More** and Done on the
-filter step. `cancelBtn` is still the dialog's cancel button, so Escape / Android back keep working.
+filter step and the grid. `cancelBtn` is still the dialog's cancel button, so Escape / Android back keep working.
 
 The bottom row's order is fixed on every platform: Add More at the left, Next / Done at the right, each
 `BOTTOM_BUTTON_WIDTH` (150) wide with empty space between. The dialog passes `createPopupDialogNode(false)`
@@ -71,12 +71,52 @@ on purpose - the default reverses the button row on mobile, which put Done on th
 Width comes from an invisible rect added to each button: the button background is `hfill`, so setting its
 own width (`setMinWidth()`) does nothing.
 
-**Add More** finishes with `ScanDialog::ADD_MORE`; `finishScan()` inserts that scan as usual and then calls
-`captureScan()` again (the photo half of `scanDocument()`, split out so it does not reset the run). Each
-follow-up goes right after the previous one: as a page at `lastScanPage + 1`, as an element stacked
-below `lastScanRect` (`ScribbleArea::insertImage()` takes and returns that rect). `scanDocument()` resets
-both, because a run abandoned in a mobile picker leaves them set. On desktop the next capture runs nested
-inside the previous `finishScan()`; the `ScanDialog` (and its full size photo) is destroyed before it.
+### Add More and the review grid
+
+**Scans stay pending in the dialog until the set is confirmed.** The first version closed the dialog on
+Add More, inserted that page, and opened a new dialog for the next photo - so a page could not be taken
+back without undo, and every page was its own undo step. Now the dialog stays open for the whole set:
+
+- Steps are `CORNERS` -> `FILTER` -> `GRID`. Add More (filter step or grid) files the page in hand under
+  `pending` (`commitCurrent()`: renders the output-size result and a thumbnail), shows the grid, and calls
+  `onAddMore`, which is `ScribbleApp::captureScan()`. The photo comes back through `finishScan()`, which
+  sees `ScribbleApp::scanDialog` set and calls `ScanDialog::addPhoto()` instead of opening a second dialog.
+  On desktop the capture (CameraDialog, file picker) runs nested inside the dialog's click handler; on
+  mobile `captureScan()` opens the picker and returns, and the photo arrives later as `INSERT_IMAGE` -
+  which still reaches `ScribbleApp`, because SvgGui sends app events to the main window even under a
+  modal. A cancelled capture just leaves the grid showing.
+- Done on the filter step inserts a lone page at once (the old single-page flow, no grid). Once the set has
+  a second page, or the grid has been shown at all (`gridShown`), Done returns to the grid instead, and the
+  grid's Done confirms the set. `finishScan()` then inserts everything in order: as pages after the current
+  page inside **one** `startAction(where | MULTIPAGE)` / `endAction()` (`insertScanPages()`), as elements
+  through `ScribbleArea::insertImages()` - one clipboard, one `doPasteAt()`, stacked top to bottom
+  `STACK_GAP` apart. One Ctrl+Z removes the whole set either way (verified for both).
+- Cancel (and Escape / Android back) drops every pending page. There is no confirmation.
+- Back from the corner step, when there are pending pages, returns to the grid and drops that photo (a
+  reopened page keeps what it had).
+
+![review grid: three pending pages, page 2 selected, floating bar](images/scan-grid.png)
+
+The grid is the document list's select mode applied to pending pages (ui-floating-bar.md): every cell
+shows the empty check badge, a tap toggles the ring and check, and the floating bar (bottom right, 48 / 43,
+radius 14, 44x44 buttons) holds a fixed-width count label ("3 pages" / "1 selected"), **Edit Corners**
+(enabled with exactly one selected) and **Discard** (destructive, enabled with any). No exit button, since
+the grid is a step rather than a mode. The CSS is `ScanDialog::stylesheet`, scoped to `.scan-dialog` and
+added by `createStylesheet()` the way `TopBar::stylesheet` is, so no `ugui/theme.cpp` change was needed; it
+uses only theme variables (`--doclist-bg`, `--floating-*`, `--badge-*`, `--checked`, `--danger`).
+Cells hug the page as the sidebar's page cards do: fixed 132x176 slot, page at its bottom, number under it.
+The grid is anchored `top hfill` in its scroller - with only `hfill` a short grid sat about 50 units too
+high and clipped the first row.
+
+Edit Corners decodes the stored photo, restores its quad, filter and rotation, and goes to the corner step
+with `editIndex` set; committing replaces that page in place, so the warp and enhance are redone from the
+original photo, not from the flattened result. Pending photos are kept as JPEG (`photoJpeg`), not raw: a
+12 MP photo is ~48 MB decoded, a few MB encoded. A photo decoded from a JPEG file hands back its own bytes
+from `encodeJPEG()`, so only camera frames are actually encoded (q92). Results are kept raw at output size
+(up to 2200 px, ~13 MB each), which is what the document holds once they are inserted anyway.
+
+To drive this in the agent display, `SUMI_CAMERA=none SUMI_FILE_PICKER=fixed:/path/photo.jpg` makes every
+capture, Add More included, return that photo at once.
 
 Where the photo comes from is per platform (`ScribbleApp::scanDocument()`); in every case a
 `pendingScan` flag on `ScribbleApp` diverts it into `ScanDialog`:
