@@ -670,6 +670,8 @@ void MainWindow::refreshSelPopup()
   actionScreenshot->setEnabled(area && (area->hasShotRegion() || hasInk));
   actionSmart_Scale->setEnabled(area && area->canSmartScale());
   actionSmart_Scale->setChecked(area && area->smartScaleOn());
+  selSkipLinesBtn->setVisible(hasInk && area && area->smartScaleOn());
+  selSkipLinesBtn->setChecked(app->scribbleMode->insSpaceSkipLines);
   selColorItem->setVisible(inkSel && hasInk);
   selWidthItem->setVisible(inkSel && hasInk);
   window()->gui()->deleteContents(moveLayerPopup->selectFirst(".child-container"));
@@ -1573,6 +1575,18 @@ void MainWindow::setupUI(ScribbleApp* a)
   Button* smartScaleBtn = selToolbar->addAction(actionSmart_Scale);
   setupTooltip(smartScaleBtn, _("Drag the round handle to resize the handwriting on its lines"));
   selInkButtons.push_back(smartScaleBtn);
+  // Skip Lines for Resize Handwriting: the same toggle (ScribbleMode::insSpaceSkipLines) the Insert Space
+  //  tool offers - text written on every second line resizes and reflows by text lines
+  selSkipLinesBtn = createToolbutton(SvgGui::useFile(":/icons/ic_menu_toggle_skip_lines.svg"), _("Skip Lines"));
+  selSkipLinesBtn->setChecked(app->scribbleMode->insSpaceSkipLines);
+  selSkipLinesBtn->onClicked = [this](){
+    app->scribbleMode->insSpaceSkipLines = !selSkipLinesBtn->isChecked();
+    selSkipLinesBtn->setChecked(app->scribbleMode->insSpaceSkipLines);
+    insSpaceSkipLinesToggle->setChecked(app->scribbleMode->insSpaceSkipLines);
+  };
+  setupTooltip(selSkipLinesBtn, _("Text is written on every second line: resize and reflow by text lines"));
+  selToolbar->addWidget(selSkipLinesBtn);
+  selInkButtons.push_back(selSkipLinesBtn);
   selInkButtons.push_back(selToolbar->addAction(actionCreate_Link));
   selToolbar->addAction(actionScreenshot);
   // Move to Layer: a labeled dropdown listing the layers, filled in by refreshSelPopup() on each open.
@@ -2098,6 +2112,8 @@ void MainWindow::createToolBars()
   insSpaceSkipLinesToggle->onClicked = [this](){
     app->scribbleMode->insSpaceSkipLines = !insSpaceSkipLinesToggle->isChecked();
     insSpaceSkipLinesToggle->setChecked(app->scribbleMode->insSpaceSkipLines);
+    if(selSkipLinesBtn)
+      selSkipLinesBtn->setChecked(app->scribbleMode->insSpaceSkipLines);
   };
   setupTooltip(insSpaceSkipLinesToggle, _("Text is written on every second line: move and reflow by text lines"));
   insSpaceRow->addWidget(insSpaceSkipLinesToggle);

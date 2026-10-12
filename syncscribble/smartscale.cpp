@@ -82,8 +82,8 @@ SmartScaleLayout smartScaleLayout(const std::vector<SmartScaleItem>& items, Dim 
         x = indent;
         lineEmpty = true;
       }
-      const Point from(word.left, (word.line + 1)*yr);
-      const Point to(x, (newLine + 1)*yr);
+      const Point from(word.left, (word.line + params.baseline)*yr);
+      const Point to(x, (newLine + params.baseline)*yr);
       for(int idx : word.items) {
         layout.from[idx] = from;
         layout.to[idx] = to;

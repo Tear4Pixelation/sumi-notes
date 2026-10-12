@@ -137,6 +137,28 @@ int runSmartScaleTests()
     smartScaleCheck(layout.newLastLine > layout.oldLastLine, "grown text takes more lines");
   }
 
+  // Skip Lines: a band is a text line plus the blank line below (pitch doubled), the rule in the middle.
+  //  Two words on bands 1 and 2 (text on every second line); at half size the second pulls up onto band 1's
+  //  rule, still mid-band, not onto the bottom of the band (which is the blank line)
+  {
+    const Dim pitch2 = 2*yr;
+    auto skipWord = [&](std::vector<SmartScaleItem>& items, int line, Dim x0) {
+      const Dim base = (line + 0.5)*pitch2;
+      items.push_back(SmartScaleItem{Rect::ltrb(x0, base - 0.6*yr, x0 + 99, base), line});
+    };
+    std::vector<SmartScaleItem> skipped;
+    skipWord(skipped, 1, 100);
+    skipWord(skipped, 2, 100);
+    SmartScaleParams skipParams = params;
+    skipParams.yRuling = pitch2;
+    skipParams.baseline = 0.5;
+    SmartScaleLayout layout = smartScaleLayout(skipped, 0.5, skipParams);
+    smartScaleCheck(nearDim(layout.from[0].y, 1.5*pitch2) && nearDim(layout.to[0].y, 1.5*pitch2),
+        "skip lines: a word scales about the rule in the middle of its band");
+    smartScaleCheck(nearDim(layout.to[1].y, 1.5*pitch2), "skip lines: the next text line pulls up onto the rule mid-band");
+    smartScaleCheck(layout.newLastLine == 1, "skip lines: two text lines of one word each fit on one");
+  }
+
   // unruled: the baseline estimate ignores descenders
   {
     std::vector<Rect> boxes = {Rect::ltrb(0, 10, 5, 50), Rect::ltrb(6, 20, 9, 50), Rect::ltrb(10, 30, 14, 70),

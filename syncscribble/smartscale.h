@@ -35,6 +35,9 @@ struct SmartScaleParams
   Dim minWordGap = 0;
   // lines are filled up to this local x
   Dim right = 0;
+  // where in its band a line's rule is, as a fraction of the pitch: 1 = the band's bottom.  With Skip Lines
+  //  a band is a text line plus the blank line below (pitch doubled) and the rule is at the middle, 0.5.
+  Dim baseline = 1;
 };
 
 struct SmartScaleLayout
