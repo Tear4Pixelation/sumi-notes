@@ -117,6 +117,9 @@ static size_t nodeMemSize(const SvgNode* node)
     const SvgImage* image = static_cast<const SvgImage*>(node);
     const Image& img = image->m_image;
     bytes += img.encData.capacity() + image->saveCache.data.capacity() + (img.data ? size_t(img.dataLen()) : 0);
+    // an edited image's original, kept as a data URI (IMAGE_ORIG_ATTR, screenshot.md)
+    if(const char* orig = image->getStringAttr("__croporig"))
+      bytes += strlen(orig);
   }
   return bytes;
 }

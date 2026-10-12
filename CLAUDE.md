@@ -126,7 +126,7 @@ relevant file before changing that area.
 - [pen-and-tools.md](docs/agent/pen-and-tools.md) - eraser hit test (capsule vs ink), marker centre-on-line, relative pen width, selection color/width/dash style, Switch Back, Select touching, reflow indent and word gap, ruled insert space as one tool (axis dead zone), Insert Lines press zones and rejoining a split
 - [history-panel.md](docs/agent/history-panel.md) - `ButtonDragTimeline` undo/redo ruler, lanes, `--screenDPI` layout preview
 - [night-mode.md](docs/agent/night-mode.md) - Invert Colors as a render-time `ColorMap`, mirrored theme vs lightness flip, never a document edit
-- [screenshot.md](docs/agent/screenshot.md) - region kept dashed after a selection (even an empty one), capture without paper/ruling, white-to-alpha, crop dialog, Copy / Add to page
+- [screenshot.md](docs/agent/screenshot.md) - region kept dashed after a selection (even an empty one), capture wider than the selection with the crop preset to it, capture without paper/ruling, white-to-alpha, crop dialog (rectangle, polygon, rounded corners; `cropshape.h`), Copy / Add to page, Edit Image on a selected image (original kept in `__croporig` for uncropping, one undo step)
 - [themes.md](docs/agent/themes.md) - palette generator (`cusp-walk-1` is FROZEN), theme storage, restyle, themed picker, `ThemeChangedItem`
 - [outlines.md](docs/agent/outlines.md) - per-page outline entries, `PageOutlineItem`, why no document-level index
 - [page-tags.md](docs/agent/page-tags.md) - tags on pages as `write-pagetag` elements, the toolbar tag button and placing tags on the pointer, to-do tags (ticked = page untagged), the `pagetags` summary and page thumbnails, page cards, inheritance and the blink

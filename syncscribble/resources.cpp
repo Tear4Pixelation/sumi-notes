@@ -1,5 +1,6 @@
 #include "resources.h"
 #include "topbar.h"
+#include "screenshot.h"
 #include <fstream>
 #include <unordered_map>
 #include "ulib/miniz_gzip.h"
@@ -215,6 +216,8 @@ SvgCssStylesheet* createStylesheet()
     styleSheet->parse_stylesheet(guiCSS.c_str());
   // the top tab bar's rules (and its one theme variable) live with it in topbar.cpp
   styleSheet->parse_stylesheet(TopBar::stylesheet);
+  // the crop dialog (screenshot, image editing) and its shape bar: screenshot.cpp
+  styleSheet->parse_stylesheet(imageCropStylesheet);
   styleSheet->sort_rules();
   return styleSheet;
 }

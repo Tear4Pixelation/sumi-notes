@@ -15,6 +15,11 @@ changes keeping the red handle's phase (`setPitchesAbout`) and the coordinate sy
 (step of 2 cells, y up, clipping; each mutation-checked), is
 tested the same way in `scribbletest/regiontest.cpp` (`runRegionTests()`; command in its header).
 
+The crop dialog's shape math (rounded outlines, the nonzero coverage mask, the `__crop` format) is in
+`scribbletest/cropshapetest.cpp` (`runCropShapeTests()`, standalone; command in its header), and
+`ScribbleTest::imageCropTest()` covers the kept original through save and load and Edit Image as one undo
+step - see [screenshot.md](screenshot.md#tests).
+
 The eraser geometry (segment distance, capsule against a path's segments / stroke width / filled inside,
 the capsule polygon's round ends) is tested the same way in `scribbletest/erasetest.cpp`
 (`runEraseTests()`; command in its header); both erasers end to end in `ScribbleTest::eraserHitTest()` -
