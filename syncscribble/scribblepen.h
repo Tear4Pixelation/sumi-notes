@@ -24,7 +24,9 @@ public:
       WIDTH_RELATIVE = 0x1000,
       // draws a straight horizontal stroke through the vertical centre of the ruled line the press lands
       //  in (text marker); implies line drawing
-      CENTER_ON_LINE = 0x2000;
+      CENTER_ON_LINE = 0x2000,
+      // the Tape tool's pen (docs/agent/tape.md): a press lays a strip of tape instead of drawing a stroke
+      TAPE = 0x4000;
 
   ScribblePen(Color c, Dim w, unsigned int _flags = 0, Dim wr = 0, Dim pr = 0, Dim spd = 0, Dim angle = 0, Dim _dash = 0, Dim _gap = 0)
       : color(c), width(w), wRatio(wr), prParam(pr), spdMax(spd), dirAngle(angle), dash(_dash), gap(_gap), flags(_flags) {}

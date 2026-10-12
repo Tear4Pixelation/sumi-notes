@@ -1485,8 +1485,13 @@ void ScribbleApp::penChanged(int changed)
 void ScribbleApp::setPen(const ScribblePen& pen)
 {
   currPen = pen;
+  // a tape pen still showing the theme's color was never given one of its own (the toolbar is shown the
+  //  resolved color, updatePenToolbar), so it goes on following the document theme (docs/agent/tape.md)
+  if(currPen.hasFlag(ScribblePen::TAPE) && !scribbleMode->tapePen.color.isValid()
+      && currPen.color == activeDoc()->tapeThemeColor())
+    currPen.color = Color::INVALID_COLOR;
   // keep the active draw tool's stored pen up to date so it survives a tool switch and app restart
-  scribbleMode->currDrawPen() = pen;
+  scribbleMode->currDrawPen() = currPen;
 }
 
 void ScribbleApp::setDrawTool(int tool)
@@ -1522,8 +1527,13 @@ void ScribbleApp::updatePenToolbar(bool forSelPopup)
   }
   else if(scribbleMode->getMode() == MODE_BOOKMARK)
     penToolbar->setPen(ScribblePen(bookmarkColor, -1), PenToolbar::BOOKMARK_MODE);
-  else
-    penToolbar->setPen(currPen, PenToolbar::PEN_MODE);
+  else {
+    ScribblePen shown = currPen;
+    // the Tape tool's "no color picked" is the document theme's color
+    if(shown.hasFlag(ScribblePen::TAPE) && !shown.color.isValid())
+      shown.color = activeDoc()->tapeThemeColor();
+    penToolbar->setPen(shown, PenToolbar::PEN_MODE);
+  }
 }
 
 // load saved pen

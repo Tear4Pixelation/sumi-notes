@@ -353,8 +353,12 @@ Action* MainWindow::modeToAction(int mode)
     case MODE_PAN:  return actionPan;
     // the three draw tools share MODE_STROKE and are distinguished by the current pen
     case MODE_STROKE:
-      return app->scribbleMode->drawTool == ScribbleMode::DRAWTOOL_HIGHLIGHT ? actionHighlight :
-          (app->scribbleMode->drawTool == ScribbleMode::DRAWTOOL_EPHEMERAL ? actionEphemeral : actionDraw);
+      switch(app->scribbleMode->drawTool) {
+        case ScribbleMode::DRAWTOOL_HIGHLIGHT:  return actionHighlight;
+        case ScribbleMode::DRAWTOOL_EPHEMERAL:  return actionEphemeral;
+        case ScribbleMode::DRAWTOOL_TAPE:  return actionTape;
+        default:  return actionDraw;
+      }
     case MODE_BOOKMARK:  return actionAdd_Bookmark;
     // the active shape is shown by the options row, not by the tools row icon
     case MODE_DRAWSHAPE:  return actionShapes;
@@ -1729,6 +1733,7 @@ void MainWindow::createToolBars()
       toolsToolbar->addAction(actionSelect);
       toolsToolbar->addAction(actionShapes);
       toolsToolbar->addAction(actionEphemeral);
+      toolsToolbar->addAction(actionTape);
       toolsToolbar->addAction(actionInsert_Space);
       toolsToolbar->node->setAttribute("box-anchor", "");  // no stretching for this subtoolbar!
       // a sub-toolbar is not a surface of its own - the toolbar it sits in supplies the background (and,
@@ -1737,7 +1742,7 @@ void MainWindow::createToolBars()
       dest->addWidget(toolsToolbar);
       // the tools are the point of the app, so the row is hidden only as a last resort (see adjFn)
       addTBWidget(toolsToolbar, 4, {actionDraw, actionErase, actionHighlight,
-          actionSelect, actionShapes, actionEphemeral, actionInsert_Space});
+          actionSelect, actionShapes, actionEphemeral, actionTape, actionInsert_Space});
   };
 
   // page ops, file ops and overflow are separate floating panels on desktop (see below), so the flat
@@ -2578,6 +2583,11 @@ void MainWindow::setupActions()
       [this](){ selectDrawTool(ScribbleMode::DRAWTOOL_EPHEMERAL); });
   actionEphemeral->setCheckable(true);
   actionEphemeral->tooltip = _("Strokes are not saved with the document");
+  // a draw tool, so the pen options row (color, width, centre on line) is its options row too
+  actionTape = createAction("actionTape", "Tape", ":/icons/ic_menu_tape.svg", "",
+      [this](){ selectDrawTool(ScribbleMode::DRAWTOOL_TAPE); });
+  actionTape->setCheckable(true);
+  actionTape->tooltip = _("Cover part of the page with tape\nTap a strip to see through it");
   // 1-8 select saved pens; 9 for draw options row, 0 for bookmark
   actionCustom_Pen = createAction("actionCustom_Pen",
       "Pen Setup...", ":/icons/ic_menu_set_pen.svg", "9", [this](){ togglePenToolbar(); });
@@ -2670,6 +2680,7 @@ void MainWindow::setupActions()
   actionDraw->setPriority(Action::NormalPriority + 2);
   actionHighlight->setPriority(Action::NormalPriority + 2);
   actionEphemeral->setPriority(Action::NormalPriority + 2);
+  actionTape->setPriority(Action::NormalPriority + 2);
   actionErase->setPriority(Action::NormalPriority + 2);
   actionSelect->setPriority(Action::NormalPriority + 2);
   actionInsert_Space->setPriority(Action::NormalPriority + 2);

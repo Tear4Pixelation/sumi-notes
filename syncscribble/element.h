@@ -217,6 +217,18 @@ public:
   bool isTodoDone() const { return isTodoTag() && node->getStringAttr("__todo", "")[0] == '1'; }
   void setTodoDone(bool done);  // only the attribute and the look; recording it is the caller's business
   Rect todoBoxRect() const;  // the checkbox, in page coordinates; invalid if this is not a to-do tag
+  // Tape (docs/agent/tape.md): a <path class="write-tape" __tape="1"> rectangle laid over the page, like
+  //  masking tape over answers.  "1" is solid - filled, and drawn over everything on the page, every layer's
+  //  ink included (Page::draw) - and "0" see-through, a dashed outline.  The look follows from the state,
+  //  but both are on the node, so an older build shows the same thing.
+  bool isTape() const { return node->type() == SvgNode::PATH && node->hasClass(TAPE_CLASS); }
+  bool isTapeSolid() const { return isTape() && node->getStringAttr("__tape", "1")[0] != '0'; }
+  void setTapeSolid(bool solid);  // the attribute and the look; recording it is the caller's business
+  // inside the strip, or within reach (page units) of its edge
+  bool tapeHit(Point pos, Dim reach) const;
+  // a strip of the given width whose centre line runs from a to b
+  static Element* createTape(Point a, Point b, Dim width, Color color, bool solid = true);
+  static const char* TAPE_CLASS;
   bool isBookmark() const { return node->hasClass("bookmark"); }
   bool isHyperRef() const;
   // all children of multi-stroke have Element exts; may extend to include bookmark groups later

@@ -1126,6 +1126,12 @@ bool ScribbleDoc::setPageProperties(const PageProperties* props, bool applytoall
   return clipped;
 }
 
+Color ScribbleDoc::tapeThemeColor()
+{
+  const Palette& pal = palette();
+  return (pal.families.empty() ? pal.neutral : pal.families.front().base).opaque();
+}
+
 const Palette& ScribbleDoc::palette()
 {
   if(!paletteValid) {

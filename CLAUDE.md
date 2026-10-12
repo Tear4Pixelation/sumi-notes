@@ -122,6 +122,7 @@ relevant file before changing that area.
 - [ruling-regions.md](docs/agent/ruling-regions.md) - Paper Patch: per-area ruling, `rulingAt()`, tilted frames, region panel
 - [smart-scale.md](docs/agent/smart-scale.md) - Resize Handwriting: selection popup toggle, round handle, words scaled about their rule and reflowed (live), later content follows by lines, one undo step, unruled fallback
 - [document-scanning.md](docs/agent/document-scanning.md) - homography, warp, enhance, quad detection in `ulib`; capture per platform (Android camera apps, iOS camera sheet, desktop `Camera` backends + `CameraDialog`), the MJPEG Huffman-table trap
+- [tape.md](docs/agent/tape.md) - Tape tool: a draw tool (`DRAWTOOL_TAPE`) laying `write-tape` strips, relative width and centre on line from the marker, solid/see-through `__tape` toggled by a tap (tool, Pan, finger) as an undoable clone swap, drawn over every layer by a second pass in `Page::draw`, theme color until picked
 - [shapes.md](docs/agent/shapes.md) - parametric shapes, `ShapeParams` descriptor, polyline/curve family, toggles, hold-to-snap recognition, 45 degree snap
 - [pen-and-tools.md](docs/agent/pen-and-tools.md) - eraser hit test (capsule vs ink), marker centre-on-line, relative pen width, selection color/width/dash style, Switch Back, Select touching, reflow indent and word gap, ruled insert space as one tool (axis dead zone), Insert Lines press zones and rejoining a split
 - [history-panel.md](docs/agent/history-panel.md) - `ButtonDragTimeline` undo/redo ruler, lanes, `--screenDPI` layout preview

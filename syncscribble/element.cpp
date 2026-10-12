@@ -16,6 +16,7 @@ const char* Element::ROUND_PEN_CLASS = "write-round-pen";
 const char* Element::CHISEL_PEN_CLASS = "write-chisel-pen";
 const char* Element::RULING_REGION_CLASS = "write-ruling-region";
 const char* Element::PAGE_TAG_CLASS = "write-pagetag";
+const char* Element::TAPE_CLASS = "write-tape";
 const ScribbleTransform Element::NO_TRANSFORM{};
 const ShapeParams Element::NO_SHAPE{};
 const RulingRegionParams Element::NO_REGION{};
@@ -1287,6 +1288,85 @@ void Element::setTodoDone(bool done)
         child->removeAttr("opacity");
     }
   }
+}
+
+// the outline's width as a share of the strip's: thin enough to read as an edge, never a hairline that
+//  vanishes when zoomed out or a band that eats into the strip
+static Dim tapeOutlineWidth(Dim width) { return std::min(std::max(width*Dim(0.04), Dim(0.75)), Dim(3)); }
+
+Element* Element::createTape(Point a, Point b, Dim width, Color color, bool solid)
+{
+  Point dir = b - a;
+  Dim len = dir.dist();
+  dir = len > 0 ? dir/len : Point(1, 0);
+  Point half = Point(-dir.y, dir.x)*(width/2);
+  Path2D path;
+  path.moveTo(a + half);
+  path.lineTo(b + half);
+  path.lineTo(b - half);
+  path.lineTo(a - half);
+  path.closeSubpath();
+  SvgPath* svgPath = new SvgPath(path);
+  svgPath->addClass(TAPE_CLASS);
+  // the outline is always there, in the tape's color: it is the see-through look, and the stroke is where
+  //  the color lives while the fill is off (a recolor sets only paint that is present)
+  setSvgStrokeColor(svgPath, color.opaque());
+  svgPath->setAttr<float>("stroke-width", tapeOutlineWidth(width));
+  svgPath->setAttr<int>("stroke-linejoin", Painter::MiterJoin);
+  svgPath->setAttr("__tape", "1");
+  Element* tape = new Element(svgPath);
+  tape->setTapeSolid(solid);
+  return tape;
+}
+
+void Element::setTapeSolid(bool solid)
+{
+  if(!isTape())
+    return;
+  node->setAttr("__tape", solid ? "1" : "0");
+  Color color = node->getColorAttr("stroke", Color::NONE);
+  if(solid) {
+    setSvgFillColor(node, color.opaque());
+    node->removeAttr("stroke-dasharray");
+  }
+  else {
+    node->setAttr<color_t>("fill", Color::NONE);
+    node->removeAttr("fill-opacity");
+    Dim w = node->getFloatAttr("stroke-width", 1);
+    node->setAttribute("stroke-dasharray", fstring("%g %g", 4*w, 3*w).c_str());
+  }
+}
+
+bool Element::tapeHit(Point pos, Dim reach) const
+{
+  if(!isTape())
+    return false;
+  const Path2D& path = *static_cast<SvgPath*>(node)->path();
+  if(path.size() < 3)
+    return false;
+  Transform2D tf = node->hasTransform() ? node->getTransform() : Transform2D();
+  std::vector<Point> poly;
+  for(int ii = 0; ii < int(path.size()); ++ii)
+    poly.push_back(tf.map(path.point(ii)));
+  // even-odd crossing test, then the distance to each edge for the reach
+  bool inside = false;
+  size_t n = poly.size();
+  for(size_t ii = 0, jj = n - 1; ii < n; jj = ii++) {
+    const Point& pi = poly[ii];
+    const Point& pj = poly[jj];
+    if((pi.y > pos.y) != (pj.y > pos.y) && pos.x < (pj.x - pi.x)*(pos.y - pi.y)/(pj.y - pi.y) + pi.x)
+      inside = !inside;
+  }
+  if(inside)
+    return true;
+  for(size_t ii = 0, jj = n - 1; ii < n; jj = ii++) {
+    Point seg = poly[ii] - poly[jj];
+    Dim len2 = seg.x*seg.x + seg.y*seg.y;
+    Dim t = len2 > 0 ? std::min(std::max(((pos - poly[jj]).x*seg.x + (pos - poly[jj]).y*seg.y)/len2, Dim(0)), Dim(1)) : 0;
+    if(pos.dist(poly[jj] + seg*t) <= reach)
+      return true;
+  }
+  return false;
 }
 
 Rect Element::todoBoxRect() const

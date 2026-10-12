@@ -97,6 +97,9 @@ public:
   // The document's themed palette (COLORS_SPEC.md), generated from cfg's recipe and cached - the
   //  generator is far too expensive to run per frame, and nothing in the drawing or input path calls it.
   const Palette& palette();
+  // the Tape tool's color while the user has not picked one: the theme's first (seed hue) family, opaque
+  //  (docs/agent/tape.md).  Falls back to the theme's neutral ink if the palette has no families.
+  Color tapeThemeColor();
   void invalidatePalette() { paletteValid = false; }
   // False once the palette has been generated from a generator id this build does not have: the
   //  document still renders correctly from its literal stroke colors, but its palette is a fallback.

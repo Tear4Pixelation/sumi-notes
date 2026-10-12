@@ -136,6 +136,8 @@ public:
   void recalcTimeRange(bool force = false);
 
   Range<ElementIter> children() const;
+  // whether any element on the page is tape, which Page::draw paints after everything else
+  bool hasTape() const;
   // `layer` defaults to LAYER_CURRENT, i.e. the element is stamped with the document's current
   //  layer.  Every route by which the *user* adds content - a finished stroke, a shape, a pasted
   //  selection, an inserted image, a scanned page - funnels through here, which is what makes "new

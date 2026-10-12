@@ -1263,6 +1263,19 @@ static const char* icons__ic_menu_tabs_svg = R"~~~~(<?xml version="1.0" encoding
 </svg>
 )~~~~";
 
+static const char* icons__ic_menu_tape_svg = R"~~~~(<?xml version="1.0" encoding="utf-8"?>
+<svg version="1.2" baseProfile="tiny" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+  x="0px" y="0px" viewBox="0 0 24 24" xml:space="preserve">
+<g class="icon">
+  <path d="M2,18.5L22,18.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+  <path d="M2,21.5L14,21.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+  <g transform="rotate(-30 12 10)">
+    <path d="M4,6.5L20,6.5L21,8.25L20,10L21,11.75L20,13.5L4,13.5L3,11.75L4,10L3,8.25Z" fill="currentColor" fill-opacity="0.3" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+  </g>
+</g>
+</svg>
+)~~~~";
+
 static const char* icons__ic_menu_toggle_erase_stroke_svg = R"~~~~(<?xml version="1.0" encoding="utf-8"?>
 <svg version="1.2" baseProfile="tiny" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
   x="0px" y="0px" viewBox="555 158.51 33 33" xml:space="preserve">
@@ -1526,6 +1539,7 @@ static void LOAD_RES_FN() { addStringResources({
   {"icons/ic_menu_stretch.svg", icons__ic_menu_stretch_svg},
   {"icons/ic_menu_switch_back.svg", icons__ic_menu_switch_back_svg},
   {"icons/ic_menu_tabs.svg", icons__ic_menu_tabs_svg},
+  {"icons/ic_menu_tape.svg", icons__ic_menu_tape_svg},
   {"icons/ic_menu_toggle_erase_stroke.svg", icons__ic_menu_toggle_erase_stroke_svg},
   {"icons/ic_menu_toggle_ruled.svg", icons__ic_menu_toggle_ruled_svg},
   {"icons/ic_menu_toggle_select_touch.svg", icons__ic_menu_toggle_select_touch_svg},
