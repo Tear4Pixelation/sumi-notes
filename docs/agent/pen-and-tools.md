@@ -618,3 +618,20 @@ Each of these must stay **pixel-identical** (checked by screenshot AE=0 on GL an
   `glTexImage3D`) cut the Ir but made Move Selection ~2x and pan ~16% slower in wall and CPU time on
   NVIDIA (driver sync / clear) - measured, don't redo it. The per-call `type`/`nedges`/`offset` uniforms
   are set only when they change.
+
+## Image handles (scale only, no crop)
+
+A selection that is exactly one image (`RectSelector::singleImage`, set in `shrink()`) has no crop handles any
+more (`MODE_CROPSEL`, `MODEMOD_CROPSEL`, `cropHandleHit`, the red dots and the "Drag red handles to crop" tip
+are gone; cropping moves to a dialog). Instead:
+
+- The four **side handles** scale one axis only (`sideHandleHit()` returns the opposite edge with NaN on the
+  untouched axis; `selectionHit()` fills the NaN from the selection centre and sets `scaleAxis`, and
+  `moveEvent` forces the other factor to 1). They run through `MODE_SCALESEL`, so a drag is one undo step like
+  any scale.
+- All four **corners** keep the aspect ratio (`scaleLockRatio` forced on for a lone image; other selections
+  still scale freely except the bottom right corner).
+- Side handles are drawn as short round-capped bars along the edge in `bgStroke` (the selection's themed
+  colour), not as dots in a fixed colour, so they do not read as crop handles.
+- Known limit: handles act in page axes, so a rotated image scaled from a side shears, as free corner scaling
+  of any rotated selection already did.

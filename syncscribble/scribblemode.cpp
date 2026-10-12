@@ -323,8 +323,6 @@ int ScribbleMode::getScribbleMode(int modifier) const
     return (modifier & MODEMOD_PENBTN) ? MODE_SCALESELW : MODE_SCALESEL;
   else if(modifier & MODEMOD_ROTATESEL)
     return (modifier & MODEMOD_PENBTN) ? MODE_ROTATESELW : MODE_ROTATESEL;
-  else if(modifier & MODEMOD_CROPSEL)
-    return MODE_CROPSEL;
   else if(modifier & MODEMOD_SHAPEHANDLE)
     return MODE_SHAPEHANDLE;
   else if(modifier & MODEMOD_ERASE)

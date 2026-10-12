@@ -269,6 +269,9 @@ protected:
   Dim prevXScale;
   Dim prevYScale;
   bool scaleLockRatio;
+  // which axes the current scale drag affects: both, or one only (side handles of an image)
+  enum { SCALE_BOTH, SCALE_X_ONLY, SCALE_Y_ONLY } scaleAxis = SCALE_BOTH;
+  bool rectSelectorSingleImage() const { return rectSelector && currSelection && currSelection->selector == rectSelector && rectSelector->singleImage; }
   Timestamp prevHoverDrawTime;
   Rect hoverRect;
   int cursorMode = 0;  // CURSORMODE_SYSTEM

@@ -975,7 +975,7 @@ void RectSelector::shrink()
     Dim pady = (4*HANDLE_PAD/mZoom - selRect.height())/2;
     selRect.pad(std::max(Dim(1.0), padx + 1), std::max(Dim(1.0), pady + 1));
   }
-  enableCrop = selection->count() == 1 && selection->strokes.front()->node->type() == SvgNode::IMAGE;
+  singleImage = selection->count() == 1 && selection->strokes.front()->node->type() == SvgNode::IMAGE;
 }
 
 // check for hit on rect selection handles used for resizing
@@ -1012,22 +1012,23 @@ Point RectSelector::rotHandleHit(Point pos, bool touch)
   return Point(NaN, NaN);
 }
 
-Point RectSelector::cropHandleHit(Point pos, bool touch)
+// the side handles of a selected image scale one axis only: the origin returned has NaN on the axis that is
+//  left alone (the opposite edge on the scaled axis)
+Point RectSelector::sideHandleHit(Point pos, bool touch)
 {
-  if(!drawHandles || !enableCrop || smartScale)
+  if(!drawHandles || !singleImage || smartScale)
     return Point(NaN, NaN);
   Dim h = touch ? 2*HANDLE_SIZE : HANDLE_SIZE;
   Dim a = (h+3)/mZoom; // +3 is to make it easier to grab handle
   Rect handlerect = Rect::ltrb(-a, -a, a, a);
-  Rect bbox = selection->getBBox();  //.toSize();
   if(Rect(handlerect).translate(selRect.left, selRect.center().y).contains(pos))
-    return Point(bbox.right, NaN);  //Point(-1, 0);
+    return Point(selRect.right, NaN);
   if(Rect(handlerect).translate(selRect.right, selRect.center().y).contains(pos))
-    return Point(bbox.left, NaN);  //Point(1, 0);
+    return Point(selRect.left, NaN);
   if(Rect(handlerect).translate(selRect.center().x, selRect.top).contains(pos))
-    return Point(NaN, bbox.bottom);  //Point(0, -1);
+    return Point(NaN, selRect.bottom);
   if(Rect(handlerect).translate(selRect.center().x, selRect.bottom).contains(pos))
-    return Point(NaN, bbox.top);  //Point(0, 1);
+    return Point(NaN, selRect.top);
   return Point(NaN, NaN);
 }
 
@@ -1695,14 +1696,16 @@ void RectSelector::drawBG(Painter* painter)
     rh.lineTo(r.center().x, r.top - 5*a);
     rh.addEllipse(r.center().x, r.top - 6*a, a, a);
     painter->drawPath(rh);
-    // cropping handles
-    if(enableCrop) {
-      painter->setFillBrush(Color::RED);
-      painter->setStrokeBrush(Color::NONE);
-      painter->drawPath(Path2D().addEllipse(r.left, r.center().y, a, a));
-      painter->drawPath(Path2D().addEllipse(r.right, r.center().y, a, a));
-      painter->drawPath(Path2D().addEllipse(r.center().x, r.top, a, a));
-      painter->drawPath(Path2D().addEllipse(r.center().x, r.bottom, a, a));
+    // side handles of an image (single-axis scale): short pills lying along their edge, in the selection's own
+    //  colour so they read as part of the frame, not as the corner squares
+    if(singleImage) {
+      painter->setFillBrush(Color::NONE);
+      painter->setStroke(bgStroke, 1.1*a, Painter::RoundCap, Painter::RoundJoin);
+      const Dim half = 1.2*a;
+      painter->drawPath(Path2D().addLine(Point(r.left, r.center().y - half), Point(r.left, r.center().y + half)));
+      painter->drawPath(Path2D().addLine(Point(r.right, r.center().y - half), Point(r.right, r.center().y + half)));
+      painter->drawPath(Path2D().addLine(Point(r.center().x - half, r.top), Point(r.center().x + half, r.top)));
+      painter->drawPath(Path2D().addLine(Point(r.center().x - half, r.bottom), Point(r.center().x + half, r.bottom)));
     }
   }
   painter->restore();
