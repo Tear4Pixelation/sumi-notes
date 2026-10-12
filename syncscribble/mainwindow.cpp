@@ -678,6 +678,8 @@ void MainWindow::refreshSelPopup()
     btn->setVisible(hasInk);
   moveLayerBtn->setVisible(hasInk);
   actionScreenshot->setEnabled(area && (area->hasShotRegion() || hasInk));
+  if(editImageBtn)
+    editImageBtn->setVisible(area && area->selectedImage());
   actionSmart_Scale->setEnabled(area && area->canSmartScale());
   actionSmart_Scale->setChecked(area && area->smartScaleOn());
   selSkipLinesBtn->setVisible(hasInk && area && area->smartScaleOn());
@@ -1605,6 +1607,8 @@ void MainWindow::setupUI(ScribbleApp* a)
   selInkButtons.push_back(selSkipLinesBtn);
   selInkButtons.push_back(selToolbar->addAction(actionCreate_Link));
   selToolbar->addAction(actionScreenshot);
+  // crop, reshape or uncrop a single selected image in the screenshot's dialog (screenshot.md)
+  editImageBtn = selToolbar->addAction(actionEditImage);
   // Move to Layer: a labeled dropdown listing the layers, filled in by refreshSelPopup() on each open.
   //  Added with addWidget rather than Menubar::addButton, whose release handler closes the menu tree -
   //  which would take the layer list down with it the moment it opened.
@@ -2455,6 +2459,8 @@ void MainWindow::setupActions()
   actionCreate_Link = createAction("actionCreate_Link", "Create Link...", ":/icons/ic_menu_link.svg", "Ctrl+L", SLOT(createLink()));
   actionScreenshot = createAction("actionScreenshot", "Screenshot", ":/icons/ic_menu_screenshot.svg", "",
       [this](){ if(app->activeArea()) app->activeArea()->screenshotSelection(); });
+  actionEditImage = createAction("actionEditImage", "Edit Image", ":/icons/ic_menu_image.svg", "",
+      [this](){ if(app->activeArea()) app->activeArea()->editSelectedImage(); });
   // a toggle on the selection: its handle then resizes the handwriting on its lines (smart-scale.md)
   actionSmart_Scale = createAction("actionSmart_Scale", "Resize Handwriting", ":/icons/ic_menu_smart_scale.svg", "",
       SLOT(doCommand(ID_SMARTSCALE)));

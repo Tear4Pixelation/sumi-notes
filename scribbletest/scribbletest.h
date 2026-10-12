@@ -37,6 +37,8 @@ public:
   //  per-refresh early-out still follows a new color and a recolored page
   int penToolbarRefreshTest();
   int outlineTest();
+  // Edit image: shaped crop, the kept original through save and load, one undo step (screenshot.md)
+  int imageCropTest();
   int outlineNestTest();
   // the sidebar's Pages view: moving pages after a target (or to the front) keeps the moved pages' order,
   //  is one undo step, and deleting a page list - all of them included - is one undo step too

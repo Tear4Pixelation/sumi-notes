@@ -154,6 +154,7 @@ public:
   Action* actionPreferences;
   Action* actionCreate_Link;
   Action* actionScreenshot;
+  Action* actionEditImage;  // the crop dialog on the one selected image (screenshot.md)
   Action* actionSmart_Scale;  // Resize Handwriting (smart-scale.md), on the selection popup only
   Action* actionUngroup;
   Action* actionUpdateCheck;
@@ -209,6 +210,8 @@ public:
   Button* selSkipLinesBtn = NULL;  // Skip Lines on the selection popup, shown while Resize Handwriting is on
   // selection popup buttons that act on ink, hidden when the gesture caught none (Screenshot remains)
   std::vector<Button*> selInkButtons;
+  // Edit image on the selection popup, shown only when the selection is a single image
+  Button* editImageBtn = NULL;
   ArrowPopup* moveLayerPopup = NULL;
   // color and width on the selection popup, shown only for an ink selection (PenToolbar::SELECTION_MODE)
   Widget* selColorItem = NULL;

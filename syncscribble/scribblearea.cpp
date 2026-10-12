@@ -2646,9 +2646,15 @@ void ScribbleArea::insertImages(std::vector<Image> images, Dim fitWidth, Dim fit
 // page units around ink captured without a drawn outline: ~4 mm, enough that the capture does not look
 //  cut off at the strokes
 static constexpr Dim SCREENSHOT_INK_PADDING = 25;
+// The capture reaches past the selection by half its longer side, at least ~1/2 inch and at most ~2 inches
+//  (page units, 150 per inch), so the crop - which starts on the selection - can be widened to take in the
+//  surroundings: a heading above an exercise, a figure beside it.  Clamped to the page.
+static constexpr Dim SCREENSHOT_MARGIN_MIN = 75;
+static constexpr Dim SCREENSHOT_MARGIN_MAX = 300;
 
-// Captures the bounding box of the selection gesture (or, for a ruled selection, of the selected ink) in
-//  the document's own colors, offers a crop, then copies it or adds it to the current page as an image.
+// Captures the selection gesture's bounding box (or, for a ruled selection, the selected ink's) with a
+//  margin around it in the document's own colors, offers a crop that starts on the selection, then copies
+//  it or adds it to the current page as an image.
 void ScribbleArea::screenshotSelection()
 {
   captureScreenshot();
@@ -2662,35 +2668,45 @@ void ScribbleArea::captureScreenshot()
   int pagenum = !shotRegion.empty() ? shotRegionPage : currSelection ? currSelPageNum : -1;
   // A ruled or path selection has no outline of its own, only the ink it caught, whose bbox runs right up
   //  to the strokes; the padding gives the capture a margin.  A drawn outline is taken as the user drew it.
-  Rect region = !shotRegion.empty() ? shotRegion.getBBox()
+  Rect selected = !shotRegion.empty() ? shotRegion.getBBox()
       : currSelection ? currSelection->getBBox().pad(SCREENSHOT_INK_PADDING) : Rect();
   Page* srcPage = pagenum >= 0 && pagenum < numPages() ? page(pagenum) : NULL;
-  if(!srcPage || !region.isValid())
+  if(!srcPage || !selected.isValid())
     return;
-  region = region.rectIntersect(srcPage->rect());
-  if(!region.isValid() || region.width() < 1 || region.height() < 1)
+  selected = selected.rectIntersect(srcPage->rect());
+  if(!selected.isValid() || selected.width() < 1 || selected.height() < 1)
     return;
+  Dim margin = std::min(SCREENSHOT_MARGIN_MAX,
+      std::max(SCREENSHOT_MARGIN_MIN, std::max(selected.width(), selected.height())/2));
+  Rect region = Rect(selected).pad(margin).rectIntersect(srcPage->rect());
   Dim scale = screenshotScale(region);
   bool hasBackground = false;
   if(srcPage->ruleNode) {
     for(SvgNode* child : srcPage->ruleNode->children())
       hasBackground = hasBackground || child->type() == SvgNode::IMAGE;
   }
-  ScreenshotDialog dialog([srcPage, region, scale](int layers){
+  // the selection in pixels of the capture: where the crop starts
+  Rect initialCrop = Rect::ltrb((selected.left - region.left)*scale, (selected.top - region.top)*scale,
+      (selected.right - region.left)*scale, (selected.bottom - region.top)*scale);
+  ImageCropDialog dialog([srcPage, region, scale](int layers){
     return renderPageRegion(srcPage, region, scale, layers);
-  }, hasBackground);
+  }, hasBackground, initialCrop);
   if(Application::execDialog(&dialog) != Dialog::ACCEPTED)
     return;
-  Rect crop = dialog.cropRect();
-  Image shot = dialog.takeCropped();
+  CropShape shape = dialog.cropShape();
+  Rect crop;
+  Image shot = dialog.takeCropped(&crop);
   if(shot.width <= 0 || shot.height <= 0)
     return;
   // at its real size: the crop in page units, where it was on the source page
   Rect bbox = Rect::ltwh(region.left + crop.left/scale, region.top + crop.top/scale,
       crop.width()/scale, crop.height()/scale);
-  if(dialog.choice == ScreenshotDialog::CHOICE_COPY) {
+  SvgImage* shotNode = new SvgImage(std::move(shot), bbox);
+  // the whole capture goes along, so Edit image can widen the crop later
+  setImageOriginal(shotNode, dialog.sourceImage(), shape);
+  if(dialog.choice == ImageCropDialog::CHOICE_COPY) {
     Clipboard* clip = new Clipboard;
-    clip->addStroke(new Element(new SvgImage(std::move(shot), bbox)));
+    clip->addStroke(new Element(shotNode));
     app->setClipboard(clip, srcPage, 0);
     app->refreshUI(scribbleDoc, UIState::ClipboardChange);  // enables Paste, which may have had nothing to paste
     return;
@@ -2700,10 +2716,96 @@ void ScribbleArea::captureScreenshot()
   doCancelAction();
   Clipboard clip;
   Point center = screenToDim(screenRect.center());
-  clip.addStroke(new Element(new SvgImage(std::move(shot), Rect::centerwh(center, bbox.width(), bbox.height()))));
+  shotNode->setSize(Rect::centerwh(center, bbox.width(), bbox.height()));
+  clip.addStroke(new Element(shotNode));
   doPasteAt(&clip, center, PasteFlags(PasteOrigPos | PasteMoveClipboard | PasteUndoable));
   uiChanged(UIState::Paste);
   doRefresh();
+}
+
+Element* ScribbleArea::selectedImage() const
+{
+  if(!currSelection || currSelection->strokes.size() != 1)
+    return NULL;
+  Element* element = currSelection->strokes.front();
+  if(element->node->type() != SvgNode::IMAGE)
+    return NULL;
+  // a linked image's pixels are not ours to rewrite (SvgWriter writes the link back, not the pixels)
+  return static_cast<SvgImage*>(element->node)->m_linkStr.empty() ? element : NULL;
+}
+
+// Edit image (screenshot.md): the crop dialog on the image's original pixels - the ones kept by an earlier
+//  edit, or else the image itself with any crop its handles made (srcRect) as the starting rectangle.  The
+//  result replaces the image as one undo step, positioned so the original's pixels stay where they were on
+//  the page: shrinking the crop leaves the rest in place, widening it brings back what was cut away.
+void ScribbleArea::editSelectedImage()
+{
+  Element* target = selectedImage();
+  if(!target)
+    return;
+  SvgImage* imageNode = static_cast<SvgImage*>(target->node);
+  Image original(0, 0);
+  CropShape shape;
+  Rect shownPx;  // the original's pixels the image's bounds show now
+  std::string keptOrig;  // the original's attribute, reused as is rather than re-encoded
+  if(getImageOriginal(imageNode, &original, &shape)) {
+    shownPx = cropPixelBounds(roundedOutline(shape.corners(), shape.radius, 0.5), original.width, original.height);
+    keptOrig = imageNode->getStringAttr(IMAGE_ORIG_ATTR, "");
+  }
+  else {
+    original = imageNode->m_image.copy();
+    Rect whole = Rect::wh(original.width, original.height);
+    shape.rect = imageNode->srcRect.isValid() ? Rect(imageNode->srcRect).rectIntersect(whole) : whole;
+    shownPx = shape.rect;
+  }
+  if(original.width <= 0 || original.height <= 0 || !shownPx.isValid() || shownPx.width() <= 0 || shownPx.height() <= 0)
+    return;
+  ImageCropDialog dialog(std::move(original), shape);
+  if(Application::execDialog(&dialog) != Dialog::ACCEPTED || selectedImage() != target)
+    return;
+  applyImageEdit(dialog.sourceImage(), dialog.cropShape(), shownPx, keptOrig);
+}
+
+// The selected image (selectedImage()) becomes `original` cut to `result`; `shownPx` is the part of the
+//  original its bounds show now, which fixes where the new pixels go.  One undo step.
+Element* ScribbleArea::applyImageEdit(const Image& original, const CropShape& result, const Rect& shownPx,
+    const std::string& keptOrig)
+{
+  Element* target = selectedImage();
+  if(!target || shownPx.width() <= 0 || shownPx.height() <= 0)
+    return NULL;
+  int pagenum = currSelPageNum;
+  Page* targetPage = currSelection->page;
+  SvgImage* imageNode = static_cast<SvgImage*>(target->node);
+  Rect px;
+  Image edited = cropToShape(original, result, &px);
+  if(edited.width <= 0 || edited.height <= 0)
+    return NULL;
+  const Rect& bounds = imageNode->m_bounds;
+  Dim sx = bounds.width()/shownPx.width(), sy = bounds.height()/shownPx.height();
+  Rect newBounds = Rect::ltrb(bounds.left + (px.left - shownPx.left)*sx, bounds.top + (px.top - shownPx.top)*sy,
+      bounds.left + (px.right - shownPx.left)*sx, bounds.top + (px.bottom - shownPx.top)*sy);
+
+  clearSelection();
+  doCancelAction();
+  // a copy with the new pixels swapped in for the old, as one action: undo, redo and sync are the
+  //  ordinary add and delete (as toggleTodoTag does), and the copy keeps the transform and the layer
+  Element* replacement = target->cloneNode();
+  SvgImage* newNode = static_cast<SvgImage*>(replacement->node);
+  newNode->m_image = std::move(edited);
+  newNode->srcRect = Rect();
+  newNode->setSize(newBounds);
+  setImageOriginal(newNode, original, result, keptOrig.empty() ? NULL : keptOrig.c_str());
+  scribbleDoc->startAction(pagenum);
+  targetPage->addStroke(replacement, target, target->layer());
+  targetPage->removeStroke(target);
+  scribbleDoc->endAction();
+  scribbleDoc->dirtyPage(pagenum);
+  if(pagenum == currPageNum)
+    selectTapped(replacement);
+  uiChanged(UIState::SetSelProps);
+  doRefresh();
+  return replacement;
 }
 
 // half the stroke width of a stroked path (page units), the widest for a group: how far its ink reaches

@@ -40,6 +40,7 @@ class ScribbleDoc;
 class ScribbleApp;
 struct SDL_Cursor;
 struct SDL_Cursor_Deleter;
+struct CropShape;
 
 class ScribbleArea : public ScribbleView
 {
@@ -74,6 +75,12 @@ public:
   void screenshotSelection();
   void captureScreenshot();
   void dirtyShotRegion();
+  // Edit image (screenshot.md): the one image selected, if that is all the selection is (and its pixels
+  //  are in the document, not a link), opened in the crop dialog; Apply replaces it as one undo step
+  Element* selectedImage() const;
+  void editSelectedImage();
+  Element* applyImageEdit(const Image& original, const CropShape& result, const Rect& shownPx,
+      const std::string& keptOrig = "");
 
   // some of these need to be made private
   DocPosition getPos() const;

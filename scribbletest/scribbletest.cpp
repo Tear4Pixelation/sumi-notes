@@ -17,6 +17,8 @@
 #include "tagstore.h"
 #include "tagdoclist.h"  // libraryResizeTest, topBarStateTest
 #include "topbar.h"  // topBarStateTest
+#include "screenshot.h"  // imageCropTest
+#include "usvg/svgwriter.h"
 #include "miniz/miniz_zip.h"
 
 // document scanning math; unlike everything else here it needs neither GL nor a document
@@ -27,6 +29,7 @@
 #include "layertest.cpp"
 #include "tabstest.cpp"
 #include "regiontest.cpp"
+#include "cropshapetest.cpp"
 #include "erasetest.cpp"
 #include "smartscaletest.cpp"
 #include "librarytest.cpp"
@@ -1182,6 +1185,78 @@ int ScribbleTest::penToolbarRefreshTest()
   app->setPen(oldPen);
   app->updatePenToolbar();
   scribbleDoc->newDocument();
+  return nbad;
+}
+
+// Edit image (docs/agent/screenshot.md): the cropped pixels, the kept original and its shape surviving a save
+//  and a load as attributes, and applying an edit as one undo step that brings the image back as it was
+int ScribbleTest::imageCropTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: image crop: %s\n", what); }
+  };
+  Image original(40, 30, Image::PNG);
+  original.fill(0xFF808080);  // opaque gray
+  CropShape shape;
+  shape.kind = CropShape::POLYGON;
+  shape.radius = 3;
+  shape.points = {Point(5, 2), Point(35, 4), Point(20, 28)};
+  Rect px;
+  Image edited = cropToShape(original, shape, &px);
+  check(px.left >= 5 && px.top >= 2 && px.right <= 35 && px.bottom <= 28 && edited.width == int(px.width())
+      && edited.height == int(px.height()), "the result is cut to the shape's pixel bounds");
+  const unsigned char* pix = edited.constBytes();
+  auto alphaAt = [&](int x, int y){ return int(pix[(size_t(y - int(px.top))*edited.width + (x - int(px.left)))*4 + 3]); };
+  check(pix && alphaAt(int(px.right) - 1, int(px.bottom) - 1) == 0, "outside the polygon is transparent");
+  check(pix && alphaAt(20, 12) == 255, "inside the polygon is kept");
+  check(edited.encoding == Image::PNG, "a shaped crop is a PNG, for its transparency");
+
+  // the kept original through the file format
+  SvgImage* node = new SvgImage(edited.copy(), Rect::ltwh(100, 100, px.width(), px.height()));
+  setImageOriginal(node, original, shape);
+  MemStream strm;
+  SvgWriter::save(node, strm);
+  std::string xml = std::string("<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\">")
+      + std::string(strm.data(), strm.size()) + "</svg>";
+  std::unique_ptr<SvgDocument> parsed(SvgParser().parseString(xml.c_str()));
+  SvgNode* loaded = parsed ? parsed->selectFirst("image") : NULL;
+  Image loadedOrig(0, 0);
+  CropShape loadedShape;
+  bool kept = loaded && getImageOriginal(static_cast<SvgImage*>(loaded), &loadedOrig, &loadedShape);
+  check(kept, "the original and its shape survive a save and a load");
+  check(kept && loadedOrig.width == 40 && loadedOrig.height == 30 && loadedShape.kind == CropShape::POLYGON
+      && loadedShape.points.size() == 3 && loadedShape.radius == 3, "...unchanged");
+  setImageOriginal(node, original, CropShape{CropShape::RECT, Rect::wh(40, 30)});
+  check(!node->getStringAttr(IMAGE_ORIG_ATTR) && !node->getStringAttr(IMAGE_CROP_ATTR),
+      "an edit back to the whole original drops both attributes");
+  delete node;
+
+  // applying an edit replaces the image as one undo step
+  scribbleDoc->newDocument();
+  Page* page = scribbleArea->currPage;
+  Element* image = new Element(new SvgImage(original.copy(), Rect::ltwh(50, 50, 40, 30)));
+  page->addStroke(image);
+  scribbleArea->selectTapped(image);
+  check(scribbleArea->selectedImage() == image, "a single selected image is offered for editing");
+  Element* replaced = scribbleArea->applyImageEdit(original, shape, Rect::wh(40, 30));
+  SvgImage* replacedNode = replaced ? static_cast<SvgImage*>(replaced->node) : NULL;
+  check(replacedNode && replacedNode->m_image.width == int(px.width()), "the edit replaces the image's pixels");
+  check(replacedNode && std::abs(replacedNode->m_bounds.left - (50 + px.left)) < 1E-3
+      && std::abs(replacedNode->m_bounds.top - (50 + px.top)) < 1E-3, "the kept pixels stay where they were on the page");
+  check(replacedNode && replacedNode->getStringAttr(IMAGE_CROP_ATTR), "the edited image keeps its original");
+  scribbleArea->clearSelection();
+  scribbleDoc->doCommand(ID_UNDO);
+  int nImages = 0;
+  SvgImage* restored = NULL;
+  for(SvgNode* child : page->contentNode->children()) {
+    if(child->type() == SvgNode::IMAGE) {
+      restored = static_cast<SvgImage*>(child);
+      ++nImages;
+    }
+  }
+  check(nImages == 1 && restored && restored->m_image.width == 40 && !restored->getStringAttr(IMAGE_CROP_ATTR),
+      "one undo brings the image back as it was");
   return nbad;
 }
 
@@ -5498,7 +5573,7 @@ void ScribbleTest::runAll(bool runsynctest)
   int nThumbsFailed = 0;
   int nUnitFailed = runScanTests() + runShapeTests() + runColorTests() + runLayerTests() + runLibraryTests()
       + runRegionTests() + runNotefulTests() + runPageTagTests() + runWidthPresetTests() + runTabTests()
-      + runJumpHistoryTests() + runEraseTests() + runSmartScaleTests() + runSimplifyTests();
+      + runJumpHistoryTests() + runEraseTests() + runSmartScaleTests() + runSimplifyTests() + runCropShapeTests();
   std::vector<std::string> slFailed;
   void (ScribbleTest::*tests[])() = {
     &ScribbleTest::test0,
@@ -5662,6 +5737,7 @@ void ScribbleTest::runAll(bool runsynctest)
   nUnitFailed += penSelectionTest();
   nUnitFailed += penToolbarRefreshTest();
   nUnitFailed += outlineTest();
+  nUnitFailed += imageCropTest();
   nUnitFailed += outlineNestTest();
   nUnitFailed += pageMoveTest();
   nUnitFailed += notefulImportTest();
