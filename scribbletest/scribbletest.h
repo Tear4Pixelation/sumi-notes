@@ -69,6 +69,7 @@ public:
   // shape edit mode without the Select tool: a finger tap on a shape selects it, a tap elsewhere and the
   //  first shape-tool drag outside only deselect
   int shapeTapEditTest();
+  int tapPasteTest();
   // a fit width/height zoom snap aligns the page only across the scroll direction, and a two finger pan
   //  that barely changes the zoom does not move the view at all
   int zoomSnapTest();

@@ -8,6 +8,7 @@
 #include "smartscale.h"
 
 struct Timer;
+class Menu;
 
 struct UIState {
   enum UIChangeFlags { SetDoc = 0, SaveDoc, InsertDoc, InsertPage, DeletePage, MovePage, SetPageProps,
@@ -445,6 +446,16 @@ protected:
   ShapeParams newShapeParams(int shapeid, Point pos) const;
   void editShapeAfterDraw(Element* shape);
   Element* touchTapTarget(Point pos) const;
+  // tap on empty canvas with something on the clipboard: a "Paste" popup, shown once it is clear no second
+  //  tap (double tap zoom), pen or pan followed (docs/agent/touch-input.md)
+  void scheduleTapPaste(Point pos);
+  bool tapPasteValid() const;
+  void showTapPaste();
+  void pasteAtTap();
+  Timer* tapPasteTimer = NULL;
+  Timestamp tapPasteTime = 0;  // ScribbleInput::initPointerTime of the tap; any later press changes it
+  Point tapPastePos;  // dim coordinates
+  Menu* tapPasteMenu = NULL;
   void selectTapped(Element* target);
   Element* createShapeElement(const ShapeParams& params);
   void cancelShape();
