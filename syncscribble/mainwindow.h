@@ -202,6 +202,7 @@ public:
   Widget* selPopup = NULL;
   // "Move to Layer" on the selection popup, and its list of layers, rebuilt each time the popup opens
   Button* moveLayerBtn = NULL;
+  Button* selSkipLinesBtn = NULL;  // Skip Lines on the selection popup, shown while Resize Handwriting is on
   // selection popup buttons that act on ink, hidden when the gesture caught none (Screenshot remains)
   std::vector<Button*> selInkButtons;
   ArrowPopup* moveLayerPopup = NULL;

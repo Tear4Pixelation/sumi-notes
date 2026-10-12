@@ -75,6 +75,18 @@ like the page). The frame is the one holding most of the strokes' centres - `sel
   strokes' bottoms (`smartScaleBaseline()` - most letters end on the baseline, only descenders below it).
   Nothing else moves.
 
+## Skip Lines
+
+While Resize Handwriting is on, the selection popup also shows **Skip Lines**, the same toggle (and the same
+flag, `ScribbleMode::insSpaceSkipLines`) the Insert Space tool offers, kept in step with it. It is read at
+the press (`smartScaleStart()`): with it on, the gesture frame is `skippedLineFrame(frame, firstLine)` (first
+line = the selection's topmost), so a "line" is a text line plus the blank one below. Nothing else in the
+layout changes - reflow wraps to the next text line, later content moves by two-line steps (`dLines` x the
+doubled pitch), `blockedLine` is per text line. The one new thing is `SmartScaleParams::baseline`: where the
+rule sits in a band, 1 normally (band bottom), **0.5** with Skip Lines, because the doubled band's bottom is
+the blank line. Words scale about and are placed on `(line + baseline) * pitch`. Same release, same one undo
+step. Not for unruled/staff paper (nothing to skip). Toggling does not re-layout; it applies to the next drag.
+
 ## Known gaps
 
 - Later content is everything below on that ruling, across the page's width: with two columns, the other
@@ -92,7 +104,7 @@ like the page). The frame is the one holding most of the strokes' centres - `sel
 - `scribbletest/smartscaletest.cpp` (`runSmartScaleTests()`, standalone: command in its header) - word
   break, writer's gap clamp, scale 1 is identity, shrunk ink on the rules and scaled, half size pulls the
   next line's word back at the scaled gap, line counts, a paragraph break kept, growing wraps to the indent,
-  unruled baseline. Mutation-checked: scaling about the band top (4 checks fail), keeping line breaks / no
+  unruled baseline, Skip Lines (rule mid-band; ignoring `baseline` fails 2). Mutation-checked: scaling about the band top (4 checks fail), keeping line breaks / no
   pull-back (5), ignoring paragraph breaks (3), an unscaled gap (2).
 - `ScribbleTest::smartScaleTest()` - three full lines on lined paper and a paragraph after a blank line; the
   toggle, the square handles gone, a drag of the round handle to half: two lines, letters on their rules at

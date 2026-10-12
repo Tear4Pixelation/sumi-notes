@@ -54,6 +54,16 @@ void ScribbleArea::smartScaleStart()
   gesture.corner = bbox.origin();
   // the ruling the most strokes sit in, as for a selection's line height (selectionLineHeight())
   gesture.frame = selectionFrame(centres, [page](Point p) { return page->rulingAt(p); });
+  // Skip Lines (the Insert Space tool's toggle, same flag): text is on every second line, so a "line" is a
+  //  text line plus the blank one below, starting at the selection's first line (skippedLineFrame)
+  const bool skipLines = scribbleDoc->scribbleMode->insSpaceSkipLines && gesture.frame.yRuling > 0
+      && !gesture.frame.staff;
+  if(skipLines) {
+    int topLine = INT_MAX;
+    for(const Point& centre : centres)
+      topLine = std::min(topLine, gesture.frame.line(centre, Page::BLANK_Y_RULING));
+    gesture.frame = skippedLineFrame(gesture.frame, topLine);
+  }
   // a staff band is not a line handwriting sits on, so music paper scales plainly too
   gesture.ruled = gesture.frame.yRuling > 0 && !gesture.frame.staff;
   if(!gesture.ruled) {
@@ -66,6 +76,7 @@ void ScribbleArea::smartScaleStart()
   const RulingFrame& frame = gesture.frame;
   const Dim yr = frame.yRuling;
   gesture.params.yRuling = yr;
+  gesture.params.baseline = skipLines ? 0.5 : 1;
   gesture.params.minWordGap = reflowWordSep*yr;
   Dim right = MIN_DIM;
   int firstLine = INT_MAX, lastLine = INT_MIN;
