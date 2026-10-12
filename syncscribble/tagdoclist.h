@@ -51,6 +51,9 @@ public:
   // hasCurrentNote: whether a "back to note" FAB should be offered (there is a real document open
   // behind this browser, as opposed to it being the very first thing shown at startup).
   void setup(Window* parent, bool hasCurrentNote);
+  // the top bar per topTabBar and the status bar inset; again whenever the inset changes
+  void applyInsets();
+  TopBar* libraryTopBar() const { return topBar; }  // ScribbleTest
   void finish(Result_t res);
   // points the browser at a different document root (the library was moved); safe while it is shown
   void setRoot(const char* root);

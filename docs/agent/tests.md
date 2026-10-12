@@ -228,6 +228,11 @@ heading blue. See [night-mode.md](night-mode.md).
   refuses no-ops and drops onto a moved page, keeps a page's outline entry, and is one undo step; `deletePageList`
   of a few pages and of every page is one undo step. Mutation-checked (insert before the target: 12 failures;
   reversed multi-page order: 1).
+- `ScribbleTest::topBarStateTest()` (also alone: `Sumi --topbartest`, as `--test` aborts in `test7`) -
+  a `topTabBar` change made without Preferences reaches the editor's bar; a cached library window, shown
+  and closed, shows the current tabs on its next `setup()` without any timer running; View > Status Bar
+  (`applyStatusBar`) gives the library's bar the new inset at once. Verified: 3 failures with the
+  `refreshUI` mode check, the `isVisible()` condition in `TopBar::refresh` and `applyLibraryInsets()` removed.
 - `ScribbleTest::libraryResizeTest()` - a `TagDocList` follows `SvgGui::SCREEN_RESIZED` (shrinking and growing);
   [document-library.md](document-library.md#following-the-window-size-browser). Mutation-checked: without the
   handler the bounds stay at the opening size and both checks fail.

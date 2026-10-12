@@ -335,6 +335,16 @@ void MainWindow::refreshUI(ScribbleDoc* doc, int reason)
     sidebar->refreshIfChanged();
   if(topBar && topBar->isVisible())
     topBar->refresh();
+  // the top bar follows topTabBar wherever it changed from: Preferences is not the only way (the mode also
+  //  depends on there being a library), and a mode left stale meant a bar missing until Preferences OK.
+  //  Deferred, as this may be inside a layout pass (see TopBar::refresh); applyTopBarMode() re-checks.
+  if(app->topBarMode() != appliedTopBarMode && gui()) {
+    gui()->setTimer(1, this, [this](){
+      if(app->topBarMode() != appliedTopBarMode)
+        applyTopBarMode();
+      return 0;
+    });
+  }
 
   // if a pen was released, may need to save pen to recent pens list
   if(reason & (1 << UIState::PenRelease)) {
@@ -1139,6 +1149,10 @@ void MainWindow::orientationChanged()
     topBar->setTopPadding(ScribbleApp::topInset);
   if(sidebar)
     sidebar->updateInsets();
+  // the library takes the inset too (its bar's padding, or its search row): it used to get it only from
+  //  TagDocList::setup(), so View > Status Bar pressed in the library changed nothing until its next opening
+  if(app)
+    app->applyLibraryInsets();
   // The canvas moves when the bar or its padding changes height, and a canvas only repaints what it
   //  thinks changed: the strip it gains kept the bar's old pixels (tab titles ghosting under the bar).
   //  Once laid out at the new size, everything is repainted.
@@ -1232,6 +1246,7 @@ void MainWindow::hostOverflowPopup(Button* btn)
 //  and the sidebar's Tabs view.  Otherwise the editor is as it was.  The library's bar is TagDocList's.
 void MainWindow::applyTopBarMode()
 {
+  appliedTopBarMode = app->topBarMode();
   bool inEditor = app->topBarInEditor();
   if(topBar) {
     topBar->setVisible(inEditor);
@@ -1540,25 +1555,26 @@ void MainWindow::setupUI(ScribbleApp* a)
   selectFirst("#top-tabbar-container")->addWidget(topBar);
   setupPopupMenu(topBar->viewBtn, createViewPopup(false));
   hostOverflowPopup(topBar->overflowBtn);
+  //  Not by a timer: each of these can run a modal loop (the library; a save prompt), and inside a timer's
+  //  callback no timer fires until it returns - the library opened from home got none, so its bar never
+  //  rebuilt and showed the tabs of its previous opening (postDeferred).
   topBar->onHome = [this](){
-    gui()->setTimer(1, this, [this](){ app->openDocument(); return 0; });
+    ScribbleApp::postDeferred([this](){ app->openDocument(); });
   };
   topBar->onTab = [this](const std::string& path){
-    gui()->setTimer(1, this, [this, path](){
+    ScribbleApp::postDeferred([this, path](){
       int idx = app->tabs.find(path);
       if(idx >= 0 && idx != app->activeTabIndex())
         app->switchToTab(idx);
-      return 0;
     });
   };
   topBar->onCloseTab = [this](const std::string& path){
-    gui()->setTimer(1, this, [this, path](){
+    ScribbleApp::postDeferred([this, path](){
       int idx = app->tabs.find(path);
       if(idx >= 0)
         app->closeTab(idx);
       if(topBar->isVisible())
         topBar->refresh();
-      return 0;
     });
   };
   applyTopBarMode();

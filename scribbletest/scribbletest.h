@@ -82,6 +82,8 @@ public:
   // typed numbers in a SpinBox: zero in every form, negatives, decimals, junk refused
   int spinBoxTest();
   int libraryResizeTest();
+  // the top tab bar follows topTabBar, the tab list and the status bar inset on every path (top-tab-bar.md)
+  int topBarStateTest();
   // page tags: placing never leaves one off a page (gap, beside, below the last page), a pen placement is
   //  selected, a tag dragged to another page moves its count there and undoes, and opening another document
   //  drops tags still on the pointer

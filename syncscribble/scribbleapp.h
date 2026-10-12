@@ -196,7 +196,12 @@ public:
   bool hasI18n = false;
   static Uint32 scribbleSDLEvent;
   enum scribbleSDLEventCode {INSERT_IMAGE=1, UPDATE_CHECK,
-      STORAGE_PERMISSION, DISMISS_DIALOG, SIMULATE_PEN_BTN, IAP_COMPLETE, APP_SUSPEND};
+      STORAGE_PERMISSION, DISMISS_DIALOG, SIMULATE_PEN_BTN, IAP_COMPLETE, APP_SUSPEND, DEFERRED_CALL,
+      SAFE_AREA_CHANGED};
+  // Runs `fn` from the event loop once the current event is done.  For anything that may run a modal loop
+  //  (the library, a message box): a 1 ms timer would run it inside SvgGui::processTimers(), and no timer
+  //  fires again until that returns - the modal window would get none (docs/agent/top-tab-bar.md)
+  static void postDeferred(std::function<void()> fn);
 
   ScribbleArea* activeArea() const { return mActiveArea; }
   ScribbleDoc* activeDoc() const;
@@ -268,6 +273,8 @@ public:
   // topInset for what sits below the top tab bar: 0 while the bar is shown, since it takes the inset as
   //  padding above itself (the toolbar, the pinned sidebar)
   static Dim editorTopInset();
+  // the library (TagDocList, cached between openings) takes topInset again: MainWindow::orientationChanged()
+  void applyLibraryInsets();
   // the app-level "system status bar shown" (cfg showStatusBar, View > Status Bar): on by default on
   //  iOS/Android, off on desktop.  Shown, topInset is the status bar's height (desktop previews 24)
   static bool statusBarShown();

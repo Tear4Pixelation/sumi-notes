@@ -44,6 +44,12 @@ Dim ScribbleApp::editorTopInset()
   return app && app->topBarInEditor() ? 0 : topInset;
 }
 
+void ScribbleApp::applyLibraryInsets()
+{
+  if(tagDocList)
+    tagDocList->applyInsets();
+}
+
 bool ScribbleApp::statusBarShown()
 {
   return cfg->Bool("showStatusBar");

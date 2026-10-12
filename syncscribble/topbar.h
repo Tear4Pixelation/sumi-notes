@@ -30,6 +30,9 @@ public:
   void refresh(bool force = false);
   // room above the bar's contents, painted in the bar's color: the status bar inset (ScribbleApp::topInset)
   void setTopPadding(Dim pad);
+  Dim topPadding() const { return topPad; }
+  // tabs currently built (ScribbleTest)
+  int tabCount() const { return int(cells.size()); }
 
   Button* homeBtn = NULL;
   Button* viewBtn = NULL;
@@ -67,4 +70,5 @@ private:
   std::vector<TabCell> cells;
   std::string shownState;
   bool forcePending = false;
+  Dim topPad = 0;
 };

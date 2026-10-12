@@ -1021,12 +1021,12 @@ void Sidebar::buildLayerRows()
 void Sidebar::onAdd()
 {
   // a new tab is a document opened from the library; deferred, since the library is modal and this
-  //  is still the press on the add button
+  //  is still the press on the add button - by an event, not a timer, whose callback would starve the
+  //  library of timers (ScribbleApp::postDeferred)
   if(currView == TABS) {
-    gui()->setTimer(1, mainWindow, [](){
+    ScribbleApp::postDeferred([](){
       if(ScribbleApp::app)
         ScribbleApp::app->openDocument();
-      return 0;
     });
     return;
   }
