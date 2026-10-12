@@ -12,7 +12,8 @@ description: How we work when the user hands over a list of features to implemen
    never collide. Spawn all independent ones in a single message so they run concurrently.
    **Model:** for difficult tasks (root-cause investigations, subtle bugs, cross-cutting
    changes, anything where a wrong guess is costly) pass `model: "opus"` (Opus 5.5) on the
-   Agent call; routine, well-scoped features use the default.
+   Agent call; routine, well-scoped features pass `model: "sonnet"` explicitly. Never omit
+   `model`: the default inherits the main session's model (Opus), not Sonnet.
 3. **Own display per subagent.** `tools/agent-display.sh` supports parallel displays: set
    `AGENT_DISPLAY_NAME=<feature-slug>` in every call (state lives in
    `$XDG_RUNTIME_DIR/write-agent-display-<name>`). Without it, agents share one display and
