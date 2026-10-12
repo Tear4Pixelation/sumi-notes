@@ -364,6 +364,28 @@ bool Page::drawsDark(const Painter* painter, Color paper)
   return (map ? map->map(paper) : paper).luma() < 128;
 }
 
+// Tape is drawn over everything on the page, every layer's ink included (docs/agent/tape.md), but it stays
+//  in its own layer's run in the tree, so lock, hide, undo and sync treat it as any other element.  The
+//  tree walk skips it and Page::draw paints it after; a skip already installed (the floating selection's)
+//  still applies to both passes.
+static bool (*tapePrevSkip)(const SvgNode* node) = NULL;
+static bool skipTapeNode(const SvgNode* node)
+{
+  return (node->type() == SvgNode::PATH && node->hasClass(Element::TAPE_CLASS))
+      || (tapePrevSkip && tapePrevSkip(node));
+}
+
+bool Page::hasTape() const
+{
+  if(!contentNode)
+    return false;
+  for(Element* s : children()) {
+    if(s->isTape())
+      return true;
+  }
+  return false;
+}
+
 void Page::draw(Painter* painter, const Rect& dirty, bool rulelines)
 {
   // draw red border around page if it failed to load
@@ -400,7 +422,20 @@ void Page::draw(Painter* painter, const Rect& dirty, bool rulelines)
 
   painter->save();
   painter->setDarkBackdrop(drawsDark(painter, ruleNode ? props.color : Color(Color::WHITE)));
-  SvgPainter(painter).drawNode(svgDoc.get(), dirty);
+  if(loadStatus == LOAD_OK && hasTape()) {
+    auto prevSkip = SvgPainter::skipNode;
+    tapePrevSkip = prevSkip;
+    SvgPainter::skipNode = skipTapeNode;
+    SvgPainter(painter).drawNode(svgDoc.get(), dirty);
+    SvgPainter::skipNode = prevSkip;
+    tapePrevSkip = NULL;
+    for(Element* s : children()) {
+      if(s->isTape() && s->node->isVisible() && !(prevSkip && prevSkip(s->node)))
+        SvgPainter(painter).drawNode(s->node, dirty);
+    }
+  }
+  else
+    SvgPainter(painter).drawNode(svgDoc.get(), dirty);
   painter->restore();
 
   if(isSelected && !Element::FORCE_NORMAL_DRAW)  //docElement()->selection())

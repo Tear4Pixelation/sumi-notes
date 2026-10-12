@@ -36,6 +36,7 @@ int ScribbleMode::getModeType(int mode)
     return MODE_PAN;
   case MODE_STROKE:
   case MODE_BOOKMARK:
+  case MODE_TAPE:
     return MODE_STROKE;
   case MODE_DRAWSHAPE:
   case MODE_SHAPEHANDLE:
@@ -83,6 +84,7 @@ ScribblePen& ScribbleMode::penForDrawTool(int tool)
   switch(tool) {
   case DRAWTOOL_HIGHLIGHT:  return highlightPen;
   case DRAWTOOL_EPHEMERAL:  return ephemeralPen;
+  case DRAWTOOL_TAPE:  return tapePen;
   default:  return drawPen;
   }
 }
@@ -133,6 +135,8 @@ std::string ScribbleMode::saveModes()
   ss << ' ' << (shapedef ? shapedef->id : "box") << ' ' << shapeFlags
      << ' ' << int(selectSwitchBack) << ' ' << int(eraseSwitchBack) << ' ' << int(insSpaceSwitchBack)
      << ' ' << int(selectTouching) << ' ' << int(insSpaceSkipLines);
+  // the Tape tool's pen, after everything an older version reads (docs/agent/tape.md)
+  writePen(ss, tapePen);
   return ss.str();
 }
 
@@ -163,6 +167,9 @@ void ScribbleMode::loadModes(const char* modestr)
       ScribblePen::TIP_CHISEL | ScribblePen::DRAW_UNDER | ScribblePen::WIDTH_RELATIVE);
   ephemeralPen = ScribblePen(Color::RED, 1.6,
       ScribblePen::TIP_FLAT | ScribblePen::WIDTH_PR | ScribblePen::EPHEMERAL, 0.9, 2.0);
+  // tape is as wide as a line of writing, like the marker, so that it covers one answer; its color is
+  //  invalid until the user picks one, which means "the document theme's" (ScribbleApp::toolPen)
+  tapePen = ScribblePen(Color::INVALID_COLOR, 0.9, ScribblePen::TAPE | ScribblePen::WIDTH_RELATIVE);
   // attempt to load from config string
   if(ss >> mode && getModeType(mode) == MODE_ERASE && mode != MODE_ERASE)
     eraserMode = mode;
@@ -177,7 +184,7 @@ void ScribbleMode::loadModes(const char* modestr)
   if(ss >> mode && getModeType(mode) == MODE_MOVESEL && mode != MODE_MOVESEL)
     moveSelMode = mode;
   //moveSelMode = (insSpaceMode == MODE_INSSPACERULED) ? MODE_MOVESELRULED : MODE_MOVESELFREE;
-  if(ss >> mode && mode >= DRAWTOOL_PEN && mode <= DRAWTOOL_EPHEMERAL)
+  if(ss >> mode && mode >= DRAWTOOL_PEN && mode <= DRAWTOOL_TAPE)
     drawTool = mode;
   // The switch back flags are read from the trailing section below, not here: this slot held
   //  eraseSwitchBack back when the toggle did nothing, so every config written before switch back was
@@ -223,6 +230,9 @@ void ScribbleMode::loadModes(const char* modestr)
     selectTouching = mode != 0;
   if(ss >> mode)
     insSpaceSkipLines = mode != 0;
+  // relative size is the default (above) but not forced, unlike TAPE: a pen saved with the toggle off holds
+  //  an absolute width, and forcing the flag would reinterpret it as line heights
+  readPen(ss, tapePen, ScribblePen::TAPE);
 }
 
 void ScribbleMode::setMode(int mode, bool once)

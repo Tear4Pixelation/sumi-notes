@@ -133,6 +133,7 @@ public:
   Action* actionDraw;
   Action* actionHighlight;
   Action* actionEphemeral;
+  Action* actionTape;
   Action* actionErase;
   Action* actionSelect;
   Action* actionInsert_Space;

@@ -1387,6 +1387,50 @@ Element* ScribbleArea::toggleTodoTag(Element* tag)
   return toggled;
 }
 
+// the topmost, as it is the one drawn over the others; tape on a locked or hidden layer is out of reach
+Element* ScribbleArea::tapeHit(Point pos, bool touch) const
+{
+  if(!currPage || !currPage->hasTape())
+    return NULL;
+  Dim reach = (touch ? 6 : 2)/mZoom;
+  Element* hit = NULL;
+  for(Element* s : currPage->children()) {
+    if(s->isTape() && currPage->isEditable(s) && s->node->isVisible() && s->tapeHit(pos, reach))
+      hit = s;  // later in the list is higher up
+  }
+  return hit;
+}
+
+// Solid <-> see-through as toggleTodoTag() ticks a box: a copy with the state flipped swapped in as one
+//  action, so undo, redo and sync are the ordinary add and delete and need no item of their own.  The copy
+//  keeps any move, scale or color the strip was given.  Undoable, and so it marks the document modified:
+//  the state is saved with the page and travels to a shared whiteboard, both of which only an undo item
+//  does here (docs/agent/tape.md, "Toggling is an edit").
+Element* ScribbleArea::toggleTape(Element* tape)
+{
+  if(!tape || !tape->isTape() || tape->node->parent() != currPage->contentNode)
+    return NULL;
+  if(tape->selection())
+    clearSelection();
+  Element* toggled = tape->cloneNode();
+  toggled->setTapeSolid(!tape->isTapeSolid());
+  scribbleDoc->startAction(currPageNum);
+  currPage->addStroke(toggled, tape, tape->layer());
+  currPage->removeStroke(tape);
+  scribbleDoc->endAction();
+  return toggled;
+}
+
+void ScribbleArea::updateTapeInProgress(Point pos)
+{
+  if(currStroke) {
+    scribbleDoc->updateCurrStroke(currStroke->bbox());
+    currStroke->deleteNode();
+  }
+  currStroke = Element::createTape(tapeStart, pos, tapeWidth, tapeColor);
+  scribbleDoc->updateCurrStroke(currStroke->bbox());
+}
+
 // two fade-in, fade-out pulses of the active (--checked) blue, ~1.4 s in all
 static const int PAGETAG_FLASH_FRAME_MS = 30;
 static const int PAGETAG_FLASH_FRAMES = 48;
@@ -2270,6 +2314,13 @@ bool ScribbleArea::doClickAction(Point pos)
   // change the page ... should we be doing this? (Note that the pan tool already did this)
   if(pagenum != currPageNum)
     setPageNum(pagenum);
+  // a tap with the Pan tool or a panning finger flips a strip of tape (docs/agent/tape.md); generous reach,
+  //  since this is also where a finger's tap arrives
+  if(Element* tape = tapeHit(dimToPageDim(gpos), true)) {
+    toggleTape(tape);
+    uiChanged(UIState::ReleaseEvent);
+    return true;
+  }
   const char* href = page(pagenum)->getHyperRef(dimToPageDim(gpos));
   // check for bookmark link
   if(!href || !href[0]) {}
@@ -2837,6 +2888,15 @@ void ScribbleArea::freeErase(Point prevpos, Point pos)
     //  the stroke and ruled erasers in Selection::doSelect does not reach it
     if(!currPage->isEditable(s))
       continue;
+    // tape goes whole, as the stroke eraser takes it: cutting a hole in a strip of tape means nothing
+    if(s->isTape()) {
+      if(!s->isSelected(tempSelection) && erasebox.intersects(s->bbox())
+          && (s->tapeHit(pos, radius) || s->tapeHit(prevpos, radius))) {
+        tempSelection->addStroke(s);
+        scribbleDoc->updateCurrStroke(s->bbox().pad(2));
+      }
+      continue;
+    }
     if(!s->isSelected(tempSelection) && Rect(erasebox).pad(strokeHalfWidth(s->node)).intersects(s->bbox())) {
       if(s->isSelected(freeErasePieces)) {
         //Rect oldbbox = s->bbox();
@@ -2888,6 +2948,17 @@ void ScribbleArea::freeEraseRuled(Dim xmin, Dim xmax, int line)
       continue;
     if(!currPage->isEditable(s))
       continue;  // see freeErase()
+    if(s->isTape()) {
+      // whole, as in freeErase(): the band's middle on the tape takes it
+      Point mid;
+      for(const Point& corner : band)
+        mid += corner/Dim(band.size());
+      if(s->tapeHit(mid, radius)) {
+        tempSelection->addStroke(s);
+        scribbleDoc->updateCurrStroke(s->bbox().pad(2));
+      }
+      continue;
+    }
     // ink belongs to the ruling it sits on, as for RuledSelector::selectHit; pieces this gesture already
     //  cut are exempt, since cutting can move a piece's centre across a region's edge
     if(!s->isSelected(freeErasePieces) && currPage->regionAt(s->com()) != gestureFrame.region)
@@ -3027,6 +3098,9 @@ ScribblePen ScribbleArea::resolvedPen(Point at) const
     // the dash pattern is sized in the width's unit (ScribblePen::dashFor), so it resolves with it
     pen.setDashStyle(currPen()->dashStyle());
   }
+  // a tape pen with no color picked takes the document theme's (docs/agent/tape.md)
+  if(pen.hasFlag(ScribblePen::TAPE) && !pen.color.isValid())
+    pen.color = scribbleDoc->tapeThemeColor();
   return pen;
 }
 
@@ -3415,6 +3489,23 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
   {
     ScribblePen resolved = resolvedPen(pos);  // the marker's relative width has to be in document units
     const ScribblePen* pen = &resolved;
+    // the Tape tool is a draw tool, so its pen gets the width, color and centre-on-line machinery, but the
+    //  gesture lays a strip (docs/agent/tape.md)
+    if(pen->hasFlag(ScribblePen::TAPE)) {
+      currMode = MODE_TAPE;
+      tapeWidth = pen->width;
+      tapeColor = pen->color;
+      // centred on the ruled line the press lands in, as the marker is, so the strip covers that line
+      tapeCentered = pen->hasFlag(ScribblePen::CENTER_ON_LINE);
+      if(tapeCentered) {
+        Dim yr = gestureFrame.yrulingOr(Page::BLANK_Y_RULING);
+        centerLineLocalY = gestureFrame.yForLine(prevLine, Page::BLANK_Y_RULING) + yr/2;
+        pos = gestureFrame.toPage(Point(lx, centerLineLocalY));
+      }
+      tapeStart = pos;
+      updateTapeInProgress(pos);
+      break;
+    }
     if(pen->hasFlag(ScribblePen::SNAP_TO_GRID))
       pos = gridFrame.snapToGrid(pos, Page::BLANK_Y_RULING);
     // the whole stroke runs along the middle of the ruled line the press lands in - in a tilted region,
@@ -3698,6 +3789,11 @@ void ScribbleArea::doMoveEvent(const InputEvent& event)
   switch(currMode) {
   case MODE_PAN:
     panZoomMove(event, event.points.size(), event.points.size());
+    break;
+  case MODE_TAPE:
+    if(tapeCentered)
+      pos = gestureFrame.toPage(Point(lx, centerLineLocalY));
+    updateTapeInProgress(pos);
     break;
   case MODE_STROKE:
     if(snapActive) {
@@ -4068,6 +4164,24 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
     uiChanged(UIState::ReleaseEvent);
     return;
   }
+  // A press that does not drag flips a strip of tape between solid and see-through: with the Tape tool
+  //  itself, or with a finger that draws (one that pans gets here through doClickAction).  The tap's dot or
+  //  stub of tape is dropped first.  Done before startAction(), since toggleTape() is its own action.
+  if(currMode == MODE_TAPE || (currMode == MODE_STROKE && event.source == INPUTSOURCE_TOUCH)) {
+    Point pos = dimToPageDim(screenToDim(Point(event.points[0].x, event.points[0].y)));
+    Dim stub = currMode == MODE_TAPE ? tapeStart.dist(prevPos) : 0;
+    bool tap = (event.modemod & MODEMOD_CLICK)
+        || (currMode == MODE_TAPE && stub < std::max(tapeWidth/4, Dim(8)/mZoom));
+    Element* hit = tap ? tapeHit(pos, event.source == INPUTSOURCE_TOUCH) : NULL;
+    if(hit || (tap && currMode == MODE_TAPE)) {
+      doCancelAction(false);
+      if(hit)
+        toggleTape(hit);
+      scribbleDoc->scribbleDone();
+      uiChanged(UIState::ReleaseEvent);
+      return;
+    }
+  }
   // MODE_PAGESEL is unique in that it involves also clicking on pages
   if(event.modemod & MODEMOD_DBLCLICK && dimToPageNum(screenToDim(prevRawPos)) == numPages()
       && currMode != MODE_PAGESEL && currMode != MODE_DRAWSHAPE) {
@@ -4154,6 +4268,20 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
       Element* drawn = currStroke;
       currStroke = NULL;
       editShapeAfterDraw(drawn);
+    }
+    break;
+  case MODE_TAPE:
+    if(currStroke) {
+      Element* laid = currStroke;
+      currStroke = NULL;
+      scribbleDoc->updateCurrStroke(laid->bbox());
+      if(!currPage->rect().intersects(laid->bbox())) {
+        laid->deleteNode();
+        break;
+      }
+      // Page::addStroke() stamps the current layer and records the StrokeAddedItem; tape stays out of
+      //  recentStrokes, which would regroup it as handwriting
+      currPage->addStroke(laid);
     }
     break;
   case MODE_SHAPEHANDLE:
@@ -4249,7 +4377,10 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
         currPage->layerFirstElement(scribbleDoc->document->layers.currentId) : NULL;
     if(under)
       currPage->addStroke(currStroke, under);
-    else if(currPage->getDirty().isValid())  // we expect page to usually be clean, so this call is cheap
+    // we expect page to usually be clean, so this call is cheap.  The stroke was painted onto the canvas as
+    //  it was drawn, over everything, so a page with tape must be repainted for the tape to cover it again
+    //  (docs/agent/tape.md)
+    else if(currPage->getDirty().isValid() || currPage->hasTape())
       currPage->addStroke(currStroke);
     else {
       currPage->addStroke(currStroke);
@@ -4615,6 +4746,7 @@ void ScribbleArea::doCancelAction(bool refresh)
     app->overlayWidget->drawSelection(NULL);
     currSelection = NULL;
     // fall through
+  case MODE_TAPE:  // the strip being laid is currStroke
   case MODE_STROKE:
     // a snapped shape is in currStroke, so it is discarded below like the ink it replaced
     stopShapeSnap();

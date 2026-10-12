@@ -355,6 +355,7 @@ void ScribbleConfig::init()
   cfgS["savedWidths"] = "";
   cfgS["savedMarkerWidths"] = "";
   cfgS["savedEphemeralWidths"] = "";
+  cfgS["savedTapeWidths"] = "";
   // for the eraser options row: index into MainWindow's eraser radii
   cfg["eraserWidth"] = 1;
 #if PLATFORM_IOS

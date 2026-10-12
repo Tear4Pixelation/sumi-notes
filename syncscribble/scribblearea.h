@@ -287,6 +287,12 @@ protected:
   int drawCursor = 0;
   Dim lineDrawPressure = 1;
   Dim centerLineLocalY = 0;  // local y (in gestureFrame) of a CENTER_ON_LINE stroke, fixed at the press
+  // MODE_TAPE: the strip being laid is currStroke; its start and width are fixed at the press
+  Point tapeStart;
+  Dim tapeWidth = 0;
+  Color tapeColor;
+  bool tapeCentered = false;
+  void updateTapeInProgress(Point pos);
   // The ruling a gesture works in, fixed at the press: a ruling region's if the press lands in one, else
   //  the page's.  Every ruled mode reads lines and along-the-line positions from this, never from the
   //  page directly, so a gesture that wanders out of a region keeps the region's lines.
@@ -420,6 +426,10 @@ public:
   // tick or untick a to-do tag on the current page, as one undo step: a ticked to-do stays on the page but
   //  no longer tags it.  Returns the element now on the page.
   Element* toggleTodoTag(Element* tag);
+  // Tape (docs/agent/tape.md): the topmost strip on the current page at pos, on an editable layer; and
+  //  flipping one between solid and see-through as one undo step.  Returns the element now on the page.
+  Element* tapeHit(Point pos, bool touch) const;
+  Element* toggleTape(Element* tape);
   // scroll to the tags with these ids on the current page and pulse them, to show where they are (a page
   //  card was opened)
   void flashPageTags(const std::vector<std::string>& tagIds);

@@ -15,6 +15,9 @@ enum { MODE_NONE = 10, MODE_PAN, MODE_STROKE, MODE_ERASE, MODE_ERASESTROKE, MODE
     MODE_INSSPACEDOWN, MODE_INSSPACERIGHT, MODE_INSSPACEAUTO,
     // dragging the smart scale handle ("Resize Handwriting", smart-scale.md); never a tool
     MODE_SMARTSCALE,
+    // laying a strip of tape (docs/agent/tape.md); never a tool - the Tape tool is a draw tool (MODE_STROKE
+    //  with DRAWTOOL_TAPE), and ScribbleArea switches a press with its pen to this
+    MODE_TAPE,
     MODE_LAST};
 
 constexpr int MODEMOD_NONE = 0;
@@ -63,7 +66,7 @@ private:
 
 public:
   // draw tools all use MODE_STROKE and are distinguished only by the pen they use
-  enum { DRAWTOOL_PEN = 0, DRAWTOOL_HIGHLIGHT, DRAWTOOL_EPHEMERAL };
+  enum { DRAWTOOL_PEN = 0, DRAWTOOL_HIGHLIGHT, DRAWTOOL_EPHEMERAL, DRAWTOOL_TAPE };
 
   int eraserMode;
   int selectMode;
@@ -97,13 +100,17 @@ public:
   ScribblePen drawPen;
   ScribblePen highlightPen;
   ScribblePen ephemeralPen;
+  // the Tape tool's pen: always TAPE and WIDTH_RELATIVE; its color starts invalid, meaning "the document
+  //  theme's" (ScribbleApp::resolveTapeColor), until the user picks one
+  ScribblePen tapePen;
 
   // the switch back flags are initialized here as well as in loadModes(): ScribbleTest builds a
   //  ScribbleMode directly and never calls loadModes, so setMode() would otherwise read uninitialized
   ScribbleMode(ScribbleConfig* _cfg) : currMode(MODE_NONE), stickyMode(MODE_NONE),
       prevStickyMode(MODE_STROKE), cfg(_cfg), eraseSwitchBack(true), selectSwitchBack(true),
       insSpaceSwitchBack(true), selectTouching(false), insSpaceSkipLines(false),
-      drawPen(Color::BLACK, 1), highlightPen(Color::BLACK, 1), ephemeralPen(Color::BLACK, 1) {}
+      drawPen(Color::BLACK, 1), highlightPen(Color::BLACK, 1), ephemeralPen(Color::BLACK, 1),
+      tapePen(Color::INVALID_COLOR, 1, ScribblePen::TAPE | ScribblePen::WIDTH_RELATIVE) {}
 
   ScribblePen& penForDrawTool(int tool);
   ScribblePen& currDrawPen() { return penForDrawTool(drawTool); }

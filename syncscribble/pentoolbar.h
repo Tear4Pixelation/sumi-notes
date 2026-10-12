@@ -214,6 +214,7 @@ private:
   WidthPresets savedWidths;           // DRAWTOOL_PEN, and every non-pen toolbar mode
   WidthPresets savedMarkerWidths;     // DRAWTOOL_HIGHLIGHT
   WidthPresets savedEphemeralWidths;  // DRAWTOOL_EPHEMERAL
+  WidthPresets savedTapeWidths;       // DRAWTOOL_TAPE
   // which of those lists is currently on the row
   int widthsTool = 0;
   // What setPen()'s full refresh last drew besides the pen itself, so an unchanged pen can skip it only

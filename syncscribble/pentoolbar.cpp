@@ -26,6 +26,9 @@ static const Dim RULING_PREVIEW_WIDTH = 190;
 // initial marker thickness presets, in line heights: three of them, matching the pen's row in the
 //  design mockup, and all far thicker than a pen preset because a marker has to cover text
 static const Dim MARKER_WIDTHS[] = {0.5, 0.75, 1.0};
+// the Tape tool's, also in line heights: a strip that covers a line of writing with a little to spare is the
+//  middle one, which is the tape pen's default (ScribbleMode::loadModes)
+static const Dim TAPE_WIDTHS[] = {0.6, 0.9, 1.2};
 // initial presets for every other tool, in document units - the same values as the pen's config default
 static const Dim DEFAULT_WIDTHS[] = {1.4, 3.0, 6.0};
 // one step of the relative width spinbox - a twentieth of a line height is about as fine as this is
@@ -268,6 +271,7 @@ PenToolbar::PenToolbar(bool _compact)
   savedWidths.parse(ScribbleApp::cfg->String("savedWidths", ""));
   savedMarkerWidths.parse(ScribbleApp::cfg->String("savedMarkerWidths", ""));
   savedEphemeralWidths.parse(ScribbleApp::cfg->String("savedEphemeralWidths", ""));
+  savedTapeWidths.parse(ScribbleApp::cfg->String("savedTapeWidths", ""));
 
   colorPalette = createPaletteWidget();
   widthPalette = createPaletteWidget();
@@ -1225,6 +1229,7 @@ void PenToolbar::saveConfig(ScribbleConfig *cfg) const {
   cfg->set("savedWidths", savedWidths.serialize().c_str());
   cfg->set("savedMarkerWidths", savedMarkerWidths.serialize().c_str());
   cfg->set("savedEphemeralWidths", savedEphemeralWidths.serialize().c_str());
+  cfg->set("savedTapeWidths", savedTapeWidths.serialize().c_str());
 }
 
 void PenToolbar::setPen(const ScribblePen &newpen, Mode m, int selDashStyle) {
@@ -1239,7 +1244,9 @@ void PenToolbar::setPen(const ScribblePen &newpen, Mode m, int selDashStyle) {
   // each tool keeps its own thickness presets, in its own unit, so switching tools (or loading a pen
   //  whose relative size setting differs) rebuilds the palette rather than just re-checking it
   int tool = drawToolForMode(m);
-  centerLineToggle->setVisible(mode == PEN_MODE && tool == ScribbleMode::DRAWTOOL_HIGHLIGHT);
+  // the marker and the tape both cover a line of writing, so both can be centred on it
+  centerLineToggle->setVisible(mode == PEN_MODE
+      && (tool == ScribbleMode::DRAWTOOL_HIGHLIGHT || tool == ScribbleMode::DRAWTOOL_TAPE));
   centerLineToggle->setChecked(newpen.hasFlag(ScribblePen::CENTER_ON_LINE));
   // MainWindow::refreshUI() lands here after every stroke and edit, nearly always with the same pen, and
   //  the full path below rewrites the color box, its sliders and hex text, the width display and every
@@ -1376,8 +1383,12 @@ int PenToolbar::drawToolForMode(Mode m) const {
 }
 
 WidthPresets& PenToolbar::activePresets() {
-  return widthsTool == ScribbleMode::DRAWTOOL_HIGHLIGHT ? savedMarkerWidths
-      : (widthsTool == ScribbleMode::DRAWTOOL_EPHEMERAL ? savedEphemeralWidths : savedWidths);
+  switch (widthsTool) {
+  case ScribbleMode::DRAWTOOL_HIGHLIGHT: return savedMarkerWidths;
+  case ScribbleMode::DRAWTOOL_EPHEMERAL: return savedEphemeralWidths;
+  case ScribbleMode::DRAWTOOL_TAPE: return savedTapeWidths;
+  default: return savedWidths;
+  }
 }
 
 const WidthPresets& PenToolbar::activePresets() const {
@@ -1415,8 +1426,10 @@ bool PenToolbar::prepareWidths() {
     changed = true;
   }
   bool marker = widthsTool == ScribbleMode::DRAWTOOL_HIGHLIGHT;
-  // MARKER_WIDTHS are line heights, DEFAULT_WIDTHS document units
-  return presets.normalize(marker ? MARKER_WIDTHS : DEFAULT_WIDTHS, marker, lh) || changed;
+  bool tape = widthsTool == ScribbleMode::DRAWTOOL_TAPE;
+  // MARKER_WIDTHS and TAPE_WIDTHS are line heights, DEFAULT_WIDTHS document units
+  return presets.normalize(marker ? MARKER_WIDTHS : (tape ? TAPE_WIDTHS : DEFAULT_WIDTHS), marker || tape, lh)
+      || changed;
 }
 
 // A marker stroke is its family at another alpha (Palette::indexOf ignores alpha), so this maps a
@@ -1427,6 +1440,9 @@ bool PenToolbar::prepareWidths() {
 //  escape hatch is that the color asked for is the color drawn.
 // The vivid marker colors themselves (vividMarker(), MARKER_ALPHA) are in markercolor.h.
 Color PenToolbar::toolColor(Color c) const {
+  // tape is opaque: its job is to hide what is under it (docs/agent/tape.md)
+  if (mode == PEN_MODE && widthsTool == ScribbleMode::DRAWTOOL_TAPE)
+    return c.opaque();
   if (widthsTool != ScribbleMode::DRAWTOOL_HIGHLIGHT)
     return c;
   const Palette *pal = themed ? docPalette() : NULL;

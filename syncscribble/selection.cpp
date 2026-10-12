@@ -809,7 +809,8 @@ static bool isNearSegment(Point a, Point b, Dim radius, SvgNode* node)
     tf = node->totalTransform();
   if(!tf.isIdentity())
     flat.transform(tf);
-  bool filled = node->getColorAttr("fill", Color::NONE) != Color::NONE;
+  // see-through tape is only an outline, but it is still a strip: erasing or selecting inside it takes it
+  bool filled = node->getColorAttr("fill", Color::NONE) != Color::NONE || node->hasClass(Element::TAPE_CLASS);
   return capsuleHitsPath(a, b, radius, flat, halfWidth, filled);
 }
 
