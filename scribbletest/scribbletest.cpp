@@ -3928,10 +3928,24 @@ int ScribbleTest::shapeSnapTest()
     }
   }
   hold(200, 333);
+  size_t stepsBeforeHeld = scribbleDoc->history->undoSteps();
   fire();
   check(!scribbleArea->snapActive, "a scratch-out must not become a shape");
   ie(0, 0, 0, pen, release);
   check(page->strokeCount() == 1, "the scratch-out should erase the stroke under it and leave itself out");
+  // three states in the history, as for the lift scratch-out: before, the scribble over everything, both
+  //  gone (the held path used to drop the ink and erase in one step - the middle state was missing)
+  check(scribbleDoc->history->undoSteps() == stepsBeforeHeld + 2, "a held scratch-out is two undo steps");
+  undo();
+  check(page->strokeCount() == 3, "the first undo of a held scratch-out brings the stroke back under the scribble");
+  undo();
+  check(page->strokeCount() == 2 && scribbleDoc->history->undoSteps() == stepsBeforeHeld,
+      "the second undo of a held scratch-out removes the scribble");
+  redo();
+  check(page->strokeCount() == 3, "the first redo of a held scratch-out puts the scribble back");
+  redo();
+  check(page->strokeCount() == 1, "the second redo of a held scratch-out erases again");
+  undo();
   undo();
   check(page->strokeCount() == 2, "undo should bring the erased stroke back");
 
@@ -5348,7 +5362,10 @@ void ScribbleTest::runAll(bool runsynctest)
   SvgWriter::DEFAULT_PATH_DATA_REL = false;
   srandpp(1);  // randomStr now used for bookmark ids
   Timestamp runAllTime = mSecSinceEpoch();
-  for(unsigned int ii = 0; true; ii++) {
+  // SCRIBBLE_TEST_UNIT_ONLY=1 skips the numbered document tests and runs only the unit checks below (the
+  //  document tests currently abort in test7 in a Debug build, see docs/agent/tests.md)
+  const bool unitOnly = getenv("SCRIBBLE_TEST_UNIT_ONLY") && !syncSlave;
+  for(unsigned int ii = 0; !unitOnly; ii++) {
     std::string basefile = fstring("%s/test%d", outPath.c_str(), ii);
     doCommand(ID_RESETZOOM);
     // enable this to update ref files (saving as *_new.html)

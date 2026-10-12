@@ -1740,8 +1740,7 @@ bool ScribbleArea::snapStroke()
     std::vector<Point> area;
     for(const shaperec::Vec2& pt : result.points)
       area.push_back(toPage(pt));
-    discardStrokeBuilder();
-    scratchOut(area);
+    scratchOut(area);  // takes over the stroke builder: the scribble becomes ink, then is erased
     // the rest of the gesture does nothing; release sees MODE_NONE
     currMode = MODE_NONE;
     return true;
@@ -1886,22 +1885,57 @@ void ScribbleArea::commitSnapShape()
   scribbleDoc->updateCurrStroke(shape->bbox());
 }
 
-// returns the number of elements erased
-int ScribbleArea::scratchOut(const std::vector<Point>& area, bool ownAction)
+// The held scratch-out, fired by the hold timer while the pen is still down (no action is open).  Like the
+//  lift scratch-out it is two undo steps, so the history holds all three states - before, the scribble
+//  over everything, and both gone: the scribble is committed as ink (step 1), then what it was drawn over
+//  is deleted together with the scribble (step 2).  It used to discard the ink and erase in one step, so a
+//  wrong detection could not be undone back to the scribble.  Returns the number of elements erased, not
+//  counting the scribble.
+int ScribbleArea::scratchOut(const std::vector<Point>& area)
 {
-  if(area.size() < 3)
+  if(area.size() < 3) {
+    discardStrokeBuilder();
     return 0;
-  // declared in this order so the selector is destroyed first, while the selection it points to lives
+  }
+  // declared in this order so the selector is destroyed first, while the selection it points to lives;
+  //  selected before the scribble is on the page, so it cannot select itself
   Selection erased(currPage, Selection::STROKEDRAW_NONE);
   ScratchOutSelector selector(&erased, area);
   erased.doSelect();
   int count = erased.count();
-  if(count > 0) {
-    if(ownAction)
+
+  Element* scribble = NULL;
+  if(StrokeBuilder* builder = scribbleDoc->strokeBuilder) {
+    scribble = builder->finish();
+    if(scribble && !currPen()->hasFlag(ScribblePen::EPHEMERAL))
+      builder->simplifyFinished(scribble, strokeSimplifyPreset(cfg->Int("strokeSimplify")));
+    scribbleDoc->updateCurrStroke(builder->getDirty());
+    delete builder;
+    scribbleDoc->strokeBuilder = NULL;
+  }
+  if(scribble) {
+    scribbleDoc->updateCurrStroke(scribble->bbox());
+    if(currPage->rect().intersects(scribble->bbox()) && !currPen()->hasFlag(ScribblePen::EPHEMERAL)) {
+      // step 1: the scribble as ordinary ink.  It is not handwriting to group, and the open group may hold
+      //  strokes about to be erased, so end the group now while they are all alive
       scribbleDoc->startAction(currPageNum);
-    erased.deleteStrokes();
-    if(ownAction)
+      groupStrokes(NULL);
+      currPage->addStroke(scribble);
       scribbleDoc->endAction();
+      erased.addStroke(scribble);
+    }
+    else {
+      scribble->deleteNode();
+      scribble = NULL;
+    }
+  }
+  // step 2: the erase, of the scribble too.  A scratch-out over nothing is recorded the same way (as on lift)
+  if(erased.count() > 0) {
+    scribbleDoc->startAction(currPageNum);
+    if(!scribble)
+      groupStrokes(NULL);
+    erased.deleteStrokes();
+    scribbleDoc->endAction();
   }
   return count;
 }
