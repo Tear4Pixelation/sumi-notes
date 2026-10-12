@@ -882,7 +882,8 @@ bool ScribbleApp::sdlEventHandler(SDL_Event* event)
     return true;
 #endif
   default:
-    if(event->type == ScribbleSync::sdlEventType) {
+    // sdlEventType stays 0 until a sync starts; never take a stray type-0 event for a sync event
+    if(ScribbleSync::sdlEventType != 0 && event->type == ScribbleSync::sdlEventType) {
       ScribbleDoc* ssdoc = static_cast<ScribbleDoc*>(event->user.data1);
       ScribbleSync* ssync = static_cast<ScribbleSync*>(event->user.data2);
       // we do this instead checking our scribbleDocs list to support ScribbleTest sync test
@@ -1078,6 +1079,11 @@ void ScribbleApp::postDeferred(std::function<void()> fn)
 //  no SDL resize follows either.  ioshelper.m calls this from viewSafeAreaInsetsDidChange.
 void iosSafeAreaChanged(void)
 {
+  // UIKit calls this as soon as the window exists, before ScribbleApp registers scribbleSDLEvent; an event
+  //  of type 0 then matched the still-unregistered ScribbleSync::sdlEventType (0) and crashed at start-up.
+  //  Nothing needs reapplying that early: MainWindow reads the safe area when it is set up.
+  if(ScribbleApp::scribbleSDLEvent == 0)
+    return;
   SvgGui::pushUserEvent(ScribbleApp::scribbleSDLEvent, ScribbleApp::SAFE_AREA_CHANGED);
 }
 

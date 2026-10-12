@@ -150,6 +150,11 @@ Removed, and where each still is:
   size, so SDL sends no resize to redo it. `viewSafeAreaInsetsDidChange` (category on SDL's view controller,
   `ioshelper.m`) now posts `SAFE_AREA_CHANGED`, which re-runs `orientationChanged()`. **(b) is not built or
   run here** (no iOS toolchain on this machine).
+  **Trap (build 354 crashed on every launch):** UIKit calls `viewSafeAreaInsetsDidChange` as soon as the
+  window exists, before `ScribbleApp` registers `scribbleSDLEvent`, so the first post was an SDL event of type
+  0 - which matched `ScribbleSync::sdlEventType`, also still 0, and the handler dereferenced a NULL
+  `ScribbleDoc*`. `iosSafeAreaChanged()` now does nothing until `scribbleSDLEvent` is registered, and the sync
+  branch ignores type 0. Any new hook UIKit can call early must make the same check.
 
 Other timer-deferred handlers that may run a modal loop will starve that loop of timers the same way;
 `grep setTimer` before deferring anything that can open the library or a message box.
