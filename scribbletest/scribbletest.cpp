@@ -15,7 +15,8 @@
 #include "undopersist.h"
 #include "pdfimport.h"
 #include "tagstore.h"
-#include "tagdoclist.h"  // libraryResizeTest
+#include "tagdoclist.h"  // libraryResizeTest, topBarStateTest
+#include "topbar.h"  // topBarStateTest
 #include "miniz/miniz_zip.h"
 
 // document scanning math; unlike everything else here it needs neither GL nor a document
@@ -2317,6 +2318,94 @@ int ScribbleTest::libraryResizeTest()
     browser.sdlUserEvent(gui, SvgGui::SCREEN_RESIZED, 0, &larger);
     check(browser.winBounds().toSize() == larger, "growing the window grows the browser");
   }
+  removeDir(scratch);
+  return nbad;
+}
+
+// Three ways the top tab bar fell out of step (docs/agent/top-tab-bar.md, "State"):
+//  - topTabBar was applied only at startup and on Preferences OK, so a mode that changed any other way (on
+//    iOS it starts at 0: no library yet, so no tabs) left the bar missing until Preferences was closed
+//  - the library is cached between openings, and its bar deferred its rebuild by a timer even while the
+//    window was closed; when the timer did not run, the library showed the tabs of its previous opening
+//  - the library took the status bar inset only in setup(), so View > Status Bar there did nothing
+int ScribbleTest::topBarStateTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: top bar state: %s\n", what); }
+  };
+  SvgGui* gui = ScribbleApp::gui;
+  MainWindow* win = ScribbleApp::win;
+  ScribbleApp* app = ScribbleApp::app;
+  if(!gui || !win || !app || !win->topBar || !app->tabsEnabled()) {
+    printf("top bar state test skipped: no main window or no tabs\n");
+    return 0;
+  }
+  ScribbleConfig* cfg = ScribbleApp::cfg;
+  // what the event loop would do meanwhile: the editor's bar applies a mode change from a 1 ms timer
+  auto pumpUntil = [&](const std::function<bool()>& done) {
+    Timestamp start = mSecSinceEpoch();
+    while(!done() && mSecSinceEpoch() - start < 1000) {
+      SDL_Delay(2);
+      gui->processTimers();
+    }
+  };
+
+  // the mode, changed behind Preferences' back
+  const int savedMode = cfg->Int("topTabBar");
+  const int otherMode = savedMode == TopBar::LIBRARY_AND_WRITING ? TopBar::OFF : TopBar::LIBRARY_AND_WRITING;
+  cfg->set("topTabBar", otherMode);
+  win->refreshUI(app->activeDoc(), UIState::Command);
+  pumpUntil([&](){ return win->topBar->isVisible() == app->topBarInEditor(); });
+  check(win->topBar->isVisible() == app->topBarInEditor(), "a mode changed without Preferences reaches the editor");
+  cfg->set("topTabBar", savedMode);
+  win->refreshUI(app->activeDoc(), UIState::Command);
+  pumpUntil([&](){ return win->topBar->isVisible() == app->topBarInEditor(); });
+  check(win->topBar->isVisible() == app->topBarInEditor(), "and back");
+
+  const char* tmpEnv = getenv("TMPDIR");
+  FSPath scratch(fstring("%s/write-topbarstate-%d/", tmpEnv && tmpEnv[0] ? tmpEnv : "/tmp", rand() % 1000000));
+  if(!createPath(scratch))
+    return nbad + 1;
+  std::vector<EditorTab> savedTabs = app->tabs.tabs;
+  TagDocList* savedList = app->tagDocList;
+  const bool savedStatusBar = cfg->Bool("showStatusBar");
+  {
+    TagDocList browser(scratch.c_str());
+    TopBar* bar = browser.libraryTopBar();
+    app->tabs.tabs.clear();
+    for(const char* name : {"one.svgz", "two.svgz", "three.svgz"}) {
+      EditorTab tab;
+      tab.path = FSPath(scratch.c_str(), name).c_str();
+      app->tabs.tabs.push_back(tab);
+    }
+    // the first opening: never shown, so built at once
+    browser.setup(win, false);
+    if(app->topBarInLibrary()) {
+      check(bar->tabCount() == 3, "fixture: the library's bar shows the three tabs");
+      // what an opening and closing (execWindow) leaves behind: closed, but with its SvgGui
+      gui->showWindow(&browser, win, true);
+      gui->closeWindow(&browser);
+      // a tab closed in the editor; nothing here pumps timers, as nothing did in a library opened from one
+      app->tabs.tabs.pop_back();
+      browser.setup(win, false);
+      check(bar->tabCount() == 2, "the library's next opening shows the tabs as they are now");
+    }
+
+    // View > Status Bar pressed while the library is up (MainWindow::applyStatusBar -> orientationChanged)
+    app->tagDocList = &browser;
+    const Dim padBefore = bar->topPadding();
+    cfg->set("showStatusBar", !savedStatusBar);
+    win->applyStatusBar();
+    check(ScribbleApp::topInset != padBefore, "fixture: the status bar changes the inset");
+    check(bar->topPadding() == ScribbleApp::topInset, "the library takes the new inset at once");
+    cfg->set("showStatusBar", savedStatusBar);
+    win->applyStatusBar();
+    app->tagDocList = savedList;
+    gui->removeTimers(&browser, true);
+  }
+  app->tabs.tabs = savedTabs;
+  win->refreshUI(app->activeDoc(), UIState::Command);
   removeDir(scratch);
   return nbad;
 }
@@ -5502,6 +5591,7 @@ void ScribbleTest::runAll(bool runsynctest)
   nUnitFailed += arrowPopupTest();
   nUnitFailed += spinBoxTest();
   nUnitFailed += libraryResizeTest();
+  nUnitFailed += topBarStateTest();
   nUnitFailed += pageTagTest();
   nUnitFailed += docStateSyncTest();
   nUnitFailed += curveFitTest();

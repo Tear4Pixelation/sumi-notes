@@ -99,18 +99,18 @@ void Sidebar::buildTabRows()
     content->addWidget(createStretch());
 
     // Closing saves and may open the library (the last tab), so it runs after this press is handled -
-    //  and off MainWindow, since a tab picked from a temporary showing hides the sidebar, and hiding a
-    //  widget drops its timers.  The tab is found again by path: the list can change in between.
+    //  by an event rather than a timer, whose callback would starve the library of timers
+    //  (ScribbleApp::postDeferred), and tied to no widget, since a tab picked from a temporary showing hides
+    //  the sidebar.  The tab is found again by path: the list can change in between.
     std::string path = tab.path;
     Button* closeBtn = createRowButton("icons/ic_menu_cancel.svg", _("Close Tab"));
     closeBtn->onClicked = [this, path](){
-      gui()->setTimer(1, mainWindow, [this, path](){
+      ScribbleApp::postDeferred([this, path](){
         ScribbleApp* scribbleApp = ScribbleApp::app;
         int current = scribbleApp ? scribbleApp->tabs.find(path) : -1;
         if(current >= 0)
           scribbleApp->closeTab(current);
         rebuildList();
-        return 0;
       });
     };
     closeBtn->setMargins(0, tabPad, 0, 0);
@@ -129,15 +129,15 @@ void Sidebar::buildTabRows()
 
     if(idx == activeIdx)
       row->node->addClass("checked");
+    // switchToTab() may ask to save (a modal loop): an event, not a timer (ScribbleApp::postDeferred)
     static_cast<Button*>(row)->onClicked = [this, path](){
-      gui()->setTimer(1, mainWindow, [this, path](){
+      ScribbleApp::postDeferred([this, path](){
         ScribbleApp* scribbleApp = ScribbleApp::app;
         int current = scribbleApp ? scribbleApp->tabs.find(path) : -1;
         if(current >= 0 && scribbleApp->switchToTab(current))
           tabChosen();
         else
           rebuildList();
-        return 0;
       });
     };
     listView->addWidget(row);

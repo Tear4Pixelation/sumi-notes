@@ -18,8 +18,10 @@ Code: `syncscribble/topbar.h/.cpp` (`TopBar`), placed by `MainWindow::setupUI()`
 | 2 Library + Writing | bar | bar; it **replaces** the toolbar's Tabs button and the sidebar's Tabs view |
 
 `ScribbleApp::topBarMode()` returns 0 whenever `tabsEnabled()` is false (iOS outside library mode).
-`MainWindow::applyTopBarMode()` applies it at startup and on Preferences OK (`reloadConfig`); the library's
-bar follows it in `TagDocList::setup()`, i.e. on its next opening.
+`MainWindow::applyTopBarMode()` applies it in `setupUI()`, again in `ScribbleApp::init()` once the library is
+known, on Preferences OK (`reloadConfig`), and from `refreshUI()` whenever the mode differs from
+`appliedTopBarMode` (1 ms timer, as `refreshUI` may be inside a layout pass). The library's bar follows it in
+`TagDocList::applyInsets()` (every `setup()` and every `orientationChanged()`). See **State** below for why.
 
 ## Anatomy (Penpot values, before scaling)
 
@@ -120,6 +122,38 @@ Removed, and where each still is:
 | Document: Import PDF; top level Import Document | library Import |
 | Insert Image, Scan Document | "+" menu (Insert Photo, Scan Document) |
 
+## State: three ways the bar fell out of step (fixed, pinned by `topBarStateTest`)
+
+- **Bar missing until Settings was closed (iOS).** `setupUI()` applied the mode before `initLibrary()` set
+  `libraryRoot`; on iOS no library means `tabsEnabled()` is false, so the mode was 0 and the editor kept the
+  old toolbar (Tabs button, View/overflow panel) until Preferences OK re-ran `applyTopBarMode()`. Now
+  `init()` re-applies it after `restoreTabs()`, and `refreshUI()` re-applies any mode that changed behind
+  Preferences' back (`appliedTopBarMode`). Not reproducible on Linux (`tabsEnabled()` is always true there);
+  the generic path is what the check pins.
+- **Home showed a closed tab (the library's bar was stale).** Two causes together. The library window is
+  cached between openings and keeps its `SvgGui`, so `TopBar::refresh()` deferred its rebuild to a timer
+  even while the window was closed. And home, the bar's close X and the sidebar's Tabs actions ran from a
+  1 ms timer: a modal loop started **inside a timer callback gets no timers at all** - ugui's timer thread
+  posts one `TIMER` event and then waits for `processTimers()` to return, which it does only when the
+  library closes. So the library opened from home never ran its bar's rebuild and showed the tab list of
+  its previous opening. It depended on how the library was reached (home: stale; the toolbar title or the
+  startup library: fine) and on the tab list having changed since - hence hard to reproduce. Fixes: a bar
+  whose window is not on screen rebuilds at once (`!win->isVisible()`), and every action that may run a
+  modal loop is deferred with **`ScribbleApp::postDeferred()`** (an SDL user event, `DEFERRED_CALL`), never a
+  timer. `TagDocList::refresh()` also refreshes the bar, for library file operations that close tabs
+  (`closeDocs`). Reproduced on desktop before the fix: open Charlie from the library, close it with the X,
+  home -> the library still listed Charlie.
+- **Status bar padding late.** (a) The library took `topInset` only in `setup()`, so View > Status Bar
+  pressed there changed nothing until its next opening (reproduced on desktop); `orientationChanged()` now
+  calls `ScribbleApp::applyLibraryInsets()`. (b) On iOS, UIKit applies the status bar change after
+  `SDL_SetWindowBordered()` returns, so `orientationChanged()` read the old safe area, and the view keeps its
+  size, so SDL sends no resize to redo it. `viewSafeAreaInsetsDidChange` (category on SDL's view controller,
+  `ioshelper.m`) now posts `SAFE_AREA_CHANGED`, which re-runs `orientationChanged()`. **(b) is not built or
+  run here** (no iOS toolchain on this machine).
+
+Other timer-deferred handlers that may run a modal loop will starve that loop of timers the same way;
+`grep setTimer` before deferring anything that can open the library or a message box.
+
 ## Traps (each one was hit)
 
 - **Hide the container, not only the bar.** With the library's bar hidden, its empty container in the
@@ -186,6 +220,11 @@ value is what was exercised:
 
 Not exercised: Preferences changing the mode live (it calls the same `applyTopBarMode()` as startup),
 the vertical toolbar, light theme, and any device (status bar hiding on iOS/Android).
+
+After the State fixes (agent-display, same fixture): open Charlie from the library bar, close it with its X,
+home -> the library bar shows Alpha, Bravo (before: Alpha, Bravo, Charlie); View > Status Bar in the library
+moves the bar down at once and back up with no stale pixels; the editor then shows the same tabs.
+`--topbartest` runs `topBarStateTest()` alone (0 failed; 3 failed with the three hooks reverted).
 
 The UBSan float division by zero in `Widget::setLayoutBounds` (the tab strip's first, empty layout) was
 not harmless: it was ugui scaling a zero-width node to a real width, which made its layout transform

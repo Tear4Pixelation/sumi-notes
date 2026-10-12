@@ -148,6 +148,7 @@ TopBar::TopBar(bool library) : Widget(new SvgG()), inLibrary(library)
 
 void TopBar::setTopPadding(Dim pad)
 {
+  topPad = pad;
   const BarMetrics& m = metrics();
   row->setMargins(m.barPadV + pad, m.barPadH, m.barPadV, m.barPadH);
   bg->setRect(Rect::wh(bg->getRect().width(), pad + m.barHeight + m.bgOverdraw));
@@ -236,13 +237,18 @@ std::string TopBar::tabState() const
 //  before the zero-size layout fix in ugui, drew an unlaid tab over home at the window's corner.  Each call
 //  that sees a change sets its own 1 ms timer (no Timer* kept: closing the library window drops its
 //  timers while the bar lives on); rebuild() re-checks, so extra timers do nothing.
+//  A window that is not on screen - never shown (setupUI, the library's first setup()) or closed (the
+//  library is cached between openings, and keeps its SvgGui) - is rebuilt at once: nothing is laid out or
+//  dispatching there.  Deferring that case left the library showing the tabs of its previous opening
+//  whenever the timer never ran (a library opened from a timer callback; see ScribbleApp::postDeferred).
 void TopBar::refresh(bool force)
 {
   if(!ScribbleApp::app)
     return;
-  SvgGui* gui = window() ? window()->gui() : NULL;
-  if(!gui) {
-    rebuild(force);  // not shown yet (setupUI, TagDocList::setup): nothing is laid out or dispatching
+  Window* win = window();
+  SvgGui* gui = win ? win->gui() : NULL;
+  if(!gui || !win->isVisible()) {
+    rebuild(force);
     return;
   }
   if(!force && tabState() == shownState)

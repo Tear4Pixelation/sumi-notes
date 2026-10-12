@@ -746,6 +746,9 @@ void TagDocList::refresh()
 {
   rebuildTagTree();
   rebuildDocGrid();
+  // a file operation here (delete, move) can close tabs (ScribbleApp::closeDocs): the bar follows
+  if(topBar && topBar->isVisible())
+    topBar->refresh();
 }
 
 void TagDocList::toggleTagFilter(const std::string& tagId)
@@ -1928,21 +1931,28 @@ void TagDocList::setup(Window* parent, bool hasCurrentNote)
   selectedDocs.clear();
   fabRow->setVisible(true);
   selectBar->setVisible(false);
-  // clear of the status bar, which the window extends under (ScribbleApp::topInset) - or the top bar
-  //  takes it, as padding above itself
+  applyInsets();
+  if(topBar->isVisible())
+    topBar->refresh(true);
+  // the editor's Tag Page dialog adds tags to the same index file; every edit here is saved as it is
+  //  made, so reading the file back loses nothing
+  tagStore.load();
+  refresh();
+}
+
+// The top bar per topTabBar, and the status bar inset (ScribbleApp::topInset): clear of the status bar,
+//  which the window extends under - or the top bar takes it, as padding above itself.  From setup() and
+//  from MainWindow::orientationChanged(), so View > Status Bar pressed here applies at once (it used to
+//  wait for the library's next opening).
+void TagDocList::applyInsets()
+{
   bool barShown = ScribbleApp::app && ScribbleApp::app->topBarInLibrary();
   // the container, not just the bar: an empty box in the window's flex column lays out at zero size, and
   //  the division by it left the whole library unpainted (black)
   topBar->setVisible(barShown);
   selectFirst("#library-topbar-container")->setVisible(barShown);
   topBar->setTopPadding(ScribbleApp::topInset);
-  if(barShown)
-    topBar->refresh(true);
   docSearchRow->setMargins(8 + (barShown ? 0 : ScribbleApp::topInset), 24, 0, 24);
-  // the editor's Tag Page dialog adds tags to the same index file; every edit here is saved as it is
-  //  made, so reading the file back loses nothing
-  tagStore.load();
-  refresh();
 }
 
 void TagDocList::finish(Result_t res)

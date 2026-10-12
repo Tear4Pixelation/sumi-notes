@@ -381,6 +381,16 @@ float iosTopSafeInset(void)
   return UIStatusBarStyleLightContent;
 }
 
+// Showing or hiding the status bar (View > Status Bar, SDL_SetWindowBordered) changes the safe area only
+//  once UIKit has laid the view out again, after MainWindow::orientationChanged() has already read it, and
+//  the view keeps its size, so SDL sends no resize: without this the new top inset arrived with the next
+//  unrelated relayout (docs/agent/top-tab-bar.md).  SDL's view controller does not implement this method.
+- (void)viewSafeAreaInsetsDidChange
+{
+  [super viewSafeAreaInsetsDidChange];
+  iosSafeAreaChanged();
+}
+
 @end
 
 // touch input

@@ -67,8 +67,9 @@ debug binary that sets `libraryPath`. View state is not persisted; the file's ow
 
 ## Sidebar: Tabs view and the temporary showing
 
-`Sidebar::TABS` (rows in `sidebartabs.cpp`, same row shape as the outline). Tap = switch (deferred 1 ms,
-timer on MainWindow because a temporary showing hides the sidebar and hiding drops a widget's timers);
+`Sidebar::TABS` (rows in `sidebartabs.cpp`, same row shape as the outline). Tap = switch (deferred by
+`ScribbleApp::postDeferred`, an event tied to no widget: a temporary showing hides the sidebar, and a timer
+callback would starve a save prompt or the library of timers - top-tab-bar.md, State);
 `x` = close; grip + row are both draggable (`RowDrag::addRow(..., rowToo)`): the grip for vertical
 reorders on touch, the row for sideways drags onto the canvas. `+` opens the library.
 

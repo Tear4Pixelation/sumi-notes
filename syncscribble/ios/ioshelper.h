@@ -40,6 +40,7 @@ enum PickerMode_t { iosOpenDocMode = 0, iosUpdateDocMode, iosChooseDocMode, iosI
 // functions expected to be available in Write
 extern void imagePicked(const void* data, int len, int fromclip);
 extern void pencilBarrelTap(void);
+extern void iosSafeAreaChanged(void);  // the safe area changed (status bar shown/hidden): reapply insets
 extern void filePicked(int requestId, const char* path);  // path NULL if cancelled
 extern void* loadDocumentContents(void* data, size_t len, size_t reserve, const char* url, void* uidoc);
 extern const char* getCfgString(const char* name, const char* dflt);

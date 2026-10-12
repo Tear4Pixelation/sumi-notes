@@ -62,8 +62,12 @@ public:
   //  only at startup, where a shown status bar is the system's default and needs nothing done
   void applyStatusBar(bool initial = false);
   // put the top tab bar, the toolbar's View/overflow panel, the Tabs button and the sidebar's Tabs view
-  //  where the topTabBar setting says (docs/agent/top-tab-bar.md); at startup and on Preferences OK
+  //  where the topTabBar setting says (docs/agent/top-tab-bar.md): at startup, once the library is known,
+  //  on Preferences OK, and from refreshUI() whenever ScribbleApp::topBarMode() no longer matches what was
+  //  applied (it also depends on the library: no library on iOS means no tabs)
   void applyTopBarMode();
+  // the mode applyTopBarMode() last put on screen; -1 before the first time
+  int appliedTopBarMode = -1;
   // the View popup: the old overflow menu's View submenu.  One per button that opens it (the toolbar's,
   //  the editor's bar, the library's bar - a popup must be its button's child); the library's leaves out
   //  what only acts on a document view

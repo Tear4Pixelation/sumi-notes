@@ -351,6 +351,9 @@ void ScribbleApp::init()
   // the open tabs come back unloaded - each one is just a path until it is shown (editortabs.cpp)
   if(outDoc.empty())
     restoreTabs();
+  // setupUI() applied topTabBar before there was a library, and on iOS no library means no tabs, so no
+  //  bar (topBarMode() is 0): it stayed off until Preferences OK applied it again
+  win->applyTopBarMode();
   // not for a command line conversion (--out), which must not stop to ask anything
   if(outDoc.empty()) {
     offerLibraryMigration();
@@ -911,6 +914,12 @@ bool ScribbleApp::sdlEventHandler(SDL_Event* event)
           currDialog->finish((intptr_t)event->user.data1);
         currDialog = NULL;
       }
+      else if(event->user.code == DEFERRED_CALL) {
+        std::unique_ptr< std::function<void()> > fn(static_cast<std::function<void()>*>(event->user.data1));
+        (*fn)();
+      }
+      else if(event->user.code == SAFE_AREA_CHANGED)
+        if(win) win->orientationChanged();  // iOS: the status bar was shown or hidden (iosSafeAreaChanged)
       else if(event->user.code == SIMULATE_PEN_BTN) {
         // we want barrel tap to support other alternative behavior besides changing mode (e.g. sel scale internal)
         ScribbleInput::simulatePenBtn = !ScribbleInput::simulatePenBtn;
@@ -1057,8 +1066,21 @@ bool ScribbleApp::keyPressEvent(SDL_Event* event)
   return true;  // key handled
 }
 
+void ScribbleApp::postDeferred(std::function<void()> fn)
+{
+  SvgGui::pushUserEvent(scribbleSDLEvent, DEFERRED_CALL, new std::function<void()>(std::move(fn)));
+}
+
 #if PLATFORM_IOS
 // these are called from ioshelper.m
+// iOS: UIKit applies a status bar change (View > Status Bar) after the call that asked for it returns, so
+//  the safe area MainWindow::orientationChanged() read then was the old one; the window keeps its size, so
+//  no SDL resize follows either.  ioshelper.m calls this from viewSafeAreaInsetsDidChange.
+void iosSafeAreaChanged(void)
+{
+  SvgGui::pushUserEvent(ScribbleApp::scribbleSDLEvent, ScribbleApp::SAFE_AREA_CHANGED);
+}
+
 void pencilBarrelTap(void)
 {
   // I don't think this is called from a separate thread, but we need an event so that processEvents loop runs
@@ -3726,7 +3748,7 @@ void ScribbleApp::reloadConfig()
   for(ScribbleDoc* doc : scribbleDocs)
     doc->loadConfig(true);
   bookmarkArea->loadConfig(cfg);
-  // the topTabBar setting (docs/agent/top-tab-bar.md); the library's bar follows it on its next setup()
+  // the topTabBar setting (docs/agent/top-tab-bar.md); the library takes it in TagDocList::applyInsets()
   if(win)
     win->applyTopBarMode();
   // destroy doc list so that it will be recreated with new settings
@@ -4370,6 +4392,12 @@ std::string ScribbleApp::runTest(std::string runtype)
     ScribbleTest test(activeDoc(), bookmarkArea, scribbleMode);
     test.canvasLayerTest();
     return test.resultStr;
+  }
+  else if(runtype == "topbartest") {
+    // the top bar's state checks alone (also part of `test`, which currently aborts earlier, in test7)
+    ScribbleTest test(activeDoc(), bookmarkArea, scribbleMode);
+    int nbad = test.topBarStateTest();
+    return fstring("top bar state: %d failed\n", nbad);
   }
   else if(runtype == "inputtest") {
     // see 83a76eea88eb for TouchInputFilter::notifyTouchEvent test
