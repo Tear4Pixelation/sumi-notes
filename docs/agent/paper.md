@@ -57,8 +57,14 @@ ruling, no dots (`sanitize()` and the page loader force both to 0) and no margin
 
 # Page layouts (Add Page popup)
 
-`addpagemenu.cpp`. The popup opens on a short row - document default, the last two layouts used
-(`recentPageLayouts`), and a "+". The "+" switches the same popup to the full grid: 13 built-in
+`addpagemenu.cpp`. The popup opens on a short row - **"Same as previous"** first, then the document default
+(only if it differs), the last two layouts used (`recentPageLayouts`), and a "+".
+"Same as previous" (`previousPageLayout()`) is the ruling of the current page, i.e. the one the new page is
+inserted after, read from `Page::getProperties()`: x/y ruling, margin, dots, staff. It is the first tile and
+so the default choice (the entries it equals are dropped from the rest of the row). It carries the **ruling
+only**: the size stays "document default" (a page grown by writing, or a PDF/scan page, has a size that was
+never a layout choice), and **ruling regions (Paper Patch) do not carry over** - a patch is a local fix to
+one page's paper, not its layout. Falls back to the default layout if the current page is out of range. The "+" switches the same popup to the full grid: 13 built-in
 layouts (three each of Lined, Squared, Dotted, then Special's four - Plain, Dotted lines, Wide margin, Music), then the user's custom layouts
 (`customPageLayouts`) and a "New layout" tile. Both views are built on open and only toggled visible
 afterwards - rebuilding from the "+" handler would free the widget being dispatched to.

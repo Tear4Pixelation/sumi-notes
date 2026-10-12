@@ -548,6 +548,21 @@ static PageLayout defaultLayout(const ScribbleDoc* doc)
   return defaultLayout(doc->cfg);
 }
 
+// The ruling of the page a new one is inserted after (the current page), as a layout.  Ruling only: the
+//  size stays "default", since a page grown by writing, or a PDF/scan page, has a size that is not a layout's
+//  choice.  Ruling regions (Paper Patch) are local to their page and do not carry over.
+static PageLayout previousPageLayout(ScribbleDoc* doc)
+{
+  PageLayout layout = defaultLayout(doc);
+  int pagenum = ScribbleApp::app->activeArea()->getCurrPageNum();
+  if(pagenum >= 0 && pagenum < doc->document->numPages()) {
+    layout = layoutFromProps(doc->document->pages[pagenum]->getProperties());
+    layout.width = 0;
+    layout.height = 0;
+  }
+  return layout;
+}
+
 // Recently used layouts, most recent first.  Stored as layouts - geometry only - under a new key: the
 //  old "recentPageRulings" entries carried colors, which is what put light-theme rules on dark paper.
 static std::vector<PageLayout> recentLayouts()
@@ -798,10 +813,14 @@ Button* createAddPageButton(Action* scanPageAction)
       return;
 
     // the recent row: the document default, the last layouts used, and "+" for everything else
+    // the first tile, and so the default choice, is the previous page's ruling
+    PageLayout prevlayout = previousPageLayout(doc);
+    recentRow->addWidget(createLayoutTile(popup, doc, prevlayout, _("Same as previous"), -1));
     PageLayout deflayout = defaultLayout(doc);
-    recentRow->addWidget(createLayoutTile(popup, doc, deflayout, _("Default"), -1));
+    if(!sameLayout(deflayout, prevlayout))
+      recentRow->addWidget(createLayoutTile(popup, doc, deflayout, _("Default"), -1));
     for(const PageLayout& layout : recentLayouts()) {
-      if(!sameLayout(layout, deflayout))
+      if(!sameLayout(layout, deflayout) && !sameLayout(layout, prevlayout))
         recentRow->addWidget(createLayoutTile(popup, doc, layout, shortDescription(layout).c_str(), -1));
     }
     Button* more = new Button(createPlusTileNode(_("More"), PLUS_TILE_W));
