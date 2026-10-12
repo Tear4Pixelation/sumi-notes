@@ -259,14 +259,30 @@ heading blue. See [night-mode.md](night-mode.md).
   drawn through a small clip: the fill quad (bounds +/- 0.5) must contain every winding quad nanovg_gl's vertex
   shader draws (segment extent +/- 0.55 up to the path top), from both segment ends, and stay within a pixel.
   Verified to fail ("covered") with nanovg's clipped bounds passed through, the old behaviour (standalone
-  harness; the in-app run currently aborts earlier, in `test7`, see below).
-- **`--test` aborts in `test7` on master 0208769** (also without this change): `Cached bounds are wrong` for a
-  `path.write-stroke-pen` in `Selection::getBBox()` from `ScribbleArea::doMoveEvent`, so no later check runs.
-  Not investigated here. `SCRIBBLE_TEST_UNIT_ONLY=1 tools/agent-display.sh test` skips the numbered document
-  tests and goes straight to the unit checks; as of 5654e38 those then abort the same way in
-  `interactCullTest()` (after `shapeSnapTest()`). An abort throws away stdout still in the buffer, so a
-  check's `FAIL:` lines from before it can vanish - add a temporary `fflush(stdout)` after the check you
-  care about rather than reading "no FAIL" as a pass.
+  harness; at the time the in-app run aborted earlier, in `test7`, see below).
+- **`--test` aborted in `test7` from c656ce1 until the fix (Oct 2026)**: `Cached bounds are wrong` for a
+  `path.write-stroke-pen` in `Selection::getBBox()` from `ScribbleArea::doMoveEvent` (Insert Lines), and with
+  `SCRIBBLE_TEST_UNIT_ONLY=1` in `interactCullTest()`, so no later check ran. Cause: the selection-drag fast
+  path in `Element::applyTransform()` (pen-and-tools.md, "shifts cached bounds") moves `m_cachedBounds` by
+  the translate offset, which is exact only to rounding (seen: cached `248.89999999999995`, recomputed
+  `248.90000000000001`), while usvg's `DEBUG_CACHED_BOUNDS` - on in every build without `NDEBUG` -
+  recomputes every `bounds()` and compares with exact `Rect ==`. Any Debug build could hit it by dragging
+  a selection, not just the tests. Now, under `DEBUG_CACHED_BOUNDS`, the shift is checked against a recompute
+  within 1E-4 ("Shifted cached bounds are wrong!") and the recomputed box is cached; Release still shifts.
+  Mutation-checked: shifting by an extra 0.5 fires that assert.
+- **Once test7 passed, `topBarStateTest()` crashed (heap-use-after-free)** in `Action::setChecked` from
+  `MainWindow::applyStatusBar()`. A `TagDocList`'s View popup adds the shared `actionFullscreen` and
+  `actionStatusBar`, and an `Action` keeps raw pointers to its buttons and is never told they were deleted.
+  `libraryResizeTest()` built a `TagDocList` on the stack, so its freed buttons stayed in those actions.
+  `~TagDocList()` now calls `MainWindow::detachButtons(this)`, which drops every action's buttons under that
+  window. The app's own library is never deleted, so only tests hit this, but any temporary window
+  that adds a shared action needs the same call. With both fixed, the full run reaches its verdict: 0 failed
+  tests, 0 failed unit checks; every check after test7 (`topBarStateTest`, `tapPasteTest`, `imageCropTest`
+  and the rest) passed on its first real run.
+- An abort throws away stdout still in the buffer, so a check's `FAIL:` lines from before it can vanish -
+  add a temporary `fflush(stdout)` after the check you care about rather than reading "no FAIL" as a pass.
+  `SCRIBBLE_TEST_UNIT_ONLY=1 tools/agent-display.sh test` skips the numbered document tests and goes
+  straight to the unit checks.
 
 Marker multiply blending is tested by `ScribbleTest::markerBlendTest()` (unit-check count), rendered with
 the software painter: details and mutation checks in [pen-and-tools.md](pen-and-tools.md#marker-multiplies-text-stays-dark).

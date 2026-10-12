@@ -870,7 +870,18 @@ void Element::applyTransform(const ScribbleTransform& tf)
   //  rect unites the old rendered bounds with these
   if(shiftBounds && ext.applyPending) {
     const Dim dx = tf.xoffset(), dy = tf.yoffset();
-    node->m_cachedBounds = Rect::ltrb(oldBounds.left + dx, oldBounds.top + dy, oldBounds.right + dx, oldBounds.bottom + dy);
+    const Rect shifted = Rect::ltrb(oldBounds.left + dx, oldBounds.top + dy, oldBounds.right + dx, oldBounds.bottom + dy);
+#ifdef DEBUG_CACHED_BOUNDS
+    // usvg's debug build recomputes every bounds() and asserts the cache matches *exactly*, but the shift
+    //  is only exact to rounding (~1E-13), so check it within a tolerance and cache the recomputed box
+    //  instead (see tests.md)
+    const Rect exact = node->bounds();
+    ASSERT(approxEq(shifted.left, exact.left, 1E-4) && approxEq(shifted.top, exact.top, 1E-4)
+        && approxEq(shifted.right, exact.right, 1E-4) && approxEq(shifted.bottom, exact.bottom, 1E-4)
+        && "Shifted cached bounds are wrong!");
+#else
+    node->m_cachedBounds = shifted;
+#endif
   }
 }
 

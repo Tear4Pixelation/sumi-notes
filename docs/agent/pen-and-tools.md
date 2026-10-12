@@ -575,7 +575,9 @@ itself pale, so alpha alone could not make it vivid.
   scale, rotation, crops, groups, regions or a pending transform the painter does not apply, so those keep the
   full invalidate. Without it a drag recomputed every moved stroke's styled bounds once per input event (63%
   of a full page drag). Shifted and recomputed boxes can differ by about 1E-6 from rounding. The commit on
-  release recomputes them.
+  release recomputes them. A Debug build must not keep the shifted box: usvg's `DEBUG_CACHED_BOUNDS` compares
+  it exactly and aborts (this broke `--test` in test7), so there the shift is only checked within a tolerance
+  and the recomputed box is cached (tests.md).
 - **Ruled select/erase culls before testing.** `Selection::doSelect()` asks `Selector::cannotHit()` before
   the layer check and `selectHit()`. `RuledSelector::cannotHit()` rejects an element only if its frame box
   misses the range's rows padded by a quarter line plus 1, *and* its com is outside them too. Small strokes

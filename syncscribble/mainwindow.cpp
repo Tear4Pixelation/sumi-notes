@@ -1222,6 +1222,19 @@ ArrowPopup* MainWindow::createViewPopup(bool forLibrary)
   return viewPopup;
 }
 
+void MainWindow::detachButtons(const Widget* owner)
+{
+  auto isOwned = [owner](const Button* button) {
+    for(const SvgNode* node = button->node; node; node = node->parent()) {
+      if(node == owner->node)
+        return true;
+    }
+    return false;
+  };
+  for(Action* action : actionList)
+    action->buttons.erase(std::remove_if(action->buttons.begin(), action->buttons.end(), isOwned), action->buttons.end());
+}
+
 // The overflow popup holds the toolbar's auto-hidden items, so there is only one; it lives under the
 //  button that opens it (an ArrowPopup is positioned relative to its parent) and moves when the other one
 //  - toolbar or top bar - is pressed.  Opened on press, like a menu.
