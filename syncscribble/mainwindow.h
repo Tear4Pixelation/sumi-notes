@@ -72,6 +72,9 @@ public:
   //  the editor's bar, the library's bar - a popup must be its button's child); the library's leaves out
   //  what only acts on a document view
   ArrowPopup* createViewPopup(bool forLibrary);
+  // an Action keeps raw pointers to its buttons and never learns they were deleted, so a window that
+  //  added shared actions (the library's View popup) must hand its buttons back before it goes
+  void detachButtons(const Widget* owner);
 
   Action* findAction(const char* name);
 

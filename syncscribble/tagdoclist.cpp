@@ -77,6 +77,14 @@ TagDocList::TagDocList(const char* root) : Window(createWindowNode(tagDocListWin
   setTitle(_("Documents"));
 }
 
+// the app keeps its library for good, but a test's TagDocList lives on the stack: without this its View
+//  popup's Fullscreen and Status Bar buttons stay in the shared actions after they are freed
+TagDocList::~TagDocList()
+{
+  if(ScribbleApp::win)
+    ScribbleApp::win->detachButtons(this);
+}
+
 Widget* TagDocList::createRoundedBg(real w, real h, real radius, const char* fillColor)
 {
   SvgRect* rect = new SvgRect(Rect::wh(w, h), radius, radius);

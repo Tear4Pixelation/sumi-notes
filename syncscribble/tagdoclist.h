@@ -39,6 +39,7 @@ public:
   //  bars cannot drift apart
   static Button* createSelectBarButton(const char* iconPath, const char* tooltip);
   TagDocList(const char* root);
+  ~TagDocList() override;
 
   std::string selectedFile;
   // with EXISTING_DOC, the page to open selectedFile at: a page card was picked (-1 = where it was left)
