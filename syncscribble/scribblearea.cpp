@@ -54,7 +54,7 @@ void ScribbleArea::loadConfig(ScribbleConfig* _cfg)
   //scribbleInput->enableHoverEvents = (drawCursor == 2);
 #ifdef ONE_TIME_TIPS
   showHelpTips = scribbleDoc->scribbleMode && (app->oneTimeTip("ghostpage") || app->oneTimeTip("scalesel") ||
-      app->oneTimeTip("rotatesel") || app->oneTimeTip("movesel") || app->oneTimeTip("cropsel") ||
+      app->oneTimeTip("rotatesel") || app->oneTimeTip("movesel") || app->oneTimeTip("imagesel") ||
       app->oneTimeTip("rectsel"));
 #endif
   // this is done here because we need to update immediately when pen is detected
@@ -1006,9 +1006,9 @@ void ScribbleArea::doPasteAt(Clipboard* clipboard, Point pos, PasteFlags flags)
   //currSelection->shrink();
   clipboard->replaceIds();
 #ifdef ONE_TIME_TIPS
-  if(showHelpTips && rectSelector->enableCrop) {
+  if(showHelpTips && rectSelector->singleImage) {
     Rect b = dimToScreen(pageDimToDim(currSelection->getBGBBox()));
-    app->oneTimeTip("cropsel", Point(b.right, b.bottom), _("Drag red handles to crop image."));
+    app->oneTimeTip("imagesel", Point(b.right, b.bottom), _("Side handles stretch the image one way, corners keep its proportions."));
   }
 #endif
 }
@@ -2842,6 +2842,10 @@ int ScribbleArea::selectionHit(Point pos, bool touch)
     // a page tag (pill + text) is never stretched: every handle keeps the aspect ratio (page-tags.md)
     if(currSelection->getFirstElement([](Element* s) { return s->isPageTag(); }))
       scaleLockRatio = true;
+    // so is a lone image: every corner keeps its aspect ratio (the side handles stretch one way)
+    if(rectSelectorSingleImage())
+      scaleLockRatio = true;
+    scaleAxis = SCALE_BOTH;
     prevXScale = 1;
     prevYScale = 1;
     return MODEMOD_SCALESEL;
@@ -2852,11 +2856,18 @@ int ScribbleArea::selectionHit(Point pos, bool touch)
   if(!scaleOrigin.isNaN())
     return MODEMOD_ROTATESEL;
 
-  scaleOrigin = currSelection->selector->cropHandleHit(pos, touch);
+  // side handle of an image: scale along one axis only.  scaleOrigin keeps NaN on the other axis for the
+  //  hit test; the move code needs a real point, so fill it in from the selection's centre.
+  scaleOrigin = currSelection->selector->sideHandleHit(pos, touch);
   if(!std::isnan(scaleOrigin.x) || !std::isnan(scaleOrigin.y)) {
+    Point center = currSelection->selector->getBGBBox().center();
+    scaleAxis = std::isnan(scaleOrigin.x) ? SCALE_Y_ONLY : SCALE_X_ONLY;
+    if(std::isnan(scaleOrigin.x)) scaleOrigin.x = center.x;
+    if(std::isnan(scaleOrigin.y)) scaleOrigin.y = center.y;
+    scaleLockRatio = false;
     prevXScale = 1;
     prevYScale = 1;
-    return MODEMOD_CROPSEL;
+    return MODEMOD_SCALESEL;
   }
 
   // hackish way to see if cursor is down within the (possibly complex) selection region
@@ -3051,7 +3062,7 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
   bool selvisible = currSelection &&
       currSelPageNum == currPageNum && isVisible(pageDimToDim(currSelection->getBGBBox()));
   int selhit = selvisible ? selectionHit(pos, event.source == INPUTSOURCE_TOUCH) : 0;
-  bool onHandle = selhit & (MODEMOD_SHAPEHANDLE | MODEMOD_SCALESEL | MODEMOD_ROTATESEL | MODEMOD_CROPSEL | MODEMOD_SMARTSCALE);
+  bool onHandle = selhit & (MODEMOD_SHAPEHANDLE | MODEMOD_SCALESEL | MODEMOD_ROTATESEL | MODEMOD_SMARTSCALE);
   switch(onHandle ? 0 : cfg->Int("panFromEdge")) {
   case 1: {
     Dim border = cfg->Float("panBorder") * preScale;
@@ -3392,29 +3403,6 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
     pathSelector = new PathSelector(currSelection);
     pathSelector->selectPath(pos, PATHSELECT_RADIUS/mZoom);
     break;
-  case MODE_CROPSEL:
-  {
-    Element* s = currSelection->strokes.front();
-    const Transform2D& tf = s->node->getTransform();
-    if(tf.isRotating() || tf.xscale() < 0 || tf.yscale() < 0) {
-      Element* t = s->cloneNode();
-      SvgImage* svgimg = static_cast<SvgImage*>(t->node);
-      if(svgimg->srcRect.isValid() && svgimg->srcRect != Rect::wh(svgimg->m_image.width, svgimg->m_image.height))
-        svgimg->m_image = svgimg->m_image.cropped(svgimg->srcRect);
-      svgimg->srcRect = Rect();
-      // actually, we should extract just the rotation from tf, and apply scale to viewport rect
-      svgimg->m_image = svgimg->m_image.transformed(tf);
-      svgimg->m_bounds = tf.mapRect(svgimg->m_bounds);
-      t->node->setTransform(Transform2D());
-      // show copy, hide original
-      currPage->contentNode->addChild(t->node, s->node);
-      currSelection->removeStroke(s);
-      currSelection->addStroke(t);
-      tempSelection = new Selection(currSelection->page, Selection::STROKEDRAW_NONE);
-      tempSelection->addStroke(s);
-    }
-    break;
-  }
   case MODE_SCALESEL:
   case MODE_SCALESELW:
   case MODE_ROTATESEL:
@@ -3610,6 +3598,10 @@ void ScribbleArea::doMoveEvent(const InputEvent& event)
       Point d0 = initialPos - scaleOrigin;
       xscale = yscale = std::max(Dim(0.01), dot(pos - scaleOrigin, d0)/std::max(dot(d0, d0), Dim(1E-9)));
     }
+    else if(scaleAxis == SCALE_X_ONLY)
+      yscale = 1;
+    else if(scaleAxis == SCALE_Y_ONLY)
+      xscale = 1;
     else if(scaleLockRatio) {
       Dim scale = std::max(Dim(0.01), std::min(std::abs(xscale), std::abs(yscale)));
       xscale = SGN(xscale)*scale;
@@ -3637,33 +3629,6 @@ void ScribbleArea::doMoveEvent(const InputEvent& event)
     Dim angle = (M_PI/12)*int(calcAngle(initialPos, scaleOrigin, pos)/(M_PI/12));
     if(angle != prevangle)
       currSelection->rotate(angle - prevangle, scaleOrigin);
-    break;
-  }
-  case MODE_CROPSEL:
-  {
-    SvgImage* svgimg = static_cast<SvgImage*>(currSelection->strokes.front()->node);
-    if(!svgimg->srcRect.isValid())
-      svgimg->srcRect = Rect::wh(svgimg->image()->width, svgimg->image()->height);
-    if(std::isnan(scaleOrigin.x)) {
-      Dim yscale = (pos.y - scaleOrigin.y)/(initialPos.y - scaleOrigin.y);
-      if(yscale <= 0) break;
-      Dim maxheight = scaleOrigin.y < svgimg->m_bounds.center().y ?
-            svgimg->image()->height - svgimg->srcRect.top : svgimg->srcRect.bottom;
-      Dim sy = std::min(yscale/prevYScale, maxheight/svgimg->srcRect.height());
-      // internalScale == 0 indicates crop
-      currSelection->applyTransform(ScribbleTransform(Transform2D(1, 0, 0, sy, 0, (1 - sy)*scaleOrigin.y), 0, 0));
-      prevYScale *= sy;
-    }
-    else {
-      Dim xscale = (pos.x - scaleOrigin.x)/(initialPos.x - scaleOrigin.x);
-      if(xscale <= 0) break;
-      Dim maxwidth = scaleOrigin.x < svgimg->m_bounds.center().x ?
-            svgimg->image()->width - svgimg->srcRect.left : svgimg->srcRect.right;
-      Dim sx = std::min(xscale/prevXScale, maxwidth/svgimg->srcRect.width());
-      currSelection->applyTransform(ScribbleTransform(Transform2D(sx, 0, 0, 1, (1 - sx)*scaleOrigin.x, 0), 0, 0));
-      prevXScale *= sx;
-    }
-    currSelection->shrink();
     break;
   }
   case MODE_DRAWSHAPE:
@@ -4282,22 +4247,6 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
     currSelection->invalidateBBox();
     growPage(currSelection->getBBox());
     break;
-  case MODE_CROPSEL:
-    if(tempSelection) {
-      Element* s = tempSelection->strokes.front();
-      Element* t = currSelection->strokes.front();
-      currPage->contentNode->removeChild(t->node);
-      // the cropped copy replaces the original in place, so it keeps the original's layer rather
-      //  than being treated as newly drawn content
-      currPage->addStroke(t, s, s->layer());
-      currPage->removeStroke(s);
-    }
-    // internalScale == 0 defeats check for identity tf in commitTransform()
-    if(approxEq(currSelection->transform.tf(), Transform2D(), 1E-7))
-      currSelection->resetTransform();
-    else
-      currSelection->commitTransform();
-    break;
   case MODE_INSSPACEVERT:
     // TODO: enforcing a minimum page size; maybe in Page::setProperties()
     // use insert space tool above empty space to change page size
@@ -4376,8 +4325,8 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
       else if(currModeType != MODE_SELECT) {}
       else if(!rectSelector->drawHandles || !rectSelector)
         app->oneTimeTip("movesel", Point(b.right, b.bottom), _("Tap selection to toggle ruled/free mode."));
-      else if(rectSelector->enableCrop)
-        app->oneTimeTip("cropsel", Point(b.right, b.bottom), _("Drag red handles to crop image."));
+      else if(rectSelector->singleImage)
+        app->oneTimeTip("imagesel", Point(b.right, b.bottom), _("Side handles stretch the image one way, corners keep its proportions."));
       else  // sel toolbar will be shown in this case, so shift the help tip up
         app->oneTimeTip("rectsel", Point(b.right, b.bottom + 50), _("Scale with square handles, rotate with round handle."));
 #endif
@@ -4506,17 +4455,6 @@ void ScribbleArea::doCancelAction(bool refresh)
     break;
   case MODE_SMARTSCALE:
     smartScaleCancel();  // the later content in tempSelection goes back with clearTempSelection() too
-    break;
-  case MODE_CROPSEL:
-    if(tempSelection) {
-      Element* s = tempSelection->strokes.front();
-      Element* t = currSelection->strokes.front();
-      currPage->contentNode->removeChild(t->node);
-      currSelection->removeStroke(t);
-      currSelection->addStroke(s);
-      t->deleteNode();
-    }
-    currSelection->resetTransform();
     break;
   case MODE_INSSPACEVERT:
   case MODE_INSSPACEHORZ:

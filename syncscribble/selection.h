@@ -145,7 +145,8 @@ public:
   // index into the shape handle list, or -1; only ShapeSelector ever returns a hit
   virtual int shapeHandleHit(Point pos, bool touch) { return -1; }
   virtual Point rotHandleHit(Point pos, bool touch) { return Point(NaN, NaN); }
-  virtual Point cropHandleHit(Point pos, bool touch) { return Point(NaN, NaN); }
+  // single-axis scale handle on a side (images only): the origin has NaN on the axis that is not scaled
+  virtual Point sideHandleHit(Point pos, bool touch) { return Point(NaN, NaN); }
   // smart scale ("Resize Handwriting", smart-scale.md): while on, the selection offers one handle that
   //  resizes the handwriting on its lines instead of the scale/rotate handles; only RectSelector has it
   virtual bool smartScaleHandleHit(Point pos, bool touch) { return false; }
@@ -188,7 +189,8 @@ class RectSelector : public Selector
 public:
   // RECTSEL_BBOX takes what lies entirely inside the rect, RECTSEL_ANY what it touches
   enum {RECTSEL_BBOX, RECTSEL_COM, RECTSEL_ANY} rectSelMode = RECTSEL_BBOX;
-  bool enableCrop = false;
+  // set by shrink(): the selection is exactly one image, which gets side handles and proportional corners
+  bool singleImage = false;
 
   RectSelector(Selection* _sel, Dim zoom = 1, bool handles = true)
       : Selector(_sel), mZoom(zoom) { drawHandles = handles;  }
@@ -203,7 +205,7 @@ public:
 
   Point scaleHandleHit(Point pos, bool touch) override;
   Point rotHandleHit(Point pos, bool touch) override;
-  Point cropHandleHit(Point pos, bool touch) override;
+  Point sideHandleHit(Point pos, bool touch) override;
   bool smartScaleHandleHit(Point pos, bool touch) override;
   bool offersSmartScale() const override { return true; }
 
