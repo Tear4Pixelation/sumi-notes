@@ -45,14 +45,13 @@ MAPPING = {
   'ic_menu_history': 'history',
   'ic_menu_import': 'import2',
   'ic_menu_cloud': 'cloud',
-  'ic_menu_copy': 'copy',
+  'ic_menu_copy': 'copy3',  # two overlapping sheets; Duplicate is hand-drawn (adds a plus), see below
   'ic_menu_screenshot': 'camera',
   'ic_menu_cut': 'scissors',
   'ic_menu_discard': 'trash2',
   'ic_menu_document': 'document-text',
   'ic_menu_doctext': 'doc-text',
   'ic_menu_drawer': 'menu',
-  'ic_menu_duplicate': 'document-copy',
   'ic_menu_editbox': 'edit',
   'ic_menu_ellipsis': 'more-h',
   'ic_menu_expanddown': 'chevron-down',
@@ -114,8 +113,8 @@ MAPPING = {
   'ic_menu_share': 'share',
   # ic_menu_split_* (all four split view directions) are in ROTATE
   'ic_menu_stretch': 'scale',
-  # Resize Handwriting (smart scale) on the selection popup: a large square and a small one
-  'ic_menu_smart_scale': 'size',
+  # ic_menu_smart_scale (Resize Handwriting) and ic_menu_duplicate are hand-drawn, NOT generated: reicon has no
+  #  text-resize glyph and no copy-with-plus; importing over them would bring back the old lookalikes
   'ic_menu_undo': 'undo',
   'ic_menu_zoom': 'magnifier',
   'ic_menu_search2': 'search2',

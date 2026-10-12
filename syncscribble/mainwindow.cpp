@@ -1594,6 +1594,7 @@ void MainWindow::setupUI(ScribbleApp* a)
   selInkButtons.push_back(selToolbar->addAction(actionCopy));
   selInkButtons.push_back(selToolbar->addAction(actionDupSel));
   selInkButtons.push_back(selToolbar->addAction(actionDelete_Selection));
+  selToolbar->addSeparator();  // Delete ends the clipboard group; Resize Handwriting starts the tools
   Button* smartScaleBtn = selToolbar->addAction(actionSmart_Scale);
   setupTooltip(smartScaleBtn, _("Drag the round handle to resize the handwriting on its lines"));
   selInkButtons.push_back(smartScaleBtn);
