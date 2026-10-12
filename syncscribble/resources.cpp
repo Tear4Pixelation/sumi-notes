@@ -1,5 +1,6 @@
 #include "resources.h"
 #include "topbar.h"
+#include "scandialog.h"
 #include <fstream>
 #include <unordered_map>
 #include "ulib/miniz_gzip.h"
@@ -215,6 +216,8 @@ SvgCssStylesheet* createStylesheet()
     styleSheet->parse_stylesheet(guiCSS.c_str());
   // the top tab bar's rules (and its one theme variable) live with it in topbar.cpp
   styleSheet->parse_stylesheet(TopBar::stylesheet);
+  // and the scan dialog's review grid (scandialog.cpp)
+  styleSheet->parse_stylesheet(ScanDialog::stylesheet);
   styleSheet->sort_rules();
   return styleSheet;
 }

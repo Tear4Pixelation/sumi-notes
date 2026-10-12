@@ -46,6 +46,7 @@ struct NewDocChoices;
 class PenToolbar;
 class Selection;
 class Clipboard;
+class ScanDialog;
 class Page;
 struct Url;
 
@@ -118,13 +119,12 @@ public:
   void scanDocument(bool asPage);
   void captureScan();
   void finishScan(Image photo);
-  void insertScanPage(Image scan);
+  void insertScanPages(std::vector<Image> scans);
   bool pendingScan = false;
   bool pendingScanAsPage = false;
-  // where the previous scan of an Add more run went, so the next one follows it: the page number when
-  //  scanning as pages (-1 = none yet), the element's bounds when scanning as images (invalid = none yet)
-  int lastScanPage = -1;
-  Rect lastScanRect;
+  // the open scan dialog, while it waits for Add More's next photo (which on mobile arrives later, as an
+  //  INSERT_IMAGE event); finishScan() hands photos to it rather than opening a second one
+  ScanDialog* scanDialog = NULL;
   void showNotify(const std::string& msg, int level = 1);
   void dismissNotify();
   void appSuspending();

@@ -65,7 +65,8 @@ public:
       Element* bkmktarget = NULL, const char* idstr = NULL, bool forcenormal = false);
   // returns where the image went, in document coordinates; passing that back as `below` places the next
   //  image underneath it rather than on top of it (scanning several pages with Add more)
-  Rect insertImage(Image image, const Rect& below = Rect(), Dim fitWidth = 0, Dim fitHeight = 0); //, bool lossy = false);
+  void insertImage(Image image, Dim fitWidth = 0, Dim fitHeight = 0);
+  void insertImages(std::vector<Image> images, Dim fitWidth = 0, Dim fitHeight = 0);
   // Screenshot (docs/agent/screenshot.md): the area the last selection gesture covered stays marked,
   //  dashed, until the selection is cleared - even when the gesture caught no ink
   bool hasShotRegion() const { return !shotRegion.empty(); }

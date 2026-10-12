@@ -3082,7 +3082,7 @@ bool ScribbleApp::insertPdfPageAsImage(const std::string& pdfPath)
         fstring(_("Error importing %s: %s"), fileName.c_str(), renderer.error()));
     return false;
   }
-  activeArea()->insertImage(std::move(pageImage), Rect(), widthPt*PdfImport::UNITS_PER_POINT,
+  activeArea()->insertImage(std::move(pageImage), widthPt*PdfImport::UNITS_PER_POINT,
       heightPt*PdfImport::UNITS_PER_POINT);
   reportReducedPages(budget, _("Insert Document"));
   return true;
@@ -3316,15 +3316,11 @@ void ScribbleApp::pickImage()
 void ScribbleApp::scanDocument(bool asPage)
 {
   pendingScanAsPage = asPage;
-  // a fresh scan, not the continuation of an earlier Add more run (which may have been abandoned in the
-  //  picker, leaving these set)
-  lastScanPage = -1;
-  lastScanRect = Rect();
   captureScan();
 }
 
 // gets a photo and hands it to finishScan(), directly on desktop or via the picker's INSERT_IMAGE event on
-//  mobile; separate from scanDocument() so Add more can run it again without losing its place
+//  mobile; separate from scanDocument() so the dialog's Add More can run it again while it stays open
 void ScribbleApp::captureScan()
 {
   pendingScan = true;
@@ -3368,27 +3364,35 @@ void ScribbleApp::finishScan(Image photo)
   pendingScan = false;
   if(photo.isNull())
     return;
-  int res;
-  Image scan(0, 0);
+  // Add More's photo: the dialog is still open, holding the pages scanned so far
+  if(scanDialog) {
+    scanDialog->addPhoto(std::move(photo));
+    return;
+  }
+  std::vector<Image> scans;
   {
     ScanDialog dialog(std::move(photo));
-    res = execDialog(&dialog);
-    if(res == Dialog::ACCEPTED || res == ScanDialog::ADD_MORE)
-      scan = dialog.takeResult();
-  }  // frees the full size photo before Add more goes and fetches another one
-  if(scan.isNull() || scan.width <= 0 || scan.height <= 0)
+    // on desktop the capture runs nested inside the dialog (CameraDialog, file picker); on mobile this
+    //  opens the picker and returns, and the photo comes back through INSERT_IMAGE into finishScan()
+    dialog.onAddMore = [this](){ captureScan(); };
+    scanDialog = &dialog;
+    int res = execDialog(&dialog);
+    scanDialog = NULL;
+    if(res == Dialog::ACCEPTED)
+      scans = dialog.takeResults();
+  }  // frees the photos before the pages go into the document
+  // a capture still out when the dialog closed must not reopen one when its photo turns up
+  pendingScan = false;
+  if(scans.empty())
     return;
   if(asPage)
-    insertScanPage(std::move(scan));
+    insertScanPages(std::move(scans));
   else
-    lastScanRect = activeArea()->insertImage(std::move(scan), lastScanRect);
-  // Add more: the dialog has already closed, so on desktop this nests one level per extra page, which is
-  //  harmless; on mobile it just opens the picker and returns
-  if(res == ScanDialog::ADD_MORE)
-    captureScan();
+    activeArea()->insertImages(std::move(scans));
 }
 
-void ScribbleApp::insertScanPage(Image scan)
+// All the pages of a scan, in order after the current page, as one undo step
+void ScribbleApp::insertScanPages(std::vector<Image> scans)
 {
   // As a page, the scan is the background, exactly as an imported PDF page is: in the rule layer, so it
   //  cannot be selected, dragged or erased while writing on top of it.  See pdfimport.cpp for why
@@ -3397,27 +3401,32 @@ void ScribbleApp::insertScanPage(Image scan)
   //  width of the current page and let the height follow the scan's aspect ratio.  That keeps scrolling
   //  and zoom consistent with the rest of the document, which matters more than a guessed DPI would.
   PageProperties refProps = activeArea()->getCurrPage()->getProperties();
-  Dim width = refProps.width > 0 ? refProps.width : Dim(scan.width);
-  Dim height = width*scan.height/scan.width;
-  PageProperties props(width, height, 0, 0, 0, Color::WHITE, Color::BLUE);
-  Page* page = new Page(props);
-  SvgImage* background = new SvgImage(std::move(scan), Rect::ltwh(0, 0, width, height));
-  page->ruleNode->addChild(background);
-  page->ruleNode->removeClass("write-std-ruling");
-  page->ruleNode->addClass("write-no-dup");
-  page->isCustomRuling = true;
   // unlike PDF import, which writes a file and reopens it, this goes into the open document, so it has
   //  to go through ScribbleDoc to get undo and sync - which needs the start/endAction pair, or the
-  //  insertion is not recorded as an undoable action
-  // the first scan goes after the current page, each Add more scan after the one before it - clamped, in
-  //  case a sync peer deleted pages while the picker was open
+  //  insertion is not recorded as an undoable action; one pair around every page makes it one step
   ScribbleDoc* doc = activeDoc();
-  int where = lastScanPage >= 0 ? std::min(lastScanPage + 1, doc->document->numPages())
-      : activeArea()->getCurrPageNum() + 1;
-  doc->startAction(where);
-  doc->insertPage(page, where);
+  int where = activeArea()->getCurrPageNum() + 1;
+  doc->startAction(where | (scans.size() > 1 ? UndoHistory::MULTIPAGE : 0));
+  int inserted = 0;
+  for(Image& scan : scans) {
+    if(scan.isNull() || scan.width <= 0 || scan.height <= 0)
+      continue;
+    Dim width = refProps.width > 0 ? refProps.width : Dim(scan.width);
+    Dim height = width*scan.height/scan.width;
+    PageProperties props(width, height, 0, 0, 0, Color::WHITE, Color::BLUE);
+    Page* page = new Page(props);
+    SvgImage* background = new SvgImage(std::move(scan), Rect::ltwh(0, 0, width, height));
+    page->ruleNode->addChild(background);
+    page->ruleNode->removeClass("write-std-ruling");
+    page->ruleNode->addClass("write-no-dup");
+    page->isCustomRuling = true;
+    doc->insertPage(page, where + inserted);
+    ++inserted;
+  }
   doc->endAction();
-  lastScanPage = where;
+  // insertPage() shows each page as it goes in, which leaves the last; the set reads from its first
+  if(inserted > 1)
+    doc->jumpToPage(where);
 }
 
 void ScribbleApp::insertImage(const std::string& filename)

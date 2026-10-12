@@ -2602,31 +2602,45 @@ void ScribbleArea::ungroupSelection()
   scribbleDoc->endAction();
 }
 
-Rect ScribbleArea::insertImage(Image image, const Rect& below, Dim fitWidth, Dim fitHeight)
+void ScribbleArea::insertImage(Image image, Dim fitWidth, Dim fitHeight)
+{
+  std::vector<Image> images;
+  images.push_back(std::move(image));
+  insertImages(std::move(images), fitWidth, fitHeight);
+}
+
+// Several images (the pages of a scan) as one paste, so one undo step and one selection: stacked top to
+//  bottom in order, the first where a single image would go
+void ScribbleArea::insertImages(std::vector<Image> images, Dim fitWidth, Dim fitHeight)
 {
   static constexpr Dim STACK_GAP = 20;
 
+  if(images.empty())
+    return;
   doCancelAction();
   Clipboard clip;
-  Dim imgw = image.getWidth()*unitsPerPx, imgh = image.getHeight()*unitsPerPx;
-  // a PDF page comes with its own size in page units and may fill the page; a photo is at most half of it
-  Dim maxFraction = 0.5;
-  if(fitWidth > 0 && fitHeight > 0) {
-    imgw = fitWidth;
-    imgh = fitHeight;
-    maxFraction = 1.0;
+  Point center = screenToDim(screenRect.center());
+  Rect stack;
+  for(Image& image : images) {
+    Dim imgw = image.getWidth()*unitsPerPx, imgh = image.getHeight()*unitsPerPx;
+    // a PDF page comes with its own size in page units and may fill the page; a photo is at most half of it
+    Dim maxFraction = 0.5;
+    if(fitWidth > 0 && fitHeight > 0) {
+      imgw = fitWidth;
+      imgh = fitHeight;
+      maxFraction = 1.0;
+    }
+    Dim s = std::min(Dim(1), std::min(currPage->width()*maxFraction/imgw, currPage->height()*maxFraction/imgh));
+    Rect bbox = stack.isValid() ? Rect::ltwh(center.x - imgw*s/2, stack.bottom + STACK_GAP, imgw*s, imgh*s)
+        : Rect::centerwh(center, imgw*s, imgh*s);
+    stack.rectUnion(bbox);
+    clip.addStroke(new Element(new SvgImage(std::move(image), bbox)));
   }
-  Dim s = std::min(Dim(1), std::min(currPage->width()*maxFraction/imgw, currPage->height()*maxFraction/imgh));
-  // doPasteAt pulls an image that would hang off the page back onto it, so a stack that runs out of
-  //  room overlaps at the bottom of the page rather than disappearing
-  Point center = below.isValid() ? Point(below.center().x, below.bottom + STACK_GAP + imgh*s/2)
-      : screenToDim(screenRect.center());
-  Rect bbox = Rect::centerwh(center, imgw*s, imgh*s);
-  clip.addStroke(new Element(new SvgImage(std::move(image), bbox)));
-  doPasteAt(&clip, center, PasteFlags(PasteOrigPos | PasteMoveClipboard | PasteUndoable));
+  // doPasteAt pulls a stack that would hang off the page back onto it, so a stack that runs out of room
+  //  overlaps at the bottom of the page rather than disappearing
+  doPasteAt(&clip, stack.center(), PasteFlags(PasteOrigPos | PasteMoveClipboard | PasteUndoable));
   uiChanged(UIState::Paste);
   doRefresh();
-  return currSelection ? pageDimToDim(currSelection->getBBox()) : Rect();
 }
 
 // page units around ink captured without a drawn outline: ~4 mm, enough that the capture does not look
