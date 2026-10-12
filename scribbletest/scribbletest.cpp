@@ -5388,7 +5388,6 @@ int ScribbleTest::rulingRegionTest()
 void ScribbleTest::runAll(bool runsynctest)
 {
   nFailed = 0;
-//TMPHACK
   // the fixtures save and reopen documents and must not pick up (or leave) persisted undo histories;
   //  undoPersistTest() turns it on for itself
   bool undoPersistWas = UndoPersist::enabled;
