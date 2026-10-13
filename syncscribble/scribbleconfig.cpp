@@ -50,8 +50,6 @@ void ScribbleConfig::init()
   cfg["savePicScaled"] = 1;
   // snap bookmarks near left margin
   cfg["snapBookmarks"] = 1;
-  // apply pen color and width to selection when pen changed (previous behavior, got complaints when removed)
-  cfg["applyPenToSel"] = 0;
 
   // input modes: 0 = ignore, 1 = pan, 2 = draw or zoom (multitouch)
   cfg["mouseMode"] = 2;
@@ -119,8 +117,6 @@ void ScribbleConfig::init()
   cfg["bookmarkMode"] = 0;
   // after delay, completely hide scroller (1) or just dim (0)?
   cfg["autoHideScroller"] = 0;
-  // how to save pens: 0 = manual, 1 = recent (global), 2 = recent (per document)
-  cfg["savePenMode"] = 0;
   // show pen toolbar (several users have requested this be persisted)
   cfg["showPenToolbar"] = 0;
   // 0 = hide cursor in draw mode, 1 = system cursors, 2 = custom drawn cursor in draw and erase modes
@@ -491,24 +487,9 @@ bool ScribbleConfig::loadConfigFile(const char* cfgfile)
 bool ScribbleConfig::loadConfig(const pugi::xml_node& cfgroot)
 {
   for(pugi::xml_node pref = cfgroot.first_child(); pref; pref = pref.next_sibling()) {
-    if(strcmp(pref.name(), "pen") == 0) {
-      pens.push_back(ScribblePen(pref.attribute("color").as_uint(), pref.attribute("width").as_float(),
-          pref.attribute("flags").as_uint(), pref.attribute("wRatio").as_float(1.0),
-          pref.attribute("pressure").as_float(), pref.attribute("speed").as_float(),
-          pref.attribute("direction").as_float(), pref.attribute("dash").as_float(),
-          pref.attribute("gap").as_float()));
-      if(std::isnan(pref.attribute("wRatio").as_float(NAN))) {  // legacy pen
-        auto& pen = pens.back();
-        if(pen.prParam > 0)
-          pen.setFlag(ScribblePen::WIDTH_PR, 1);
-        if(pen.hasFlag(ScribblePen::DRAW_UNDER))
-          pen.setFlag(ScribblePen::TIP_CHISEL, 1);
-        else if(pen.width > 4)
-          pen.setFlag(ScribblePen::TIP_ROUND, 1);
-        else
-          pen.setFlag(ScribblePen::TIP_FLAT, 1);
-      }
-    }
+    // <pen> was a saved pen (keys 1-8, removed: only the pen toolbar writes a pen - pen-and-tools.md);
+    //  an old config or document still carries them, and they are dropped
+    if(strcmp(pref.name(), "pen") == 0) {}
     else if(strcmp(pref.name(), "ruling") == 0) {} // old ruling ... ignore
     else {
       const char* name = pref.attribute("name").value();
@@ -571,19 +552,6 @@ void ScribbleConfig::saveConfig(pugi::xml_node cfgroot, bool skipdefaults)
       node.append_attribute("value").set_value(ii->second.c_str());
     }
   }
-  // pens
-  for(penIterator ii = pens.begin(); ii != pens.end(); ii++) {
-    node = cfgroot.append_child("pen");
-    node.append_attribute("color").set_value(ii->color.color);
-    node.append_attribute("width").set_value(float(ii->width));  // float reduces number of excess digits
-    node.append_attribute("wRatio").set_value(float(ii->wRatio));
-    node.append_attribute("pressure").set_value(float(ii->prParam));
-    node.append_attribute("speed").set_value(float(ii->spdMax));
-    node.append_attribute("direction").set_value(float(ii->dirAngle));
-    node.append_attribute("dash").set_value(float(ii->dash));
-    node.append_attribute("gap").set_value(float(ii->gap));
-    node.append_attribute("flags").set_value(ii->flags);
-  }
   if(df)
     delete df;
 }
@@ -593,39 +561,6 @@ bool ScribbleConfig::saveConfigFile(const char* cfgfile, bool skipdefaults)
   pugi::xml_document doc;
   saveConfig(doc.append_child("map"), skipdefaults);
   return doc.save_file(PLATFORM_STR(cfgfile), "  ");
-}
-
-// consider moving pen stuff into child class ... maybe BasicConfig -> ScribbleConfig
-ScribblePen* ScribbleConfig::getPen(int num)
-{
-  if((unsigned int)num < pens.size()) {
-    penIterator it = pens.begin();
-    std::advance(it, num);
-    return &(*it);
-  }
-  else if(upconfig)
-    return upconfig->getPen(num);
-  else
-    return NULL;
-}
-
-void ScribbleConfig::savePen(const ScribblePen& pen, int slot)
-{
-  if(slot < 0) {
-    if(pens.front() == pen) return;
-    // remove any copies of pen from list
-    pens.remove(pen);
-    pens.push_front(pen);
-    if(pens.size() > 8)  // remove at most 1 pen (in case user edited config file to give more pens)
-      pens.pop_back();
-  }
-  else if(slot < int(pens.size())) {
-    penIterator it = pens.begin();
-    std::advance(it, slot);
-    *it = pen;
-  }
-  else
-    pens.push_back(pen);
 }
 
 // right now, these are only used when loading a config string, but I can imagine other uses

@@ -127,9 +127,6 @@ const char* prefInfoXML = R"#(
       enum="Right;Left" title="Scrollbar position" description="" / -->
   <pref name="autoHideScroller" type="bool" group="User Interface"
       title="Hide scroll handle" description="after 2 seconds" />
-  <pref name="savePenMode" type="int" group="User Interface"
-      enum="Manual;Recent pens;Recent per document"
-      title="Saving pens" description="Method used to populate saved pen list" />
   <pref name="undoCircleSteps" type="int" min="1" max="360" step="1" group="User Interface"
       title="Undo dial steps" description="Number of undo/redo steps per revolution of undo dial" />
   <pref name="keepScreenOn" type="bool" group="User Interface" exclude="desktop"
@@ -168,8 +165,6 @@ const char* prefInfoXML = R"#(
       title="Auto grow page right" description="Allow page width to increase" />
   <pref name="growWithPen" type="bool" group="General"
       title="Grow page with strokes" description="Writing near edge of page will enlarge page" />
-  <pref name="applyPenToSel" type="bool" group="General"
-      title="Apply pen to selection" description="when pen changed with selection present" />
   <pref name="eraseOnImage" type="bool" group="General"
       title="Apply free eraser to images" description="Allow free erase tool to act on images" />
   <pref name="viewMode" type="int" group="General"

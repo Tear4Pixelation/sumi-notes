@@ -1040,8 +1040,8 @@ int ScribbleTest::penWidthPresetTest()
 
 // The pen and a selection share the pen toolbar.  With ink selected and the pen back in hand (Switch Back
 //  after a selection), the toolbar used to stay the selection's: the pen row showed the selection's
-//  absolute width without the Relative size toggle and edited the selection.  And "Use as Pen" handed the
-//  draw pen the selection's flagless absolute pen, so a relative pen became absolute for good.
+//  absolute width without the Relative size toggle and edited the selection.  And "Use as Pen" (removed)
+//  handed the draw pen the selection's flagless absolute pen, so a relative pen became absolute for good.
 int ScribbleTest::penSelectionTest()
 {
   int nbad = 0;
@@ -1096,16 +1096,12 @@ int ScribbleTest::penSelectionTest()
   if(stroke)
     check(near(stroke->node->getFloatAttr("stroke-width", 0), strokeWidth), "...and not the selected stroke");
 
-  // "Use as Pen" from the selection popup: color and width are taken, in the pen's own unit, and the pen
-  //  stays relative
+  // a pen-only change sent while the toolbar is the selection's (it once meant "Use as Pen", since
+  //  removed) writes nothing to the draw pen: only the pen's own quick settings change a pen
+  ScribblePen penBefore = *app->getPen();
   toolbar->setPen(ScribblePen(Color::RED, 3.2), PenToolbar::SELECTION_MODE);
-  Dim lineHeight = toolbar->lineHeight();
   toolbar->onChanged(PenToolbar::PEN_CHANGED);
-  const ScribblePen* drawPen = app->getPen();
-  check(drawPen->hasFlag(ScribblePen::WIDTH_RELATIVE), "Use as Pen keeps a relative pen relative");
-  check(drawPen->hasFlag(ScribblePen::TIP_ROUND), "...and keeps its other flags");
-  check(near(drawPen->width, 3.2/lineHeight), "...and converts the selection's width to line heights");
-  check(drawPen->color.opaque() == Color(Color::RED).opaque(), "...and takes the selection's color");
+  check(*app->getPen() == penBefore, "a selection's toolbar never writes the draw pen");
 
   scribbleDoc->clearSelection();
   scribbleMode->drawTool = oldDrawTool;
@@ -1196,6 +1192,27 @@ int ScribbleTest::penWidthWriteTest()
   app->updatePenToolbar();
   spin->updateValueFromText(spinText->text().c_str());
   check(app->getPen()->width == fine, "Return on the unchanged width does not round it");
+
+  // number keys pick tools, and no key recalls a pen: 1-8 (and ; and ') used to load a saved pen over the
+  //  current one, the only width writer outside the quick settings left (saved pens are gone)
+  if(app->win) {
+    auto pressKey = [&](SDL_Keycode sym) {
+      SDL_Event event = {};
+      event.type = SDL_KEYDOWN;
+      event.key.keysym.sym = sym;
+      app->keyPressEvent(&event);
+      ScribbleInput::pressedKey = 0;  // an unhandled key is held as the pen button's emulation
+    };
+    const ScribblePen keyPen(Color::BLUE, 0.4, ScribblePen::TIP_ROUND | ScribblePen::WIDTH_RELATIVE);
+    app->setPen(keyPen);
+    app->updatePenToolbar();
+    pressKey(SDLK_1);
+    check(scribbleMode->getMode() == MODE_PAN, "key 1 picks Pan, the toolbar's first tool");
+    pressKey(SDLK_SEMICOLON);
+    pressKey(SDLK_QUOTE);
+    check(scribbleMode->drawPen == keyPen, "number and pen-cycling keys leave the pen alone");
+    app->setMode(MODE_STROKE);
+  }
 
   // saved and loaded: a marker the user turned absolute stays absolute (it was converted back to line
   //  heights on every start), and a fine relative pen keeps its width (it was raised to 0.01 line heights)

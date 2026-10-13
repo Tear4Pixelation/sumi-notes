@@ -458,19 +458,8 @@ PenToolbar::PenToolbar(bool _compact)
                                  _("More Options"));
   overflowBtn->setMenu(overflowMenu);
 
-  Menu *selOverflowMenu = createMenu(Menu::VERT_LEFT);
-  Button *useAsPenItem = createMenuItem(_("Use as Pen"));
-  useAsPenItem->onClicked = [this]() {
-    pen.color = colorPicker->color();
-    pen.width = spinWidth->value();
-    if (pen.color.alpha() > 0 && pen.width > 0 && onChanged)
-      onChanged(PEN_CHANGED);
-  };
-  selOverflowMenu->addItem(useAsPenItem);
-  selOverflowBtn = createToolbutton(
-      SvgGui::useFile("icons/ic_menu_overflow.svg"), _("Selection Options"));
-  selOverflowBtn->setMenu(selOverflowMenu);
-  selOverflowBtn->setVisible(false);
+  // A selection has no overflow menu: its one item, "Use as Pen", wrote the pen from outside the pen's own
+  //  controls, and only those may change a pen (pen-and-tools.md, "Only the quick settings write a pen").
 
   closeBtn = createToolbutton(SvgGui::useFile("icons/ic_menu_cancel.svg"), "");
   // closeBtn->onClicked = [this](){ setVisible(false); };  -- must be set by
@@ -549,8 +538,7 @@ PenToolbar::PenToolbar(bool _compact)
   setupTooltip(pressureRow, _("How much thinner a light touch draws than a full press"));
 
   settingsBtn = createToolSettingsButton(
-      "Pen Settings", {"inputSmoothing", "inputSimplify", "shapeDrawThrough", "shapeSnapDelay", "liftScratchOut", "liftScratchOutLevel",
-          "applyPenToSel", "savePenMode"},
+      "Pen Settings", {"inputSmoothing", "inputSimplify", "shapeDrawThrough", "shapeSnapDelay", "liftScratchOut", "liftScratchOutLevel"},
       compact ? std::vector<Button *>{cbSnaptoGrid, cbLineDrawing} : std::vector<Button *>{},
       {penTipRow, pressureRow});
 
@@ -617,7 +605,6 @@ PenToolbar::PenToolbar(bool _compact)
   if (!compact)
     addWidget(settingsBtn);
   addWidget(overflowBtn);
-  addWidget(selOverflowBtn);
   addWidget(helpBtn);
   if (!compact)
     addSeparator();
@@ -1263,7 +1250,6 @@ void PenToolbar::setPen(const ScribblePen &newpen, Mode m, int selDashStyle) {
   widthGroup->setEnabled(mode != BOOKMARK_MODE);
   overflowBtn->setEnabled(mode == PEN_MODE);
   overflowBtn->setVisible(!compact && mode != SELECTION_MODE);
-  selOverflowBtn->setVisible(mode == SELECTION_MODE);
   settingsBtn->setVisible(mode == PEN_MODE);
 
   // each tool keeps its own thickness presets, in its own unit, so switching tools (or loading a pen
@@ -1441,7 +1427,7 @@ Dim PenToolbar::presetWidth(size_t idx) const {
 // A preset list's numbers mean nothing without its unit, so the list carries one (WidthPresets).  Lists
 //  start empty and are seeded here, once the tool is in hand and its unit is known: a fixed default in
 //  the config could only be in one unit.  In PEN_MODE the list is kept in the pen's unit, converted
-//  (never reinterpreted) when they differ - a saved pen recalled with the other relative setting, say.
+//  (never reinterpreted) when they differ - a config whose list and pen were saved in different units, say.
 //  A selection or a bookmark leaves the list alone and reads it through presetWidth() instead, since
 //  its pen is absolute whatever the draw pen is.
 bool PenToolbar::prepareWidths() {

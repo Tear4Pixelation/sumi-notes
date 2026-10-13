@@ -119,13 +119,13 @@ mechanism is the same for all three draw tools, and only the default differs.
     selection's 3.2 *units* raw into the line-height list, and the pen then drew 3.2 line heights.
     Now a selection reads presets through `presetWidth()` (`WidthPresets::inUnit()`, resolved against
     the current page's line height) and writes them back through `WidthPresets::setFrom()`.
-  - A saved pen recalled with the other relative setting (`penSelected()`, keys 1-9) kept the list in
-    the old unit. In `PEN_MODE` `prepareWidths()` now converts the list to the pen's unit whenever they
-    differ, exactly as the toggle does.
+  - A saved pen recalled with the other relative setting (`penSelected()`, then keys 1-8; saved pens are
+    gone now) kept the list in the old unit. In `PEN_MODE` `prepareWidths()` converts the list to the
+    pen's unit whenever they differ, exactly as the toggle does.
   - A list from an older config has no prefix (`UNIT_UNKNOWN`); it takes that tool's pen's unit once,
     which is the pairing the old code assumed, and is written with a prefix from then on.
   `penSelected()` with **applyPenToSel** also resolved nothing, giving a selection a relative pen's
-  line-height fraction as its width; it multiplies by the line height now.
+  line-height fraction as its width (both removed with saved pens).
 - **Always three presets, always editable.** The width row's right-click "Insert Current"/"Delete" menu
   is gone; `WidthPresets::normalize()` (run by `prepareWidths()` on every `setPen()`) keeps exactly
   `WidthPresets::COUNT` (3), refilling a short list from that slot's default and sorting, dropping extra
@@ -227,7 +227,7 @@ and thumbs), the width display and every swatch - about 110K instructions a stro
 Its early return was dead for years: `ScribblePen::operator==` was a `memcmp`, and the struct's padding
 (after `color`, after `flags`) holds whatever the copy or temporary left there, so identical pens compared
 different. It is now member by member - **a new pen member must be added to `operator==`**, and never go
-back to `memcmp` (`savePen()`'s recent-pens dedupe depended on it too and was failing the same way).
+back to `memcmp` (the removed saved-pens list's dedupe depended on it too and was failing the same way).
 
 With the early return working it must not swallow anything else the full path draws, so it also keys on
 `PenToolbar::ShownContext`: the active document (the swatches' palette follows it - a switch to a tab
@@ -257,15 +257,17 @@ whose it is: `ScribbleApp::penToolbarEditsSelection()`, used by `updatePenToolba
   used while the popup is open: the outside press that would reach it closes the popup and is swallowed.
 - Other tools (select, move, a shape with its handles - the shape row edits the shape) keep the toolbar
   on the selection, as before. A selected ruling region still never takes it.
-- **"Use as Pen" takes only colour and width.** It fired `PEN_CHANGED` with the toolbar's pen, which in
-  SELECTION_MODE is the selection's - `ScribblePen(color, absoluteWidth)`, no flags - and `penChanged()`
-  set it as the draw pen whole: a relative pen became absolute (and the next `setPen()` converted the
-  tool's presets to units to match), the marker lost its chisel tip and `DRAW_UNDER`. Now the draw pen
-  keeps its flags and alpha (as the shape row does) and the width is converted into its unit.
+- **"Use as Pen" is gone** (with the selection row's overflow button, its only item). It wrote the draw
+  pen from a selection, outside the pen's quick settings (see "Only the quick settings write a pen").
+  Before that it had set the selection's flagless absolute pen as the draw pen whole, so a relative pen
+  became absolute and the marker lost its chisel tip. `penChanged()` in SELECTION_MODE now ignores a
+  change that carries no colour, width or dash flag (centre on line, say) instead of reading it as Use
+  as Pen.
 
 Tested by `ScribbleTest::penSelectionTest()`. The test's document is not the app's active one, so
 `penToolbarEditsSelection()` takes the area as a parameter. Mutation-checked: the old "any ink selection"
-rule plus the old Use as Pen fail 7 checks. "...and not the selected stroke" passes either way (the
+rule plus the old Use as Pen fail 7 checks (the Use as Pen checks are now one: a `PEN_CHANGED` from the
+selection's toolbar leaves the draw pen equal to what it was). "...and not the selected stroke" passes either way (the
 toolbar edits the app's active area, not the test's), so it pins nothing on its own. Verified in
 agent-display: rect select with Switch Back, Esc closes the popup, the selection stays, the pen row
 shows the pen's settings button again, and picking a colour there recolours the pen, not the stroke.
@@ -277,8 +279,8 @@ box, a preset tap, the shape row's width while it shows the pen, and the Relativ
 `PenToolbar::updateWidth()` / `setRelativeWidth()`, the only senders of `WIDTH_CHANGED`. In PEN_MODE
 `ScribbleApp::penChanged()` takes the width and unit from the toolbar **only on `WIDTH_CHANGED`**; on
 any other change (color, tip, dash, snap, centre on line) it keeps `currPen`'s and re-shows the pen if the
-toolbar disagreed. Whole-pen replacements the user asks for by name - a saved pen (keys 1-9), "Use as Pen"
-- still replace it; nothing else may. Do not add a writer: route a new width UI through `updateWidth()`.
+toolbar disagreed. Nothing replaces a whole pen any more (see the next section). Do not add a writer:
+route a new width UI through `updateWidth()`.
 
 **The cause.** The toolbar keeps its own copy of the pen and every change used to hand that whole copy
 back (`setPen(pen)`), so any number that ended up in the copy's `width` became the pen's on the next
@@ -317,6 +319,41 @@ config still converting). Mutation-checked: with every guard reverted at once (w
 9 checks fail, one per guard plus "the toolbar shows..." and "the width control sets..." following the
 flag change; restored, 0 fail. The typed-width check needs the popup on screen (hiding sends the focus
 loss only to a displayed widget), so the test unhides the toolbar's hidden ancestors for it.
+
+# Only the quick settings write a pen
+
+**A pen - its width above all, but also its colour, tip, flags and line style - is changed only by the
+user working the pen's quick settings**: the pen toolbar (draw tools' options row) and its popups, all of
+which reach the app through `PenToolbar::onChanged` -> `ScribbleApp::penChanged()` in PEN_MODE. Nothing
+else may replace it. Removed for this rule (Oct 2026):
+- **Saved pens.** `ScribbleConfig::pens`, `getPen(int)`, `savePen()`, the eight default pens pushed at
+  start, the `savePenMode` pref (and the PenRelease save in `MainWindow::refreshUI()`),
+  `ScribbleApp::penSelected()`/`currPenIndex`, the `;`/`'` cycling keys and keys 1-8, and the
+  `applyPenToSel` pref that only `penSelected()` read. An old config or document still has `<pen>`
+  nodes: `ScribbleConfig::loadConfig()` skips them, and the two old prefs are unknown names, which
+  `setConfigValue()` ignores. They are not written back.
+- **"Use as Pen"** on the selection row (above, "Pen and selection").
+
+**Keys 1-9 pick tools**, in the main toolbar's order (`addTools()`): 1 Pan, 2 Draw, 3 Erase, 4 Highlight,
+5 Select, 6 Shapes, 7 Ephemeral, 8 Tape, 9 Insert Space. They are entries in `MainWindow::shortcuts`
+(set up after `actionInsert_Space` in `createActions()`), so a key triggers the tool's `Action` exactly
+like a click, plain keys only (a modifier makes the lookup `Shift+1` etc.), and a focused text field
+takes digits before the shortcut path sees them (`TextEdit` consumes the key down). Pen Setup lost its
+`9`; `0` is still Add Bookmark. A user's `shortcutKeys` config entry still overrides any of them. If the
+toolbar order changes, change the `toolKeys` list with it.
+
+Writers left, all deliberate - change them if the rule is to be absolute:
+- **The shape row's swatch and line style** (`createSingleSwatch`/`createSingleWidth` in
+  `mainwindow.cpp`) set the pen's colour and dash style while editing a *selected* shape, to arm the next
+  shape the way the arrowhead toggles do. They are pen toolbar widgets, but act from SELECTION_MODE.
+- **Tape follows the theme** while no colour was picked (`setPen()` stores `INVALID_COLOR`); a theme
+  change alters the drawn colour without writing the pen.
+- **Loading the tool's own pen** on a tool switch (`setDrawTool()`) and at start (`loadModes()`, which
+  clamps a width out of range) - these restore the user's pen, they do not replace it.
+
+Tested in `penWidthWriteTest()` (key 1 lands on Pan; 1, `;` and `'` leave the stored draw pen equal to
+what it was - with saved pens back, key 1 would load pen 0 and stay in MODE_STROKE, failing both) and
+`penSelectionTest()` (selection toolbar `PEN_CHANGED`).
 
 # Switch back (single-use tools)
 

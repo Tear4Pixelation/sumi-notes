@@ -228,22 +228,6 @@ void ScribbleApp::init()
     std::string filename = execDocumentList(mode, exts);
     return documentList && documentList->result > 0 ? filename : std::string();
   });
-  // Default pens
-  auto dflttip = ScribblePen::TIP_FLAT | ScribblePen::WIDTH_PR;
-  switch(std::max(0, 8 - int(cfg->pens.size()))) {
-    case 8: cfg->pens.push_back(ScribblePen(Color::BLACK, 1.6, dflttip, 0.9, 2.0));
-    case 7: cfg->pens.push_back(ScribblePen(Color::RED, 1.6, dflttip, 0.9, 2.0));
-    case 6: cfg->pens.push_back(ScribblePen(Color::DARKGREEN, 1.6, dflttip, 0.9, 2.0));
-    case 5: cfg->pens.push_back(ScribblePen(Color::BLUE, 1.6, dflttip, 0.9, 2.0));
-    case 4: cfg->pens.push_back(
-        ScribblePen(Color::BLACK, 3.0, dflttip | ScribblePen::WIDTH_DIR, 0.8, 2.0, 0, 45));
-    case 3: cfg->pens.push_back(
-        ScribblePen(Color::BLACK, 1.8, ScribblePen::TIP_FLAT | ScribblePen::WIDTH_SPEED, 0.7, 0, 0.5, 0));
-    case 2: cfg->pens.push_back(ScribblePen(Color::BLACK, 4.0, ScribblePen::TIP_ROUND));
-    case 1: cfg->pens.push_back(  //Color(255, 255, 0, 127)
-        ScribblePen(Color(255, 127, 255, 127), 34, ScribblePen::TIP_CHISEL | ScribblePen::DRAW_UNDER));
-  }
-
   // load mode logic
   scribbleMode = new ScribbleMode(cfg);
   scribbleMode->loadModes(cfg->String("toolModes"));
@@ -318,7 +302,6 @@ void ScribbleApp::init()
 
   // restore the pen of the last used draw tool
   currPen = scribbleMode->currDrawPen();
-  currPenIndex = 0;
   bookmarkColor = Color::fromArgb(cfg->Int("bookmarkColor"));
 
   const char* recentDocsStr = cfg->String("recentDocs");
@@ -996,12 +979,6 @@ bool ScribbleApp::keyPressEvent(SDL_Event* event)
     if(SCRIBBLE_DEBUG)
       finish();
     break;
-  case SDLK_SEMICOLON:
-    penSelected(currPenIndex > 0 ? currPenIndex-1 : cfg->pens.size() - 1);
-    break;
-  case SDLK_QUOTE:
-    penSelected(currPenIndex+1 < int(cfg->pens.size()) ? currPenIndex+1 : 0);
-    break;
 #if PLATFORM_ANDROID
   case SDLK_AC_BACK:
     // hide bookmarks if autohide enabled; otherwise, display document list
@@ -1054,12 +1031,6 @@ bool ScribbleApp::keyPressEvent(SDL_Event* event)
           it->second->onTriggered(); //gui, event);
         return true;
       }
-    }
-    // currently, saved pens are custom menu items w/ no action, so shortcuts won't work - fix this!
-    if(key >= SDLK_1 && key <= SDLK_8) {
-      if(key - SDLK_1 < int(cfg->pens.size()))
-        penSelected(key - SDLK_1);
-      break;
     }
     ScribbleInput::pressedKey = key;
     return false;  // key not handled
@@ -1500,24 +1471,14 @@ void ScribbleApp::penChanged(int changed)
     if(newPen.width != pen.width || newPen.hasFlag(ScribblePen::WIDTH_RELATIVE) != pen.hasFlag(ScribblePen::WIDTH_RELATIVE))
       updatePenToolbar();
   }
-  else if(changed == PenToolbar::PEN_CHANGED && penToolbar->mode == PenToolbar::SELECTION_MODE) {
-    // "Use as Pen": the selection's color and width go to the draw pen, and nothing else does.  The
-    //  toolbar's pen here is the selection's - built from a color and an absolute width, no flags - and
-    //  taking it whole made the pen absolute, dropped the marker's tip and DRAW_UNDER, and converted the
-    //  tool's width presets to units on the next setPen() (pen-and-tools.md, "Pen and selection")
-    ScribblePen drawPen = currPen;
-    if(pen.color.alpha() > 0) {
-      int alpha = drawPen.color.alpha();  // keep the marker translucent, as the shape row does
-      drawPen.color = pen.color;
-      drawPen.color.setAlpha(alpha);
-    }
-    if(pen.width > 0)
-      drawPen.width = drawPen.hasFlag(ScribblePen::WIDTH_RELATIVE) ? pen.width/penToolbar->lineHeight() : pen.width;
-    setPen(drawPen);
-  }
   else if(penToolbar->mode == PenToolbar::BOOKMARK_MODE)
     bookmarkColor = pen.color;
   else if(penToolbar->mode == PenToolbar::SELECTION_MODE) {
+    // A selection takes only its color, width and line style.  Anything else (a pen-only flag such as
+    //  centre on line) is ignored - it once meant "Use as Pen" and wrote the selection into the draw pen,
+    //  which only the pen's own quick settings may change (pen-and-tools.md)
+    if(!(changed & (PenToolbar::COLOR_CHANGED | PenToolbar::WIDTH_CHANGED | PenToolbar::DASH_CHANGED)))
+      return;
     size_t hpos = activeDoc()->history->histPos();
     // must always create undo item if syncing
     bool undoable = !(changed & PenToolbar::UNDO_PREV) || historyPos == hpos || activeDoc()->scribbleSync;
@@ -1583,24 +1544,6 @@ void ScribbleApp::updatePenToolbar(bool forSelPopup)
     if(shown.hasFlag(ScribblePen::TAPE) && !shown.color.isValid())
       shown.color = activeDoc()->tapeThemeColor();
     penToolbar->setPen(shown, PenToolbar::PEN_MODE);
-  }
-}
-
-// load saved pen
-void ScribbleApp::penSelected(int penindex)
-{
-  ScribblePen* pen = activeDoc()->cfg->getPen(penindex);
-  if(pen) {
-    currPenIndex = penindex;
-    setPen(*pen);
-    setMode(MODE_STROKE);
-    if(cfg->Bool("applyPenToSel")) {
-      // a relative pen's width is in line heights, the selection's in document units
-      Page* page = activeArea()->getCurrPage();
-      Dim width = pen->hasFlag(ScribblePen::WIDTH_RELATIVE)
-          ? pen->width*(page ? page->yruling(true) : Page::BLANK_Y_RULING) : pen->width;
-      activeArea()->setStrokeProperties(StrokeProperties(pen->color, width));  // no-op if no sel
-    }
   }
 }
 

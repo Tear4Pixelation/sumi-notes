@@ -130,7 +130,6 @@ public:
   void appSuspending();
   void hideBookmarks();
   void insertDocument();
-  void penSelected(int penindex);
   void closeDocs(const FSPath& path);
   void maybeQuit();
   // android callbacks
@@ -311,7 +310,6 @@ private:
   std::vector< std::unique_ptr<Action> > recentFileActions;
   //std::string backupFilename;
   int clipboardSerial = 0;  // iOS and Windows
-  int currPenIndex;
   bool backToDocList = true;
   bool delayedShowDocList = false;
   bool disableConfigSave = false;

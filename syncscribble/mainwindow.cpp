@@ -345,16 +345,6 @@ void MainWindow::refreshUI(ScribbleDoc* doc, int reason)
       return 0;
     });
   }
-
-  // if a pen was released, may need to save pen to recent pens list
-  if(reason & (1 << UIState::PenRelease)) {
-    int savepen = ScribbleApp::cfg->Int("savePenMode");
-    if(savepen > 0) {
-      ScribbleApp::cfg->savePen(app->currPen);
-      if(savepen == 2)  // 2 = save to both doc and global
-        doc->cfg->savePen(app->currPen);
-    }
-  }
 }
 
 Action* MainWindow::modeToAction(int mode)
@@ -2078,7 +2068,7 @@ void MainWindow::createToolBars()
     {"ic_menu_switch_back.svg", "Switch Back", "Returns to the previous tool after one selection."} })));
   selectRow->addWidget(createStretch());
   selectRow->addWidget(smallFloatBtn(createToolSettingsButton("Selection Settings",
-      {"popupToolbar", "applyPenToSel", "columnDetectMode"})));
+      {"popupToolbar", "columnDetectMode"})));
   floatRow(selectRow);
 
   Toolbar* shapeRow = createToolbar();
@@ -2658,10 +2648,10 @@ void MainWindow::setupActions()
       [this](){ selectDrawTool(ScribbleMode::DRAWTOOL_TAPE); });
   actionTape->setCheckable(true);
   actionTape->tooltip = _("Cover part of the page with tape\nTap a strip to see through it");
-  // 1-8 select saved pens; 9 for draw options row, 0 for bookmark
+  // 1-9 pick the toolbar's tools (below, after Insert Space); 0 for bookmark
   actionCustom_Pen = createAction("actionCustom_Pen",
-      "Pen Setup...", ":/icons/ic_menu_set_pen.svg", "9", [this](){ togglePenToolbar(); });
-  actionCustom_Pen->tooltip = _("Customize and save pens");
+      "Pen Setup...", ":/icons/ic_menu_set_pen.svg", "", [this](){ togglePenToolbar(); });
+  actionCustom_Pen->tooltip = _("Show the pen's options row");
   actionAdd_Bookmark = createAction("actionAdd_Bookmark",
       "Add Bookmark", ":/icons/ic_menu_add_bookmark.svg", "0", SLOT(setMode(MODE_BOOKMARK)));
   actionAdd_Bookmark->setCheckable(true);
@@ -2731,6 +2721,16 @@ void MainWindow::setupActions()
   actionInsert_Space = createAction("actionInsert_Space", "Insert Space",
       ":/icons/ic_menu_insert_space.svg", "", [this](){ selectTool(MODE_INSSPACE); });
   actionInsert_Space->setCheckable(true);
+  // Keys 1-9 pick the main toolbar's tools in the order addTools() lays them out (Pan, then the tools row),
+  //  through the same shortcut path as any other key, so a key does exactly what clicking the button does
+  //  and a focused text field (which takes digits itself) never sees it.  They used to recall saved pens,
+  //  which replaced the pen from outside its quick settings (pen-and-tools.md).  Keep in step with addTools().
+  {
+    Action* toolKeys[] = {actionPan, actionDraw, actionErase, actionHighlight, actionSelect,
+        actionShapes, actionEphemeral, actionTape, actionInsert_Space};
+    for(size_t ii = 0; ii < sizeof(toolKeys)/sizeof(toolKeys[0]); ++ii)
+      shortcuts.emplace(std::to_string(ii + 1), toolKeys[ii]);
+  }
   // insert space menu items
   actionInsert_Space_Vert = createAction("actionInsert_Space_Vert",
       "Insert Space", ":/icons/ic_menu_insert_space.svg", "", SLOT(setMode(MODE_INSSPACEVERT)));

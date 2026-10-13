@@ -40,9 +40,6 @@ public:
   bool saveConfigFile(const char* cfgfile, bool skipdefaults = false);
   bool setConfigValue(const char* name, const char* val);
 
-  ScribblePen* getPen(int num);
-  void savePen(const ScribblePen& pen, int slot=-1);
-
   // The document theme (COLORS_SPEC.md §4.1).  Stored as ordinary config values rather than as a new
   //  file-format construct, which buys the whole round trip for free: a ScribbleDoc's cfg already loads
   //  from and saves to the document's <script type="text/writeconfig"> node.  It also means a document
@@ -67,8 +64,4 @@ public:
   int removeInt(const char* s);
   int removeFloat(const char* s);
   int removeString(const char* s);
-
-  // pens
-  std::list<ScribblePen> pens;
-  typedef std::list<ScribblePen>::iterator penIterator;
 };

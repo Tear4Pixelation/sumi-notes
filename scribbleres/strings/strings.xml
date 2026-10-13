@@ -59,7 +59,6 @@
   <string name="tp_snaptogrid">Snap to Grid</string>
   <string name="tp_drawlines">Draw Lines</string>
   <string name="tp_ephemeral">Ephemeral</string>
-  <string name="tp_useaspen">Use as Pen</string>
   <string name="link_enterurl">Enter URL:</string>
   <string name="link_choosebkmk">or choose bookmark:</string>
   <string name="save_prompt">The document has never been saved.\nWhat would you like to do?</string>
@@ -113,10 +112,6 @@
   <string name="pref_returnprevtool">Return to previous tool</string>
   <string name="pref_popupseltools">Popup selection tools</string>
   <string name="pref_hidescroller">Hide scroll handle</string>
-  <string name="pref_savepen_manual">Manual</string>
-  <string name="pref_savepen_recent">Recent pens</string>
-  <string name="pref_savepen_perdoc">Recent per document</string>
-  <string name="pref_savepen">Saving pens</string>
   <string name="pref_cursor_hide">Hide</string>
   <string name="pref_cursor_system">System</string>
   <string name="pref_cursor_custom">Custom</string>
@@ -223,7 +218,6 @@
   <string name="page_rulings_mediumgrid" >Medium grid</string>
   <string name="page_rulings_finegrid"   >Fine grid</string>
 
-  <string name="tp_savepen">Save Pen</string>
   <string name="tp_pressure_none">0 (none)</string>
   <string name="tp_pressure_low" >0.25 (low)</string>
   <string name="tp_pressure_med" >0.5 (med)</string>
@@ -438,7 +432,6 @@
   <string name="pref_growwithpen_s">If disabled, use insert space or move selection to grow page</string>
   <string name="pref_insemptyspace">Insert empty space</string>
   <string name="pref_insemptyspace_s">Allow growing page by inserting empty space</string>
-  <string name="pref_applypentosel">Apply pen to selection</string>
 
     <!-- About dialog -->
   <string name="about_title">About</string>

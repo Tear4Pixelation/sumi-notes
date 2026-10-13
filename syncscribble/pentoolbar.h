@@ -201,7 +201,6 @@ private:
   Widget* widthGroup;
 
   Button* overflowBtn;
-  Button* selOverflowBtn;
   Menu* colorCtxMenu;
   Button* colorMenuDelete;
   Dim preScale;

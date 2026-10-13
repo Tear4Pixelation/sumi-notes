@@ -48,7 +48,6 @@
   <string name="tp_snaptogrid">网格线对齐</string>
   <string name="tp_drawlines">画线</string>
   <string name="tp_ephemeral">临时</string>
-  <string name="tp_useaspen">用作书写笔</string>
   <string name="link_enterurl">输入 URL:</string>
   <string name="link_choosebkmk">选择书签:</string>
   <string name="save_prompt">文件尚未保存。\n下一步</string>
@@ -94,10 +93,6 @@
   <string name="pref_returnprevtool">返回前一个工具</string>
   <string name="pref_popupseltools">弹出式工具栏</string>
   <string name="pref_hidescroller">隐藏滚动条</string>
-  <string name="pref_savepen_manual">使用手册</string>
-  <string name="pref_savepen_recent">书写笔近期设置值</string>
-  <string name="pref_savepen_perdoc">最近文档</string>
-  <string name="pref_savepen">保存手写笔</string>
   <string name="pref_cursor_hide">隐藏</string>
   <string name="pref_cursor_system">系统</string>
   <string name="pref_cursor_custom">自定义</string>
@@ -187,7 +182,6 @@
   <string name="page_rulings_mediumgrid" >中网格</string>
   <string name="page_rulings_finegrid"   >密网格</string>
 
-  <string name="tp_savepen">另存为笔：</string>
   <string name="tp_pressure_none">无</string>
   <string name="tp_pressure_low" >0.25（低）</string>
   <string name="tp_pressure_med" >0.5（中）</string>
@@ -379,7 +373,6 @@
   <string name="pref_growwithpen_s">如果不可操作，使用插入空格或移动选择，扩展页面</string>
   <string name="pref_insemptyspace">插入空白空间</string>
   <string name="pref_insemptyspace_s">可通过插入空白空间扩展页面</string>
-  <string name="pref_applypentosel">用笔改变选择</string>
 
     <!-- About dialog -->
   <string name="about_title">关于</string>

@@ -34,7 +34,7 @@ public:
   // Member by member, never memcmp: the class has padding (after color and after flags) that copies and
   //  temporaries leave holding garbage, so memcmp called identical pens different.  That silently
   //  disabled PenToolbar::setPen()'s early-out (the whole pen toolbar was rewritten after every stroke)
-  //  and ScribbleConfig::savePen()'s dedupe.  A new member must be added here.
+  //  and the old saved-pen list's dedupe.  A new member must be added here.
   bool operator==(const ScribblePen& b) const
   {
     return color == b.color && width == b.width && wRatio == b.wRatio && prParam == b.prParam
