@@ -51,6 +51,7 @@ class ScribbleArea : public ScribbleView
   // the outline sidebar navigates to a page, exactly as a link does (sidebar.cpp)
   friend class Sidebar;
   friend class ScribbleDoc;
+  friend class MainWindow;  // the tap-paste action (actionTapPaste)
 public:
   ScribbleArea();
   //~ScribbleArea();
@@ -473,7 +474,6 @@ protected:
   Timer* tapPasteTimer = NULL;
   Timestamp tapPasteTime = 0;  // ScribbleInput::initPointerTime of the tap; any later press changes it
   Point tapPastePos;  // dim coordinates
-  Menu* tapPasteMenu = NULL;
   void selectTapped(Element* target);
   Element* createShapeElement(const ShapeParams& params);
   void cancelShape();

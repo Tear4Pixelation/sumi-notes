@@ -664,13 +664,28 @@ static real regionSpacingToSlider(Dim spacing, bool staff = false)
 //  items close it).  Top layer first, as the sidebar lists them; the layer already holding the whole
 //  selection is ticked and disabled, and a locked layer shows its lock - moving there is allowed (it is
 //  how a locked layer is filled), but the ink is then out of reach and the selection is let go.
-void MainWindow::refreshSelPopup()
+void MainWindow::refreshSelPopup(bool pasteOnly)
 {
   ScribbleArea* area = app->activeArea();
   ScribbleDoc* doc = app->activeDoc();
   const Selection* sel = area ? area->selection() : NULL;
   if(!doc || !moveLayerPopup)
     return;
+  if(pasteOnly) {
+    for(Button* btn : selInkButtons)
+      btn->setVisible(false);
+    moveLayerBtn->setVisible(false);
+    selSkipLinesBtn->setVisible(false);
+    selColorItem->setVisible(false);
+    selWidthItem->setVisible(false);
+    if(editImageBtn)
+      editImageBtn->setVisible(false);
+    selPasteBtn->setVisible(true);
+    actionScreenshot->setVisible(false);
+    return;
+  }
+  selPasteBtn->setVisible(false);
+  actionScreenshot->setVisible(true);
   // a selected ruling region is not ink, so the pen toolbar stays on the pen and these would edit that.
   //  The popup is about to open, so the toolbar is the selection's even with a draw tool in hand
   app->updatePenToolbar(true);
@@ -1603,6 +1618,9 @@ void MainWindow::setupUI(ScribbleApp* a)
 
   // popup selection toolbar
   Menubar* selToolbar = createMenubar();  // Menubar used instead of Toolbar so that popup closes after use
+  // the tap-to-paste offer is this same popup holding only Paste, as a lone screenshot region holds only
+  //  the camera (docs/agent/screenshot.md, touch-input.md)
+  selPasteBtn = selToolbar->addAction(actionTapPaste);
   selInkButtons.push_back(selToolbar->addAction(actionCut)); // TouchBar::HideText is default
   selInkButtons.push_back(selToolbar->addAction(actionCopy));
   selInkButtons.push_back(selToolbar->addAction(actionDupSel));
@@ -2478,6 +2496,8 @@ void MainWindow::setupActions()
   actionCreate_Link = createAction("actionCreate_Link", "Create Link...", ":/icons/ic_menu_link.svg", "Ctrl+L", SLOT(createLink()));
   actionScreenshot = createAction("actionScreenshot", "Screenshot", ":/icons/ic_menu_screenshot.svg", "",
       [this](){ if(app->activeArea()) app->activeArea()->screenshotSelection(); });
+  actionTapPaste = createAction("actionTapPaste", "Paste", ":/icons/ic_menu_paste.svg", "",
+      [this](){ if(app->activeArea()) app->activeArea()->pasteAtTap(); });
   actionEditImage = createAction("actionEditImage", "Edit Image", ":/icons/ic_menu_image.svg", "",
       [this](){ if(app->activeArea()) app->activeArea()->editSelectedImage(); });
   // a toggle on the selection: its handle then resizes the handwriting on its lines (smart-scale.md)
