@@ -24,9 +24,14 @@ struct WidthPresets
   static constexpr int COUNT = 3;
   // the width spinbox's limits, which a preset must stay within - one outside them can never be
   //  selected exactly (the spinbox clamps it), so tapping it never opens its editor and it is stuck
-  static constexpr Dim MIN_WIDTH = 0.01;
+  static constexpr Dim MIN_WIDTH = 0.01;  // document units
+  // in line heights the floor has to be far lower: 0.01 of a 40 unit line is 0.4 units, so a fine pen
+  //  (0.25) turned relative was raised to it on the next load - its width rewritten by nothing the user
+  //  did.  0.0005 is the thinnest PEN_WIDTHS entry (0.1) on a 200 unit line.
+  static constexpr Dim MIN_RELATIVE = 0.0005;
   static constexpr Dim MAX_ABSOLUTE = 200;
   static constexpr Dim MAX_RELATIVE = 4;  // in line heights, 4 is already absurdly thick
+  static Dim minWidth(bool relative) { return relative ? MIN_RELATIVE : MIN_WIDTH; }
   static Dim maxWidth(bool relative) { return relative ? MAX_RELATIVE : MAX_ABSOLUTE; }
 
   std::vector<Dim> widths;

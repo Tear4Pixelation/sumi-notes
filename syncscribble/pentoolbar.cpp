@@ -309,7 +309,14 @@ PenToolbar::PenToolbar(bool _compact)
 
   spinWidth = createTextSpinBox(1.25, 0.01, 0, 200, "%.3g",
                                 120); // 3 significant digits
-  spinWidth->onValueChanged = [this](Dim w) { updateWidth(); };
+  // Return re-parses the text, which "%.3g" has rounded: a value that only reads back what the box
+  //  already shows is no edit, and must not round the pen (0.0311111 -> 0.0311)
+  spinWidth->onValueChanged = [this](Dim w) {
+    if (showsPenWidth(w))
+      spinWidth->setValue(pen.width);
+    else
+      updateWidth();
+  };
   // override spinbox onStep to step though PEN_WIDTHS
   spinWidth->onStep = [this](int nsteps) {
     Dim w = 0, oldw = spinWidth->value();
@@ -959,11 +966,12 @@ void PenToolbar::pickSingleSwatch(SingleSwatch *sw, Color color) {
     sw->onPicked(pen.color);
 }
 
-Widget *PenToolbar::createSingleWidth(std::function<void()> onWidthChanged) {
+Widget *PenToolbar::createSingleWidth(std::function<void()> onWidthChanged, bool selectionOnly) {
   singleWidths.emplace_back(new SingleWidth());
   singlesDashStyle = -2;  // drawn by the next refresh, which would otherwise skip updateSingles()
   SingleWidth *sw = singleWidths.back().get();
   sw->onChanged = onWidthChanged;
+  sw->selectionOnly = selectionOnly;
   // the draw row's thickness cell, with a longer line so that a dash pattern has room to show
   std::string btnSVG = fstring(R"#(
     <g class="toolbutton swatch-btn" layout="box">
@@ -984,7 +992,12 @@ Widget *PenToolbar::createSingleWidth(std::function<void()> onWidthChanged) {
   sw->spin = createTextSpinBox(1.25, 0.01, 0, 200, "%.3g", 120);
   // spinWidth always holds the same value as this one (setSingleWidth), so its stepping applies as is
   sw->spin->onStep = spinWidth->onStep;
-  sw->spin->onValueChanged = [this, sw](Dim width) { setSingleWidth(sw, width); };
+  sw->spin->onValueChanged = [this, sw](Dim width) {
+    if (showsPenWidth(width))
+      sw->spin->setValue(pen.width);  // Return without an edit, as for spinWidth
+    else
+      setSingleWidth(sw, width);
+  };
   trackEditFocus(sw->spin);
   sw->spinRow = createTitledRow(_("Width"), sw->spin);
   sw->popup->addWidget(sw->spinRow);
@@ -1057,6 +1070,12 @@ void PenToolbar::openSingleWidth(SingleWidth *sw) {
 
 // through spinWidth and updateWidth(), which resize the selection in SELECTION_MODE
 void PenToolbar::setSingleWidth(SingleWidth *sw, Dim width) {
+  // the selection popup's item with the toolbar on the pen (the selection went while the popup was up,
+  //  or a focus-lost commit arrived after it closed): the width was meant for ink, never for the pen
+  if (settingPen || (sw->selectionOnly && mode != SELECTION_MODE)) {
+    sw->spin->setValue(pen.width);
+    return;
+  }
   spinWidth->setValue(width);
   updateWidth();
   if (sw->onChanged)
@@ -1233,6 +1252,12 @@ void PenToolbar::saveConfig(ScribbleConfig *cfg) const {
 }
 
 void PenToolbar::setPen(const ScribblePen &newpen, Mode m, int selDashStyle) {
+  // no width edit can start from in here (updateWidth()); restored on every return
+  struct SettingPen {
+    bool &flag, prev;
+    SettingPen(bool &f) : flag(f), prev(f) { flag = true; }
+    ~SettingPen() { flag = prev; }
+  } settingPenGuard(settingPen);
   mode = m;
   dashStyle = m == SELECTION_MODE ? selDashStyle : newpen.dashStyle();
   widthGroup->setEnabled(mode != BOOKMARK_MODE);
@@ -1340,7 +1365,17 @@ void PenToolbar::updateColor() {
     ++changesSinceFocused;
 }
 
+// The one place a pen's width is written from (pen-and-tools.md, "Pen width is written in one place"):
+//  the spin box, a preset tap and the shape row's width all end here, and only this sends WIDTH_CHANGED,
+//  the only change the app takes a pen's width from.
 void PenToolbar::updateWidth() {
+  // a focus-lost commit fired by setPen() closing the width popup: `pen` is already the next pen (or
+  //  the selection's), and the typed number belongs to neither - this is how a width typed for the pen
+  //  became the marker's, in line heights
+  if (settingPen) {
+    spinWidth->setValue(pen.width);
+    return;
+  }
   pen.width = spinWidth->value();
   // a pen's dash pattern is sized by its width (a selection's is rescaled element by element)
   if (mode != SELECTION_MODE)
@@ -1456,6 +1491,10 @@ Color PenToolbar::toolColor(Color c) const {
   return out;
 }
 
+bool PenToolbar::showsPenWidth(Dim w) const {
+  return pen.width > 0 && fstring("%.3g", w) == fstring("%.3g", pen.width);
+}
+
 bool PenToolbar::relativeWidths() const {
   return pen.hasFlag(ScribblePen::WIDTH_RELATIVE);
 }
@@ -1506,7 +1545,8 @@ Dim PenToolbar::widthPreview(Dim w) const {
 //  current unit rather than two lists per tool, since a second list would have to be kept in step
 //  with this one to no benefit - the two are the same set of thicknesses either way.
 void PenToolbar::setRelativeWidth(bool relative) {
-  if (relative == pen.hasFlag(ScribblePen::WIDTH_RELATIVE))
+  // only a pen has a unit (the row is hidden otherwise); setPen() syncing the box must not convert
+  if (mode != PEN_MODE || settingPen || relative == pen.hasFlag(ScribblePen::WIDTH_RELATIVE))
     return;
   Dim lh = lineHeight();
   activePresets().convertTo(relative, lh);
@@ -1516,9 +1556,10 @@ void PenToolbar::setRelativeWidth(bool relative) {
   updateWidthPopup();  // new limits for the new unit, so this must precede setValue
   spinWidth->setValue(pen.width);
   rebuildGrids();
-  // both the width and a flag changed, so the whole pen has to go back to the app
+  // both the width and a flag changed, so the whole pen has to go back to the app - WIDTH_CHANGED too,
+  //  since the app keeps its own width and unit on anything else
   if (onChanged)
-    onChanged(PEN_CHANGED);
+    onChanged(PEN_CHANGED | WIDTH_CHANGED);
 }
 
 void PenToolbar::updateWidthPopup() {
@@ -1527,11 +1568,11 @@ void PenToolbar::updateWidthPopup() {
   cbRelWidth->setChecked(pen.hasFlag(ScribblePen::WIDTH_RELATIVE));
   bool rel = relativeWidths();
   // in line heights, 4 is already absurdly thick and 200 would be nonsense
-  spinWidth->setLimits(WidthPresets::MIN_WIDTH, WidthPresets::maxWidth(rel));
+  spinWidth->setLimits(WidthPresets::minWidth(rel), WidthPresets::maxWidth(rel));
   widthSpinRow->selectFirst(".row-text")
       ->setText(rel ? _("Line heights") : _("Width"));
   for (auto &sw : singleWidths) {
-    sw->spin->setLimits(WidthPresets::MIN_WIDTH, WidthPresets::maxWidth(rel));
+    sw->spin->setLimits(WidthPresets::minWidth(rel), WidthPresets::maxWidth(rel));
     sw->spinRow->selectFirst(".row-text")->setText(rel ? _("Line heights") : _("Width"));
   }
   // the display is always up, so an absolute width is shown against the ruling too - it is drawn from

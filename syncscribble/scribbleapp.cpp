@@ -1481,8 +1481,25 @@ void ScribbleApp::penChanged(int changed)
   }
   if(changed == PenToolbar::YIELD_FOCUS)
     gui->setFocused(activeArea()->widget);
-  else if(penToolbar->mode == PenToolbar::PEN_MODE)
-    setPen(pen);
+  else if(penToolbar->mode == PenToolbar::PEN_MODE) {
+    // The pen's width (with its unit, WIDTH_RELATIVE) is written by one thing only: the width control,
+    //  which alone sends WIDTH_CHANGED (PenToolbar::updateWidth(), and the Relative size toggle).  Every
+    //  other change - a color, a tip, a dash style, centre on line - used to hand back the toolbar's
+    //  whole copy of the pen, so whatever width that copy held became the pen's: a focus-lost commit
+    //  that landed on the pen just switched to, a clamp, the selection popup's width item.  Now the
+    //  stored width is carried over (pen-and-tools.md, "Pen width is written in one place").
+    ScribblePen newPen = pen;
+    if(!(changed & PenToolbar::WIDTH_CHANGED)) {
+      int dashStyle = pen.dashStyle();
+      newPen.width = currPen.width;
+      newPen.setFlag(ScribblePen::WIDTH_RELATIVE, currPen.hasFlag(ScribblePen::WIDTH_RELATIVE));
+      newPen.setDashStyle(dashStyle);  // the pattern is sized by the width
+    }
+    setPen(newPen);
+    // the toolbar showed a width the pen does not have: show the pen's again
+    if(newPen.width != pen.width || newPen.hasFlag(ScribblePen::WIDTH_RELATIVE) != pen.hasFlag(ScribblePen::WIDTH_RELATIVE))
+      updatePenToolbar();
+  }
   else if(changed == PenToolbar::PEN_CHANGED && penToolbar->mode == PenToolbar::SELECTION_MODE) {
     // "Use as Pen": the selection's color and width go to the draw pen, and nothing else does.  The
     //  toolbar's pen here is the selection's - built from a color and an absolute width, no flags - and

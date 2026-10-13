@@ -1641,7 +1641,7 @@ void MainWindow::setupUI(ScribbleApp* a)
   //  selected).  Their popups close only themselves, so a color and a width can be picked in one visit.
   PenToolbar* selPenToolbar = static_cast<PenToolbar*>(penToolbarAutoAdj->contents);
   selColorItem = selPenToolbar->createSingleSwatch();
-  selWidthItem = selPenToolbar->createSingleWidth();
+  selWidthItem = selPenToolbar->createSingleWidth(nullptr, true);  // never the pen's
   selToolbar->addWidget(selColorItem);
   selToolbar->addWidget(selWidthItem);
   // rounded like the floating toolbar panels, with their button sizes
@@ -2073,8 +2073,8 @@ void MainWindow::createToolBars()
   // One swatch and one width, not the draw row's saved lists: those would make this row too wide.
   //  Shapes are drawn with the current draw pen, so these show and set that pen's color, width and
   //  line style.  With a shape selected the pen toolbar is in SELECTION_MODE and a change edits the
-  //  shape - so the pen is set here as well, just as the toggles below arm the next shape as well as
-  //  editing the selected one.
+  //  shape - so the pen's color and line style are set here as well, just as the toggles below arm the
+  //  next shape as well as editing the selected one.  Never its width: only the width control writes that.
   PenToolbar* penToolbar = static_cast<PenToolbar*>(penToolbarAutoAdj->contents);
   shapeRow->addWidget(penToolbar->createSingleSwatch([this, penToolbar](Color color){
     if(penToolbar->mode == PenToolbar::PEN_MODE)
@@ -2088,13 +2088,11 @@ void MainWindow::createToolBars()
   shapeRow->addWidget(penToolbar->createSingleWidth([this, penToolbar](){
     if(penToolbar->mode == PenToolbar::PEN_MODE)
       return;  // updateWidth()/setDashStyle() have already set the pen
+    // the line style arms the next shape as well, but the width does not: a width given to the selected
+    //  shape is the shape's, and copying it here wrote the pen's width (converted through the
+    //  selection's line height) on every dash click too (pen-and-tools.md, "Pen width is written in
+    //  one place")
     ScribblePen pen = *app->getPen();
-    Dim width = penToolbar->pen.width;  // the selection's, in document units; -1 if it has several
-    if(width > 0) {
-      // a relative pen (the marker) holds its width in line heights
-      Dim lineHeight = penToolbar->lineHeight();
-      pen.width = pen.hasFlag(ScribblePen::WIDTH_RELATIVE) ? width/lineHeight : width;
-    }
     if(penToolbar->dashStyle >= 0)
       pen.setDashStyle(penToolbar->dashStyle);
     app->setPen(pen);

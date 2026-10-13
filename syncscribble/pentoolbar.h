@@ -81,8 +81,10 @@ public:
   Widget* createSingleSwatch(std::function<void(Color)> onPicked = nullptr);
   // Its thickness counterpart: one width swatch showing the pen's (or the selection's) width and line
   //  style, opening a popup with the width presets, the width itself and solid/dashed/dotted.
-  //  onWidthChanged is called after the width or the style is changed through it.
-  Widget* createSingleWidth(std::function<void()> onWidthChanged = nullptr);
+  //  onWidthChanged is called after the width or the style is changed through it.  selectionOnly: the
+  //  selection popup's, which edits a selection and never the pen (pen-and-tools.md, "Pen width is
+  //  written in one place") - with the toolbar on the pen it does nothing.
+  Widget* createSingleWidth(std::function<void()> onWidthChanged = nullptr, bool selectionOnly = false);
   // line height relative widths are measured in; in SELECTION_MODE that of the Paper Patch holding most of
   //  the selection (Page::lineHeightFor), else the page's
   Dim lineHeight() const;
@@ -108,6 +110,7 @@ private:
     Widget* spinRow;
     Button* dashBtns[3];
     std::function<void()> onChanged;
+    bool selectionOnly = false;
   };
   std::vector<std::unique_ptr<SingleSwatch>> singleSwatches;
   std::vector<std::unique_ptr<SingleWidth>> singleWidths;
@@ -229,6 +232,12 @@ private:
   };
   ShownContext shownContext;
   bool shownValid = false;
+  // set while setPen() swaps the pen in: closing the width popup there hands the spin box a focus-lost
+  //  commit of whatever was typed, which would land on the pen being switched *to* (updateWidth())
+  bool settingPen = false;
+  // whether a width the spin box reports is the pen's own as the box shows it ("%.3g"): Return without an
+  //  edit re-parses the rounded text, and that must not round the pen
+  bool showsPenWidth(Dim w) const;
   int singlesDashStyle = -2;  // the line style updateSingles() last drew (-2: never)
   static std::unique_ptr<SvgNode> widthBtnNode;
   static std::unique_ptr<SvgNode> compactWidthBtnNode;

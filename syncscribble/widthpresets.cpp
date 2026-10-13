@@ -7,6 +7,7 @@
 // out-of-line definitions, needed before C++17 since std::min/max take them by reference
 constexpr int WidthPresets::COUNT;
 constexpr Dim WidthPresets::MIN_WIDTH;
+constexpr Dim WidthPresets::MIN_RELATIVE;
 constexpr Dim WidthPresets::MAX_ABSOLUTE;
 constexpr Dim WidthPresets::MAX_RELATIVE;
 
@@ -68,14 +69,14 @@ bool WidthPresets::normalize(const Dim* defaults, bool defaultsRelative, Dim lin
 {
   std::vector<Dim> before = widths;
   bool relative = isRelative();
-  Dim maxw = maxWidth(relative);
+  Dim minw = minWidth(relative), maxw = maxWidth(relative);
   // a non-finite or non-positive preset is not a width at all, so it is dropped and refilled; one
   //  that is merely out of range is clamped, keeping the slot and as much of the user's choice as fits
   std::vector<Dim> kept;
   for(Dim width : widths) {
     if(!std::isfinite(width) || width <= 0)
       continue;
-    kept.push_back(std::min(maxw, std::max(MIN_WIDTH, width)));
+    kept.push_back(std::min(maxw, std::max(minw, width)));
   }
   if(int(kept.size()) > COUNT)
     kept.resize(COUNT);
@@ -85,7 +86,7 @@ bool WidthPresets::normalize(const Dim* defaults, bool defaultsRelative, Dim lin
       Dim width = defaults[i];
       if(defaultsRelative != relative && lineHeight > 0)
         width = relative ? width/lineHeight : width*lineHeight;
-      kept.push_back(std::min(maxw, std::max(MIN_WIDTH, width)));
+      kept.push_back(std::min(maxw, std::max(minw, width)));
     }
     std::sort(kept.begin(), kept.end());
   }
@@ -107,7 +108,7 @@ void WidthPresets::setFrom(size_t idx, Dim width, bool relative, Dim lineHeight)
     width = relative ? width*lineHeight : width/lineHeight;
   else if(unit == UNIT_UNKNOWN)
     unit = relative ? UNIT_RELATIVE : UNIT_ABSOLUTE;
-  widths[idx] = std::min(maxWidth(isRelative()), std::max(MIN_WIDTH, width));
+  widths[idx] = std::min(maxWidth(isRelative()), std::max(minWidth(isRelative()), width));
 }
 
 bool WidthPresets::sameWidth(Dim a, Dim b)

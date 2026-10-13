@@ -73,12 +73,15 @@ text marker only** (`DRAWTOOL_HIGHLIGHT`): a marker's job is to cover a line of 
 of a line" is the number that means something, where a pen is drawing a mark of a particular size. The
 mechanism is the same for all three draw tools, and only the default differs.
 
-- **The marker is relative, always.** The flag is the constructor's default *and* `loadModes()`
-  converts a marker pen read without it (width divided by `Page::BLANK_Y_RULING`, since the page being
-  drawn on is not known yet) and, for a list saved without its unit, clears `savedMarkerWidths` so the
-  presets reseed in the new unit (a list with a `rel:`/`abs:` prefix is converted by `prepareWidths()`) -
-  that runs before the toolbar is built, which is what makes clearing the config value enough. The
-  numbers are converted, never reinterpreted: 30 units would otherwise load as 30 line heights.
+- **The marker starts relative.** The flag is the constructor's default, and `loadModes()` converts a
+  marker pen read without it (width divided by `Page::BLANK_Y_RULING`, since the page being drawn on is
+  not known yet) - **but only for a config without the trailing `markerunit` word** `saveModes()` now
+  writes. It used to do this on every start, so a marker the user had turned absolute came back relative
+  (see "Pen width is written in one place"). For a list saved without its unit it clears
+  `savedMarkerWidths` so the presets reseed in the new unit (a list with a `rel:`/`abs:` prefix is
+  converted by `prepareWidths()`) - that runs before the toolbar is built, which is what makes clearing
+  the config value enough. The numbers are converted, never reinterpreted: 30 units would otherwise load
+  as 30 line heights.
 - **`ScribbleArea::resolvedPen()` is the only place the multiplication happens**, and every consumer of
   the pen's width goes through it - the stroke builder, `createShapeElement()` and the hover cursor.
   What lands in the document is therefore always an absolute `stroke-width`, so the file format, the
@@ -127,7 +130,7 @@ mechanism is the same for all three draw tools, and only the default differs.
   is gone; `WidthPresets::normalize()` (run by `prepareWidths()` on every `setPen()`) keeps exactly
   `WidthPresets::COUNT` (3), refilling a short list from that slot's default and sorting, dropping extra
   ones, and replacing non-finite ones. It also **clamps every preset into the spinbox's limits** for its
-  unit (0.01-4 line heights, 0.01-200 units), and `readPen()` in `scribblemode.cpp` does the same for a
+  unit (0.0005-4 line heights, 0.01-200 units; `WidthPresets::minWidth()`), and `readPen()` in `scribblemode.cpp` does the same for a
   loaded pen. An out-of-range preset was not merely ugly: `selectWidth()` sets the spinbox to the preset,
   the spinbox clamps, so the pen never equals the preset, so the second tap never opens the editor - the
   preset can never be selected or edited, and Delete was the only way out. Presets are compared with
@@ -266,6 +269,54 @@ rule plus the old Use as Pen fail 7 checks. "...and not the selected stroke" pas
 toolbar edits the app's active area, not the test's), so it pins nothing on its own. Verified in
 agent-display: rect select with Switch Back, Esc closes the popup, the selection stays, the pen row
 shows the pen's settings button again, and picking a colour there recolours the pen, not the stroke.
+
+# Pen width is written in one place
+
+**A pen's width (and its unit, `WIDTH_RELATIVE`) is written only by the width control**: the width spin
+box, a preset tap, the shape row's width while it shows the pen, and the Relative size toggle - all in
+`PenToolbar::updateWidth()` / `setRelativeWidth()`, the only senders of `WIDTH_CHANGED`. In PEN_MODE
+`ScribbleApp::penChanged()` takes the width and unit from the toolbar **only on `WIDTH_CHANGED`**; on
+any other change (color, tip, dash, snap, centre on line) it keeps `currPen`'s and re-shows the pen if the
+toolbar disagreed. Whole-pen replacements the user asks for by name - a saved pen (keys 1-9), "Use as Pen"
+- still replace it; nothing else may. Do not add a writer: route a new width UI through `updateWidth()`.
+
+**The cause.** The toolbar keeps its own copy of the pen and every change used to hand that whole copy
+back (`setPen(pen)`), so any number that ended up in the copy's `width` became the pen's on the next
+color tap. Several things put one there, most of them through the relative unit:
+- **A typed width landed on the next pen.** A spin box commits typed text on focus loss (the iPad's
+  number pad has no Return, so that is how every typed width is committed), and hiding the width popup
+  is a focus loss. `PenToolbar::setPen()` hid it *after* taking the new pen and mode, so a width typed
+  for the pen was committed to whatever pen the toolbar was switching to - a relative one got the
+  number in line heights (30 units -> 30 line heights). `setPen()` now sets `settingPen`, and
+  `updateWidth()`/`setSingleWidth()` drop a commit that arrives while it is set. The typed number is
+  lost (there is no pen left it belongs to); committing it to the old pen is not possible because the
+  app has already switched.
+- **The selection popup's width item wrote the pen** whenever the toolbar was on the pen while the item
+  was usable (the selection went while the popup was up, a late focus-lost commit). It is created with
+  `selectionOnly` and does nothing outside SELECTION_MODE.
+- **The shape row wrote the selected shape's width into the pen** - converted through the selection's
+  line height - on a width change *and on every dash-style click*. It now carries only the line style
+  (and the swatch only the color) over to the pen.
+- **The marker was forced relative on every start** (above): a marker turned absolute came back as
+  `30/BLANK_Y_RULING` line heights, a different thickness on any other ruling. Now once, for an old config.
+- **A fine relative pen was raised on every start**: `readPen()` and the spin box used the absolute floor
+  (0.01) for line heights too, and 0.01 of a 40 unit line is 0.4 units - a 0.25 pen turned relative came
+  back 0.4. The floor is per unit now (`WidthPresets::minWidth()`, 0.0005 line heights).
+- **Return without an edit rounded the pen**: it re-parses the box's `"%.3g"` text (0.0311111 ->
+  0.0311). A value that reads back as what the box already shows is ignored (`showsPenWidth()`).
+
+Not writers, checked: zoom (nothing in the view touches the pen), theme restyle (`refreshPalette()`
+rebuilds swatches only), Switch Back and tool switching (`setDrawTool()` reads the tool's stored pen),
+`resolvedPen()` (a copy), the saved preset lists (presets are not the pen's width).
+
+Tested by `ScribbleTest::penWidthWriteTest()`: the typed-then-switched commit, a color and a flag change
+carrying a stale width, the selection item on the pen, Return on an unchanged width, and ScribbleMode's
+`saveModes()`/`loadModes()` round trip of an absolute marker and a 0.006 line-height pen (plus an old
+config still converting). Mutation-checked: with every guard reverted at once (whole-pen `penChanged()`, no `settingPen`, no
+`selectionOnly`, no `showsPenWidth()`, marker always converted, absolute floor for line heights) all
+9 checks fail, one per guard plus "the toolbar shows..." and "the width control sets..." following the
+flag change; restored, 0 fail. The typed-width check needs the popup on screen (hiding sends the focus
+loss only to a displayed widget), so the test unhides the toolbar's hidden ancestors for it.
 
 # Switch back (single-use tools)
 
