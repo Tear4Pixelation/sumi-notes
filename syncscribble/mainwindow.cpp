@@ -2079,32 +2079,13 @@ void MainWindow::createToolBars()
   shapeRow->addAction(actionRulingRegion);
   shapeRow->addSeparator();
   // One swatch and one width, not the draw row's saved lists: those would make this row too wide.
-  //  Shapes are drawn with the current draw pen, so these show and set that pen's color, width and
-  //  line style.  With a shape selected the pen toolbar is in SELECTION_MODE and a change edits the
-  //  shape - so the pen's color and line style are set here as well, just as the toggles below arm the
-  //  next shape as well as editing the selected one.  Never its width: only the width control writes that.
+  //  Shapes are drawn with the current draw pen, so in PEN_MODE these show and set that pen (through the
+  //  toolbar's own updateColor()/updateWidth()/setDashStyle()).  With a shape selected the toolbar is in
+  //  SELECTION_MODE and a change edits only the shape: it never reaches the pen, which only the pen's
+  //  quick settings write (pen-and-tools.md, "Only the quick settings write a pen").
   PenToolbar* penToolbar = static_cast<PenToolbar*>(penToolbarAutoAdj->contents);
-  shapeRow->addWidget(penToolbar->createSingleSwatch([this, penToolbar](Color color){
-    if(penToolbar->mode == PenToolbar::PEN_MODE)
-      return;  // updateColor() has already set the pen
-    ScribblePen pen = *app->getPen();
-    int alpha = pen.color.alpha();  // keep the marker translucent
-    pen.color = color;
-    pen.color.setAlpha(alpha);
-    app->setPen(pen);
-  }));
-  shapeRow->addWidget(penToolbar->createSingleWidth([this, penToolbar](){
-    if(penToolbar->mode == PenToolbar::PEN_MODE)
-      return;  // updateWidth()/setDashStyle() have already set the pen
-    // the line style arms the next shape as well, but the width does not: a width given to the selected
-    //  shape is the shape's, and copying it here wrote the pen's width (converted through the
-    //  selection's line height) on every dash click too (pen-and-tools.md, "Pen width is written in
-    //  one place")
-    ScribblePen pen = *app->getPen();
-    if(penToolbar->dashStyle >= 0)
-      pen.setDashStyle(penToolbar->dashStyle);
-    app->setPen(pen);
-  }));
+  shapeRow->addWidget(penToolbar->createSingleSwatch());
+  shapeRow->addWidget(penToolbar->createSingleWidth());
   shapeHeadStartToggle = createToolbutton(
       SvgGui::useFile(":/icons/ic_menu_shape_head_start.svg"), _("Start Arrowhead"));
   shapeHeadStartToggle->onClicked = [this](){

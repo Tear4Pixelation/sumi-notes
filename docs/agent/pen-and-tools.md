@@ -212,8 +212,9 @@ width popup has the presets, the width, and **Solid / Dashed / Dotted**.
 - The popups close only up to the menu holding their button (`closeMenus(btn)`, `setupSinglePopup()`):
   `closeAutoClosePopup()` would take the selection popup down with them. The selection popup's key
   handler no longer closes it while its own width box has focus.
-- On the shape row, a change with a shape selected also sets the pen (as the arrowhead toggles do), so the
-  next shape matches. Shapes share the draw pen, so a dashed shape pen also dashes non-pressure pen strokes.
+- On the shape row, a change with a shape selected edits only that shape, never the pen (the user's rule:
+  only the pen's quick settings write a pen). Shapes share the draw pen, so a dashed shape pen also dashes
+  non-pressure pen strokes.
 
 Known gaps: undoing a dotted style leaves the round cap it set; the width item's preview only shows a
 pattern clearly at thin widths. Tested by `ScribbleTest::dashStyleTest()` (mutation-checked: no
@@ -342,10 +343,11 @@ takes digits before the shortcut path sees them (`TextEdit` consumes the key dow
 `9`; `0` is still Add Bookmark. A user's `shortcutKeys` config entry still overrides any of them. If the
 toolbar order changes, change the `toolKeys` list with it.
 
-Writers left, all deliberate - change them if the rule is to be absolute:
-- **The shape row's swatch and line style** (`createSingleSwatch`/`createSingleWidth` in
-  `mainwindow.cpp`) set the pen's colour and dash style while editing a *selected* shape, to arm the next
-  shape the way the arrowhead toggles do. They are pen toolbar widgets, but act from SELECTION_MODE.
+The shape row's swatch and line style used to copy a *selected* shape's colour and dash style into the
+pen, to arm the next shape. Removed at the user's word ("it should never do that in the first place"):
+in SELECTION_MODE they edit the shape only.
+
+Remaining non-writers, all deliberate:
 - **Tape follows the theme** while no colour was picked (`setPen()` stores `INVALID_COLOR`); a theme
   change alters the drawn colour without writing the pen.
 - **Loading the tool's own pen** on a tool switch (`setDrawTool()`) and at start (`loadModes()`, which
