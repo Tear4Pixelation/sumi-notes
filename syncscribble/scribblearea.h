@@ -6,6 +6,7 @@
 #include "selection.h"
 #include "nightmode.h"
 #include "smartscale.h"
+#include "strokebuilder.h"  // StrokePoint, for the Draw Lines samples
 
 struct Timer;
 class Menu;
@@ -286,7 +287,6 @@ protected:
   Rect hoverRect;
   int cursorMode = 0;  // CURSORMODE_SYSTEM
   int drawCursor = 0;
-  Dim lineDrawPressure = 1;
   Dim centerLineLocalY = 0;  // local y (in gestureFrame) of a CENTER_ON_LINE stroke, fixed at the press
   // MODE_TAPE: the strip being laid is currStroke; its start and width are fixed at the press
   Point tapeStart;
@@ -508,6 +508,14 @@ protected:
   bool snapStroke();
   bool scratchOutOnLift(Selection& erased);
   void discardStrokeBuilder();
+  // Draw Lines (ScribblePen::LINE_DRAWING, docs/agent/pen-and-tools.md): the pen draws freehand, and on
+  //  pen-up straightenLineStroke() replaces a nearly straight stroke with straight lines (linestraighten.h).
+  //  linePen is the pen the stroke was begun with (resolved, so a relative width is in document units), set
+  //  only while a Draw Lines stroke is in progress; lineSamples is its raw input, exactly as given to the
+  //  builder, in page coordinates.
+  std::unique_ptr<ScribblePen> linePen;
+  std::vector<StrokePoint> lineSamples;
+  void straightenLineStroke();
   void scaleSnapShape(Point pos);
   void commitSnapShape();
   int scratchOut(const std::vector<Point>& area);

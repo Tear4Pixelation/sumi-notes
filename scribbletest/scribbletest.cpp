@@ -32,6 +32,7 @@
 #include "cropshapetest.cpp"
 #include "erasetest.cpp"
 #include "smartscaletest.cpp"
+#include "straightentest.cpp"
 #include "librarytest.cpp"
 #include "notefultest.cpp"
 #include "pagetagtest.cpp"
@@ -5793,7 +5794,8 @@ void ScribbleTest::runAll(bool runsynctest)
   int nThumbsFailed = 0;
   int nUnitFailed = runScanTests() + runShapeTests() + runColorTests() + runLayerTests() + runLibraryTests()
       + runRegionTests() + runNotefulTests() + runPageTagTests() + runWidthPresetTests() + runTabTests()
-      + runJumpHistoryTests() + runEraseTests() + runSmartScaleTests() + runSimplifyTests() + runCropShapeTests();
+      + runJumpHistoryTests() + runEraseTests() + runSmartScaleTests() + runSimplifyTests() + runCropShapeTests()
+      + runStraightenTests();
   std::vector<std::string> slFailed;
   void (ScribbleTest::*tests[])() = {
     &ScribbleTest::test0,

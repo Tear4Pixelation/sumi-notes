@@ -16,6 +16,8 @@ public:
 
   unsigned int flags;
   // existing numerical values must NOT be changed - flags is serialized to config file when saving pen
+  // LINE_DRAWING ("Draw Lines"): freehand, straightened on pen-up when nearly straight (linestraighten.h);
+  //  until Oct 2026 it was a rubber band from the press to the pen
   static constexpr unsigned int DRAW_UNDER = 0x1, SNAP_TO_GRID = 0x2, LINE_DRAWING = 0x4, EPHEMERAL = 0x8,
       WIDTH_PR = 0x10, WIDTH_SPEED = 0x20, WIDTH_DIR = 0x40, WIDTH_MASK = 0xF0, //WIDTH_LINPR = 0x80,
       TIP_FLAT = 0x100, TIP_ROUND = 0x200, TIP_CHISEL = 0x400, TIP_MASK = 0xF00,
@@ -23,7 +25,7 @@ public:
       //  ScribbleArea::resolvedPen(), which is the only place the multiplication is done
       WIDTH_RELATIVE = 0x1000,
       // draws a straight horizontal stroke through the vertical centre of the ruled line the press lands
-      //  in (text marker); implies line drawing
+      //  in (text marker): one segment from the press to the pen, at fixed pressure, with no filters
       CENTER_ON_LINE = 0x2000,
       // the Tape tool's pen (docs/agent/tape.md): a press lays a strip of tape instead of drawing a stroke
       TAPE = 0x4000;

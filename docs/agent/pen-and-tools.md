@@ -2,12 +2,53 @@
 
 `ScribblePen::CENTER_ON_LINE` (a pen flag, so saved with the pen) turns a stroke into a straight
 horizontal line along the vertical centre of the ruled line the press lands in
-(`getYforLine(getLine(y)) + yruling(true)/2`, fixed for the gesture in `ScribbleArea::centerLineY`); it
-reuses the `LINE_DRAWING` path, so x follows the pen and no filters are installed. The toggle is a
+(`getYforLine(getLine(y)) + yruling(true)/2`, fixed for the gesture in `ScribbleArea::centerLineLocalY`);
+the stroke is one segment from the press to the pen at fixed pressure (the end point is replaced on every
+move), so x follows the pen and no filters are installed. This used to be the `LINE_DRAWING` rubber band;
+since Draw Lines became a straight-line assist (below) it is centre on line's own branch. The toggle is a
 toolbutton on the pen options row itself, after the widths (`PenToolbar::centerLineToggle`, the ruled
 eraser's `ic_menu_toggle_ruled` icon), shown only while the marker is the active tool - visibility is set
 in `setPen()` *before* its early return, since switching tools with an identical pen still changes it.
 Not covered by automated tests.
+
+# Draw Lines: straight-line assist
+
+The pen's **Draw Lines** option (`ScribblePen::LINE_DRAWING`, pen overflow menu / compact pen popup) used
+to be a rubber band: every stroke was one exact segment from pen-down to the pen, filters off, pressure
+fixed (`lineDrawPressure`, with debug keys `[` `]` for it and `\` to keep a corner). That is gone, not kept
+as an option. Now the pen draws **freehand with the normal filters and pressure**, and on pen-up
+`ScribbleArea::straightenLineStroke()` asks `straightenStroke()` (`linestraighten.h/.cpp`, pure geometry)
+whether the stroke is nearly straight. If it is, the builder is swapped for a new one fed the stroke's own
+raw samples slid onto the straight line(s) (`projectOntoStraightened()`, pressure, tilt and time kept, points
+that would step backwards dropped), with no filters, before `finish()` - so the straight stroke is what is
+committed, one undo step, and the pen-up simplification then reduces it. If not, nothing changes: the test
+is **all or nothing**, curves and handwriting stay exactly as drawn.
+
+- **Samples:** `lineSamples` is exactly what went into the builder (after grid snap and region clamp), in
+  page coordinates; `linePen` the resolved pen of the press (relative width already in document units). It
+  is measured in the gesture's ruling frame (`gestureFrame.toLocal`), so in a tilted region "horizontal"
+  is along its lines.
+- **Straight** (`LineStraightenParams`): every point within **4 %** of the chord's length from the chord
+  (`maxDeviation`; an arc passes up to ~18 degrees of turn) and a drawn length at most **1.15 x** the chord
+  (`maxPathRatio`, rejects doubling back). Strokes shorter than **12 screen units** (`LINE_STRAIGHTEN_MIN_LENGTH`
+  / `mScale`) are left alone.
+- **Corners:** if the whole is not straight, Ramer-Douglas-Peucker at 4 % of the drawn length splits it; at
+  most **3 pieces** (`maxSegments`), each straight by the test above and at least **12 %** of the drawn
+  length, and the direction must turn at least **35 degrees** at each corner (a gentler bend is a curve -
+  without this a 30 degree bow became two lines). A rectangle drawn in one stroke (4 pieces) is left alone.
+- **Snap:** each piece within **4 degrees** of horizontal/vertical, or **2.5 degrees** of a 45 degree diagonal,
+  is turned onto it (exact unit vectors, so a horizontal line has exactly equal y); the start stays where the
+  pen came down and each snapped piece's far end is projected onto the snapped direction. Off for a
+  Snap to Grid pen, whose corners are grid points already.
+- **Hold-to-snap stays disabled** for Draw Lines (`startShapeSnap`): a pause before lifting would turn the
+  line into a parametric shape instead of ink. So is the lift scratch-out, which reads hold-to-snap's samples.
+- **Centre on line** is checked first: a pen with both flags is centre on line (already straight).
+
+Known gaps: a hook at the end of a line (pen-lift flick) that is too big to stay within 4 % and too short to
+be a piece (12 %) makes the stroke fail, so it stays as drawn. The rebuilt stroke uses raw pressure (the
+filters that smoothed pressure on the live stroke are not reapplied). Not tested in the app (no
+`ScribbleTest` check yet); the geometry is tested standalone in `scribbletest/straightentest.cpp`
+(`runStraightenTests()`, command in its header, also run by `--test`).
 
 # Marker over scanned images
 

@@ -276,7 +276,8 @@ were all refused. 240 Hz sampling by itself cost nothing.
   of the gesture is `MODE_NONE`.
 - **The shape is not left selected** after the pen lifts, unlike the shape tool's `shapeEditAfterDraw`:
   `clearSelOnly` is on by default, so a selection would swallow the next handwriting stroke.
-- Disabled for ephemeral, line-drawing, snap-to-grid and centre-on-line pens.
+- Disabled for ephemeral, Draw Lines, snap-to-grid and centre-on-line pens (Draw Lines straightens on
+  pen-up instead, see [pen-and-tools.md](pen-and-tools.md#draw-lines-straight-line-assist)).
 
 Tested by `ScribbleTest::shapeSnapTest()`, which fires the hold by calling `checkShapeSnap()` with a
 time past the delay (the suite runs with `shapeSnapDelay` 0, so the wall-clock timer never interferes).

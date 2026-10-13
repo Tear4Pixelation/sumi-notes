@@ -13,6 +13,7 @@ SOURCES = \
   basics.cpp \
   strokebuilder.cpp \
   strokesimplify.cpp \
+  linestraighten.cpp \
   shape.cpp \
   shaperec.cpp \
   rulingregion.cpp \
