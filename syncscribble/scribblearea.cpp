@@ -1181,6 +1181,8 @@ void ScribbleArea::setSelRegionParams(const RulingRegionParams& params)
   // the item holds the parameters as they were; undo swaps them back
   scribbleDoc->history->addItem(new RegionChangedItem(region, currSelection->page));
   region->setRegionParams(params);
+  // resized, it may now be bigger or smaller than an image of its layer (Page::regionInsertPos)
+  currSelection->page->restackRegionsFor(region);
   scribbleDoc->endAction();
   currSelection->invalidateBBox();
   currSelection->xchgBGDirty(true);
@@ -4287,8 +4289,11 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
   case MODE_SHAPEHANDLE:
   {
     if(regionSelector) {
-      if(regionHandleStart.isValid())
+      if(regionHandleStart.isValid()) {
         scribbleDoc->history->addItem(new RegionChangedItem(regionSelector->region, currPage, regionHandleStart));
+        // resized by a handle: it may now be bigger or smaller than an image of its layer
+        currPage->restackRegionsFor(regionSelector->region);
+      }
       regionHandleStart = RulingRegionParams();
       shapeHandleIdx = -1;
       break;

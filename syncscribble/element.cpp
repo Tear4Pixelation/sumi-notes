@@ -999,8 +999,8 @@ void Element::updateFromNode()
     }
     params.sanitize();
     if(params.isValid()) {
-      // the region keeps the __layer it was read with: it is paper, but paper on a layer, stacked at the
-      //  bottom of that layer's run (Page::regionInsertPos)
+      // the region keeps the __layer it was read with: it is paper, but paper on a layer, stacked within
+      //  that layer's run by the size rule (Page::regionInsertPos)
       extra().region = params;
       rebuildRegion();
     }

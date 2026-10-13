@@ -159,10 +159,34 @@ public:
   //  "under all the ink on my layer", not under the whole page.  Images on the layer (scans) are
   //  skipped: the stroke goes above the last one, or a marker would vanish behind the picture
   Element* layerFirstElement(int layer) const;
-  // where a ruling region on `layer` goes: the bottom of that layer's run, above the layer's earlier
-  //  regions and below everything else on it - paper under that layer's ink and images, over every
-  //  lower layer (docs/agent/ruling-regions.md)
-  Element* regionInsertPos(int layer) const;
+  // The stacking rule for a ruling region within its own layer's run (docs/agent/ruling-regions.md):
+  //  the region goes just above the topmost image of the run that is bigger than it (by area,
+  //  imageUnderRegion()), or at the bottom of the run if there is none, above any regions already
+  //  there and below every other element - so it is paper over a scan and under the layer's ink and its
+  //  small images, and over every lower layer.  `region` may or may not be in the page; it is skipped.
+  Element* regionInsertPos(const Element* region, int layer) const;
+  // the size test behind it: true when `image` is an image whose bounding box has a larger area than
+  //  the region's outline.  Area, not position, so moving either never restacks; only resizing does.
+  static bool imageUnderRegion(const Element* image, const Element* region);
+  // Put `layer`'s regions where regionInsertPos() says, in document order; nothing moves when they
+  //  already are.  Only regions move - ink and images keep the order the user gave them.  The order is
+  //  derived, outside the undo system: every path that adds, removes, resizes or restacks an image or
+  //  region calls this (or restackRegionsFor()) afterwards, undo/redo and sync included, so each client
+  //  arrives at the same order.  Returns whether anything moved.
+  bool restackRegions(int layer);
+  // restackRegions() for `s`'s layer when `s` is an image or a region - the only elements the rule reads
+  void restackRegionsFor(const Element* s);
+  // `next`, or if it is a region on `layer`, the first element after it that is not - the sibling an
+  //  undo item should record for an element of `layer`, since a region's place is derived and may have
+  //  changed by the time the item replays.  An element not on the page is returned as NULL.
+  Element* skipLayerRegions(Element* next, int layer) const;
+  // where `s` goes back into the page (onto `layer`) when an undo item, sync or a layer move's undo
+  //  recorded `next` as its successor: a region beside the same-layer region it was recorded before, or
+  //  where the rule puts it; anything else before `next`, but past that layer's regions, and at the end
+  //  of its own run if `next` is now on another layer.  NULL `next` is the end of the page.
+  Element* restorePos(const Element* s, Element* next, int layer) const;
+  // z index of a layer id, 0 when there is no document (a clipping, the ghost page: one layer)
+  int layerZ(int layer) const;
   // Move an element to another layer, restacking it into that layer's run (at `next` if given).
   //  Returns the element it used to precede (NULL = it was last), which is exactly what an undo item
   //  needs to put it back: a layer change is also a z-order change, so restoring only the layer id

@@ -5722,14 +5722,54 @@ int ScribbleTest::rulingRegionTest()
     // a marker drawn under (layerFirstElement) goes above the patch, not behind its paper
     Element* under = lpage->layerFirstElement(top);
     check(under == ink, "draw-under on the patch's layer lands above the patch");
-    // a patch made on the lower layer stays under that layer's image, as before
+    // On the image's own layer the patch goes over an image bigger than it (the scan it is laid on) and
+    //  under one smaller than it (a sticker on the patch) - by area, Page::imageUnderRegion().  Every
+    //  check below that has the patch above an image fails against the old rule, which put a patch at
+    //  the bottom of its layer's run whatever was there.
     scribbleDoc->setLayerLocked(base, false);
     scribbleDoc->setCurrentLayer(base);
-    Element* lowPatch = scribbleArea->addRulingRegion(Rect::ltrb(100, 500, 400, 600));
+    Element* lowPatch = scribbleArea->addRulingRegion(Rect::ltrb(100, 500, 400, 600));  // 30000 vs 160000
     scribbleDoc->clearSelection();
-    check(lowPatch && lowPatch->layer() == base && indexOf(lowPatch) < indexOf(scan),
-        "a patch on the image's own layer stays at the bottom of that layer");
+    check(lowPatch && lowPatch->layer() == base && indexOf(lowPatch) > indexOf(scan),
+        "a patch on the image's own layer draws over an image bigger than it");
     check(lpage->regions().size() == 2, "regions() finds patches on every layer");
+    if(lowPatch) {
+      scribbleDoc->doUndoRedo(false);
+      check(!lowPatch->node->parent(), "undo takes the patch on the image's layer away");
+      scribbleDoc->doUndoRedo(true);
+      check(lowPatch->node->parent() && indexOf(lowPatch) > indexOf(scan),
+          "...and redo puts it back over the bigger image, not at the bottom of the layer");
+      // an image added after the patch: a bigger one goes under it, a smaller one over it
+      scribbleDoc->startAction(scribbleArea->currPageNum);
+      Element* scan2 = new Element(new SvgImage(Image(8, 8), Rect::ltwh(60, 380, 350, 350)));  // 122500
+      lpage->addStroke(scan2, NULL, base);
+      scribbleDoc->endAction();
+      check(indexOf(lowPatch) > indexOf(scan2), "a bigger image added later goes under the patch");
+      scribbleDoc->startAction(scribbleArea->currPageNum);
+      Element* sticker = new Element(new SvgImage(Image(8, 8), Rect::ltwh(150, 520, 30, 30)));  // 900
+      lpage->addStroke(sticker, NULL, base);
+      scribbleDoc->endAction();
+      check(indexOf(sticker) > indexOf(lowPatch) && indexOf(lowPatch) > indexOf(scan2),
+          "a smaller image stays over the patch, which stays over the bigger ones");
+      scribbleDoc->doUndoRedo(false);  // sticker
+      scribbleDoc->doUndoRedo(false);  // scan2
+      check(!scan2->node->parent() && indexOf(lowPatch) > indexOf(scan), "undoing the images keeps the patch over the scan");
+      scribbleDoc->doUndoRedo(true);
+      scribbleDoc->doUndoRedo(true);
+      check(scan2->node->parent() && sticker->node->parent() && indexOf(lowPatch) > indexOf(scan2)
+          && indexOf(sticker) > indexOf(lowPatch), "redoing them restacks the patch between the two again");
+      // resized bigger than every image of the layer it drops under all of them; undo lifts it back
+      scribbleArea->selectRegion(lowPatch);
+      RulingRegionParams grown = lowPatch->regionParams();
+      grown.corners = {Point(20, 20), Point(620, 20), Point(620, 760), Point(20, 760)};  // 444000
+      scribbleArea->setSelRegionParams(grown);
+      scribbleDoc->clearSelection();
+      check(indexOf(lowPatch) < indexOf(scan) && indexOf(lowPatch) < indexOf(scan2)
+          && indexOf(lowPatch) < indexOf(sticker), "a patch grown past the images drops under them");
+      scribbleDoc->doUndoRedo(false);
+      check(indexOf(lowPatch) > indexOf(scan2) && indexOf(lowPatch) < indexOf(sticker),
+          "undoing the resize puts the patch back between the big and small images");
+    }
     // and its "..." button obeys the lock: from another layer a locked layer's patch is out of reach
     check(lowPatch && scribbleArea->regionButtonHit(scribbleArea->regionButtonPos(lowPatch), false) == lowPatch,
         "a patch's button is reachable on its own layer");

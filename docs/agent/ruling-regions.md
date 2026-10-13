@@ -20,23 +20,49 @@ selection in `RegionSelector` (`selection.cpp`), the UI in `ScribbleArea` and th
   as a plain group. Parameter edits are `RegionChangedItem` (`<regionchanged>`); move/rotate/scale are
   ordinary transform items, because `Element::applyTransform()` has a region branch that maps the
   parameters (never a node transform, which would leave `__rr*` stale).
-- **On its layer, at the bottom of that layer's run.** A region gets the layer it was made on (`addStroke`
-  stamps the current layer like any element, `__layer` is written like any element's) and
-  `Page::regionInsertPos()` puts it after that layer's earlier regions and below everything else on the
-  layer - so over every lower layer, under its own layer's ink and images. Used by `addStroke` (whatever
-  sibling the caller names), `moveToLayer` (moving a region selection or removing its layer), undo/sync
-  replay (`reinsertPos()` in `syncundo.cpp`: only a region sibling on the same layer is trusted, a NULL or
-  vanished sibling means "on top") and page load, which re-homes every region in document order.
+- **On its layer, over the images bigger than it.** A region gets the layer it was made on (`addStroke`
+  stamps the current layer like any element, `__layer` is written like any element's). Across layers it
+  follows layer order: over every lower layer, under every higher one. Within its own layer's run,
+  `Page::regionInsertPos()` puts it just above the topmost image of the run that is **bigger than it**,
+  or at the bottom of the run if there is none - above regions already there, below every other
+  element. So a patch laid on a scan draws over the scan, and a sticker or photo smaller than the patch
+  still sits on it; ink of the layer stays over the patch.
+  - **"Bigger" = area** (`Page::imageUnderRegion()`): the image's bounding-box area against the area of
+    the region's own outline (shoelace over its corners, so a tilted patch is not inflated by its bbox);
+    a tie counts as smaller (image on top). Area, not "the image covers the patch": a patch laid over a
+    scan but poking past its edge would otherwise go *under* the scan and vanish, and an area test does
+    not depend on position, so moving an image or patch never restacks - only adding, removing,
+    resizing or changing layer does. Only top-level `<image>` elements count (not an image in a group),
+    as in `layerFirstElement`.
+  - **Only regions move.** Ink and images keep the order the user gave them; the regions' place is
+    derived. `Page::restackRegions(layer)` re-places a layer's regions by the rule (document order kept
+    among regions that land at the same spot; a no-op when already in place), outside the undo system,
+    and every path that can change the outcome calls it or `restackRegionsFor(s)` (images and regions
+    only): `addStroke`/`removeStroke` (create, paste, insert, Edit Image's replace), `moveToLayer` (both
+    layers), `Selection::commitTransform` and smart scale (a scale), the region panel and size handle
+    (`setSelRegionParams`, `MODE_SHAPEHANDLE` release), the undo items (`StrokeAdded`/`Deleted`,
+    `StrokeTransform`, `RegionChanged`; `StrokeLayerItem` via `moveToLayer`), which sync and persisted
+    undo replay too, and page load. Since the order is a function of the state, every client and every
+    undo/redo arrives at the same one.
+  - **Recorded siblings skip regions.** An undo item's `next` for ink or an image is taken past the
+    layer's regions (`skipLayerRegions()` in `removeStroke` and `moveToLayer`), because a restack may
+    move them before the item replays; replay goes through `Page::restorePos()` (`reinsertPos()` in
+    `syncundo.cpp` and `moveToLayer` with a `next`): a region goes back beside a same-layer region it was
+    recorded before, else where the rule puts it; anything else goes before its sibling, past regions,
+    and to the end of its own run if the sibling is now on another layer (it was the first element of
+    the layer above, possibly a region that has since moved up inside its own run).
   `layerFirstElement` skips a layer's regions as it skips its images, so draw-under lands above the
   patch's paper. `regions()`/`regionAt()` scan the whole page, as regions are no longer contiguous;
   `regionAt()` ignores a hidden layer's region (not drawn, so it rules nothing). The "..." button and
   insert space obey the layer's lock and visibility (`Page::isRegionEditable()`).
   *Why:* regions used to be on no layer (`REGION_LAYER`, -2, `zIndexOf() == -1`), always first in the page.
   That put every patch below **every** image, so a patch drawn on an upper layer vanished behind a scan
-  on a lower (typically locked) layer - the very case a patch exists for. Pinned by the layer block at
-  the end of `ScribbleTest::rulingRegionTest()`. An older file's region has no `__layer`, so it lands on
-  the default layer; a patch on the *same* layer as an image still draws under it (bottom of its run),
-  as before - move the image or the patch to another layer.
+  on a lower (typically locked) layer - the very case a patch exists for. Then (47bf513) a patch went to
+  the bottom of its own layer, so on the scan's own layer it still drew under the scan; the size rule
+  fixes that while keeping small images on top. Pinned by the layer block at the end of
+  `ScribbleTest::rulingRegionTest()` (big image under, small image over, undo/redo, resize past the
+  images). An older file's region has no `__layer`, so it lands on the default layer and is restacked
+  by the rule on load.
 - **Not ink.** `Page::isEditable()` returns false for a region - explicitly, since an unknown layer fails
   open - which keeps it out of every selection, eraser and insert space; `findStops` and the history panel's
   select lane needed their own skips. Deleting a selected region deletes only the region.
