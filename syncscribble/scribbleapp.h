@@ -245,7 +245,7 @@ public:
   void repaintBookmarks(bool newdoc = false);
   void refreshUI(ScribbleDoc* doc, int reason);
   bool oneTimeTip(const char* id, Point pos = {}, const char* message = NULL);
-  void showSelToolbar(Point pos);
+  void showSelToolbar(Point pos, bool pasteOnly = false);
   void doCommand(int cmd);
   void setClipboard(Clipboard* cb, const Page* srcpage, int flags);
   void loadClipboardText(const char* clipText, size_t len = 0);

@@ -105,6 +105,7 @@ public:
   Action* actionDelete_Selection;
   Action* actionCopy;
   Action* actionPaste;
+  Action* actionTapPaste;  // Paste at the tapped point, shown alone in the selection popup
   Action* actionDupSel;
   Action* actionInsertDocument;
   Action* actionInsert_PDF;
@@ -216,11 +217,12 @@ public:
   std::vector<Button*> selInkButtons;
   // Edit image on the selection popup, shown only when the selection is a single image
   Button* editImageBtn = NULL;
+  Button* selPasteBtn = NULL;
   ArrowPopup* moveLayerPopup = NULL;
   // color and width on the selection popup, shown only for an ink selection (PenToolbar::SELECTION_MODE)
   Widget* selColorItem = NULL;
   Widget* selWidthItem = NULL;
-  void refreshSelPopup();
+  void refreshSelPopup(bool pasteOnly = false);
   AutoAdjContainer* penToolbarAutoAdj;
   Widget* eraseOptsRow;
   Widget* selectOptsRow;

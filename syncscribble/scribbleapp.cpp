@@ -1744,11 +1744,11 @@ void ScribbleApp::hideBookmarks()
     win->toggleBookmarks();
 }
 
-void ScribbleApp::showSelToolbar(Point pos)
+void ScribbleApp::showSelToolbar(Point pos, bool pasteOnly)
 {
   // sel toolbar only opened on pen up, so don't make pressed (because outside_pressed event will invoke 2nd
   //  call to ScribbleArea::doReleaseEvent)
-  win->refreshSelPopup();
+  win->refreshSelPopup(pasteOnly);
   gui->showContextMenu(win->selPopup, pos, NULL, false);   //if(!pos.isNaN())
 }
 

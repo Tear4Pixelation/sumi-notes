@@ -63,13 +63,14 @@ With touch panning (a pen in use), a lone finger tap that nothing else claims - 
 It records `ScribbleInput::initPointerTime` (reset by every new press from any source) and the tap point, and
 starts a 560 ms timer, just past the 500 ms double tap window. When it fires, `tapPasteValid()` must still hold:
 `initPointerTime` unchanged (no second tap, pan, pinch or pen press since), nothing being scribbled, no
-selection, clipboard still non-empty. Then a single-item "Paste" `Menu` is shown at the tap
-(`showContextMenu`); choosing it runs `pasteAtTap()` -> `doPasteAt(... PasteCenter | PasteUndoable ...)` centred on
+selection, clipboard still non-empty. Then the **selection popup** (`selPopup`, the rounded floating bar) is shown at the tap holding only a Paste button
+(`ScribbleApp::showSelToolbar(pos, pasteOnly=true)` -> `refreshSelPopup(true)`), exactly as a screenshot region with
+nothing selected shows it with only the camera - one shared widget, theme tokens included, instead of a separate plain `Menu` (which read as a box); choosing it runs `pasteAtTap()` -> `doPasteAt(... PasteCenter | PasteUndoable ...)` centred on
 the tap (whole-page clipboards fall back to `doPaste`). The popup is deferred rather than immediate so a
 double tap (zoom) never flashes it. `doTouchTap` still returns false there, so the double tap clock is untouched.
 The two finger tap and the pen never reach `doTouchTap`, and a pen cancel ends the gesture before a click.
-Not offered when the touch tool draws (no pan, no `doTouchTap`). The menu is built once and parented to
-`#main-container`: `showContextMenu` reads its parent's bounds and crashes on an unparented menu.
+Not offered when the touch tool draws (no pan, no `doTouchTap`). The button is `actionTapPaste`
+(MainWindow, a friend of `ScribbleArea` for `pasteAtTap`); `refreshSelPopup(false)` hides it again for every other use.
 Pinned by `tapPasteTest` (arming, second press, pen and pan after the tap, two finger tap, pen tap, paste
 position). Gotcha: timestamps have millisecond resolution, so test steps need a few ms between them.
 

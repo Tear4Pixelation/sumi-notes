@@ -2450,13 +2450,8 @@ void ScribbleArea::showTapPaste()
 {
   if(!tapPasteValid())
     return;
-  if(!tapPasteMenu) {
-    tapPasteMenu = createMenu(Menu::FLOATING, false);  // kept: a fresh Menu per show has crashed before
-    tapPasteMenu->addItem(_("Paste"), [this](){ pasteAtTap(); });
-    // showContextMenu() positions against the menu's parent, so it must be in the tree (as selPopup is)
-    ScribbleApp::win->selectFirst("#main-container")->addWidget(tapPasteMenu);
-  }
-  ScribbleApp::gui->showContextMenu(tapPasteMenu, screenToGlobal(dimToScreen(tapPastePos)), NULL, false);
+  // the selection popup holding only Paste: what a region with nothing selected shows with only the camera
+  app->showSelToolbar(screenToGlobal(dimToScreen(tapPastePos)), true);
 }
 
 void ScribbleArea::pasteAtTap()
