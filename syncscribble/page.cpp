@@ -120,14 +120,17 @@ std::vector<Element*> Page::regions() const
   std::vector<Element*> result;
   if(!contentNode || !contentNode->hasExt())
     return result;
-  // regions are kept first in the page (REGION_LAYER sorts below every layer), so stop at the first
-  //  element that is not one
+  // each region sits at the bottom of its own layer's run, so they are spread through the page
   for(Element* s : children()) {
-    if(!s->isRulingRegion())
-      break;
-    result.push_back(s);
+    if(s->isRulingRegion())
+      result.push_back(s);
   }
   return result;
+}
+
+bool Page::isRegionEditable(const Element* region) const
+{
+  return !document || document->layers.isEditable(region->layer());
 }
 
 Element* Page::regionAt(Point pos) const
@@ -138,7 +141,10 @@ Element* Page::regionAt(Point pos) const
     return hit;
   for(Element* s : children()) {
     if(!s->isRulingRegion())
-      break;
+      continue;
+    // a region on a hidden layer is not drawn, so it rules nothing either
+    if(document && document->layers.isHidden(s->layer()))
+      continue;
     // later regions draw over earlier ones, so the last one containing pos is the one you see
     Point local = s->node->hasTransform() ? s->node->getTransform().inverse().map(pos) : pos;
     if(s->regionParams().contains(local))
@@ -674,20 +680,17 @@ bool Page::loadSVG(SvgDocument* doc)
     pageTagIds.clear();
     for(SvgNode* node : contentNode->children())
       onAddStroke(new Element(node));
-    // regions go below all ink; a file (or an older build) may have put ink ahead of one
-    std::vector<SvgNode*> regionNodes;
+    // a region goes at the bottom of its layer's run; a file (or an older build) may have put ink of
+    //  that layer ahead of one.  Taken in document order, so regions keep their order among themselves.
+    std::vector<Element*> regionElements;
     for(SvgNode* node : contentNode->children()) {
       if(node->hasExt() && static_cast<Element*>(node->ext())->isRulingRegion())
-        regionNodes.push_back(node);
+        regionElements.push_back(static_cast<Element*>(node->ext()));
     }
-    SvgNode* front = NULL;
-    for(SvgNode* node : contentNode->children()) {
-      if(!node->hasExt() || !static_cast<Element*>(node->ext())->isRulingRegion()) { front = node; break; }
-    }
-    for(SvgNode* node : regionNodes) {
-      if(!front) break;
-      contentNode->removeChild(node);
-      contentNode->addChild(node, front);
+    for(Element* region : regionElements) {
+      contentNode->removeChild(region->node);
+      Element* at = regionInsertPos(region->layer());
+      contentNode->addChild(region->node, at ? at->node : NULL);
     }
   }
 
@@ -808,7 +811,8 @@ Element* Page::layerFirstElement(int layer) const
     int sz = document->layers.zIndexOf(s->layer());
     if(sz < z)
       continue;
-    if(sz == z && s->node->type() == SvgNode::IMAGE) {
+    // a region on the layer is paper: a stroke put under it would vanish behind an opaque one
+    if(sz == z && (s->node->type() == SvgNode::IMAGE || s->isRulingRegion())) {
       first = NULL;
       continue;
     }
@@ -818,16 +822,29 @@ Element* Page::layerFirstElement(int layer) const
   return first;
 }
 
+Element* Page::regionInsertPos(int layer) const
+{
+  // no document (a clipping, the ghost page, a page loading before it has one): one layer, so the
+  //  region goes after the leading regions, below everything else
+  auto zOf = [this](int id) { return document ? document->layers.zIndexOf(id) : 0; };
+  int z = zOf(layer);
+  for(Element* s : children()) {
+    int sz = zOf(s->layer());
+    if(sz < z || (sz == z && s->isRulingRegion()))
+      continue;
+    return s;
+  }
+  return NULL;
+}
+
 Element* Page::moveToLayer(Element* s, int layer, Element* next)
 {
-  if(s->isRulingRegion())
-    layer = LayerList::REGION_LAYER;  // a region is on no layer, whatever the caller asked
   SvgNode* nextNode = contentNode->removeChild(s->node);
   Element* prevnext = nextNode ? static_cast<Element*>(nextNode->ext()) : NULL;
   s->setLayer(layer);
   if(document)
     s->node->setDisplayMode(document->layers.isHidden(layer) ? SvgNode::NoneMode : SvgNode::BlockMode);
-  Element* at = next ? next : layerInsertPos(layer);
+  Element* at = next ? next : (s->isRulingRegion() ? regionInsertPos(layer) : layerInsertPos(layer));
   contentNode->addChild(s->node, at ? at->node : NULL);
   return prevnext;
 }
@@ -855,8 +872,7 @@ bool Page::hasImageBackground() const
 bool Page::isEditable(const Element* s) const
 {
   // a ruling region is not ink: it is reached only through its own "..." button, never by ink
-  //  selection or an eraser.  This has to be explicit - REGION_LAYER is not in the layer table, and
-  //  an unknown layer fails open.
+  //  selection or an eraser.  This has to be explicit: a region is on an ordinary layer.
   if(s && s->isRulingRegion())
     return false;
   // no document means the ghost page or a clipping, neither of which has a layer table
@@ -865,16 +881,16 @@ bool Page::isEditable(const Element* s) const
 
 void Page::addStroke(Element* s, Element* next, int layer)
 {
-  // a region is never stamped with a layer: it stays below every layer's ink
-  if(s->isRulingRegion())
-    s->setLayer(LayerList::REGION_LAYER);
-  else if(document)
+  if(document)
     s->setLayer(layer == LayerList::LAYER_CURRENT ? document->layers.currentId : layer);
   // z-order within the page follows the layer table; an explicit `next` still wins, since the
   //  callers that pass one (draw-under, free-erase subpaths, undo replay) are placing the element
   //  relative to a sibling they already know is on the right layer
-  // a region goes below all ink even when a caller names a sibling that is ink
-  if(!next || s->isRulingRegion() != next->isRulingRegion())
+  // a region goes at the bottom of its layer, under that layer's ink and images and over every lower
+  //  layer, whatever sibling a caller names (docs/agent/ruling-regions.md)
+  if(s->isRulingRegion())
+    next = regionInsertPos(s->layer());
+  else if(!next || next->isRulingRegion())
     next = layerInsertPos(s->layer());
   contentNode->addChild(s->node, next ? next->node : NULL);
   if(document->history->undoable())

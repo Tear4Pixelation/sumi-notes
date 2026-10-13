@@ -106,6 +106,9 @@ public:
   // the topmost region containing `pos`, or NULL
   Element* regionAt(Point pos) const;
   std::vector<Element*> regions() const;
+  // a region's own controls ("..." button, insert space) obey its layer's lock and visibility, as ink
+  //  does; Page::isEditable() stays false for it, which is about ink tools, not these
+  bool isRegionEditable(const Element* region) const;
   // the area a frame's ruled tools may act over, in the frame's local coordinates: the page for the
   //  page's own ruling, the region's bounding box for a region's
   Rect frameExtent(const RulingFrame& frame) const;
@@ -156,6 +159,10 @@ public:
   //  "under all the ink on my layer", not under the whole page.  Images on the layer (scans) are
   //  skipped: the stroke goes above the last one, or a marker would vanish behind the picture
   Element* layerFirstElement(int layer) const;
+  // where a ruling region on `layer` goes: the bottom of that layer's run, above the layer's earlier
+  //  regions and below everything else on it - paper under that layer's ink and images, over every
+  //  lower layer (docs/agent/ruling-regions.md)
+  Element* regionInsertPos(int layer) const;
   // Move an element to another layer, restacking it into that layer's run (at `next` if given).
   //  Returns the element it used to precede (NULL = it was last), which is exactly what an undo item
   //  needs to put it back: a layer change is also a z-order change, so restoring only the layer id

@@ -5345,7 +5345,7 @@ int ScribbleTest::rulingRegionTest()
   scribbleArea->setSelRegionParams(params);
   scribbleDoc->clearSelection();
   check(elementAt(0) == region && elementAt(1) == before, "a region goes below ink written before it");
-  check(region->layer() == LayerList::REGION_LAYER, "a region is on no layer");
+  check(region->layer() == scribbleDoc->currentLayer(), "a region is on the layer it was made on");
 
   RulingFrame frame = region->regionParams().frame(region);
   Point inside = frame.toPage(frame.toLocal(Point(250, 320)));
@@ -5557,6 +5557,58 @@ int ScribbleTest::rulingRegionTest()
     }
     else
       check(false, "no region to test sync with");
+  }
+
+  // A Paper Patch follows layer order: made on an upper layer it draws over an image on a lower (locked)
+  //  layer - a scan put on its own locked layer is exactly what a patch is for.  Regions used to be on
+  //  no layer at all, first in the page, so every image on every layer covered them.
+  {
+    scribbleDoc->newDocument();
+    Page* lpage = scribbleArea->currPage;
+    const int base = scribbleDoc->currentLayer();
+    auto indexOf = [lpage](const Element* target) {
+      int idx = 0;
+      for(Element* s : lpage->children()) { if(s == target) return idx; ++idx; }
+      return -1;
+    };
+    scribbleDoc->startAction(scribbleArea->currPageNum);
+    Element* scan = new Element(new SvgImage(Image(8, 8), Rect::ltwh(50, 50, 400, 400)));
+    lpage->addStroke(scan);
+    scribbleDoc->endAction();
+    int top = scribbleDoc->addLayer("Top");
+    scribbleDoc->setCurrentLayer(top);
+    check(scribbleDoc->setLayerLocked(base, true), "the scan's layer can be locked");
+    scribbleDoc->app->setPen(ScribblePen(Color::BLACK, 2, ScribblePen::TIP_ROUND));
+    Element* ink = stroke({Point(150, 300), Point(250, 305)});
+    Element* patch = scribbleArea->addRulingRegion(Rect::ltrb(100, 200, 400, 440));
+    scribbleDoc->clearSelection();
+    check(patch && patch->layer() == top, "a patch made on the upper layer is on that layer");
+    check(patch && indexOf(patch) > indexOf(scan), "a patch on an upper layer draws over a lower layer's image");
+    check(patch && indexOf(patch) < indexOf(ink), "...and still under the ink of its own layer");
+    // undo replay re-homes it the same way
+    scribbleDoc->doUndoRedo(false);
+    check(patch && !patch->node->parent(), "undo takes the patch away");
+    scribbleDoc->doUndoRedo(true);
+    check(patch && patch->node->parent() && indexOf(patch) > indexOf(scan) && indexOf(patch) < indexOf(ink),
+        "undo and redo put the patch back between the image and the ink");
+    // a marker drawn under (layerFirstElement) goes above the patch, not behind its paper
+    Element* under = lpage->layerFirstElement(top);
+    check(under == ink, "draw-under on the patch's layer lands above the patch");
+    // a patch made on the lower layer stays under that layer's image, as before
+    scribbleDoc->setLayerLocked(base, false);
+    scribbleDoc->setCurrentLayer(base);
+    Element* lowPatch = scribbleArea->addRulingRegion(Rect::ltrb(100, 500, 400, 600));
+    scribbleDoc->clearSelection();
+    check(lowPatch && lowPatch->layer() == base && indexOf(lowPatch) < indexOf(scan),
+        "a patch on the image's own layer stays at the bottom of that layer");
+    check(lpage->regions().size() == 2, "regions() finds patches on every layer");
+    // and its "..." button obeys the lock: from another layer a locked layer's patch is out of reach
+    check(lowPatch && scribbleArea->regionButtonHit(scribbleArea->regionButtonPos(lowPatch), false) == lowPatch,
+        "a patch's button is reachable on its own layer");
+    scribbleDoc->setCurrentLayer(top);
+    scribbleDoc->setLayerLocked(base, true);
+    check(lowPatch && scribbleArea->regionButtonHit(scribbleArea->regionButtonPos(lowPatch), false) == NULL,
+        "a locked layer's patch has no button from another layer");
   }
 
   scribbleDoc->newDocument();

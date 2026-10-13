@@ -999,8 +999,9 @@ void Element::updateFromNode()
     }
     params.sanitize();
     if(params.isValid()) {
+      // the region keeps the __layer it was read with: it is paper, but paper on a layer, stacked at the
+      //  bottom of that layer's run (Page::regionInsertPos)
       extra().region = params;
-      m_layer = LayerList::REGION_LAYER;
       rebuildRegion();
     }
     return;
@@ -1058,7 +1059,6 @@ void Element::setRegionParams(const RulingRegionParams& params)
 {
   if(params.isValid() || m_extra)
     extra().region = params;
-  m_layer = LayerList::REGION_LAYER;
   rebuildRegion();
 }
 
@@ -1464,9 +1464,9 @@ void Element::serializeAttr(SvgWriter* writer)
     else
       node->removeAttr("__rraxes");
   }
-  // written only when non-default, so an unlayered document gains no attributes at all; a region's
-  //  REGION_LAYER is never written - the class is what identifies it
-  else if(m_layer != LayerList::DEFAULT_LAYER)
+  // written only when non-default, so an unlayered document gains no attributes at all.  A region has
+  //  one too (it used to be on no layer and draw below every layer, behind a lower layer's image)
+  if(m_layer != LayerList::DEFAULT_LAYER)
     node->setAttr("__layer", fstring("%d", m_layer).c_str());
   if(m_timestamp > 0 && !SVG_NO_TIMESTAMP)
     node->setAttr("__timestamp",

@@ -32,8 +32,6 @@ LayerInfo* LayerList::find(int id)
 
 int LayerList::zIndexOf(int id) const
 {
-  if(id == REGION_LAYER)
-    return -1;
   for(int idx = 0; idx < size(); ++idx) {
     if(layers[idx].id == id)
       return idx;
