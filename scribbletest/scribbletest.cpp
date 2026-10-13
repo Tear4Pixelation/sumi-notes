@@ -1115,6 +1115,117 @@ int ScribbleTest::penSelectionTest()
   return nbad;
 }
 
+// A pen's width is written by the width control and by nothing else (pen-and-tools.md, "Pen width is
+//  written in one place").  Each block below is a path that used to write it.
+int ScribbleTest::penWidthWriteTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: pen width write: %s\n", what); }
+  };
+  auto near = [](Dim a, Dim b) { return std::abs(a - b) < 1E-6*std::max(Dim(1), std::abs(b)); };
+  ScribbleApp* app = scribbleDoc->app;
+  PenToolbar* toolbar = app ? app->penToolbar : NULL;
+  if(!toolbar) {
+    check(false, "no pen toolbar");
+    return nbad;
+  }
+  scribbleDoc->newDocument();
+  int oldDrawTool = scribbleMode->drawTool;
+  ScribblePen oldPen = *app->getPen();
+  scribbleMode->drawTool = ScribbleMode::DRAWTOOL_PEN;
+  scribbleMode->setMode(MODE_STROKE);
+  SpinBox* spin = toolbar->spinWidth;
+  TextBox* spinText = static_cast<TextBox*>(spin->containerNode()->selectFirst(".spinbox_text")->ext());
+  const ScribblePen absPen(Color::BLACK, 1.6, ScribblePen::TIP_ROUND);
+  const ScribblePen relPen(Color::BLUE, 0.75, ScribblePen::TIP_CHISEL | ScribblePen::WIDTH_RELATIVE);
+
+  // a width typed and not committed (the iPad's number pad has no Return) is committed when the width
+  //  popup hides - and setPen() hid it after taking the next pen, so 30 units typed for the pen became
+  //  the relative pen's 30 line heights.  Hiding sends the focus loss only to a popup that is on screen,
+  //  and the test's toolbar may not be, so whatever hides it is shown for the duration.
+  std::vector<Widget*> unhidden;
+  for(Widget* ancestor = toolbar->widthPopup->parent(); ancestor; ancestor = ancestor->parent()) {
+    if(!ancestor->isVisible()) {
+      ancestor->setVisible(true);
+      unhidden.push_back(ancestor);
+    }
+  }
+  app->setPen(absPen);
+  app->updatePenToolbar();
+  openAutoClosePopup(toolbar->widthPopup);
+  app->gui->setFocused(spin);
+  spinText->setText("30");
+  check(toolbar->widthPopup->isDisplayed() && spin->window()->focusedWidget == spin,
+      "(setup) the width popup is up with 30 typed into its box");
+  app->setPen(relPen);
+  app->updatePenToolbar();
+  closeAutoClosePopup(toolbar->widthPopup);
+  for(Widget* ancestor : unhidden)
+    ancestor->setVisible(false);
+  check(near(app->getPen()->width, 0.75) && app->getPen()->hasFlag(ScribblePen::WIDTH_RELATIVE),
+      "a width typed for one pen does not land on the pen switched to");
+
+  // any other change hands back the toolbar's whole pen: a width the toolbar holds and the pen does not
+  //  must not become the pen's
+  toolbar->pen.width = 2.5;
+  toolbar->onChanged(PenToolbar::COLOR_CHANGED);
+  check(near(app->getPen()->width, 0.75), "a color change does not write the width");
+  toolbar->pen.setFlag(ScribblePen::WIDTH_RELATIVE, false);
+  toolbar->onChanged(PenToolbar::PEN_CHANGED);
+  check(app->getPen()->hasFlag(ScribblePen::WIDTH_RELATIVE) && near(app->getPen()->width, 0.75),
+      "a flag change does not write the width's unit");
+  app->updatePenToolbar();
+  check(near(toolbar->pen.width, 0.75), "the toolbar shows the pen's width again");
+  // ...while the width control still does
+  spin->setValue(0.5);
+  toolbar->updateWidth();
+  check(near(app->getPen()->width, 0.5) && app->getPen()->hasFlag(ScribblePen::WIDTH_RELATIVE),
+      "the width control sets the width");
+
+  // the selection popup's width item, with the toolbar on the pen, edits nothing
+  for(auto& sw : toolbar->singleWidths) {
+    if(sw->selectionOnly)
+      toolbar->setSingleWidth(sw.get(), 3.2);
+  }
+  check(near(app->getPen()->width, 0.5), "the selection popup's width item does not write the pen");
+
+  // Return without an edit re-parses the box's "%.3g" text, which must not round the pen
+  const Dim fine = 0.0311111;
+  app->setPen(ScribblePen(Color::BLACK, fine, ScribblePen::TIP_ROUND | ScribblePen::WIDTH_RELATIVE));
+  app->updatePenToolbar();
+  spin->updateValueFromText(spinText->text().c_str());
+  check(app->getPen()->width == fine, "Return on the unchanged width does not round it");
+
+  // saved and loaded: a marker the user turned absolute stays absolute (it was converted back to line
+  //  heights on every start), and a fine relative pen keeps its width (it was raised to 0.01 line heights)
+  {
+    ScribbleConfig modesCfg;
+    ScribbleMode saved(&modesCfg);
+    saved.loadModes("");
+    saved.highlightPen = ScribblePen(Color(255, 64, 224, 165), 30,
+        ScribblePen::TIP_CHISEL | ScribblePen::DRAW_UNDER);
+    saved.drawPen = ScribblePen(Color::BLACK, 0.25/40, ScribblePen::TIP_ROUND | ScribblePen::WIDTH_RELATIVE);
+    std::string modes = saved.saveModes();
+    ScribbleMode loaded(&modesCfg);
+    loaded.loadModes(modes.c_str());
+    check(!loaded.highlightPen.hasFlag(ScribblePen::WIDTH_RELATIVE) && near(loaded.highlightPen.width, 30),
+        "a marker turned absolute loads absolute and as wide");
+    check(loaded.drawPen.hasFlag(ScribblePen::WIDTH_RELATIVE) && near(loaded.drawPen.width, 0.25/40),
+        "a fine relative pen loads as fine");
+    // a config from before relative widths (no unit word) still has its marker converted, once
+    loaded.loadModes("0 0 0 0 0 0  4278190080 0 1.6 0 0 0 0 0 0  2768257216 0 30 0 0 0 0 0 0");
+    check(loaded.highlightPen.hasFlag(ScribblePen::WIDTH_RELATIVE)
+        && near(loaded.highlightPen.width, 30/Page::BLANK_Y_RULING), "an old absolute marker is converted");
+  }
+
+  scribbleMode->drawTool = oldDrawTool;
+  app->setPen(oldPen);
+  app->updatePenToolbar();
+  scribbleDoc->newDocument();
+  return nbad;
+}
+
 // MainWindow::refreshUI() pushes the pen into the toolbar after every stroke, and PenToolbar::setPen()
 //  returns early when nothing it draws has changed.  That early-out was dead for years: operator==
 //  compared the pen with memcmp, padding included, and identical pens built in different places
@@ -5787,6 +5898,7 @@ void ScribbleTest::runAll(bool runsynctest)
   nUnitFailed += dashStyleTest();
   nUnitFailed += penWidthPresetTest();
   nUnitFailed += penSelectionTest();
+  nUnitFailed += penWidthWriteTest();
   nUnitFailed += penToolbarRefreshTest();
   nUnitFailed += outlineTest();
   nUnitFailed += imageCropTest();

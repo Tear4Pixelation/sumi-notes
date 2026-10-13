@@ -89,6 +89,9 @@ ScribblePen& ScribbleMode::penForDrawTool(int tool)
   }
 }
 
+// the last word of saveModes(); see loadModes()
+static const char* MARKER_UNIT_KEPT = "markerunit";
+
 static void writePen(std::ostream& ss, const ScribblePen& pen)
 {
   ss << ' ' << pen.color.color << ' ' << pen.flags << ' ' << pen.width << ' ' << pen.wRatio
@@ -115,8 +118,10 @@ static void readPen(std::istream& ss, ScribblePen& pen, unsigned int reqflags)
     loaded.width = maxwidth;
     loaded.setDashStyle(dashstyle);
   }
-  else if(loaded.width < WidthPresets::MIN_WIDTH)
-    loaded.width = WidthPresets::MIN_WIDTH;
+  // the floor is per unit: with the absolute one (0.01) a fine relative pen (0.25 units = 0.006 line
+  //  heights) was raised to 0.4 units on every start
+  else if(loaded.width < WidthPresets::minWidth(loaded.hasFlag(ScribblePen::WIDTH_RELATIVE)))
+    loaded.width = WidthPresets::minWidth(loaded.hasFlag(ScribblePen::WIDTH_RELATIVE));
   pen = loaded;
 }
 
@@ -137,6 +142,9 @@ std::string ScribbleMode::saveModes()
      << ' ' << int(selectTouching) << ' ' << int(insSpaceSkipLines);
   // the Tape tool's pen, after everything an older version reads (docs/agent/tape.md)
   writePen(ss, tapePen);
+  // says the marker's unit is the user's: a config without it predates relative widths, or comes from a
+  //  build that forced the marker relative on every start, and loadModes() converts it once
+  ss << ' ' << MARKER_UNIT_KEPT;
   return ss.str();
 }
 
@@ -194,23 +202,6 @@ void ScribbleMode::loadModes(const char* modestr)
     (void)mode;
   readPen(ss, drawPen, 0);
   readPen(ss, highlightPen, ScribblePen::DRAW_UNDER);
-  // The marker's width is a fraction of the line height, always - that is the number that means
-  //  something for a tool whose job is to cover a line of text, and it is the default above.  A config
-  //  written before relative widths existed (or with the toggle turned off) carries an absolute width,
-  //  so it is converted here rather than reinterpreted: 30 units would otherwise load as 30 line
-  //  heights.  The page being drawn on is not known yet, so the blank-page ruling is the unit; it is
-  //  the same fallback PenToolbar::lineHeight() uses when a page has none.
-  // A marker preset list saved with its unit ("rel:"/"abs:", see WidthPresets) is converted along with
-  //  the pen by PenToolbar::prepareWidths().  An older one has no unit to convert by, so it is cleared
-  //  and reseeded (in line heights) there.  This runs before the toolbar is built, which is what makes
-  //  clearing the config value enough.
-  if(!highlightPen.hasFlag(ScribblePen::WIDTH_RELATIVE)) {
-    highlightPen.width = highlightPen.width/Page::BLANK_Y_RULING;
-    highlightPen.setFlag(ScribblePen::WIDTH_RELATIVE, true);
-    const char* markerWidths = cfg->String("savedMarkerWidths", "");
-    if(strncmp(markerWidths, "rel:", 4) != 0 && strncmp(markerWidths, "abs:", 4) != 0)
-      cfg->set("savedMarkerWidths", "");
-  }
   readPen(ss, ephemeralPen, ScribblePen::EPHEMERAL);
   std::string shapestr;
   if(ss >> shapestr) {
@@ -233,6 +224,29 @@ void ScribbleMode::loadModes(const char* modestr)
   // relative size is the default (above) but not forced, unlike TAPE: a pen saved with the toggle off holds
   //  an absolute width, and forcing the flag would reinterpret it as line heights
   readPen(ss, tapePen, ScribblePen::TAPE);
+  std::string unitKept;
+  bool markerUnitKept = (ss >> unitKept) && unitKept == MARKER_UNIT_KEPT;
+  // The marker's width is a fraction of the line height, always - that is the number that means
+  //  something for a tool whose job is to cover a line of text, and it is the default above.  A config
+  //  written before relative widths existed (or with the toggle turned off) carries an absolute width,
+  //  so it is converted here rather than reinterpreted: 30 units would otherwise load as 30 line
+  //  heights.  The page being drawn on is not known yet, so the blank-page ruling is the unit; it is
+  //  the same fallback PenToolbar::lineHeight() uses when a page has none.
+  // A marker preset list saved with its unit ("rel:"/"abs:", see WidthPresets) is converted along with
+  //  the pen by PenToolbar::prepareWidths().  An older one has no unit to convert by, so it is cleared
+  //  and reseeded (in line heights) there.  This runs before the toolbar is built, which is what makes
+  //  clearing the config value enough.
+  // Only once, though: this ran on every start, so a marker the user had turned absolute (Relative size
+  //  off) came back relative at 30/BLANK_Y_RULING, a different thickness on any other ruling - a pen
+  //  width rewritten with no edit at all.  A config carrying MARKER_UNIT_KEPT was written by a build that
+  //  honors the toggle, and its marker is loaded exactly as saved.
+  if(!markerUnitKept && !highlightPen.hasFlag(ScribblePen::WIDTH_RELATIVE)) {
+    highlightPen.width = highlightPen.width/Page::BLANK_Y_RULING;
+    highlightPen.setFlag(ScribblePen::WIDTH_RELATIVE, true);
+    const char* markerWidths = cfg->String("savedMarkerWidths", "");
+    if(strncmp(markerWidths, "rel:", 4) != 0 && strncmp(markerWidths, "abs:", 4) != 0)
+      cfg->set("savedMarkerWidths", "");
+  }
 }
 
 void ScribbleMode::setMode(int mode, bool once)
