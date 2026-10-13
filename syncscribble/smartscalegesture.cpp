@@ -178,6 +178,9 @@ void ScribbleArea::smartScaleFinish()
         hist->addItem(new StrokeTransformItem(s, page, tf));
     }
     s->commitTransform();
+    // a scaled image can change which side of a region of its layer it belongs on (Page::regionInsertPos)
+    if(!tf.isTranslate())
+      page->restackRegionsFor(s);
   };
   for(Element* s : gesture->strokes)
     commit(s);

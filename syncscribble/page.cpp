@@ -683,18 +683,18 @@ bool Page::loadSVG(SvgDocument* doc)
     pageTagIds.clear();
     for(SvgNode* node : contentNode->children())
       onAddStroke(new Element(node));
-    // a region goes at the bottom of its layer's run; a file (or an older build) may have put ink of
-    //  that layer ahead of one.  Taken in document order, so regions keep their order among themselves.
-    std::vector<Element*> regionElements;
+    // a region goes where Page::regionInsertPos() puts it within its layer's run; a file (or an older
+    //  build) may have put it elsewhere.  restackRegions() keeps document order among them.
+    std::vector<int> regionLayers;
     for(SvgNode* node : contentNode->children()) {
-      if(node->hasExt() && static_cast<Element*>(node->ext())->isRulingRegion())
-        regionElements.push_back(static_cast<Element*>(node->ext()));
+      if(node->hasExt() && static_cast<Element*>(node->ext())->isRulingRegion()) {
+        int layer = static_cast<Element*>(node->ext())->layer();
+        if(std::find(regionLayers.begin(), regionLayers.end(), layer) == regionLayers.end())
+          regionLayers.push_back(layer);
+      }
     }
-    for(Element* region : regionElements) {
-      contentNode->removeChild(region->node);
-      Element* at = regionInsertPos(region->layer());
-      contentNode->addChild(region->node, at ? at->node : NULL);
-    }
+    for(int layer : regionLayers)
+      restackRegions(layer);
   }
 
   if(svgDoc->width().isPercent() || svgDoc->height().isPercent()) {
@@ -825,30 +825,147 @@ Element* Page::layerFirstElement(int layer) const
   return first;
 }
 
-Element* Page::regionInsertPos(int layer) const
+int Page::layerZ(int layer) const
 {
-  // no document (a clipping, the ghost page, a page loading before it has one): one layer, so the
-  //  region goes after the leading regions, below everything else
-  auto zOf = [this](int id) { return document ? document->layers.zIndexOf(id) : 0; };
-  int z = zOf(layer);
+  return document ? document->layers.zIndexOf(layer) : 0;
+}
+
+bool Page::imageUnderRegion(const Element* image, const Element* region)
+{
+  if(image->node->type() != SvgNode::IMAGE || !region->isRulingRegion())
+    return false;
+  // the region's own outline (shoelace), not its bbox: a tilted patch's bbox is far larger than it is
+  const std::vector<Point>& pts = region->regionParams().corners;
+  Dim twiceArea = 0;
+  for(size_t i = 0; i < pts.size(); ++i) {
+    const Point& a = pts[i];
+    const Point& b = pts[(i + 1) % pts.size()];
+    twiceArea += a.x*b.y - b.x*a.y;
+  }
+  Rect ib = image->bbox();
+  return ib.isValid() && ib.width()*ib.height() > std::abs(twiceArea)/2;
+}
+
+Element* Page::regionInsertPos(const Element* region, int layer) const
+{
+  // no document (a clipping, the ghost page, a page loading before it has one): one layer
+  int z = layerZ(layer);
+  // `open`: nothing of the run seen since the last image bigger than the region (or since the run
+  //  began), so the region goes before the next element that is not itself a region
+  Element* pos = NULL;
+  bool open = true;
   for(Element* s : children()) {
-    int sz = zOf(s->layer());
-    if(sz < z || (sz == z && s->isRulingRegion()))
+    if(s == region)
       continue;
-    return s;
+    int sz = layerZ(s->layer());
+    if(sz < z)
+      continue;
+    if(sz > z)
+      return open ? s : pos;
+    if(s->isRulingRegion())
+      continue;
+    if(imageUnderRegion(s, region))
+      open = true;
+    else if(open) {
+      pos = s;
+      open = false;
+    }
+  }
+  return open ? NULL : pos;
+}
+
+Element* Page::skipLayerRegions(Element* next, int layer) const
+{
+  if(!next || !next->isRulingRegion())
+    return next;
+  int z = layerZ(layer);
+  bool found = false;
+  for(Element* s : children()) {
+    if(!found && s != next)
+      continue;
+    found = true;
+    if(!(s->isRulingRegion() && layerZ(s->layer()) == z))
+      return s;
   }
   return NULL;
 }
 
+Element* Page::restorePos(const Element* s, Element* next, int layer) const
+{
+  // A region: a NULL `next` (it was last), a peer's ink arriving since, or the sibling deleted by a
+  //  peer (which also appends) would all put an opaque region over ink; only a sibling that is itself a
+  //  region on the same layer is a safe place to go back to, and restackRegions() settles even that.
+  if(s->isRulingRegion()) {
+    if(next && next->isRulingRegion() && next->node->parent() == contentNode
+        && layerZ(next->layer()) == layerZ(layer))
+      return next;
+    return regionInsertPos(s, layer);
+  }
+  if(!next)
+    return NULL;
+  // recorded as the first element of a higher layer: the end of our own run.  That element may be a
+  //  region, which can since have moved up inside its own run - going before it would then put `s` in
+  //  the wrong layer's run.
+  if(layerZ(next->layer()) != layerZ(layer))
+    return layerInsertPos(layer);
+  return skipLayerRegions(next, layer);
+}
+
+bool Page::restackRegions(int layer)
+{
+  if(!contentNode)
+    return false;
+  int z = layerZ(layer);
+  std::vector<Element*> regions;
+  for(Element* s : children()) {
+    if(s->isRulingRegion() && layerZ(s->layer()) == z)
+      regions.push_back(s);
+  }
+  // in place when each region's successor (past its fellow regions) is where the rule puts it
+  bool inPlace = true;
+  for(Element* region : regions) {
+    if(skipLayerRegions(region, region->layer()) != regionInsertPos(region, region->layer())) {
+      inPlace = false;
+      break;
+    }
+  }
+  if(inPlace)
+    return false;
+  for(Element* region : regions)
+    contentNode->removeChild(region->node);
+  // in document order: regions that land at the same place keep their order among themselves
+  for(Element* region : regions) {
+    Element* at = regionInsertPos(region, region->layer());
+    contentNode->addChild(region->node, at ? at->node : NULL);
+  }
+  return true;
+}
+
+void Page::restackRegionsFor(const Element* s)
+{
+  if(s && (s->isRulingRegion() || s->node->type() == SvgNode::IMAGE))
+    restackRegions(s->layer());
+}
+
 Element* Page::moveToLayer(Element* s, int layer, Element* next)
 {
+  int oldlayer = s->layer();
   SvgNode* nextNode = contentNode->removeChild(s->node);
   Element* prevnext = nextNode ? static_cast<Element*>(nextNode->ext()) : NULL;
+  // what undo puts it back before: past its old layer's regions, which the restack below may move
+  if(!s->isRulingRegion())
+    prevnext = skipLayerRegions(prevnext, oldlayer);
   s->setLayer(layer);
   if(document)
     s->node->setDisplayMode(document->layers.isHidden(layer) ? SvgNode::NoneMode : SvgNode::BlockMode);
-  Element* at = next ? next : (s->isRulingRegion() ? regionInsertPos(layer) : layerInsertPos(layer));
+  Element* at = next ? restorePos(s, next, layer)
+      : (s->isRulingRegion() ? regionInsertPos(s, layer) : layerInsertPos(layer));
   contentNode->addChild(s->node, at ? at->node : NULL);
+  // an image or region leaving one layer and joining another changes what both layers' regions sit on
+  if(s->isRulingRegion() || s->node->type() == SvgNode::IMAGE) {
+    restackRegions(oldlayer);
+    restackRegions(layer);
+  }
   return prevnext;
 }
 
@@ -889,10 +1006,11 @@ void Page::addStroke(Element* s, Element* next, int layer)
   // z-order within the page follows the layer table; an explicit `next` still wins, since the
   //  callers that pass one (draw-under, free-erase subpaths, undo replay) are placing the element
   //  relative to a sibling they already know is on the right layer
-  // a region goes at the bottom of its layer, under that layer's ink and images and over every lower
-  //  layer, whatever sibling a caller names (docs/agent/ruling-regions.md)
+  // a region goes where the stacking rule puts it within its layer (over bigger images, under the
+  //  layer's ink and smaller images, over every lower layer), whatever sibling a caller names
+  //  (docs/agent/ruling-regions.md)
   if(s->isRulingRegion())
-    next = regionInsertPos(s->layer());
+    next = regionInsertPos(s, s->layer());
   else if(!next || next->isRulingRegion())
     next = layerInsertPos(s->layer());
   contentNode->addChild(s->node, next ? next->node : NULL);
@@ -901,18 +1019,31 @@ void Page::addStroke(Element* s, Element* next, int layer)
   if(s->timestamp() <= 0)
     s->setTimestamp(mSecSinceEpoch());
   onAddStroke(s);
+  // a new image may be bigger than a region of its layer, which then goes over it
+  if(!s->isRulingRegion())
+    restackRegionsFor(s);
 }
 
 void Page::removeStroke(Element* s)
 {
   onRemoveStroke(s);
+  // read before s can be deleted below
+  bool isImage = s->node->type() == SvgNode::IMAGE;
+  int layer = s->layer();
   SvgNode* nextNode = contentNode->removeChild(s->node);
   if(document->history->undoable()) {
     Element* next = nextNode ? static_cast<Element*>(nextNode->ext()) : NULL;
+    // past the layer's regions: the restack below can move them, and undo must put `s` back among the
+    //  ink and images, which do not move
+    if(!s->isRulingRegion())
+      next = skipLayerRegions(next, s->layer());
     document->history->addItem(new StrokeDeletedItem(s, this, next));
   }
   else
     s->deleteNode();
+  // a region that sat over this image goes back down to where the rule now puts it
+  if(isImage)
+    restackRegions(layer);
 }
 
 void Page::onAddStroke(Element* s)

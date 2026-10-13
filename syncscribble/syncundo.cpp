@@ -29,14 +29,6 @@ void StrokeUndoItem::discard(bool undone)
     page->dirtyCount = SAVED_STATE_DISCARDED;
 }
 
-// StrokeAddedItem
-void StrokeAddedItem::undo()
-{
-  StrokeUndoItem::undo();
-  page->onRemoveStroke(s);
-  page->contentNode->removeChild(s->node);
-}
-
 // A stroke put back into a page takes its layer's visibility: the layer may have been hidden while the
 //  stroke was out of the page (undo of a delete), or on this client only (a peer drawing on a layer we
 //  have hidden).  Visibility is otherwise applied only when the table changes or a page loads.
@@ -47,20 +39,23 @@ static void applyLayerVisibility(Element* s, Page* page)
         SvgNode::NoneMode : SvgNode::BlockMode);
 }
 
-// Where a stroke goes back into its page.  Normally the recorded sibling; but a ruling region must end
-//  up at the bottom of its own layer's run (below that layer's ink, above lower layers), and its recorded
-//  sibling is not enough to guarantee that: a NULL `next` (it was the last element) means "on top", and
-//  under sync a peer's ink can have arrived since, or the sibling can have been deleted by a peer, which
-//  also appends.  Either would put an opaque region over ink.  Only a sibling that is itself a region on
-//  the same layer is a safe place to go back to.
+// Where a stroke goes back into its page: Page::restorePos(), which keeps a ruling region where the
+//  stacking rule puts it (docs/agent/ruling-regions.md) rather than trusting a recorded sibling that sync
+//  or a restack may have moved.  Every add and remove of an image or region below is followed by
+//  Page::restackRegionsFor(), since a region's place within its layer depends on the images there.
 static SvgNode* reinsertPos(Element* s, Page* page, Element* next)
 {
-  if(s->isRulingRegion() && !(next && next->isRulingRegion() && next->layer() == s->layer()
-      && next->node->parent() == page->contentNode)) {
-    Element* pos = page->regionInsertPos(s->layer());
-    return pos ? pos->node : NULL;
-  }
-  return next ? next->node : NULL;
+  Element* pos = page->restorePos(s, next, s->layer());
+  return pos ? pos->node : NULL;
+}
+
+// StrokeAddedItem
+void StrokeAddedItem::undo()
+{
+  StrokeUndoItem::undo();
+  page->onRemoveStroke(s);
+  page->contentNode->removeChild(s->node);
+  page->restackRegionsFor(s);
 }
 
 void StrokeAddedItem::redo()
@@ -68,6 +63,7 @@ void StrokeAddedItem::redo()
   applyLayerVisibility(s, page);
   page->contentNode->addChild(s->node, reinsertPos(s, page, next));
   page->onAddStroke(s);
+  page->restackRegionsFor(s);
   StrokeUndoItem::redo();
 }
 
@@ -83,6 +79,7 @@ void StrokeDeletedItem::undo()
   applyLayerVisibility(s, page);
   page->contentNode->addChild(s->node, reinsertPos(s, page, next));
   page->onAddStroke(s);
+  page->restackRegionsFor(s);
   StrokeUndoItem::undo();
 }
 
@@ -91,6 +88,7 @@ void StrokeDeletedItem::redo()
   StrokeUndoItem::redo();
   page->onRemoveStroke(s);
   page->contentNode->removeChild(s->node);
+  page->restackRegionsFor(s);
 }
 
 void StrokeDeletedItem::discard(bool undone)
@@ -179,6 +177,8 @@ void RegionChangedItem::swapParams()
   s->setRegionParams(params);
   s->rebuildRegion(page->props.color, page->props.ruleColor);
   params = temp;
+  // a resized region can now be bigger or smaller than an image of its layer
+  page->restackRegionsFor(s);
 }
 
 void RegionChangedItem::undo()
@@ -254,6 +254,7 @@ void StrokeTransformItem::undo()
 {
   s->applyTransform(transform.inverse());
   s->commitTransform();
+  page->restackRegionsFor(s);  // a scale changes the area the region stacking rule compares
   StrokeUndoItem::undo();
 }
 
@@ -261,6 +262,7 @@ void StrokeTransformItem::redo()
 {
   s->applyTransform(transform);
   s->commitTransform();
+  page->restackRegionsFor(s);  // a scale changes the area the region stacking rule compares
   StrokeUndoItem::redo();
 }
 

@@ -30,7 +30,8 @@ layer and drop the rest on save. The attribute has no such failure mode.
   and sync are unaffected because both express position as a *sibling node*, which this only chooses
   differently. `DRAW_UNDER` had to become "under this layer's content" (`layerFirstElement`) rather
   than "first child of the page", or it would drop a stroke outside its own layer's run.
-  A Paper Patch (ruling region) is on a layer too, at the bottom of its run (`regionInsertPos`); it
+  A Paper Patch (ruling region) is on a layer too: within its run it sits just above the images
+  bigger than it and below everything else (`regionInsertPos`, restacked by `restackRegions`); it
   was once on no layer below all of them, which hid it behind a lower layer's image - see
   [ruling-regions.md](ruling-regions.md).
 - **The edit gate is `Page::isEditable()`, and it is consulted in exactly three places.**

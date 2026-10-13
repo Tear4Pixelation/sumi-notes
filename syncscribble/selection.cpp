@@ -312,6 +312,12 @@ void Selection::commitTransform()
     }
     node->commitTransform();
   }
+  // a scaled image or region can change which of them is bigger, and so the region stacking order
+  //  (Page::regionInsertPos); a translation cannot, the rule reads only areas
+  if(istf) {
+    for(Element* node : strokes)
+      page->restackRegionsFor(node);
+  }
   transform.reset();
 }
 
