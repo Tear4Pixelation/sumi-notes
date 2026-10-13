@@ -117,6 +117,16 @@ the next toggle of the same strip cancels out), not a non-undoable toggle.
 - The **free eraser** and the **ruled free eraser** take a strip whole (into `tempSelection`, deleted on
   release like a stroke-erased element) rather than cutting it: `toPenPoints()` would read the rectangle as
   pen geometry, and a hole in a strip of tape means nothing.
+- **Erased tape disappears while the eraser is still down**, like ink. Every eraser collects what it touched
+  in a `STROKEDRAW_NONE` `tempSelection`, which hides each element by `setDisplayMode(AbsoluteMode)`; the
+  tree walk (`SvgPainter`) skips AbsoluteMode children, and the strokes are only deleted on release. The
+  tape second pass in `Page::draw` calls `drawNode()` on each strip directly, so it bypassed that skip and
+  kept painting an erased strip until pen-up (bug: "tape erasure only shows on release"). The pass now
+  checks `displayMode() != SvgNode::AbsoluteMode` as well as `isVisible()`. The dirt was always right - the
+  ink under it repainted live - only the pass ignored the hide. Erasing is still one undo step (unchanged).
+  Same check covers a selection dragged off the page (`STROKEDRAW_NONE`, drawn on the overlay): its strip
+  is no longer also painted at its old place on the page. Rule: anything new that draws nodes outside the
+  tree walk must honour AbsoluteMode.
 
 ## Toolbar and icon
 
@@ -138,3 +148,4 @@ the next toggle of the same strip cancels out), not a non-undoable toggle.
   save, restart and reload keep `__tape="0"`; the toggle survives in the persisted undo history; centre on
   line snaps a slanted drag to the line; a tap off any strip lays nothing; the ruled eraser takes the strip.
   Not driven: a finger (agent-display has no touch), layers other than the default, the free eraser, sync.
+  Erased tape gone while the eraser is held: checked with `stroke ... @8000` and a `shot` during the hold.

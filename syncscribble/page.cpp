@@ -429,8 +429,11 @@ void Page::draw(Painter* painter, const Rect& dirty, bool rulelines)
     SvgPainter(painter).drawNode(svgDoc.get(), dirty);
     SvgPainter::skipNode = prevSkip;
     tapePrevSkip = NULL;
+    // AbsoluteMode is how an element in an eraser's tempSelection (STROKEDRAW_NONE) is hidden until release:
+    //  the tree walk skips such children, so drawing the node directly has to as well (docs/agent/tape.md)
     for(Element* s : children()) {
-      if(s->isTape() && s->node->isVisible() && !(prevSkip && prevSkip(s->node)))
+      if(s->isTape() && s->node->isVisible() && s->node->displayMode() != SvgNode::AbsoluteMode
+          && !(prevSkip && prevSkip(s->node)))
         SvgPainter(painter).drawNode(s->node, dirty);
     }
   }
