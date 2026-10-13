@@ -20,11 +20,23 @@ selection in `RegionSelector` (`selection.cpp`), the UI in `ScribbleArea` and th
   as a plain group. Parameter edits are `RegionChangedItem` (`<regionchanged>`); move/rotate/scale are
   ordinary transform items, because `Element::applyTransform()` has a region branch that maps the
   parameters (never a node transform, which would leave `__rr*` stale).
-- **Not on any layer, below all of them.** `LayerList::REGION_LAYER` (-2, never serialized) has
-  `zIndexOf() == -1`, which keeps regions first through `addStroke`, restacking and `layerFirstElement`
-  (draw-under would otherwise put a marker stroke under an opaque region). Undo/sync replay insert at a
-  literal sibling, and a NULL or vanished sibling means "on top", so `reinsertPos()` in `syncundo.cpp`
-  re-homes a region below ink in that case.
+- **On its layer, at the bottom of that layer's run.** A region gets the layer it was made on (`addStroke`
+  stamps the current layer like any element, `__layer` is written like any element's) and
+  `Page::regionInsertPos()` puts it after that layer's earlier regions and below everything else on the
+  layer - so over every lower layer, under its own layer's ink and images. Used by `addStroke` (whatever
+  sibling the caller names), `moveToLayer` (moving a region selection or removing its layer), undo/sync
+  replay (`reinsertPos()` in `syncundo.cpp`: only a region sibling on the same layer is trusted, a NULL or
+  vanished sibling means "on top") and page load, which re-homes every region in document order.
+  `layerFirstElement` skips a layer's regions as it skips its images, so draw-under lands above the
+  patch's paper. `regions()`/`regionAt()` scan the whole page, as regions are no longer contiguous;
+  `regionAt()` ignores a hidden layer's region (not drawn, so it rules nothing). The "..." button and
+  insert space obey the layer's lock and visibility (`Page::isRegionEditable()`).
+  *Why:* regions used to be on no layer (`REGION_LAYER`, -2, `zIndexOf() == -1`), always first in the page.
+  That put every patch below **every** image, so a patch drawn on an upper layer vanished behind a scan
+  on a lower (typically locked) layer - the very case a patch exists for. Pinned by the layer block at
+  the end of `ScribbleTest::rulingRegionTest()`. An older file's region has no `__layer`, so it lands on
+  the default layer; a patch on the *same* layer as an image still draws under it (bottom of its run),
+  as before - move the image or the patch to another layer.
 - **Not ink.** `Page::isEditable()` returns false for a region - explicitly, since an unknown layer fails
   open - which keeps it out of every selection, eraser and insert space; `findStops` and the history panel's
   select lane needed their own skips. Deleting a selected region deletes only the region.

@@ -49,11 +49,6 @@ public:
   static constexpr int SHARED_ID_BASE = 1 << 24;
   // setLayerState()'s `belowId` for a layer at the bottom of the stack
   static constexpr int BELOW_NONE = -1;
-  // What Element::layer() reports for a ruling region.  A region is not on any layer: it is the page's
-  //  ruling, not ink, so hiding or locking a layer must not touch it.  zIndexOf() puts it below every
-  //  layer, which is what keeps it first in the page through addStroke, restacking and undo replay.
-  //  Never serialized - a region is recognised by its class, not by this id.
-  static constexpr int REGION_LAYER = -2;
 
   LayerList() { reset(); }
   // a document always has at least one layer, so "no layers" and "one layer" are the same case and

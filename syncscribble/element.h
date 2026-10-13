@@ -195,7 +195,7 @@ public:
   void dropShape();
   // Ruling regions (rulingregion.h): a <g class="write-ruling-region"> whose parameters are the
   //  document and whose children - the paper fill and the rule lines - are a cache, like a shape's path.
-  //  A region is not ink: ink selection and every eraser skip it, and it sits below every layer.
+  //  A region is not ink: ink selection and every eraser skip it, and it sits at the bottom of its own layer.
   bool isRulingRegion() const { return m_extra && m_extra->region.isValid(); }
   const RulingRegionParams& regionParams() const { return m_extra ? m_extra->region : NO_REGION; }
   void setRegionParams(const RulingRegionParams& params);  // updates parameters and rebuilds the children

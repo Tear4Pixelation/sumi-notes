@@ -1076,6 +1076,8 @@ Element* ScribbleArea::regionButtonHit(Point pos, bool touch) const
   // topmost region first, as it is the one drawn over the others
   std::vector<Element*> regions = currPage->regions();
   for(auto it = regions.rbegin(); it != regions.rend(); ++it) {
+    if(!currPage->isRegionEditable(*it))
+      continue;
     Point c = regionButtonPos(*it);
     if(std::abs(pos.x - c.x) <= reach && std::abs(pos.y - c.y) <= reach)
       return *it;
@@ -1105,6 +1107,9 @@ void ScribbleArea::drawRegionButtons(Painter* painter)
     }
     painter->setAntiAlias(true);
     for(Element* region : regions) {
+      // a locked layer's patch is out of reach from other layers, like its ink; a hidden one is not drawn
+      if(!pg->isRegionEditable(region))
+        continue;
       Point c = regionButtonPos(region);
       bool selected = region == selectedRegion();
       // a dark chip with its own border reads the same over paper, a scan or ink - the page behind it is
@@ -2054,7 +2059,7 @@ void ScribbleArea::groupStrokes(Element* b)
 void ScribbleArea::addRegionsToInsertSpace(Selection* sel, const std::function<bool(const Rect&)>& past)
 {
   for(Element* region : sel->page->regions()) {
-    if(past(region->bbox()))
+    if(sel->page->isRegionEditable(region) && past(region->bbox()))
       sel->addStroke(region);
   }
 }

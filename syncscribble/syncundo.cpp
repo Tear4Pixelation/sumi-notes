@@ -48,13 +48,16 @@ static void applyLayerVisibility(Element* s, Page* page)
 }
 
 // Where a stroke goes back into its page.  Normally the recorded sibling; but a ruling region must end
-//  up below all ink, and its recorded sibling is not enough to guarantee that: a NULL `next` (it was
-//  the last element) means "on top", and under sync a peer's ink can have arrived since, or the sibling
-//  can have been deleted by a peer, which also appends.  Either would put an opaque region over ink.
+//  up at the bottom of its own layer's run (below that layer's ink, above lower layers), and its recorded
+//  sibling is not enough to guarantee that: a NULL `next` (it was the last element) means "on top", and
+//  under sync a peer's ink can have arrived since, or the sibling can have been deleted by a peer, which
+//  also appends.  Either would put an opaque region over ink.  Only a sibling that is itself a region on
+//  the same layer is a safe place to go back to.
 static SvgNode* reinsertPos(Element* s, Page* page, Element* next)
 {
-  if(s->isRulingRegion() && !(next && next->isRulingRegion() && next->node->parent() == page->contentNode)) {
-    Element* pos = page->layerInsertPos(LayerList::REGION_LAYER);
+  if(s->isRulingRegion() && !(next && next->isRulingRegion() && next->layer() == s->layer()
+      && next->node->parent() == page->contentNode)) {
+    Element* pos = page->regionInsertPos(s->layer());
     return pos ? pos->node : NULL;
   }
   return next ? next->node : NULL;
