@@ -215,7 +215,12 @@ void Sidebar::createUI()
   listContainer->addWidget(listScroll);
   panelContent->addWidget(listContainer);
   // thumbnails are rendered for what is on screen (renderThumbnails), so scrolling has to ask for more
-  listScroll->onScroll = [this](){ if(currView == PAGES) ensureThumbTimer(); };
+  listScroll->onScroll = [this](){
+    if(!autoScrolling)
+      lastUserScroll = mSecSinceEpoch();
+    if(currView == PAGES)
+      ensureThumbTimer();
+  };
 
   // drag an outline row onto another to nest it there (layers have no nesting)
   outlineDrag.reset(new RowDrag(this));
@@ -457,6 +462,8 @@ SvgGui* Sidebar::gui() const
 void Sidebar::setView(View v)
 {
   currView = v;
+  if(v == PAGES)
+    pagesRecenter = true;
   // picked while showing temporarily: shown, but the view the sidebar comes back to is still the stored one
   if(temporary) {
     refresh();
@@ -616,8 +623,15 @@ void Sidebar::setOpen(bool open)
   // Hiding a widget does NOT drop its timers (ugui removes them only in deleteWidget/closeWindow).  This
   //  used to just forget the handle, so the renderer kept running and the next open started a second
   //  one beside it - a floating sidebar closes on every press outside it, so they piled up.
-  if(!open)
+  if(!open) {
     stopThumbTimer();
+    pageScrollPending = false;
+    if(pageScrollTimer && gui())
+      gui()->removeTimer(pageScrollTimer);
+    pageScrollTimer = NULL;
+  }
+  else
+    pagesRecenter = true;
   if(pageSelectBar)
     pageSelectBar->setVisible(open && pageSelectMode && currView == PAGES);
   if(open)
@@ -745,6 +759,8 @@ void Sidebar::refresh()
   addBtn->setVisible(!pages);
   searchBtn->setVisible(!pages);
   selectBtn->setVisible(pages);
+  if(pages && scribbleDoc != prevDoc)
+    pagesRecenter = true;
   // select mode belongs to the Pages view of one document
   if(pageSelectMode && (!pages || scribbleDoc != prevDoc))
     setPageSelectMode(false);
@@ -1309,7 +1325,11 @@ void Sidebar::buildPageGrid()
       showThumbnail(pageCells.size() - 1, cached->second.image);
   }
   shownCurrPage = -1;
-  updateCurrentPage();
+  updateCurrentPage(false);
+  if(pagesRecenter) {
+    pagesRecenter = false;
+    requestPageScroll(true);
+  }
   updatePageSelectBar();
   ensureThumbTimer();
 }
@@ -1442,17 +1462,73 @@ void Sidebar::pruneThumbnails(int first, int last)
   }
 }
 
-void Sidebar::updateCurrentPage()
+void Sidebar::updateCurrentPage(bool follow)
 {
   ScribbleArea* area = ScribbleApp::app ? ScribbleApp::app->activeArea() : NULL;
   int curr = area && area->scribbleDoc == scribbleDoc ? area->getCurrPageNum() : -1;
-  if(curr == shownCurrPage)
+  // another pane focused (split view): jump to where that pane is, whether or not its page number differs
+  bool paneChanged = area != shownArea;
+  shownArea = area;
+  if(curr != shownCurrPage) {
+    if(shownCurrPage >= 0 && shownCurrPage < int(pageCells.size()))
+      pageCells[shownCurrPage].cell->node->removeClass("current");
+    if(curr >= 0 && curr < int(pageCells.size()))
+      pageCells[curr].cell->node->addClass("current");
+    shownCurrPage = curr;
+    if(follow && curr >= 0)
+      requestPageScroll(paneChanged);
+  }
+  else if(follow && paneChanged && curr >= 0)
+    requestPageScroll(true);
+}
+
+void Sidebar::requestPageScroll(bool center)
+{
+  if(currView != PAGES || !gui())
     return;
-  if(shownCurrPage >= 0 && shownCurrPage < int(pageCells.size()))
-    pageCells[shownCurrPage].cell->node->removeClass("current");
-  if(curr >= 0 && curr < int(pageCells.size()))
-    pageCells[curr].cell->node->addClass("current");
-  shownCurrPage = curr;
+  pageScrollPending = true;
+  pageScrollCenter = pageScrollCenter || center;
+  if(pageScrollTimer)
+    return;
+  // the grid is laid out on the next frame after a rebuild, and a follow waits out the user's own scrolling,
+  //  so this retries until it can act
+  pageScrollTimer = gui()->setTimer(30, this, [this](){
+    if(!pageScrollPending || tryPageScroll()) {
+      pageScrollPending = false;
+      pageScrollCenter = false;
+      pageScrollTimer = NULL;  // cleared here, where the returned 0 frees the timer
+      return 0;
+    }
+    return 30;
+  });
+}
+
+// true when done (scrolled, already visible, or nothing to do); false to try again
+bool Sidebar::tryPageScroll()
+{
+  ScribbleArea* area = ScribbleApp::app ? ScribbleApp::app->activeArea() : NULL;
+  if(currView != PAGES || !isVisible() || !area || area->scribbleDoc != scribbleDoc)
+    return true;
+  int curr = area->getCurrPageNum();
+  if(curr < 0 || curr >= int(pageCells.size()))
+    return true;
+  // a follow does not fight the user dragging or flinging the sidebar's own list
+  if(!pageScrollCenter && mSecSinceEpoch() - lastUserScroll < 1500)
+    return false;
+  Rect view = listScroll->node->bounds();
+  Rect cell = pageCells[curr].cell->node->bounds();
+  if(!view.isValid() || view.height() <= 0 || !cell.isValid() || !listScroll->scrollLimits.isValid())
+    return false;  // not laid out yet
+  if(listScroll->staticLimits.height() <= 0)
+    return true;  // everything fits
+  if(!pageScrollCenter && cell.top >= view.top && cell.bottom <= view.bottom)
+    return true;
+  // cell bounds move with the scroll, so the distance between the two centres is the distance to scroll
+  real shift = (cell.top + cell.bottom)/2 - (view.top + view.bottom)/2;
+  autoScrolling = true;
+  listScroll->scrollTo(Point(listScroll->scrollX, listScroll->scrollY + shift));
+  autoScrolling = false;
+  return true;
 }
 
 // The document list's select mode bar (ui-floating-bar.md), built by the same createSelectBarButton.  It

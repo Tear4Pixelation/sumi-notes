@@ -26,6 +26,7 @@
 
 class ScribbleDoc;
 class MainWindow;
+class ScribbleArea;
 
 class Sidebar : public Widget
 {
@@ -117,7 +118,13 @@ private:
   void deletePages(const std::vector<int>& pages);
   void exportPages(int kind, const std::vector<int>& pages);
   // the current page's mark, restyled in place
-  void updateCurrentPage();
+  //  `follow`: also bring it into view (a change of page or of focused pane); false for a rebuild, which
+  //  must not move a grid the user has scrolled
+  void updateCurrentPage(bool follow = true);
+  // scroll the grid to the current page: `center` always, else only if it is not fully visible; waits for
+  //  layout and for the user to stop scrolling the sidebar (docs/agent/page-management.md)
+  void requestPageScroll(bool center);
+  bool tryPageScroll();
   // keep rendering thumbnails near the visible part of the grid, a few per event-loop turn
   void ensureThumbTimer();
   // renders thumbnails until a small time budget is spent; the timer's next period, 0 when none is left
@@ -211,6 +218,13 @@ private:
   unsigned int thumbTimerGen = 0;
   void stopThumbTimer();
   int shownCurrPage = -1;
+  ScribbleArea* shownArea = NULL;  // the pane the current mark follows; a change of pane re-centres
+  bool pagesRecenter = false;      // set when the view is opened/switched/another document: centre after the build
+  bool pageScrollPending = false;
+  bool pageScrollCenter = false;
+  Timer* pageScrollTimer = NULL;
+  bool autoScrolling = false;      // our own scrollTo is running, so onScroll is not the user
+  Timestamp lastUserScroll = 0;
   // selection by Page::uid, so it survives renumbering; pruned to the document at every rebuild
   std::set<unsigned int> selectedPageUids;
   bool pageSelectMode = false;
