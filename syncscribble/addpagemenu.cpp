@@ -750,7 +750,7 @@ bool layoutFromString(const char* str, PageLayout* layout)
 // how the "+" menu's Paper entry reaches the Add Page popup (see createAddMenuButton)
 static std::function<void()> openAddPagePopup;
 
-Button* createAddPageButton(Action* scanPageAction)
+Button* createAddPageButton(const std::vector<Action*>& pageActions)
 {
   Button* btn = createToolbutton(SvgGui::useFile(":/icons/ic_menu_file_plus.svg"), _("Add Page"));
   ArrowPopup* popup = createArrowPopup(Menu::VERT_LEFT);
@@ -780,8 +780,8 @@ Button* createAddPageButton(Action* scanPageAction)
   popup->addWidget(recentRow);
   popup->addWidget(layoutGrid);
   popup->addSeparator();
-  if(scanPageAction)
-    popup->addAction(scanPageAction);
+  for(Action* action : pageActions)
+    popup->addAction(action);
   setupAutoClosePopup(popup);
   btn->addWidget(popup);
 

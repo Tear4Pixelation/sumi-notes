@@ -1821,7 +1821,7 @@ void MainWindow::createToolBars()
         Widget* tagBtn = TagMenu::createTagButton();
         tb->addWidget(tagBtn);
         addTBWidget(tagBtn, 2);
-        Widget* addPageBtn = AddPageMenu::createAddPageButton(actionScan_Page);
+        Widget* addPageBtn = AddPageMenu::createAddPageButton({actionScan_Page, actionInsertDocument, actionInsert_PDF});
         tb->addWidget(addPageBtn);
         // adding a page is the one thing this button does that nothing else on a narrow toolbar does,
         //  so it outranks everything but undo/redo and the tools themselves
@@ -1929,7 +1929,7 @@ void MainWindow::createToolBars()
     Widget* tagBtn = TagMenu::createTagButton();
     fileopsRow->addWidget(tagBtn);
     addTBWidget(tagBtn, 2);
-    Widget* addPageBtn = AddPageMenu::createAddPageButton(actionScan_Page);
+    Widget* addPageBtn = AddPageMenu::createAddPageButton({actionScan_Page, actionInsertDocument, actionInsert_PDF});
     fileopsRow->addWidget(addPageBtn);
     addTBWidget(addPageBtn, 3);
     Widget* addMenuBtn = AddPageMenu::createAddMenuButton(addMenuActions());
@@ -2528,9 +2528,9 @@ void MainWindow::setupActions()
   actionScan_Page = createAction("actionScan_Page",
       "Scan Document as Page...", ":/icons/ic_menu_append_page.svg", "", SLOT(scanDocument(true)));
   // insert pages from another document
-  actionInsertDocument = createAction("actionInsertDocument", "Insert Document...", "", "", SLOT(insertDocument()));
+  actionInsertDocument = createAction("actionInsertDocument", "Insert Document...", ":/icons/ic_menu_file_plus.svg", "", SLOT(insertDocument()));
   // the pages of a PDF, after the current page (ScribbleApp::insertPdfPages)
-  actionInsert_PDF = createAction("actionInsert_PDF", "Insert PDF...", "", "", SLOT(insertPDF()));
+  actionInsert_PDF = createAction("actionInsert_PDF", "Insert PDF...", ":/icons/ic_menu_pdf.svg", "", SLOT(insertPDF()));
 
   // the "+" beside Add Page: things to add to this page (docs/agent/paper.md).  Own actions, since the
   //  menu words them differently from the overflow menu's.
@@ -2809,9 +2809,7 @@ void MainWindow::setupActions()
     overflowPopup->addAction(actionSave);
   }
   overflowPopup->addSubmenu(_("Export"), exportmenu);
-  // pages from another file, into this document (the "+" menu's Insert Document is a different feature)
-  overflowPopup->addAction(actionInsertDocument);
-  overflowPopup->addAction(actionInsert_PDF);
+  overflowPopup->addAction(actionDelete_Page);
   if(IS_DEBUG || !PLATFORM_IOS || cfg->String("syncServer", "")[0]) {
     overflowPopup->addAction(actionShare_Document);
 #if PLATFORM_IOS

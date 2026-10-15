@@ -155,8 +155,7 @@
   <string name="pages_selected">%d selected</string>
   <string name="pages_done">Done</string>
   <string name="pages_delete_page">Delete Page</string>
-  <string name="pages_share">Share</string>
-  <string name="pages_share_title">Share Pages</string>
+  <string name="pages_share">Export Native</string>
   <string name="pages_export_png">Export PNG</string>
   <string name="pages_save_error">Error saving document.</string>
   <string name="pages_save_error_folder">Error saving document. Please try a different folder.</string>

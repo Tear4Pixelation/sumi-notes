@@ -3580,7 +3580,7 @@ void ScribbleApp::sharePagesDocument(const std::vector<int>& pages)
 #if PLATFORM_MOBILE || PLATFORM_EMSCRIPTEN
   std::string path = FSPath(tempPath).childPath(name);
   if(!activeDoc()->savePagesCopy(pages, path.c_str())) {
-    messageBox(Error, _("Share Pages"), _("Error saving document."));
+    messageBox(Error, _("Export Native"), _("Error saving document."));
     return;
   }
 #if PLATFORM_EMSCRIPTEN
@@ -3589,12 +3589,12 @@ void ScribbleApp::sharePagesDocument(const std::vector<int>& pages)
   sendFile(_("See attached file"), path);
 #endif
 #else
-  FilePicker::saveFile(_("Share Pages"), name, "svgz", [this, pages](const std::string& filename){
+  FilePicker::saveFile(_("Export Native"), name, "svgz", [this, pages](const std::string& filename){
     // the format follows the extension (Document::save), so a name typed without one still gets svgz
     std::string path = FSPath(filename).extension() == "svgz" ? filename : filename + ".svgz";
     if(activeDoc()->savePagesCopy(pages, path.c_str()))
       return true;
-    messageBox(Error, _("Share Pages"), _("Error saving document. Please try a different folder."));
+    messageBox(Error, _("Export Native"), _("Error saving document. Please try a different folder."));
     return false;
   });
 #endif

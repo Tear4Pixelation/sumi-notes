@@ -98,11 +98,11 @@ borderless path and the Android fullscreen path are untested.
 ## Overflow menu cleanup
 
 Now: (auto-adjust items) / Whiteboard (while syncing) / [New, Open, Save - only with `useDocList` off] /
-**Export >** / Insert Document... / Insert PDF... / **Create Whiteboard...** (+ Open Whiteboard on iOS) / Page Setup / Theme / Preferences /
+**Export >** / Delete Current Page / **Create Whiteboard...** (+ Open Whiteboard on iOS) / Page Setup / Theme / Preferences /
 Testing (debug).
 
 Export holds Export PDF (desktop) or Send PDF / Send Document / Send Page Image (mobile), the new
-Export PNG (every page, `exportPagesPNG`) and Save As.
+Export PNG (every page, `exportPagesPNG`) and Save As. The sidebar Pages view's "Share" (saves the pages as .svgz; share sheet on mobile) is now called "Export Native".
 
 Removed, and where each still is:
 
@@ -113,12 +113,12 @@ Removed, and where each still is:
 | View: all | View popup |
 | Page: New Page After | Add Page (inserts after the current page) |
 | Page: Scan Document as Page | Add Page popup |
-| Page: Delete Current Page (also was top level) | sidebar Pages view (context menu, select mode) |
+| Page: Delete Current Page | back as a top level overflow item after Export (ID_DELPAGE, no shortcut); also the sidebar Pages view (context menu, select mode) |
 | Page: New Page Before | **only Ctrl+Shift+Left** |
 | Page: Expand Down, Expand Right | **nowhere** |
 | Page: Select Pages (`MODE_PAGESEL`) | **only Ctrl+Shift+P**; the sidebar's Pages select mode covers move/delete/export |
 | Document: Discard Changes | **only Ctrl+W** |
-| Document: Insert Document, Insert PDF (pages from another file) | restored as top level overflow items after Export (no icons, as before); the "+" menu's Insert Document places a PDF page as an image, which is different |
+| Document: Insert Document, Insert PDF (pages from another file) | Add Page popup, below Scan Document as Page (not in the overflow menu). Insert Document = native `.svgz/.svg/.html` pages (`ScribbleApp::insertDocument`), Insert PDF = `insertPdfPages`; the "+" menu's Insert Document places a PDF page as an image, which is different |
 | Document: Import PDF; top level Import Document | library Import |
 | Insert Image, Scan Document | "+" menu (Insert Photo, Scan Document) |
 

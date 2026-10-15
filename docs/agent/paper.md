@@ -89,7 +89,7 @@ is saved as a new custom layout.
 
 `AddPageMenu::createAddMenuButton()` (`addpagemenu.cpp`): a `ic_menu_plus` toolbutton right after Add Page
 in both places Add Page lives (the vertical toolbar's `addPage` entry and the floating file-ops panel),
-opening an arrow popup of "add things to this page": Patch, Scan Document, Insert Document, Insert Photo. They are
+opening an arrow popup of "add things to this page": Patch, Scan Document, Insert Document, Insert Photo. (The Add Page popup itself ends with Scan Document as Page, Insert Document... and Insert PDF... - pages from a native file / a PDF, after the current page, one undo step; `createAddPageButton` takes the list of actions.) They are
 their own `MainWindow` actions (`actionAddPatch/Scan/Document/Photo`, `addMenuActions()`) because the wording
 differs from the overflow menu's; each forwards to an existing flow:
 

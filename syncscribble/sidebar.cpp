@@ -304,7 +304,7 @@ void Sidebar::createUI()
     });
   };
   pageMenu->addItem(_("Export PDF"), SvgGui::useFile("icons/ic_menu_pdf.svg"), [=](){ deferPageAction(0); });
-  pageMenu->addItem(_("Share"), SvgGui::useFile("icons/ic_menu_share.svg"), [=](){ deferPageAction(1); });
+  pageMenu->addItem(_("Export Native"), SvgGui::useFile("icons/ic_menu_share.svg"), [=](){ deferPageAction(1); });
   pageMenu->addItem(_("Export PNG"), SvgGui::useFile("icons/ic_menu_image.svg"), [=](){ deferPageAction(2); });
   pageMenu->addItem(_("Delete Page"), SvgGui::useFile("icons/ic_menu_discard.svg"), [=](){ deferPageAction(-1); });
   setupAutoClosePopup(pageMenu);
@@ -1507,7 +1507,7 @@ Widget* Sidebar::createPageSelectBar()
   };
   addAction("icons/ic_menu_discard.svg", _("Delete"), -1)->node->addClass("selectbar-delete");
   addAction("icons/ic_menu_pdf.svg", _("Export PDF"), 0);
-  addAction("icons/ic_menu_share.svg", _("Share"), 1);
+  addAction("icons/ic_menu_share.svg", _("Export Native"), 1);
   addAction("icons/ic_menu_image.svg", _("Export PNG"), 2);
   Widget* separator = new Widget(new SvgRect(Rect::wh(1, 28)));
   separator->node->addClass("selectbar-sep");
