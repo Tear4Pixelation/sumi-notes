@@ -72,6 +72,8 @@ public:
   // shape edit mode without the Select tool: a finger tap on a shape selects it, a tap elsewhere and the
   //  first shape-tool drag outside only deselect
   int shapeTapEditTest();
+  // Draw Lines: the pen draws the Line shape tool's editable, angle-snapped line in its own color and width
+  int drawLinesTest();
   int tapPasteTest();
   // a fit width/height zoom snap aligns the page only across the scroll direction, and a two finger pan
   //  that barely changes the zoom does not move the view at all
