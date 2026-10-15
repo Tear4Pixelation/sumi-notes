@@ -3023,10 +3023,10 @@ bool ScribbleApp::insertPdfPages(const std::string& pdfPath)
 void ScribbleApp::insertPdfAsImage()
 {
   if(!PdfImport::isAvailable()) {
-    messageBox(Warning, _("Insert Document"), _("This build of Sumi does not include PDF support."));
+    messageBox(Warning, _("Insert PDF"), _("This build of Sumi does not include PDF support."));
     return;
   }
-  FilePicker::openFile(_("Insert Document"), "pdf", [this](const std::string& filename){
+  FilePicker::openFile(_("Insert PDF"), "pdf", [this](const std::string& filename){
     if(!filename.empty())
       insertPdfPageAsImage(filename);
   });
@@ -3038,7 +3038,7 @@ bool ScribbleApp::insertPdfPageAsImage(const std::string& pdfPath)
   PdfImport::MemoryBudget budget(importMemoryLimit());
   PdfImport::Renderer renderer;
   if(!renderer.open(pdfPath.c_str(), NULL, &budget) || renderer.numPages() <= 0) {
-    messageBox(Warning, _("Insert Document"),
+    messageBox(Warning, _("Insert PDF"),
         fstring(_("Error importing %s: %s"), fileName.c_str(), renderer.error()));
     return false;
   }
@@ -3054,14 +3054,39 @@ bool ScribbleApp::insertPdfPageAsImage(const std::string& pdfPath)
   Image pageImage = renderer.render(pageIndex, std::max(72, cfg->Int("pdfImportDPI")),
       cfg->Bool("pdfImportLossy") ? Image::JPEG : Image::PNG, &widthPt, &heightPt);
   if(pageImage.isNull()) {
-    messageBox(Warning, _("Insert Document"),
+    messageBox(Warning, _("Insert PDF"),
         fstring(_("Error importing %s: %s"), fileName.c_str(), renderer.error()));
     return false;
   }
   activeArea()->insertImage(std::move(pageImage), widthPt*PdfImport::UNITS_PER_POINT,
       heightPt*PdfImport::UNITS_PER_POINT);
-  reportReducedPages(budget, _("Insert Document"));
+  reportReducedPages(budget, _("Insert PDF"));
   return true;
+}
+
+// Insert Document ("+" menu): the ink of one page of a native document (.svgz/.svg/.html) as editable
+//  strokes on the current page, selected afterwards, one undo step.  A document of several pages asks which
+//  one, first suggested, like Insert PDF above.  The page's ruling is left behind.
+void ScribbleApp::insertDocumentContent()
+{
+  FilePicker::openFile(_("Insert Document"), "svgz svg html htm", [this](const std::string& filename){
+    if(filename.empty())
+      return;
+    Document otherDoc;
+    if(otherDoc.load(new FileStream(filename.c_str(), "rb"), false) != Document::LOAD_OK || otherDoc.numPages() <= 0) {
+      messageBox(Warning, _("Error inserting document"), fstring(_("An error occured opening %s"), docDisplayName(filename).c_str()));
+      return;
+    }
+    int pageCount = otherDoc.numPages();
+    int pageIndex = 0;
+    if(pageCount > 1) {
+      TagNameDialog dialog(fstring(_("Insert page (1-%d)"), pageCount).c_str(), "1");
+      if(Application::execDialog(&dialog) != Dialog::ACCEPTED)
+        return;
+      pageIndex = std::min(std::max(atoi(dialog.getName().c_str()), 1), pageCount) - 1;
+    }
+    activeArea()->insertPageContent(otherDoc.pages[pageIndex]);
+  });
 }
 
 // Does the actual work of doImportPdf(), without touching the UI beyond a status notification, and

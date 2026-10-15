@@ -89,14 +89,18 @@ is saved as a new custom layout.
 
 `AddPageMenu::createAddMenuButton()` (`addpagemenu.cpp`): a `ic_menu_plus` toolbutton right after Add Page
 in both places Add Page lives (the vertical toolbar's `addPage` entry and the floating file-ops panel),
-opening an arrow popup of "add things to this page": Patch, Scan Document, Insert Document, Insert Photo. (The Add Page popup itself ends with Scan Document as Page, Insert Document... and Insert PDF... - pages from a native file / a PDF, after the current page, one undo step; `createAddPageButton` takes the list of actions.) They are
+opening an arrow popup of "add things to this page": Patch, Scan Document, Insert Document, Insert PDF, Insert Photo. (The Add Page popup itself ends with Scan Document as Page, Insert Document... and Insert PDF... - pages from a native file / a PDF, after the current page, one undo step; `createAddPageButton` takes the list of actions.) They are
 their own `MainWindow` actions (`actionAddPatch/Scan/Document/Photo`, `addMenuActions()`) because the wording
 differs from the overflow menu's; each forwards to an existing flow:
 
 - **Patch** triggers `actionRulingRegion` (Paper Patch, ruling-regions.md).
 - **Scan Document** is `scanDocument(false)`, the scan-and-place flow (document-scanning.md).
-- **Insert Document** is `ScribbleApp::insertPdfAsImage()`: system file picker for a PDF, then ONE page of it
-  becomes an image on the current page (content, unlike Insert PDF in the overflow menu, which adds pages).
+- **Insert Document** is `ScribbleApp::insertDocumentContent()`: file picker for a native `.svgz/.svg/.html`, asks
+  which page when there are several (like Insert PDF), then `ScribbleArea::insertPageContent()` clones that page's
+  elements (real, editable strokes; its ruling stays behind) into a Clipboard and `doPasteAt` centres it on the view,
+  selected, one undo step; content bigger than the page is shrunk by the "external" rule.
+- **Insert PDF** is `ScribbleApp::insertPdfAsImage()`: system file picker for a PDF, then ONE page of it
+  becomes an image on the current page (content, unlike the Add Page popup's Insert PDF, which adds pages).
   A multi-page PDF asks which page (a `TagNameDialog` with a page number, 1 suggested, clamped to the range);
   a single page goes straight in. Rendered with `PdfImport::Renderer` at `pdfImportDPI`, placed through
   `ScribbleArea::insertImage(image, below, fitWidth, fitHeight)` at the PDF page's real size

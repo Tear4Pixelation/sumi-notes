@@ -118,7 +118,7 @@ Removed, and where each still is:
 | Page: Expand Down, Expand Right | **nowhere** |
 | Page: Select Pages (`MODE_PAGESEL`) | **only Ctrl+Shift+P**; the sidebar's Pages select mode covers move/delete/export |
 | Document: Discard Changes | **only Ctrl+W** |
-| Document: Insert Document, Insert PDF (pages from another file) | Add Page popup, below Scan Document as Page (not in the overflow menu). Insert Document = native `.svgz/.svg/.html` pages (`ScribbleApp::insertDocument`), Insert PDF = `insertPdfPages`; the "+" menu's Insert Document places a PDF page as an image, which is different |
+| Document: Insert Document, Insert PDF (pages from another file) | Add Page popup, below Scan Document as Page (not in the overflow menu). Insert Document = native `.svgz/.svg/.html` pages (`ScribbleApp::insertDocument`), Insert PDF = `insertPdfPages`; the "+" menu has content versions of both: Insert Document (a native page's strokes onto this page) and Insert PDF (one PDF page as an image) |
 | Document: Import PDF; top level Import Document | library Import |
 | Insert Image, Scan Document | "+" menu (Insert Photo, Scan Document) |
 

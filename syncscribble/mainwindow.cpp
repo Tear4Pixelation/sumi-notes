@@ -2542,9 +2542,12 @@ void MainWindow::setupActions()
   actionAddAxesPatch->setIcon(axesPatchIcon());
   actionAddScan = createAction("actionAddScan", "Scan Document", ":/icons/ic_menu_add_doc.svg", "",
       [this](){ app->scanDocument(false); });
-  // a page of a PDF as content on this page (ScribbleApp::insertPdfAsImage)
-  actionAddDocument = createAction("actionAddDocument", "Insert Document", ":/icons/ic_menu_file_plus.svg", "",
+  // a page of a PDF as an image on this page (ScribbleApp::insertPdfAsImage)
+  actionAddDocument = createAction("actionAddDocument", "Insert PDF", ":/icons/ic_menu_pdf.svg", "",
       [this](){ app->insertPdfAsImage(); });
+  // the ink of a page of a native document as strokes on this page (ScribbleApp::insertDocumentContent)
+  actionAddNativeDocument = createAction("actionAddNativeDocument", "Insert Document", ":/icons/ic_menu_file_plus.svg", "",
+      [this](){ app->insertDocumentContent(); });
   actionAddPhoto = createAction("actionAddPhoto", "Insert Photo", ":/icons/ic_menu_add_pic.svg", "",
       [this](){ app->insertImage(); });
 

@@ -151,8 +151,9 @@ public:
   Action* actionAddAxesPatch;  // a coordinate system patch (RulingRegionParams::axes)
   Action* actionAddScan;
   Action* actionAddDocument;
+  Action* actionAddNativeDocument;
   Action* actionAddPhoto;
-  std::vector<Action*> addMenuActions() const { return {actionAddPatch, actionAddAxesPatch, actionAddScan, actionAddDocument, actionAddPhoto}; }
+  std::vector<Action*> addMenuActions() const { return {actionAddPatch, actionAddAxesPatch, actionAddScan, actionAddNativeDocument, actionAddDocument, actionAddPhoto}; }
   static const SvgNode* axesPatchIcon();
   Action* actionExport_PDF;
   Action* actionImport_PDF;

@@ -2739,6 +2739,26 @@ void ScribbleArea::insertImages(std::vector<Image> images, Dim fitWidth, Dim fit
   doRefresh();
 }
 
+// Copies the ink of another document's page onto the current page as one selected paste, centred on the
+//  view like an inserted image and shrunk (by doPasteAt's "external" rule) when it is much bigger than this
+//  page.  Elements stay real strokes; the source page's ruling is not part of its elements and stays behind.
+void ScribbleArea::insertPageContent(Page* source)
+{
+  if(!source)
+    return;
+  source->ensureLoaded();
+  doCancelAction();
+  Clipboard clip;
+  for(Element* element : source->children())
+    clip.addStroke(element->cloneNode());
+  if(clip.count() == 0)
+    return;
+  clip.content->addClass("external");
+  doPasteAt(&clip, screenToDim(screenRect.center()), PasteFlags(PasteCenter | PasteMoveClipboard | PasteUndoable));
+  uiChanged(UIState::Paste);
+  doRefresh();
+}
+
 // page units around ink captured without a drawn outline: ~4 mm, enough that the capture does not look
 //  cut off at the strokes
 static constexpr Dim SCREENSHOT_INK_PADDING = 25;
