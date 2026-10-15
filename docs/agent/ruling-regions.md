@@ -134,8 +134,10 @@ selection in `RegionSelector` (`selection.cpp`), the UI in `ScribbleArea` and th
   it can sit on something visible in the scan and the offset be dragged from there. Relocating is shape
   handle index `n+2` (`moveGripIndex()`); it changes no parameter and makes no undo item (the move case
   clears `regionHandleStart`, which is what release uses to decide to add a `RegionChangedItem` - do not
-  drop that). Dragging the handle itself still slides the origin, and a relocated handle rides along with
-  the pointer. **Transient by decision**: the position lives in the selector (page coordinates, mapped by
+  drop that). Dragging the handle itself still slides the origin, and the handle rides along with
+  the pointer *exactly* (no snapping): the drag pins a default handle at its spot (`setHandlePos`) on every
+  move, since an unpinned default is re-derived on the first line and looked like it snapped to the ruling.
+  Nothing in the docs asked for that snap; coordinate systems excepted (handle = origin). **Transient by decision**: the position lives in the selector (page coordinates, mapped by
   `transform()` when the region moves, clamped inside the outline by `clampInside` at use), so deselecting
   resets it to the left edge. Storing it would need an attribute plus a `<regionchanged>` field for no
   persistent meaning. The standalone regiontest does not cover it (selector needs the app); checked with
