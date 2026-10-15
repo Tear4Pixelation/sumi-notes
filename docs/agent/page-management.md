@@ -9,6 +9,26 @@ Delete, Export PDF, Share, Export PNG and Done. Dragging a thumbnail onto anothe
 long press on a thumbnail (outside select mode) offers the same four actions for that one page.
 `syncscribble/sidebar.cpp` (the `Pages view` section), backend in `ScribbleDoc`, exports in `ScribbleApp`.
 
+## The grid follows the current page
+
+`Sidebar::requestPageScroll(center)` / `tryPageScroll()` (`sidebar.cpp`), a 30 ms retry timer
+(`pageScrollTimer`) that scrolls `listScroll` so the current page's cell is centered.
+- **Centered** (`center`) when the sidebar opens, the Pages view is selected, another document is shown
+  (`pagesRecenter`, consumed at the end of `buildPageGrid`), or **another pane is focused** in split view
+  (`updateCurrentPage` compares `activeArea()` with `shownArea`; works with the same document in both panes).
+- **Follow** (a change of the current page, e.g. the canvas scrolled, prev/next, a jump): scrolls only when
+  the cell is not fully visible, then centers it.
+- **Does not fight the user**: `ScrollWidget::onScroll` stamps `lastUserScroll` unless `autoScrolling` (set
+  around our own `scrollTo`); a follow waits until 1.5 s after the last user scroll/fling (the timer keeps
+  retrying), a centering request does not wait.
+- **Traps**: right after a rebuild the grid is not laid out yet (cell bounds and `scrollLimits` invalid), so the
+  timer retries until they are; `updateCurrentPage(false)` is used by `buildPageGrid` so a rebuild (select
+  mode, a move) never moves a grid the user has scrolled; the timer is removed in `setOpen(false)`, and its
+  handle cleared in the callback that returns 0 (see the timer rule under Thumbnails).
+- Lazy thumbnails are untouched: the scroll goes through `onScroll`, so only the new neighbourhood renders.
+- Verified in agent-display (17 pages, pinned sidebar): reopen centers page 9, last/prev page jumps, a sidebar
+  scroll delays the follow, and in split view (Ctrl+T, "This Document") focusing either pane jumps to its page.
+
 ## Moving pages
 
 - **A drop puts the page(s) straight *after* the page dropped on.** The one way to the front: the leading
