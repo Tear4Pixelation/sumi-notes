@@ -4062,8 +4062,9 @@ void ScribbleArea::doMoveEvent(const InputEvent& event)
       else if(shapeHandleIdx == int(params.corners.size()))
       {
         params.origin = params.origin + (pos - regionHandleStartPos);
-        // a relocated handle rides along with the lines it is dragging
-        if(regionSelector->handleMoved)
+        // the handle rides along with the lines it is dragging, so it follows the pointer exactly.  A default
+        //  handle would otherwise be re-derived on the first line and appear to snap to the ruling.
+        if(!params.axes)
           regionSelector->setHandlePos(regionHandleStartHandle + (pos - regionHandleStartPos));
       }
       else if(shapeHandleIdx == int(params.corners.size()) + 1)
