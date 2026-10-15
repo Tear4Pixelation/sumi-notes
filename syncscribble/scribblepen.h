@@ -16,8 +16,8 @@ public:
 
   unsigned int flags;
   // existing numerical values must NOT be changed - flags is serialized to config file when saving pen
-  // LINE_DRAWING ("Draw Lines"): freehand, straightened on pen-up when nearly straight (linestraighten.h);
-  //  until Oct 2026 it was a rubber band from the press to the pen
+  // LINE_DRAWING ("Draw Lines"): the pen draws the Line shape tool's editable line shape in its own color
+  //  and width (ScribbleArea::drawLinesGesture)
   static constexpr unsigned int DRAW_UNDER = 0x1, SNAP_TO_GRID = 0x2, LINE_DRAWING = 0x4, EPHEMERAL = 0x8,
       WIDTH_PR = 0x10, WIDTH_SPEED = 0x20, WIDTH_DIR = 0x40, WIDTH_MASK = 0xF0, //WIDTH_LINPR = 0x80,
       TIP_FLAT = 0x100, TIP_ROUND = 0x200, TIP_CHISEL = 0x400, TIP_MASK = 0xF00,

@@ -32,7 +32,6 @@
 #include "cropshapetest.cpp"
 #include "erasetest.cpp"
 #include "smartscaletest.cpp"
-#include "straightentest.cpp"
 #include "librarytest.cpp"
 #include "notefultest.cpp"
 #include "pagetagtest.cpp"
@@ -2121,6 +2120,76 @@ int ScribbleTest::shapeTapEditTest()
   cfg->set("clearSelOnly", wasClearSelOnly);
   input->singleTouchMode = wasSingle;
   input->multiTouchMode = wasMulti;
+  return nbad;
+}
+
+// Draw Lines (docs/agent/pen-and-tools.md): with the pen tool, a stroke is the Line shape tool's gesture -
+//  a live line shape from the press to the pen, 45 degree snap, an editable SHAPE_LINE left on release in
+//  the pen's color and width.  Before, the pen drew ink (straightened on pen-up), which fails every check.
+int ScribbleTest::drawLinesTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: draw lines: %s\n", what); }
+  };
+  scribbleDoc->newDocument();
+  ScribbleConfig* cfg = scribbleDoc->cfg;
+  const bool wasEditAfterDraw = cfg->Bool("shapeEditAfterDraw");
+  cfg->set("shapeEditAfterDraw", true);
+  Page* page = scribbleArea->currPage;
+  auto lastElement = [&]() {
+    Element* elem = NULL;
+    for(Element* child : page->children())
+      elem = child;
+    return elem;
+  };
+  scribbleMode->setMode(MODE_STROKE);
+  // armed arrowheads on the shape row must not reach the pen's lines
+  scribbleMode->shapeFlags = SHAPEFLAG_HEADEND;
+  scribbleDoc->app->setPen(ScribblePen(Color::RED, 3, ScribblePen::TIP_ROUND | ScribblePen::LINE_DRAWING));
+
+  // nearly horizontal, wobbling on the way: live line while the pen is down, snapped flat
+  ie(100, 200, 0.5, pen, press);
+  ie(160, 208, 0.5, pen);
+  Element* live = scribbleArea->currStroke;
+  check(live && live->isShape() && live->shapeParams().id == SHAPE_LINE, "the pen draws a live line shape");
+  check(live && live->shapeParams().points.size() == 2, "from the press to the pen, no intermediate points");
+  ie(230, 195, 0.5, pen);
+  ie(300, 203, 0.5, pen);
+  check(scribbleArea->currStroke == live, "one shape follows the whole gesture");
+  ie(0, 0, 0, pen, release);
+  Element* line = lastElement();
+  check(page->strokeCount() == 1 && line && line->isShape() && line->shapeParams().id == SHAPE_LINE,
+      "release leaves one line shape and no ink");
+  if(line && line->isShape()) {
+    const ShapeParams& params = line->shapeParams();
+    check(params.points.size() == 2 && params.points[0].y == params.points[1].y,
+        "a nearly horizontal line snaps flat, like the Line tool");
+    check(!(params.flags & (SHAPEFLAG_HEADSTART | SHAPEFLAG_HEADEND)), "no arrowheads from the shape row");
+    check(line->node->getColorAttr("stroke", Color::NONE) == Color::RED, "in the pen's color");
+    check(line->node->getFloatAttr("stroke-width") == 3, "and the pen's width");
+  }
+  check(scribbleArea->currSelection && scribbleArea->currSelection->count() == 1 && scribbleArea->shapeSelector,
+      "left selected with its shape handles, like a drawn shape");
+
+  // a deliberate 30 degree line stays at 30 degrees; the press outside the selected line draws through it
+  ie(100, 400, 0.5, pen, press);
+  ie(200, 400 - 100*std::tan(M_PI/6), 0.5, pen);
+  ie(300, 400 - 200*std::tan(M_PI/6), 0.5, pen);
+  ie(0, 0, 0, pen, release);
+  Element* slope = lastElement();
+  check(page->strokeCount() == 2 && slope && slope->isShape(), "the next press draws a second line through the selection");
+  if(slope && slope->isShape() && slope->shapeParams().points.size() == 2) {
+    Point delta = slope->shapeParams().points[1] - slope->shapeParams().points[0];
+    check(std::abs(std::atan2(-delta.y, delta.x) - M_PI/6) < 0.01, "a 30 degree line is not snapped");
+  }
+  undo();
+  check(page->strokeCount() == 1, "a line is one undo step");
+
+  scribbleDoc->clearSelection();
+  scribbleMode->shapeFlags = 0;
+  scribbleDoc->app->setPen(ScribblePen(Color::BLACK, 2, ScribblePen::TIP_ROUND));
+  cfg->set("shapeEditAfterDraw", wasEditAfterDraw);
   return nbad;
 }
 
@@ -5794,8 +5863,7 @@ void ScribbleTest::runAll(bool runsynctest)
   int nThumbsFailed = 0;
   int nUnitFailed = runScanTests() + runShapeTests() + runColorTests() + runLayerTests() + runLibraryTests()
       + runRegionTests() + runNotefulTests() + runPageTagTests() + runWidthPresetTests() + runTabTests()
-      + runJumpHistoryTests() + runEraseTests() + runSmartScaleTests() + runSimplifyTests() + runCropShapeTests()
-      + runStraightenTests();
+      + runJumpHistoryTests() + runEraseTests() + runSmartScaleTests() + runSimplifyTests() + runCropShapeTests();
   std::vector<std::string> slFailed;
   void (ScribbleTest::*tests[])() = {
     &ScribbleTest::test0,
@@ -5976,6 +6044,7 @@ void ScribbleTest::runAll(bool runsynctest)
   nUnitFailed += windingFillBoundsTest();
   nUnitFailed += thumbRendererTest();
   nUnitFailed += shapeTapEditTest();
+  nUnitFailed += drawLinesTest();
   nUnitFailed += tapPasteTest();
   nUnitFailed += zoomSnapTest();
   nUnitFailed += currentPageTest();

@@ -9,7 +9,6 @@
 #include "strokebuilder.h"
 #include "bookmarkview.h"
 #include "shaperec.h"
-#include "linestraighten.h"
 #include <fstream>
 
 
@@ -1661,10 +1660,9 @@ void ScribbleArea::startShapeSnap(Point pos)
   stopShapeSnap();
   snapActive = false;
   const ScribblePen* pen = currPen();
-  // a grid-snapped, centre-on-line or Draw Lines pen is already making straight lines its own way (Draw
-  //  Lines straightens on pen-up, and a hold before lifting would otherwise turn the line into a shape)
-  if(shapeSnapDelayMs(cfg) <= 0 || pen->hasFlag(ScribblePen::EPHEMERAL)
-      || pen->hasFlag(ScribblePen::LINE_DRAWING) || pen->hasFlag(ScribblePen::SNAP_TO_GRID)
+  // a grid-snapped or centre-on-line pen is already making straight lines its own way (a Draw Lines pen
+  //  never gets here: its press is the Line shape gesture)
+  if(shapeSnapDelayMs(cfg) <= 0 || pen->hasFlag(ScribblePen::EPHEMERAL) || pen->hasFlag(ScribblePen::SNAP_TO_GRID)
       || pen->hasFlag(ScribblePen::CENTER_ON_LINE))
     return;
   snapSamples.push_back(pos);
@@ -1734,47 +1732,6 @@ void ScribbleArea::discardStrokeBuilder()
     scribbleDoc->updateCurrStroke(stroke->bbox());
     stroke->deleteNode();
   }
-}
-
-// Draw Lines: strokes drawn shorter than this (screen units) are never straightened - dots, ticks
-static constexpr Dim LINE_STRAIGHTEN_MIN_LENGTH = 12;
-
-// Draw Lines (docs/agent/pen-and-tools.md): on pen-up, before the stroke is finished, a stroke that is
-//  nearly straight (or nearly straight pieces meeting at clear corners) is rebuilt as straight lines from
-//  its own samples slid onto them, so a pressure pen keeps its pressure.  Measured in the gesture's ruling
-//  frame, so in a tilted region "horizontal" is along its lines.  Anything else is left exactly as drawn.
-//  The rebuilt stroke gets no filters: its points are on the lines already, and a low pass or curve fit
-//  would round the corners off.
-void ScribbleArea::straightenLineStroke()
-{
-  std::unique_ptr<ScribblePen> pen = std::move(linePen);
-  std::vector<StrokePoint> samples;
-  samples.swap(lineSamples);
-  if(!pen || !scribbleDoc->strokeBuilder || samples.size() < 2)
-    return;
-  std::vector<Point> local;
-  local.reserve(samples.size());
-  for(const StrokePoint& sample : samples)
-    local.push_back(gestureFrame.toLocal(sample));
-  LineStraightenParams params;
-  params.minLength = LINE_STRAIGHTEN_MIN_LENGTH/mScale;
-  // a grid pen's samples are grid points, and so are the corners found among them: turning a piece onto
-  //  an axis would move its end off the grid
-  params.snapAngles = !pen->hasFlag(ScribblePen::SNAP_TO_GRID);
-  StraightenedStroke line = straightenStroke(local, params);
-  if(line.empty())
-    return;
-  std::vector<int> kept;
-  std::vector<Point> moved = projectOntoStraightened(local, line, kept);
-  discardStrokeBuilder();
-  StrokeBuilder* builder = StrokeBuilder::create(*pen);
-  for(size_t ii = 0; ii < moved.size(); ++ii) {
-    const StrokePoint& sample = samples[kept[ii]];
-    Point pos = gestureFrame.toPage(moved[ii]);
-    builder->addInputPoint(StrokePoint(pos.x, pos.y, sample.pr, sample.tiltX, sample.tiltY, sample.t));
-  }
-  scribbleDoc->strokeBuilder = builder;
-  scribbleDoc->updateCurrStroke(builder->getDirty());
 }
 
 // The scratch-out test alone over a stroke just finished.  If it is one, returns true with what it was
@@ -3444,6 +3401,20 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
   modemod |= selhit;
   // get the mode!
   currMode = scribbleDoc->getScribbleMode(modemod);
+  // Draw Lines: the pen draws exactly what the Shapes Line tool does - live line from the press, 45 degree
+  //  snap, an editable line shape left on release - in the pen's own color and width (createShapeElement()
+  //  takes them from currPen()).  Switched here, before the selection is looked at, so a press outside the
+  //  line just drawn (and left selected by shapeEditAfterDraw) draws through it like the shape tool.  Centre
+  //  on line and Tape keep their own gestures.
+  drawLinesGesture = false;
+  if(currMode == MODE_STROKE) {
+    const ScribblePen* pen = currPen();
+    if(pen->hasFlag(ScribblePen::LINE_DRAWING) && !pen->hasFlag(ScribblePen::CENTER_ON_LINE)
+        && !pen->hasFlag(ScribblePen::TAPE)) {
+      currMode = MODE_DRAWSHAPE;
+      drawLinesGesture = true;
+    }
+  }
   // Down and Right are ruled insert space held to one axis: everything about the gesture - selection, Skip
   //  Lines, region slop, erase, page growth - is ruled insert space's, only the drag is cut to one direction
   //  The one offered tool, MODE_INSSPACEAUTO, picks Down, Right or both from the drag (see doMoveEvent)
@@ -3563,13 +3534,6 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
     //Dim w = cfg->Bool("scalePenWithZoom") ? pen->width/mZoom : pen->width;
     // centre on line draws one segment from the press to the pen, along the line (x follows the pen)
     bool centerOnLine = pen->hasFlag(ScribblePen::CENTER_ON_LINE);
-    // Draw Lines draws freehand, filters and pressure as usual, and is straightened on pen-up; centre on
-    //  line is straight already
-    lineSamples.clear();
-    if(pen->hasFlag(ScribblePen::LINE_DRAWING) && !centerOnLine)
-      linePen.reset(new ScribblePen(*pen));
-    else
-      linePen.reset();
     StrokeBuilder* builder = StrokeBuilder::create(*pen);
     // install filters
     if(!centerOnLine && !pen->hasFlag(ScribblePen::SNAP_TO_GRID)) {
@@ -3599,8 +3563,6 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
         StrokePoint sample(pos.x, pos.y,
             event.points[0].pressure, event.points[0].tiltX, event.points[0].tiltY, event.t);
         builder->addInputPoint(sample);
-        if(linePen)
-          lineSamples.push_back(sample);
       }
     }
     scribbleDoc->strokeBuilder = builder;
@@ -3610,7 +3572,7 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
   }
   case MODE_DRAWSHAPE:
   {
-    if(scribbleDoc->scribbleMode->drawRegion) {
+    if(scribbleDoc->scribbleMode->drawRegion && !drawLinesGesture) {
       // the region tool is a drag, like the box: the region is live (painted each frame) until release
       finishShape();
       Dim yr = currPage->yruling() > 0 ? currPage->yruling() : Page::BLANK_Y_RULING;
@@ -3626,7 +3588,7 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
       regionInProgress = Element::createRulingRegion(params, currPage->props.color, currPage->props.ruleColor);
       break;
     }
-    int shapeid = scribbleDoc->scribbleMode->shapeId;
+    int shapeid = drawLinesGesture ? int(SHAPE_LINE) : scribbleDoc->scribbleMode->shapeId;
     const ShapeDef* def = shapeDef(shapeid);
     if(!def)
       break;
@@ -3660,7 +3622,11 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
       }
       break;
     }
-    currStroke = createShapeElement(newShapeParams(shapeid, pos));
+    ShapeParams params = newShapeParams(shapeid, pos);
+    // the arrowhead toggles live on the shape options row, which the pen does not show
+    if(drawLinesGesture)
+      params.flags &= ~(SHAPEFLAG_HEADSTART | SHAPEFLAG_HEADEND);
+    currStroke = createShapeElement(params);
     break;
   }
   case MODE_SHAPEHANDLE:
@@ -3880,13 +3846,9 @@ void ScribbleArea::doMoveEvent(const InputEvent& event)
         scribbleDoc->strokeBuilder->addInputPoint(StrokePoint(pos.x, pos.y, 1, 0, 0, event.t));
       scribbleDoc->strokeBuilder->addInputPoint(StrokePoint(pos.x, pos.y, 1, 0, 0, event.t));
     }
-    else {
-      StrokePoint sample(pos.x, pos.y,
-          event.points[0].pressure, event.points[0].tiltX, event.points[0].tiltY, event.t);
-      scribbleDoc->strokeBuilder->addInputPoint(sample);
-      if(linePen)
-        lineSamples.push_back(sample);
-    }
+    else
+      scribbleDoc->strokeBuilder->addInputPoint(StrokePoint(pos.x, pos.y,
+          event.points[0].pressure, event.points[0].tiltX, event.points[0].tiltY, event.t));
     // current stroke is drawn directly to screen; note that in reqRepaint(),
     //  currPage->getDirty() will return invalid rect since currStroke is not added
     //  to page until cursor release.
@@ -4397,10 +4359,6 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
       break;
     }
     strokeCounter++;
-    // Draw Lines: swap in the straightened stroke before it is finished, so it is committed (and undone)
-    //  as the one stroke
-    if(linePen)
-      straightenLineStroke();
     currStroke = scribbleDoc->strokeBuilder->finish();
     // The centre of mass is what says which line a stroke is on, and its heuristic leans on "up" (first
     //  point, bbox top).  On a tilted region's lines up is the region's up, so measure it there - in page
@@ -4813,8 +4771,6 @@ void ScribbleArea::doCancelAction(bool refresh)
     // a snapped shape is in currStroke, so it is discarded below like the ink it replaced
     stopShapeSnap();
     snapActive = false;
-    linePen.reset();
-    lineSamples.clear();
     if(scribbleDoc->strokeBuilder) {
       currStroke = scribbleDoc->strokeBuilder->finish();
       delete scribbleDoc->strokeBuilder;

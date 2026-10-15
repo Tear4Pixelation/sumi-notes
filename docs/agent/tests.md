@@ -29,12 +29,6 @@ The smart scale layout ([smart-scale.md](smart-scale.md)) is tested the same way
 `scribbletest/smartscaletest.cpp` (`runSmartScaleTests()`; command in its header); the gesture end to end
 (one undo step, later content pulled up) in `ScribbleTest::smartScaleTest()`.
 
-The Draw Lines straight-line assist ([pen-and-tools.md](pen-and-tools.md#draw-lines-straight-line-assist)) is
-tested the same way in `scribbletest/straightentest.cpp` (`runStraightenTests()`; command in its header):
-nearly straight becomes 2 points, near horizontal/vertical/45 degrees exactly that, curves, a gentle bow,
-squiggles and doubling back unchanged, an "L" two snapped pieces. Each check notes what it gives without the
-feature. Not covered in the app.
-
 Pen-up stroke simplification ([stroke-input.md](stroke-input.md)): `scribbletest/simplifytest.cpp`
 (`runSimplifyTests()`; command in its header) for the geometry, `ScribbleTest::strokeSimplifyTest()` for
 every pen kind through the real builders and pen-up path. `--simplifybenchtest` (`simplifybench.cpp`,

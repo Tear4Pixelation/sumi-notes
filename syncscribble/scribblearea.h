@@ -508,14 +508,9 @@ protected:
   bool snapStroke();
   bool scratchOutOnLift(Selection& erased);
   void discardStrokeBuilder();
-  // Draw Lines (ScribblePen::LINE_DRAWING, docs/agent/pen-and-tools.md): the pen draws freehand, and on
-  //  pen-up straightenLineStroke() replaces a nearly straight stroke with straight lines (linestraighten.h).
-  //  linePen is the pen the stroke was begun with (resolved, so a relative width is in document units), set
-  //  only while a Draw Lines stroke is in progress; lineSamples is its raw input, exactly as given to the
-  //  builder, in page coordinates.
-  std::unique_ptr<ScribblePen> linePen;
-  std::vector<StrokePoint> lineSamples;
-  void straightenLineStroke();
+  // Draw Lines (ScribblePen::LINE_DRAWING, docs/agent/pen-and-tools.md): a pen press is the Line shape
+  //  tool's gesture (MODE_DRAWSHAPE with SHAPE_LINE) in the pen's own color and width; set for that gesture
+  bool drawLinesGesture = false;
   void scaleSnapShape(Point pos);
   void commitSnapShape();
   int scratchOut(const std::vector<Point>& area);
