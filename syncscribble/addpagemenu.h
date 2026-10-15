@@ -73,6 +73,10 @@ std::vector<Button*> createLayoutGrid(Widget* container, const ScribbleConfig* c
 Button* createAddPageButton(const std::vector<Action*>& pageActions);
 // opens the popup of the Add Page button most recently created (no-op if there is none)
 void showAddPagePopup();
+// The Add Page chooser - recent row, then the full grid behind its "+" - in a dialog of its own, for choosing
+//  a page's layout for something other than adding a page (Convert to Subpage).  onChosen runs after the
+//  dialog closes on a tap; Cancel calls nothing.
+void chooseLayout(const char* title, const std::function<void(const PageLayout&)>& onChosen);
 
 // The "+" beside Add Page: a menu of things to add to this page, one entry per action given (Paper, Patch,
 //  Insert Document, Insert Photo - docs/agent/paper.md)

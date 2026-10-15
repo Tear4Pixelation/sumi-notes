@@ -112,3 +112,6 @@ There is no Paper entry any more (it opened the Add Page popup, which the Add Pa
 `AddPageMenu::showAddPagePopup()` and its closure are now unused.
 
 Like Add Page, the popup opens on press (a popup shown on release is closed by that release). 
+
+The chooser (recent row + grid) is a `LayoutChooser` that the Add Page popup and `chooseLayout()` (a dialog,
+used by Convert to Subpage - ruling-regions.md) both host; they differ only in what a pick and a close do.

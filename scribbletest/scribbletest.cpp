@@ -5784,6 +5784,145 @@ int ScribbleTest::rulingRegionTest()
   return nbad;
 }
 
+// Convert to Subpage (docs/agent/ruling-regions.md).  The placement itself is checked in regiontest.cpp; this
+//  is the document side: what lands on the new page, where, on which layer, and that undo gives back the
+//  original page.
+int ScribbleTest::subpageTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: subpage: %s\n", what); }
+  };
+  auto at = [&](Point pagept, int ev) {
+    Point scr = scribbleArea->dimToScreen(scribbleArea->pageDimToDim(pagept));
+    ie(scr.x, scr.y, 0, pen, ev);
+  };
+  auto stroke = [&](const std::vector<Point>& pts) -> Element* {
+    scribbleMode->setMode(MODE_STROKE);
+    at(pts.front(), press);
+    for(size_t ii = 1; ii < pts.size(); ++ii) at(pts[ii], INPUTEVENT_MOVE);
+    at(pts.back(), release);
+    Element* last = NULL;
+    for(Element* s : scribbleArea->currPage->children()) last = s;
+    return last;
+  };
+  auto children = [](Page* page) {
+    std::vector<Element*> result;
+    for(Element* s : page->children()) result.push_back(s);
+    return result;
+  };
+  auto nearRect = [](const Rect& a, const Rect& b) {
+    return std::abs(a.left - b.left) < 0.5 && std::abs(a.top - b.top) < 0.5
+        && std::abs(a.right - b.right) < 0.5 && std::abs(a.bottom - b.bottom) < 0.5;
+  };
+  const Dim newPitch = 40;
+
+  // a lined page with ink: it becomes a patch carrying its own ruling, ink on top, all shifted together
+  {
+    scribbleDoc->newDocument();
+    scribbleDoc->app->setPen(ScribblePen(Color::BLACK, 2, ScribblePen::TIP_ROUND));
+    Page* orig = scribbleArea->currPage;
+    PageProperties origprops = orig->getProperties();
+    origprops.yRuling = 30;
+    origprops.xRuling = 0;
+    scribbleDoc->startAction(0);
+    orig->setProperties(&origprops);
+    scribbleDoc->endAction();
+    scribbleDoc->setPageOutline(0, "Lecture", 0);
+    Element* ink = stroke({Point(150, 300), Point(250, 305), Point(300, 310)});
+    check(ink != NULL, "a stroke was written");
+    if(!ink) return nbad;
+    Rect inkBox = ink->bbox();
+    int inkLayer = ink->layer();
+    Dim origW = orig->width(), origH = orig->height();
+
+    PageProperties props = orig->getProperties();
+    props.xRuling = newPitch;
+    props.yRuling = newPitch;
+    props.marginLeft = 0;
+    SubpagePlacement place = subpagePlacement(origW, origH, props.width, props.height, newPitch, newPitch);
+    check(scribbleDoc->convertToSubpage(0, props), "converting the page succeeds");
+    Page* page = scribbleDoc->document->pages[0];
+    check(page != orig && scribbleDoc->document->numPages() == 1, "the page is replaced in place, not added");
+    check(page->width() == place.width && page->height() == place.height, "the new page has the placement's size");
+    check(page->width() >= origW + 2*SUBPAGE_MARGIN && page->height() >= origH + 2*SUBPAGE_MARGIN,
+        "the new page holds the old one with a margin all round");
+    check(page->yruling() == newPitch && page->xruling() == newPitch, "the new page has the chosen ruling");
+    check(page->outlineTitle == "Lecture", "the outline entry stays with the page");
+    std::vector<Element*> elements = children(page);
+    check(elements.size() == 2, "the new page holds the patch and the stroke");
+    Element* region = elements.size() == 2 ? elements[0] : NULL;
+    Element* moved = elements.size() == 2 ? elements[1] : NULL;
+    check(region && region->isRulingRegion(), "the patch comes first, under the ink");
+    if(region && moved) {
+      const RulingRegionParams& params = region->regionParams();
+      check(nearRect(params.bounds(), Rect::ltwh(place.offset.x, place.offset.y, origW, origH)),
+          "the patch is the old page, where the placement puts it");
+      check(params.yRuling == 30 && params.xRuling == 0, "the patch carries the old page's ruling");
+      // phased as on the old page: a rule line of the old page at y = 30 is one at offset.y + 30 now
+      RulingFrame frame = params.frame(region);
+      check(std::abs(frame.toLocal(place.offset + Point(0, 30)).y - 30) < 1E-3, "the patch's lines are the old page's lines");
+      check(region->layer() == scribbleDoc->document->layers.byIndex(0)->id, "the patch is on the bottom layer");
+      check(nearRect(moved->bbox(), Rect(inkBox).translate(place.offset.x, place.offset.y)), "the ink moved with its paper");
+      check(moved->layer() == inkLayer, "the ink keeps its layer");
+      check(page->rulingAt(moved->bbox().center()).region == region, "the ink is ruled by the patch, not the page");
+    }
+
+    scribbleDoc->doCommand(ID_UNDO);
+    check(scribbleDoc->document->pages[0] == orig, "one undo brings back the original page");
+    check(orig->width() == origW && orig->height() == origH && children(orig).size() == 1,
+        "the original page is unchanged");
+    check(children(orig).size() == 1 && nearRect(children(orig)[0]->bbox(), inkBox), "its ink is where it was");
+    scribbleDoc->doCommand(ID_REDO);
+    check(scribbleDoc->document->pages[0] == page && children(page).size() == 2, "redo puts the new page back");
+  }
+
+  // a PDF page: its background image comes across as an image element instead, with the ink over it
+  {
+    scribbleDoc->newDocument();
+    Page* orig = scribbleArea->currPage;
+    const Dim pdfW = 600, pdfH = 800;
+    PageProperties pdfprops(pdfW, pdfH, 0, 0, 0, Color::WHITE, Color::BLUE);
+    scribbleDoc->startAction(0);
+    orig->setProperties(&pdfprops);
+    scribbleDoc->endAction();
+    Image picture(16, 16);
+    memset(picture.bytes(), 0x80, size_t(16)*16*4);
+    SvgImage* background = new SvgImage(std::move(picture), Rect::ltwh(0, 0, pdfW, pdfH));
+    background->addClass(PdfImport::BACKGROUND_CLASS);
+    orig->ruleNode->addChild(background);
+    orig->ruleNode->removeClass("write-std-ruling");
+    orig->ruleNode->addClass("write-no-dup");
+    orig->isCustomRuling = true;
+    check(orig->hasImageBackground(), "the test page has a PDF background");
+    scribbleArea->gotoPage(0);
+    Element* ink = stroke({Point(100, 200), Point(200, 210)});
+    if(!ink) { check(false, "a stroke was written on the PDF page"); return nbad; }
+    Rect inkBox = ink->bbox();
+
+    PageProperties props(scribbleDoc->cfg->Float("pageWidth"), scribbleDoc->cfg->Float("pageHeight"),
+        0, newPitch, 0, Color::WHITE, Color::BLUE);
+    SubpagePlacement place = subpagePlacement(pdfW, pdfH, props.width, props.height, 0, newPitch);
+    check(scribbleDoc->convertToSubpage(0, props), "converting the PDF page succeeds");
+    Page* page = scribbleDoc->document->pages[0];
+    std::vector<Element*> elements = children(page);
+    check(!page->hasImageBackground(), "the new page has ordinary paper");
+    check(elements.size() == 2, "the new page holds the image and the stroke");
+    if(elements.size() == 2) {
+      Element* image = elements[0];
+      check(image->node->type() == SvgNode::IMAGE && !image->isRulingRegion(), "a PDF page comes across as an image, not a patch");
+      check(image->node->hasClass(PdfImport::BACKGROUND_CLASS), "the image keeps the PDF class, so its resolution");
+      check(nearRect(image->bbox(), Rect::ltwh(place.offset.x, place.offset.y, pdfW, pdfH)), "the image is where the placement puts it");
+      check(nearRect(elements[1]->bbox(), Rect(inkBox).translate(place.offset.x, place.offset.y)), "the ink stays on its place on the image");
+    }
+    scribbleDoc->doCommand(ID_UNDO);
+    check(scribbleDoc->document->pages[0] == orig && orig->hasImageBackground(), "undo brings back the PDF page");
+  }
+
+  scribbleDoc->newDocument();
+  return nbad;
+}
+
 void ScribbleTest::runAll(bool runsynctest)
 {
   nFailed = 0;
@@ -5992,6 +6131,7 @@ void ScribbleTest::runAll(bool runsynctest)
   nUnitFailed += eraserHitTest();
   nUnitFailed += interactCullTest();
   nUnitFailed += rulingRegionTest();
+  nUnitFailed += subpageTest();
   nUnitFailed += reflowIndentTest();
   nUnitFailed += smartScaleTest();
   nUnitFailed += skippedLinesTest();

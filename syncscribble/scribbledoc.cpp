@@ -903,6 +903,80 @@ void ScribbleDoc::insertPage(Page* page, int where)
   uiChanged(UIState::InsertPage);
 }
 
+// Convert to Subpage (docs/agent/ruling-regions.md).  The new page is built complete before it enters the
+//  document, while no action is open, so building it records nothing; the swap itself is then a
+//  PageDeletedItem + PageAddedItem in one action - one undo step that restores the original page object,
+//  and for sync one <deletepage> plus one <addpage>, which carries the finished page's content (an
+//  <addpage> serializes its page when sent, so stroke items on top of it would arrive twice).
+bool ScribbleDoc::convertToSubpage(int pagenum, const PageProperties& props)
+{
+  if(pagenum < 0 || pagenum >= document->numPages())
+    return false;
+  Page* orig = document->pages[pagenum];
+  if(!orig->ensureLoaded())
+    return false;
+  clearSelection();
+
+  SubpagePlacement place = subpagePlacement(orig->width(), orig->height(), props.width, props.height,
+      props.xRuling, props.yRuling);
+  PageProperties newprops = props;
+  newprops.width = place.width;
+  newprops.height = place.height;
+  Page* page = generatePage(pagenum, &newprops);
+  // before `document` is set: with one, ensureLoaded() would run the memory check for a page not in it
+  if(orig->hasOutlineEntry())
+    page->setOutlineEntry(orig->outlineTitle.c_str(), orig->outlineLevel);
+  // addStroke reads the layer table through it; nothing reaches the history since no action is open
+  page->document = document;
+  // the old page's paper goes under everything, on the bottom layer: its ink keeps its own layers above it
+  const LayerInfo* bottom = document->layers.byIndex(0);
+  int bottomlayer = bottom ? bottom->id : LayerList::DEFAULT_LAYER;
+  ScribbleTransform shift = ScribbleTransform().translate(place.offset.x, place.offset.y);
+  // added in the old page's coordinates, then shifted, as Selection::stealthTransform does
+  auto addShifted = [&](Element* element, int layer) {
+    page->addStroke(element, NULL, layer);
+    element->applyTransform(shift);
+    element->commitTransform();
+  };
+
+  // A page whose background is an image (PDF, scan, Noteful) has no ruling a patch could reproduce, so the
+  //  image itself comes across, as content.  It keeps write-pdf-background, so it keeps its resolution.
+  if(orig->hasImageBackground()) {
+    for(SvgNode* node : orig->ruleNode->children()) {
+      if(node->type() != SvgNode::IMAGE)
+        continue;
+      SvgNode* image = node->clone();
+      addShifted(image->hasExt() ? static_cast<Element*>(image->ext()) : new Element(image), bottomlayer);
+    }
+  }
+  else {
+    // the patch carries the old page's ruling, phased as on the old page (pageFrame: the blank-page offset)
+    RulingFrame frame = orig->pageFrame();
+    RulingRegionParams params = RulingRegionParams::fromRect(orig->rect(), frame.xRuling, frame.yRuling,
+        frame.dotRadius, frame.staff);
+    params.origin = frame.origin;
+    params.sanitize();
+    addShifted(Element::createRulingRegion(params, orig->props.color, orig->props.ruleColor), bottomlayer);
+  }
+  // then the content in document order, each on its own layer: added after the patch or image, so ink on the
+  //  bottom layer stays over them, and regions already on the page restack over the new patch as usual
+  for(Element* element : orig->children())
+    addShifted(element->cloneNode(), element->layer());
+
+  startAction(pagenum);
+  document->deletePage(pagenum);
+  document->insertPage(page, pagenum);
+  endAction();
+  if(pagenum >= document->numPages() - 1)
+    updateGhostPage();
+  document->bookmarksDirty = true;
+  pageCountChanged(pagenum, document->numPages());
+  activeArea->gotoPage(pagenum);
+  uiChanged(UIState::InsertPage);
+  doRefresh();
+  return true;
+}
+
 void ScribbleDoc::deletePage(int where)
 {
   if(document->numPages() < 2)

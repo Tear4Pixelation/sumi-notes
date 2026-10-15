@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <memory>
 
 #include "ulib/stringutil.h"
 
@@ -573,16 +574,9 @@ static std::vector<PageLayout> recentLayouts()
   return layouts;
 }
 
-// every route into the popup ends here: insert after the current page (the "add page" a user means),
-//  and remember the layout so the same page is one tap away next time
-static void addPage(const PageLayout& layout)
+// a layout just used goes to the front of the recent row, so the same page is one tap away next time
+static void rememberLayout(const PageLayout& layout)
 {
-  ScribbleDoc* doc = ScribbleApp::app->activeDoc();
-  if(!doc)
-    return;
-  PageProperties props = layoutToProps(layout, doc->cfg);
-  doc->newPage(ScribbleApp::app->activeArea()->getCurrPageNum() + 1, &props);
-
   std::vector<PageLayout> recents = recentLayouts();
   // re-using a layout moves it back to the front rather than adding a duplicate
   recents.erase(std::remove_if(recents.begin(), recents.end(),
@@ -591,6 +585,17 @@ static void addPage(const PageLayout& layout)
   if(recents.size() > MAX_RECENT)
     recents.resize(MAX_RECENT);
   ScribbleApp::cfg->set(RECENT_CFG_KEY, serializeLayouts(recents).c_str());
+}
+
+// every route into the Add Page popup ends here: insert after the current page (the "add page" a user means)
+static void addPage(const PageLayout& layout)
+{
+  ScribbleDoc* doc = ScribbleApp::app->activeDoc();
+  if(!doc)
+    return;
+  PageProperties props = layoutToProps(layout, doc->cfg);
+  doc->newPage(ScribbleApp::app->activeArea()->getCurrPageNum() + 1, &props);
+  rememberLayout(layout);
 }
 
 // Edit a layout in the page setup dialog.  customidx >= 0 edits that custom layout in place (and offers
@@ -629,16 +634,21 @@ static void editLayout(const PageLayout& layout, int customidx, const char* titl
   setCustomLayouts(ScribbleApp::cfg, layouts);
 }
 
-// a layout tile: tap adds that page, right-click or long press edits the layout
-static Button* createLayoutTile(ArrowPopup* popup, ScribbleDoc* doc, const PageLayout& layout,
-    const char* label, int customidx)
+// What a chooser does with a tile: `pick` is a tap (add the page, or whatever the host chooses a layout for),
+//  `close` dismisses the host - the Add Page popup or the chooseLayout() dialog - before a layout is edited.
+typedef std::function<void(const PageLayout&)> PickFn;
+typedef std::function<void()> CloseFn;
+
+// a layout tile: tap picks that layout, right-click or long press edits it
+static Button* createLayoutTile(const CloseFn& close, const PickFn& pick, ScribbleDoc* doc,
+    const PageLayout& layout, const char* label, int customidx)
 {
   Button* tile = new Button(createLayoutTileNode(layoutToProps(layout, doc->cfg), label));
-  tile->onClicked = [popup, layout](){ closeAutoClosePopup(popup); addPage(layout); };
+  tile->onClicked = [pick, layout](){ pick(layout); };
   std::string edittitle = customidx >= 0 ? _("Edit Layout") : fstring(_("New Layout from %s"),
       layoutDescription(layout).c_str());
-  SvgGui::setupRightClick(tile, [popup, layout, customidx, edittitle](SvgGui*, Widget*, Point){
-    closeAutoClosePopup(popup);
+  SvgGui::setupRightClick(tile, [close, layout, customidx, edittitle](SvgGui*, Widget*, Point){
+    close();
     editLayout(layout, customidx, edittitle.c_str());
   });
   setupTooltip(tile, (layoutDescription(layout) + _(" - right-click or long press to edit")).c_str());
@@ -690,18 +700,18 @@ static void buildLayoutGrid(Widget* layoutGrid, const TileMaker& makeTile, Widge
   flushRows(_("Custom"));
 }
 
-static void buildAddPageGrid(ArrowPopup* popup, Widget* layoutGrid, ScribbleDoc* doc)
+static void buildAddPageGrid(const CloseFn& close, const PickFn& pick, Widget* layoutGrid, ScribbleDoc* doc)
 {
   Button* newtile = new Button(createPlusTileNode(_("New layout"), TILE_W));
-  newtile->onClicked = [popup](){
-    closeAutoClosePopup(popup);
+  newtile->onClicked = [close](){
+    close();
     ScribbleDoc* activedoc = ScribbleApp::app->activeDoc();
     if(activedoc)
       editLayout(defaultLayout(activedoc), -1, _("New Layout"));
   };
   setupTooltip(newtile, _("Add a custom layout"));
-  buildLayoutGrid(layoutGrid, [popup, doc](const PageLayout& layout, const char* label, int customidx) {
-    return createLayoutTile(popup, doc, layout, label, customidx);
+  buildLayoutGrid(layoutGrid, [close, pick, doc](const PageLayout& layout, const char* label, int customidx) {
+    return createLayoutTile(close, pick, doc, layout, label, customidx);
   }, newtile);
 }
 
@@ -750,94 +760,136 @@ bool layoutFromString(const char* str, PageLayout* layout)
 // how the "+" menu's Paper entry reaches the Add Page popup (see createAddMenuButton)
 static std::function<void()> openAddPagePopup;
 
-Button* createAddPageButton(const std::vector<Action*>& pageActions)
+// The chooser itself: the recent row (what opens - "another one of those" should stay a single tap) and the
+//  full layout grid behind its "+", in `container`.  Shared by the Add Page popup and chooseLayout(), which
+//  differ only in what a pick does and how they close.  Both views are built by populate() and only their
+//  visibility changes afterwards: "+" is pressed inside the recent row, and rebuilding from its own click
+//  handler would free the widget the press is still being dispatched to.
+struct LayoutChooser {
+  TextBox* title = NULL;  // NULL when the host has a title of its own (a dialog)
+  Widget* titleSpacer = NULL;
+  Widget* titleRow = NULL;
+  Widget* gridOptions = NULL;
+  Widget* recentRow = NULL;
+  Widget* layoutGrid = NULL;
+  CloseFn close;
+  PickFn pick;
+  // rebuilt on every open: recents and custom layouts change, and the 1:1 halves follow the zoom
+  std::function<void()> populate;
+  // after the recent row gives way to the grid: a popup re-sizes itself, a dialog has to be told (chooseLayout)
+  std::function<void()> onViewChanged;
+};
+
+static std::shared_ptr<LayoutChooser> createLayoutChooser(Widget* container, bool withTitle,
+    const CloseFn& close, const PickFn& pick)
 {
-  Button* btn = createToolbutton(SvgGui::useFile(":/icons/ic_menu_file_plus.svg"), _("Add Page"));
-  ArrowPopup* popup = createArrowPopup(Menu::VERT_LEFT);
+  auto chooser = std::make_shared<LayoutChooser>();
+  chooser->close = close;
+  chooser->pick = pick;
+  if(withTitle) {
+    chooser->title = createTextBox(_("Add Page"));
+    chooser->title->node->addClass("arrowpopup-title");
+    // in a row of its own so its spacing can grow with the grid view.  Space above it is an empty rect
+    //  rather than a top margin: the popup's column ignores its first child's top margin (tried on the
+    //  text and on this row), while a spacer's height it cannot ignore.
+    chooser->titleSpacer = new Widget(loadSVGFragment("<rect width=\"1\" height=\"8\" fill=\"none\"/>"));
+    chooser->titleRow = createRow({chooser->title}, "", "", "left");
+    container->addWidget(chooser->titleSpacer);
+    container->addWidget(chooser->titleRow);
+  }
 
-  TextBox* title = createTextBox(_("Add Page"));
-  title->node->addClass("arrowpopup-title");
-  // in a row of its own so its spacing can grow with the grid view.  Space above it is an empty rect
-  //  rather than a top margin: the popup's column ignores its first child's top margin (tried on the
-  //  text and on this row), while a spacer's height it cannot ignore.
-  Widget* titleSpacer = new Widget(loadSVGFragment("<rect width=\"1\" height=\"8\" fill=\"none\"/>"));
-  Widget* titleRow = createRow({title}, "", "", "left");
-  popup->addWidget(titleSpacer);
-  popup->addWidget(titleRow);
-
-  // Two views in one popup: the recent row, which is what opens - "another one of those" should stay a
-  //  single tap - and the full layout grid behind its "+".  Both are built on open and only their
-  //  visibility changes afterwards: "+" is pressed inside the recent row, and rebuilding from its own
-  //  click handler would free the widget the press is still being dispatched to.
-  Widget* recentRow = createRow({}, "", "", "left");
-  Widget* layoutGrid = createColumn({}, "", "", "left");
+  chooser->recentRow = createRow({}, "", "", "left");
+  chooser->layoutGrid = createColumn({}, "", "", "left");
   // the grid's options sit outside the grid for the same reason: toggling one rebuilds the grid
   CheckBox* marginCb = createCheckBox(_("Margin line"), ScribbleApp::cfg->Bool("layoutMarginLine", true));
   setupTooltip(marginCb, _("Red margin line at the left of lined and squared layouts"));
-  Widget* gridOptions = createRow({marginCb}, "", "", "left");
-  gridOptions->setMargins(0, 0, 8, 0);
-  popup->addWidget(gridOptions);
-  popup->addWidget(recentRow);
-  popup->addWidget(layoutGrid);
-  popup->addSeparator();
-  for(Action* action : pageActions)
-    popup->addAction(action);
-  setupAutoClosePopup(popup);
-  btn->addWidget(popup);
+  chooser->gridOptions = createRow({marginCb}, "", "", "left");
+  chooser->gridOptions->setMargins(0, 0, 8, 0);
+  container->addWidget(chooser->gridOptions);
+  container->addWidget(chooser->recentRow);
+  container->addWidget(chooser->layoutGrid);
 
-  marginCb->onToggled = [popup, layoutGrid](bool checked){
+  // a raw pointer in the widgets' handlers: the host keeps the chooser for as long as those widgets live
+  LayoutChooser* views = chooser.get();
+  marginCb->onToggled = [views](bool checked){
     ScribbleApp::cfg->set("layoutMarginLine", checked);
     ScribbleDoc* doc = ScribbleApp::app->activeDoc();
-    SvgGui* gui = popup->window() ? popup->window()->gui() : NULL;
+    SvgGui* gui = views->layoutGrid->window() ? views->layoutGrid->window()->gui() : NULL;
     if(!doc || !gui)
       return;
-    gui->deleteContents(layoutGrid);
-    buildAddPageGrid(popup, layoutGrid, doc);
+    gui->deleteContents(views->layoutGrid);
+    buildAddPageGrid(views->close, views->pick, views->layoutGrid, doc);
   };
 
-  // rebuilt on every open: recents and custom layouts change, and the 1:1 halves follow the zoom
-  auto populate = [popup, title, titleSpacer, titleRow, gridOptions, recentRow, layoutGrid]() {
-    SvgGui* gui = popup->window() ? popup->window()->gui() : NULL;
+  chooser->populate = [views]() {
+    SvgGui* gui = views->layoutGrid->window() ? views->layoutGrid->window()->gui() : NULL;
     if(gui) {
-      gui->deleteContents(recentRow);
-      gui->deleteContents(layoutGrid);
+      gui->deleteContents(views->recentRow);
+      gui->deleteContents(views->layoutGrid);
     }
-    title->setText(_("Add Page"));
-    titleSpacer->setVisible(false);
-    titleRow->setMargins(0, 0, 0, 0);
-    gridOptions->setVisible(false);
-    recentRow->setVisible(true);
-    layoutGrid->setVisible(false);
+    if(views->title) {
+      views->title->setText(_("Add Page"));
+      views->titleSpacer->setVisible(false);
+      views->titleRow->setMargins(0, 0, 0, 0);
+    }
+    views->gridOptions->setVisible(false);
+    views->recentRow->setVisible(true);
+    views->layoutGrid->setVisible(false);
     ScribbleDoc* doc = ScribbleApp::app->activeDoc();
     if(!doc)
       return;
 
     // the recent row: the document default, the last layouts used, and "+" for everything else
     // the first tile, and so the default choice, is the previous page's ruling
+    const CloseFn& close = views->close;
+    const PickFn& pick = views->pick;
     PageLayout prevlayout = previousPageLayout(doc);
-    recentRow->addWidget(createLayoutTile(popup, doc, prevlayout, _("Same as previous"), -1));
+    views->recentRow->addWidget(createLayoutTile(close, pick, doc, prevlayout, _("Same as previous"), -1));
     PageLayout deflayout = defaultLayout(doc);
     if(!sameLayout(deflayout, prevlayout))
-      recentRow->addWidget(createLayoutTile(popup, doc, deflayout, _("Default"), -1));
+      views->recentRow->addWidget(createLayoutTile(close, pick, doc, deflayout, _("Default"), -1));
     for(const PageLayout& layout : recentLayouts()) {
       if(!sameLayout(layout, deflayout) && !sameLayout(layout, prevlayout))
-        recentRow->addWidget(createLayoutTile(popup, doc, layout, shortDescription(layout).c_str(), -1));
+        views->recentRow->addWidget(createLayoutTile(close, pick, doc, layout, shortDescription(layout).c_str(), -1));
     }
     Button* more = new Button(createPlusTileNode(_("More"), PLUS_TILE_W));
-    more->onClicked = [title, titleSpacer, titleRow, gridOptions, recentRow, layoutGrid](){
-      title->setText(_("Choose Layout"));
-      // the grid is a much bigger view than the recent row, and its title needs room to match
-      titleSpacer->setVisible(true);
-      titleRow->setMargins(0, 6, 14, 6);
-      gridOptions->setVisible(true);
-      recentRow->setVisible(false);
-      layoutGrid->setVisible(true);
+    more->onClicked = [views](){
+      if(views->title) {
+        views->title->setText(_("Choose Layout"));
+        // the grid is a much bigger view than the recent row, and its title needs room to match
+        views->titleSpacer->setVisible(true);
+        views->titleRow->setMargins(0, 6, 14, 6);
+      }
+      views->gridOptions->setVisible(true);
+      views->recentRow->setVisible(false);
+      views->layoutGrid->setVisible(true);
+      if(views->onViewChanged)
+        views->onViewChanged();
     };
     setupTooltip(more, _("All layouts"));
-    recentRow->addWidget(more);
+    views->recentRow->addWidget(more);
 
-    buildAddPageGrid(popup, layoutGrid, doc);
+    buildAddPageGrid(close, pick, views->layoutGrid, doc);
   };
+  return chooser;
+}
+
+Button* createAddPageButton(const std::vector<Action*>& pageActions)
+{
+  Button* btn = createToolbutton(SvgGui::useFile(":/icons/ic_menu_file_plus.svg"), _("Add Page"));
+  ArrowPopup* popup = createArrowPopup(Menu::VERT_LEFT);
+  // the popup's own column: ArrowPopup::addWidget is not virtual, so the chooser, which adds through a
+  //  plain Widget*, would put its rows beside the popup's chrome rather than inside it
+  std::shared_ptr<LayoutChooser> chooser = createLayoutChooser(popup->selectFirst(".child-container"), true,
+      [popup](){ closeAutoClosePopup(popup); },
+      [popup](const PageLayout& layout){ closeAutoClosePopup(popup); addPage(layout); });
+  popup->addSeparator();
+  for(Action* action : pageActions)
+    popup->addAction(action);
+  setupAutoClosePopup(popup);
+  btn->addWidget(popup);
+  // the button's handlers keep the chooser from here on, and the popup is the button's child
+  auto populate = [chooser](){ chooser->populate(); };
 
   // opened on press like a menu, not from onClicked: a popup shown on release is closed again by that
   //  same release arriving as an outside press.  Mirrors the overflow button in mainwindow.cpp.
@@ -864,6 +916,29 @@ Button* createAddPageButton(const std::vector<Action*>& pageActions)
     btn->node->addClass("pressed");
   };
   return btn;
+}
+
+void chooseLayout(const char* title, const std::function<void(const PageLayout&)>& onChosen)
+{
+  Dialog* dialog = createPopupDialog(title);
+  Widget* body = dialog->selectFirst(".body-container");
+  // a pick is remembered as one from Add Page is: the layout just used is offered first next time
+  std::shared_ptr<LayoutChooser> chooser = createLayoutChooser(body, false,
+      [dialog](){ dialog->finish(Dialog::CANCELLED); },
+      [dialog, onChosen](const PageLayout& layout){
+        dialog->finish(Dialog::ACCEPTED);
+        rememberLayout(layout);
+        onChosen(layout);
+      });
+  dialog->cancelBtn = dialog->addButton(_("Cancel"), [dialog](){ dialog->finish(Dialog::CANCELLED); });
+  // a dialog keeps the size of its first layout; size 0 lets it fit its new contents (as RulingDialog does)
+  chooser->onViewChanged = [dialog](){
+    dialog->setWinBounds(Rect::centerwh(dialog->winBounds().center(), 0, 0));
+  };
+  // filled before it is shown, so there is no gui yet and nothing to clear
+  chooser->populate();
+  // the dialog's finish callback keeps the chooser, and lives exactly as long as the dialog
+  Application::asyncDialog(dialog, [chooser](int){});
 }
 
 void showAddPagePopup()

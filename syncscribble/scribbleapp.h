@@ -79,6 +79,7 @@ public:
   void resetDocPrefs();
   void setMode(int mode);
   void showPageSetup();
+  void convertToSubpage();  // chooses the new page's layout, then ScribbleDoc::convertToSubpage
   void showThemePicker();
   // shows TagDocList; openResult = false leaves acting on the result to the caller
   //  (openOrCreateDocTagged(), which also handles OPEN_WHITEBOARD)

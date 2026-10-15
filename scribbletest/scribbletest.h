@@ -107,6 +107,9 @@ public:
   // ruling regions: the ruled tools follow a (tilted) region's lines, the region stays below all ink and
   // out of reach of ink selection and erasers, moves with its ink, and survives undo, reload and sync
   int rulingRegionTest();
+  // Convert to Subpage: the page becomes a patch (or, on a PDF page, an image) with its ink on a new page, in
+  //  place, one undo step
+  int subpageTest();
   int reflowIndentTest();
   int smartScaleTest();
   int skippedLinesTest();

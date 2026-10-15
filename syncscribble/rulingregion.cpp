@@ -567,3 +567,22 @@ Dim selectionLineHeight(const std::vector<Point>& centres, const std::function<R
 {
   return centres.empty() ? fallback : selectionFrame(centres, frameAt).yrulingOr(fallback);
 }
+
+SubpagePlacement subpagePlacement(Dim innerW, Dim innerH, Dim pageW, Dim pageH, Dim xRuling, Dim yRuling, Dim margin)
+{
+  // up to the next multiple of pitch (tolerant of a value already on one), unchanged when there is no ruling
+  auto upToPitch = [](Dim value, Dim pitch) {
+    return pitch > 0 ? std::ceil(value/pitch - Dim(1E-6))*pitch : value;
+  };
+  SubpagePlacement place;
+  place.width = std::max(pageW, innerW + 2*margin);
+  Dim left = (place.width - innerW)/2;
+  if(xRuling > 0)
+    left = std::max(upToPitch(margin, xRuling), std::floor(left/xRuling)*xRuling);
+  Dim top = upToPitch(margin, yRuling);
+  place.offset = Point(left, top);
+  // snapping can eat into the far margins, so the page grows again where it did
+  place.width = std::max(place.width, left + innerW + margin);
+  place.height = std::max(pageH, top + innerH + margin);
+  return place;
+}
