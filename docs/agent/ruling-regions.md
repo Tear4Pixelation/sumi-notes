@@ -180,6 +180,53 @@ selection in `RegionSelector` (`selection.cpp`), the UI in `ScribbleArea` and th
   All handles (shape, scale, rotate, crop) are hit-tested in page coordinates with no page-bounds check, so
   they work off-page once the edge pan is out of the way. Not covered by an automated test (needs the app).
 
+## Convert to Subpage
+
+Overflow menu > **Convert to Subpage...** (`actionConvert_Subpage` -> `ScribbleApp::convertToSubpage()` ->
+`ScribbleDoc::convertToSubpage(pagenum, props)`) puts the current page, as it looks, onto a bigger new page of
+another ruling, so there is room around it for notes.
+
+- **The ruling is chosen with the Add Page chooser itself**, not a copy: `AddPageMenu::chooseLayout(title,
+  onChosen)` hosts the same `LayoutChooser` (recent row with "Same as previous" = the current page's ruling,
+  "+" for the full grid, Margin line, right-click to edit a layout) in a `createPopupDialog` with Cancel. The
+  popup and the dialog differ only in their `pick`/`close` callbacks (`addpagemenu.cpp`). A dialog keeps the
+  size of its first layout, so "More" calls `onViewChanged`, which sets the window bounds to 0 x 0 to make it
+  fit the grid (the RulingDialog trick); without it the grid is clipped to the recent row's size. A pick goes
+  into `recentPageLayouts` like an Add Page pick.
+- **The old page becomes a Paper Patch** over its own outline (`fromRect(orig->rect())`) with its ruling
+  phased as on the page (`origin` = `pageFrame().origin`, i.e. including the blank-page `yRuleOffset`),
+  outline on. **A page with an image background** (`hasImageBackground()`: PDF, scan, Noteful) has no ruling a
+  patch could draw, so each `<image>` of its rule layer comes across as an ordinary image element instead; it
+  keeps `write-pdf-background`, so it keeps its import resolution on save (`NO_RESAMPLE_CLASS`). It becomes
+  selectable/erasable ink-layer content, which is the point - it is a picture on the page now.
+- **Placement** is `subpagePlacement()` (`rulingregion.cpp`, tested standalone in `regiontest.cpp`,
+  mutation-checked): the new page is at least the chosen layout's size and grows to hold the old page with
+  `SUBPAGE_MARGIN` (75 units, 1/2 inch) on every side; the old page is centred across and `margin` from the
+  top, both edges moved out to the new page's own lines (top on a rule line, left on a grid line) so the patch
+  lines up with the paper around it; snapping can eat into the far margins, so the page grows again after.
+- **Layers and order**: the patch (or image) goes on the **bottom layer** (`layers.byIndex(0)`), added first;
+  then every element of the old page is cloned in document order onto *its own* layer (`addStroke(clone,
+  NULL, layer)`), shifted by the placement (`applyTransform` + `commitTransform`, as
+  `Selection::stealthTransform`; a region's branch maps its parameters). So ink on the bottom layer stays over
+  the patch, higher layers stay higher, and patches already on the page restack over the new one by the usual
+  rule. The outline entry is copied; page tags and bookmarks are elements and come along.
+- **One undo step, sync for free**: the new page is built completely while no action is open (with
+  `page->document` set so `addStroke` can read the layer table; nothing is recorded since `undoable()` is
+  false), then swapped in by `deletePage` + `insertPage` in one action. Undo restores the original `Page`
+  object. Building the page *after* inserting it would be wrong for sync: `<addpage>` serializes its page's
+  content when it is sent, so stroke items on top would arrive twice. Trap: `setOutlineEntry()` is called
+  before `page->document` is set, since with a document `ensureLoaded()` runs the memory check for a page that
+  is not in it.
+- The patch's colors are the new page's paper and rule colors (`onAddStroke` rebuilds a region with its
+  page's colors, as on undo and sync) - the theme's, same as the old page's in practice.
+- Tested by `ScribbleTest::subpageTest()` (lined page: size, patch rect/ruling/phase/layer, ink offset and
+  layer, ink ruled by the patch, outline kept, undo/redo; PDF page: image not patch, class kept, positions,
+  undo). Mutation-checked: dropping the shift fails 5 checks. Checked in agent-display for a lined page with
+  strokes onto Medium squared, and a PDF-style page onto the default lined layout, with undo.
+- Known gaps: the old page's **margin line** is not reproduced (a region has no margin); a custom ruling
+  that is not an image (pdf2write's vector rulings, an inherited custom rule layer) falls back to the page's
+  standard ruling numbers; the old page's own paper color, if it differed from the theme, is not kept.
+
 Known gaps: page-level ruled insert space does not move regions below it (vertical/horizontal insert space
 do); content pushed past a region's edge by ruled insert space leaves it; a corner drag can make a
 self-intersecting outline; the hover cursor for a relative-width marker uses the page's line height; regions

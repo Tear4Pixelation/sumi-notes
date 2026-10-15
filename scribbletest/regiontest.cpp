@@ -369,6 +369,38 @@ int runRegionTests()
     regionCheck(nearPt(snapCornerToRect(flat, triangle, 2, Point(11, 11), tol), Point(11, 11)), "snap: not four corners, no snap");
   }
 
+  // Convert to Subpage placement: the old page fits with a margin all round, its edges on the new lines
+  {
+    const Dim margin = 75;
+    // every placement must leave at least `margin` on all four sides
+    auto fitsWithMargin = [margin](const SubpagePlacement& place, Dim innerW, Dim innerH) {
+      return place.offset.x >= margin - 1E-6 && place.offset.y >= margin - 1E-6
+          && place.width - (place.offset.x + innerW) >= margin - 1E-6
+          && place.height - (place.offset.y + innerH) >= margin - 1E-6;
+    };
+    auto onPitch = [](Dim value, Dim pitch) { return std::abs(value/pitch - std::round(value/pitch)) < 1E-6; };
+
+    // A4 on a lined A4: grows by the margins, top edge moved down to the first rule line at or past it
+    SubpagePlacement same = subpagePlacement(1240, 1754, 1240, 1754, 0, 40, margin);
+    regionCheck(fitsWithMargin(same, 1240, 1754), "subpage: same size page grows to hold the margins");
+    regionCheck(nearPt(same.offset, Point(75, 80)), "subpage: centred across, top on the rule line at 80");
+    regionCheck(same.width == 1390 && same.height == 1909, "subpage: A4 on A4 makes a 1390 x 1909 page");
+    // a small page on a squared A4: the page keeps its size, the patch is centred and on the grid
+    SubpagePlacement small = subpagePlacement(400, 300, 1240, 1754, 40, 40, margin);
+    regionCheck(small.width == 1240 && small.height == 1754, "subpage: a small page does not grow the new one");
+    regionCheck(onPitch(small.offset.x, 40) && onPitch(small.offset.y, 40), "subpage: patch corner on a grid point");
+    regionCheck(std::abs(small.offset.x + 200 - 620) <= 40, "subpage: centred across to within a grid cell");
+    // wider than the page, on a grid that pushes the left edge past the centred spot: the right margin
+    //  must still be there, so the page grows again
+    SubpagePlacement wide = subpagePlacement(1300, 500, 1240, 1754, 40, 40, margin);
+    regionCheck(fitsWithMargin(wide, 1300, 500), "subpage: grid snap never eats the right margin");
+    regionCheck(onPitch(wide.offset.x, 40), "subpage: wide page still on the grid");
+    // no ruling: exactly the margin, exactly centred
+    SubpagePlacement plain = subpagePlacement(1000, 1000, 1240, 1754, 0, 0, margin);
+    regionCheck(nearPt(plain.offset, Point(120, 75)), "subpage: unruled is centred, margin from the top");
+    regionCheck(fitsWithMargin(plain, 1000, 1000), "subpage: unruled fits");
+  }
+
   return nRegionChecksFailed;
 }
 

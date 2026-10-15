@@ -3687,6 +3687,20 @@ void ScribbleApp::showPageSetup()
   asyncDialog(new RulingDialog(activeDoc()));
 }
 
+// Convert to Subpage (docs/agent/ruling-regions.md): the new page's layout comes from the Add Page chooser
+void ScribbleApp::convertToSubpage()
+{
+  if(!activeDoc())
+    return;
+  AddPageMenu::chooseLayout(_("Convert to Subpage"), [this](const AddPageMenu::PageLayout& layout){
+    ScribbleDoc* doc = activeDoc();
+    if(!doc)
+      return;
+    PageProperties props = AddPageMenu::layoutToProps(layout, doc->cfg);
+    doc->convertToSubpage(activeArea()->getCurrPageNum(), props);
+  });
+}
+
 void ScribbleApp::showThemePicker()
 {
   // works on an untitled document exactly as on a saved one - the per-document config exists either way

@@ -193,3 +193,18 @@ struct RulingRegionParams
 // serialization helpers for the __rr* attributes
 std::string serializeRegionPoints(const std::vector<Point>& points);
 void parseRegionPoints(const char* str, std::vector<Point>& points);
+
+// Convert to Subpage (docs/agent/ruling-regions.md): a page of size innerW x innerH is put on a new page of
+//  at least pageW x pageH with ruling xRuling/yRuling.  The new page grows to hold it with `margin` on every
+//  side; it sits centred across, `margin` from the top, both edges moved out to the new page's own lines
+//  (a top edge on a rule line, a left edge on a grid line) so the patch lines up with the paper around it.
+//  Returns the new page's size and where the old page's top-left corner lands on it.
+constexpr Dim SUBPAGE_MARGIN = 75;  // page units (150 per inch): 1/2 inch
+struct SubpagePlacement
+{
+  Dim width;
+  Dim height;
+  Point offset;
+};
+SubpagePlacement subpagePlacement(Dim innerW, Dim innerH, Dim pageW, Dim pageH, Dim xRuling, Dim yRuling,
+    Dim margin = SUBPAGE_MARGIN);

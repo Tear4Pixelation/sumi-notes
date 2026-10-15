@@ -187,6 +187,9 @@ public:
   void updateGhostPage();
   void newPage(int where = INT_MAX, const PageProperties* props = NULL);
   void insertPage(Page* page, int where = INT_MAX);
+  // Convert to Subpage: page `pagenum` becomes a Paper Patch (or, on a PDF/scan page, an image) with its
+  //  content on a new page of `props`' ruling, grown to hold it, in its place; one undo step
+  bool convertToSubpage(int pagenum, const PageProperties& props);
   void deletePages();
   void deletePage(int where);
   void pastePages(Clipboard* clipboard, int where);
