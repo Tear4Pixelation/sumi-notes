@@ -129,6 +129,27 @@ static std::vector<Point> localCorners(const RulingRegionParams& params)
   return local;
 }
 
+RulingRegionParams RulingRegionParams::resizedByHandle(Point startPos, Point pos, bool fromTopLeft, Dim minSize) const
+{
+  RulingRegionParams params = *this;
+  RulingFrame frame = this->frame();
+  Rect box;
+  for(const Point& local : localCorners(*this))
+    box.rectUnion(local);
+  if(box.width() <= 0 || box.height() <= 0)
+    return params;
+  Point drag = frame.toLocalDir(pos - startPos);
+  // the dragged edge moves by drag; the opposite one is the anchor
+  Dim scaleX = std::max(box.width() + (fromTopLeft ? -drag.x : drag.x), minSize)/box.width();
+  Dim scaleY = std::max(box.height() + (fromTopLeft ? -drag.y : drag.y), minSize)/box.height();
+  Point anchor = fromTopLeft ? Point(box.right, box.bottom) : Point(box.left, box.top);
+  for(Point& corner : params.corners) {
+    Point local = frame.toLocal(corner) - anchor;
+    corner = frame.toPage(anchor + Point(local.x*scaleX, local.y*scaleY));
+  }
+  return params;
+}
+
 bool RulingRegionParams::contains(Point p) const
 {
   return isValid() && pointInPolygon(corners, p);

@@ -1869,6 +1869,16 @@ Point RegionSelector::scaleHandlePos() const
   return f.toPage(Point(r.right + d, r.bottom + d));
 }
 
+Point RegionSelector::scaleHandleTopLeftPos() const
+{
+  const RulingRegionParams& params = region->regionParams();
+  RulingFrame f = params.frame();
+  Rect r = regionLocalBBox(params);
+  // the mirror of scaleHandlePos(): just past the top-left corner
+  Dim d = 4*HANDLE_SIZE/mZoom;
+  return f.toPage(Point(r.left - d, r.top - d));
+}
+
 // the origin handle sits on the left edge, on the first line inside the region, and drags the lines
 //  - except on a coordinate system, where it is the plot's (0, 0) itself (kept inside the outline)
 static Point defaultOriginHandlePos(const RulingRegionParams& params)
@@ -1903,6 +1913,7 @@ Rect RegionSelector::getBGBBox()
   Rect r = region->regionParams().bounds();
   r.rectUnion(rotHandlePos());
   r.rectUnion(scaleHandlePos());
+  r.rectUnion(scaleHandleTopLeftPos());
   r.rectUnion(originHandlePos());
   r.rectUnion(moveGripPos());
   return r.pad(2*(HANDLE_SIZE + 3)/mZoom);
@@ -1920,6 +1931,8 @@ int RegionSelector::shapeHandleHit(Point pos, bool touch)
     return moveGripIndex();
   if((pos - scaleHandlePos()).dist() <= a*1.2)
     return resizeHandleIndex();
+  if((pos - scaleHandleTopLeftPos()).dist() <= a*1.2)
+    return resizeHandleTopLeftIndex();
   for(int ii = int(params.corners.size()); ii-- > 0;) {
     if(std::abs(pos.x - params.corners[ii].x) <= a && std::abs(pos.y - params.corners[ii].y) <= a)
       return ii;
@@ -1942,23 +1955,9 @@ Point RegionSelector::rotHandleHit(Point pos, bool touch)
 //  moves the outline only - spacing is the panel's slider - and, since the lines stay put, the ink on
 //  them stays put too.  Scaling ink with lines that did not scale would lift it off them.  Being free
 //  of the ruling, the size need not be uniform either.
-RulingRegionParams RegionSelector::resized(const RulingRegionParams& start, Point startPos, Point pos) const
+RulingRegionParams RegionSelector::resized(const RulingRegionParams& start, int handleIndex, Point startPos, Point pos) const
 {
-  RulingRegionParams params = start;
-  RulingFrame f = start.frame();
-  Rect r = regionLocalBBox(start);
-  if(r.width() <= 0 || r.height() <= 0)
-    return params;
-  Point d = f.toLocalDir(pos - startPos);
-  Dim minsize = 4*HANDLE_SIZE/mZoom;
-  Dim sx = std::max(r.width() + d.x, minsize)/r.width();
-  Dim sy = std::max(r.height() + d.y, minsize)/r.height();
-  Point anchor(r.left, r.top);
-  for(Point& p : params.corners) {
-    Point local = f.toLocal(p) - anchor;
-    p = f.toPage(anchor + Point(local.x*sx, local.y*sy));
-  }
-  return params;
+  return start.resizedByHandle(startPos, pos, handleIndex == resizeHandleTopLeftIndex(), 4*HANDLE_SIZE/mZoom);
 }
 
 void RegionSelector::drawBG(Painter* painter)
@@ -1997,9 +1996,10 @@ void RegionSelector::drawBG(Painter* painter)
   // rotate and scale: hollow circles, which RectSelector's handles also are
   painter->setFillBrush(Color::WHITE);
   painter->setStroke(Color::BLACK, 1/mZoom);
-  Point rh = rotHandlePos(), sh = scaleHandlePos();
+  Point rh = rotHandlePos(), sh = scaleHandlePos(), th = scaleHandleTopLeftPos();
   painter->drawPath(Path2D().addEllipse(rh.x, rh.y, 1.5*a, 1.5*a));
   painter->drawPath(Path2D().addEllipse(sh.x, sh.y, 1.5*a, 1.5*a));
+  painter->drawPath(Path2D().addEllipse(th.x, th.y, 1.5*a, 1.5*a));
   painter->restore();
   bgDirty = false;
 }

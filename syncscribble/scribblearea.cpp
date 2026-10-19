@@ -4029,8 +4029,9 @@ void ScribbleArea::doMoveEvent(const InputEvent& event)
         if(!params.axes)
           regionSelector->setHandlePos(regionHandleStartHandle + (pos - regionHandleStartPos));
       }
-      else if(shapeHandleIdx == int(params.corners.size()) + 1)
-        params = regionSelector->resized(regionHandleStart, regionHandleStartPos, pos);
+      else if(shapeHandleIdx == regionSelector->resizeHandleIndex()
+          || shapeHandleIdx == regionSelector->resizeHandleTopLeftIndex())
+        params = regionSelector->resized(regionHandleStart, shapeHandleIdx, regionHandleStartPos, pos);
       else
         break;
       dirtyScreen(currSelection->getBGBBox());
@@ -4281,6 +4282,8 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
       //  writing in the one just made
       scribbleDoc->scribbleMode->drawRegion = false;
       scribbleDoc->scribbleMode->drawAxes = false;
+      // back to the pen, not left on whichever shape the Shapes tool last held
+      app->setMode(MODE_STROKE);
       break;
     }
     // the multi-point gesture deliberately survives the release; only drag gestures commit here
