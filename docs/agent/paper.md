@@ -55,6 +55,22 @@ ruling, no dots (`sanitize()` and the page loader force both to 0) and no margin
   staff space itself, only the band height. The strings are not in `strings.xml` (neither are the other
   layout names), so they are English until translated.
 
+# Change Margin (overflow menu)
+
+"Change Margin..." (`actionChange_Margin`, overflow popup after Convert to Subpage) opens `MarginDialog`
+(`rulingdialog.cpp`) to set the current page's margin line in **line heights** (`marginLeft / yRuling`).
+- Shown only while the page has a margin: `UIState::pageHasMargin` (`marginLeft > 0`, `yRuling > 0`, not staff,
+  set in `ScribbleArea::updateUIState`) drives `Action::setVisible` in `MainWindow::refreshCommonUI`; hidden on
+  whiteboard rx-only. Ruling regions have no margin, so only the page's own is edited.
+- A "Snap to whole lines" checkbox, **on by default**, rounds the value to integers (min 1) and sets spin step 1;
+  off allows free values (min 0.25). A step from a fractional value lands on the whole line in its direction
+  (2.5 up -> 3, not 3.5 rounded to 4). The dialog opens on the page's true margin (e.g. 2.50) and only snaps once
+  the value or the toggle changes, so OK without touching anything is a no-op (no undo step).
+- Live preview is `createPagePreviewNode()` (no lens, it would cover the margin), rebuilt on every change.
+- OK is `ScribbleDoc::setPageProperties(&props, false, false, false)` with only `marginLeft` changed: one undo
+  step (a `PageChangedItem`), verified by Ctrl+Z restoring the old margin. Strings are in `strings.xml`.
+- Known gap: margins are capped at 80% of the page width; the action reuses the Page Setup icon.
+
 # Page layouts (Add Page popup)
 
 `addpagemenu.cpp`. The popup opens on a short row - **"Same as previous"** first, then the document default

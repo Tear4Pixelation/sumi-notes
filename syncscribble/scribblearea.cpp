@@ -3078,6 +3078,7 @@ void ScribbleArea::updateUIState(UIState* state)
   state->totalPages = numPages();
   state->zoom = mZoom;
   state->currPageStrokes = currPage->strokeCount();
+  state->pageHasMargin = currPage->props.marginLeft > 0 && currPage->props.yRuling > 0 && !currPage->props.staff;
   state->currSelStrokes = currSelection ? currSelection->count() : 0;
   state->prevView = scribbleDoc && scribbleDoc->jumpHistory.canBack();
   state->nextView = scribbleDoc && scribbleDoc->jumpHistory.canForward();

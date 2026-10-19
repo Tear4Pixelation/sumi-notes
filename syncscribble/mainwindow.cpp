@@ -278,6 +278,7 @@ void MainWindow::refreshCommonUI(ScribbleDoc* doc, const UIState* uiState)
   actionSelect_Pages->setEnabled(!uiState->rxOnly);
   // ScribbleDoc::deletePage() refuses to delete the only page
   actionDelete_Page->setEnabled(!uiState->rxOnly && uiState->totalPages > 1);
+  actionChange_Margin->setVisible(uiState->pageHasMargin && !uiState->rxOnly);
   actionInsertDocument->setEnabled(!uiState->rxOnly);
   actionInsert_PDF->setEnabled(!uiState->rxOnly && PdfImport::isAvailable());
   // change title button icon to a cloud when connected
@@ -2497,6 +2498,9 @@ void MainWindow::setupActions()
   // the page becomes a Paper Patch (or image) on a new page (docs/agent/ruling-regions.md)
   actionConvert_Subpage = createAction("actionConvert_Subpage",
       "Convert to Subpage...", ":/icons/ic_menu_pages.svg", "", SLOT(convertToSubpage()));
+  // margin width in line heights, shown only while the page has a margin line (docs/agent/paper.md)
+  actionChange_Margin = createAction("actionChange_Margin",
+      "Change Margin...", ":/icons/ic_menu_document.svg", "", SLOT(changeMargin()));
   // ic_menu_add_color is the closest thing already in scribbleres/icons; a dedicated icon would have to
   //  come from the reicon pipeline (see CLAUDE.md), not be hand-drawn here
   actionTheme = createAction("actionTheme",
@@ -2826,6 +2830,7 @@ void MainWindow::setupActions()
   //  view), Discard Changes, Import, Insert Image and Scan (the "+" menu and the library) are gone
   overflowPopup->addAction(actionPage_Setup);
   overflowPopup->addAction(actionConvert_Subpage);
+  overflowPopup->addAction(actionChange_Margin);
   overflowPopup->addAction(actionTheme);
   overflowPopup->addAction(actionPreferences);
 

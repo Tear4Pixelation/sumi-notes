@@ -175,6 +175,12 @@
   <string name="menu_pagesetup2">Page Setup...</string>
   <string name="menu_convertsubpage2">Convert to Subpage...</string>
   <string name="menu_convertsubpage">Convert to Subpage</string>
+  <string name="menu_changemargin2">Change Margin...</string>
+  <string name="dlg_changemargin">Change Margin</string>
+  <string name="changemargin_caption">Margin width in line heights</string>
+  <string name="changemargin_lines">Margin (line heights)</string>
+  <string name="changemargin_snap">Snap to whole lines</string>
+  <string name="changemargin_snaptip">Snap the margin to whole line heights</string>
   <string name="menu_custompen">Custom Pen...</string>
   <string name="menu_pensetup">Pen Setup...</string>
   <string name="menu_discard">Discard Changes...</string>
