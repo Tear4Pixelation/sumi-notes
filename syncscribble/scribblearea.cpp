@@ -4299,13 +4299,21 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
       if(cfg->Bool("growWithPen"))
         growPage(bbox);
       // Page::addStroke() creates the StrokeAddedItem itself (spec 7.11)
-      currPage->addStroke(currStroke);
+      // a Draw Lines highlighter goes under the layer's ink like its freehand strokes (DRAW_UNDER)
+      Element* under = drawLinesGesture && currPen()->hasFlag(ScribblePen::DRAW_UNDER) ?
+          currPage->layerFirstElement(scribbleDoc->document->layers.currentId) : NULL;
+      if(under)
+        currPage->addStroke(currStroke, under);
+      else
+        currPage->addStroke(currStroke);
       // shapes are deliberately kept out of recentStrokes: groupStrokes() would rewrite their
       //  centre of mass as if they were handwriting (spec 7.6)
       groupStrokes();
       Element* drawn = currStroke;
       currStroke = NULL;
-      editShapeAfterDraw(drawn);
+      // only the Shapes tool's own line is edited right after drawing; a Draw Lines pen just draws
+      if(!drawLinesGesture)
+        editShapeAfterDraw(drawn);
     }
     break;
   case MODE_TAPE:

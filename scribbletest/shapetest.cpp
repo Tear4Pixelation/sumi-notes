@@ -242,6 +242,31 @@ static void testArrowHead()
       "headStart adds a second arrowhead");
 }
 
+// a fitted curve's head follows the end tangent of the curve as drawn, at any tightness (the head used to
+//  stay along the original last segment, so it sat skew once the curve was relaxed)
+static void testCurveArrowHead()
+{
+  for(Dim tightness : {Dim(0), Dim(0.4), Dim(1)}) {
+    ShapeParams curve;
+    curve.id = SHAPE_CURVE;
+    curve.flags = SHAPEFLAG_HEADEND;
+    curve.strokeWidth = 2;
+    curve.tightness = tightness;
+    curve.points = {Point(0, 0), Point(60, 80), Point(120, 0), Point(180, 90), Point(200, 20)};
+    Path2D path = buildShapePath(curve);
+    int count = int(path.size());
+    // the path ends with the head's three points, before them the last cubic: ... c1, c2, end
+    Point tip = path.point(count - 2);
+    Point leftTip = path.point(count - 3), rightTip = path.point(count - 1);
+    Point lastControl = path.point(count - 5);
+    Point headAxis = tip - (leftTip + rightTip)/2;
+    Point tangent = tip - lastControl;
+    Dim cross = headAxis.x*tangent.y - headAxis.y*tangent.x;
+    Dim sinAngle = cross/(headAxis.dist()*tangent.dist());
+    shapeCheckNear(sinAngle, 0, 1e-6, "the curve's arrowhead is along its end tangent");
+  }
+}
+
 static void testPolyline()
 {
   ShapeParams poly;
@@ -652,6 +677,7 @@ int runShapeTests()
   testRoundedBoxRadius();
   testBoxCornerHandles();
   testArrowHead();
+  testCurveArrowHead();
   testPolyline();
   testFilletPolyline();
   testCurvePolylines();

@@ -268,7 +268,8 @@ static Point fitKnot(const ShapeParams& params, int ii)
   return (pts[((ii - 1) % n + n) % n] + 4*pts[ii] + pts[(ii + 1) % n])/6;
 }
 
-static void addFitBody(Path2D& path, const ShapeParams& params)
+// the points the smooth curve is actually run through: the originals relaxed towards their B-spline knots
+static ShapeParams fitRelaxedParams(const ShapeParams& params)
 {
   int n = int(params.points.size());
   Dim tight = std::min(Dim(1), std::max(Dim(0), params.tightness));
@@ -279,7 +280,12 @@ static void addFitBody(Path2D& path, const ShapeParams& params)
     Point knot = fitKnot(params, ii);
     relaxed.points[ii] = knot + tight*(params.points[ii] - knot);
   }
-  addSplineBody(path, relaxed);
+  return relaxed;
+}
+
+static void addFitBody(Path2D& path, const ShapeParams& params)
+{
+  addSplineBody(path, fitRelaxedParams(params));
 }
 
 // the point whose knot is furthest from it - the one where the tightness handle has the most travel,
@@ -315,11 +321,21 @@ static Path2D buildPolylineFamilyPath(const ShapeParams& params)
   }
   if(params.flags & SHAPEFLAG_CLOSED)
     return path;  // heads are only allowed on open ends
-  size_t n = params.points.size();
+  // Heads follow the end tangent of the curve as drawn.  For the fitted curve that is along the segment
+  //  between the end point and its *relaxed* neighbour (the ends themselves are never relaxed), not the
+  //  original neighbour - which is only the same at tightness 1
+  const std::vector<Point>* headPoints = &params.points;
+  ShapeParams relaxed;
+  if(params.id == SHAPE_CURVE) {
+    relaxed = fitRelaxedParams(params);
+    headPoints = &relaxed.points;
+  }
+  const std::vector<Point>& pts = *headPoints;
+  size_t n = pts.size();
   if(params.flags & SHAPEFLAG_HEADEND)
-    addArrowHead(path, params.points[n-1], params.points[n-2], params.strokeWidth);
+    addArrowHead(path, params.points[n-1], pts[n-2], params.strokeWidth);
   if(params.flags & SHAPEFLAG_HEADSTART)
-    addArrowHead(path, params.points[0], params.points[1], params.strokeWidth);
+    addArrowHead(path, params.points[0], pts[1], params.strokeWidth);
   return path;
 }
 

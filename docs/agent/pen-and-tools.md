@@ -17,14 +17,16 @@ The pen's **Draw Lines** option (`ScribblePen::LINE_DRAWING`, pen overflow menu 
 the pen behave exactly like the Shapes **Line** tool, in the pen's own color, width and dash: a live line
 from pen-down to the pen, the Line tool's 45 degree snap (`snapShapeAngleAt()`, by distance, see
 [shapes.md](shapes.md#45-degree-angle-snap)), and on release an
-editable `SHAPE_LINE` element, left selected with its handles (`shapeEditAfterDraw`), one undo step.
+editable `SHAPE_LINE` element, one undo step. It is **not** left selected / in edit mode (`shapeEditAfterDraw`
+is the Shapes tool's own Line only: the release skips `editShapeAfterDraw()` when `drawLinesGesture`); select it
+later to edit. A `DRAW_UNDER` pen (the highlighter) inserts the line via `layerFirstElement()` like its ink does.
 
 - **One code path.** `doPressEvent()` turns a `MODE_STROKE` press with a Draw Lines pen into
   `MODE_DRAWSHAPE` right after `getScribbleMode()` and sets `drawLinesGesture`, which makes the shape branch
   use `SHAPE_LINE` instead of `ScribbleMode::shapeId` and skip the Paper Patch tool. Move, release and
   cancel are the shape tool's. `createShapeElement()` already took its style from `currPen()`, which is the
   pen while the pen tool is active. Done before the selection is looked at, so with `shapeDrawThrough` (on
-  by default) the next line draws through the one just left selected instead of only deselecting it.
+  by default) a press draws through a selection instead of only deselecting it.
 - **No arrowheads.** The shape row's head toggles are armed in `ScribbleMode::shapeFlags`, which the pen
   does not show, so they are cleared for Draw Lines.
 - **Centre on line and Tape win**: a pen with either flag keeps its own gesture.
@@ -37,7 +39,7 @@ left **ink**: the rebuilt stroke went through a `StrokeBuilder` as a pen path, n
 was editable with handles. Both are gone, not kept as options.
 
 Tested by `ScribbleTest::drawLinesTest()`: live line shape during the drag, a nearly horizontal line
-snapped flat, a 30 degree one not, pen color/width, no armed arrowheads, left selected, drawn through,
+snapped flat, a 30 degree one not, pen color/width, no armed arrowheads, not left selected, highlighter line under the ink,
 one undo step. With the switch to the shape gesture disabled (ink again) 5 checks fail; the rest only run
 once a shape exists.
 
