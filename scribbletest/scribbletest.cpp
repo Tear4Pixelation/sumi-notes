@@ -18,6 +18,7 @@
 #include "tagdoclist.h"  // libraryResizeTest, topBarStateTest
 #include "topbar.h"  // topBarStateTest
 #include "screenshot.h"  // imageCropTest
+#include "addpagemenu.h"  // addPageLayoutTest
 #include "usvg/svgwriter.h"
 #include "miniz/miniz_zip.h"
 
@@ -1919,6 +1920,32 @@ int ScribbleTest::zeroSizeLayoutTest()
 //  a ruling line through a small dirty rect left winding in the buffer above and below it: thin columns of
 //  half-drawn top bar and floating toolbar on the iPad.  Application::windingFillBounds() must give bounds
 //  whose quad contains every winding quad; the clipped bounds nanovg passes (the old behaviour) do not.
+int ScribbleTest::addPageLayoutTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: add page layout: %s\n", what); }
+  };
+  // pages 1 and 2 are PDF pages, 0 is ruled, 3 is a PDF page too
+  auto isImage = [](int idx){ return idx >= 1; };
+  check(AddPageMenu::previousRuledPage(2, isImage) == 0, "skips PDF pages back to the ruled one");
+  check(AddPageMenu::previousRuledPage(0, isImage) == 0, "a ruled current page is itself");
+  check(AddPageMenu::previousRuledPage(2, [](int){ return true; }) == -1, "all PDF: none");
+  AddPageMenu::PageLayout coarse;
+  coarse.xRuling = 35;  coarse.yRuling = 35;
+  const char* name = AddPageMenu::layoutPresetName(coarse);
+  check(name && std::string(name) == "Coarse grid", "35x35 grid is named Coarse grid");
+  coarse.marginLeft = 35;
+  name = AddPageMenu::layoutPresetName(coarse);
+  check(name && std::string(name) == "Coarse grid", "margin does not change the name");
+  coarse.dotRadius = 2;
+  name = AddPageMenu::layoutPresetName(coarse);
+  check(name && std::string(name) == "Coarse dot grid", "dots: Coarse dot grid");
+  coarse.dotRadius = 0;  coarse.yRuling = 36;
+  check(!AddPageMenu::layoutPresetName(coarse), "no preset for an odd spacing");
+  return nbad;
+}
+
 int ScribbleTest::windingFillBoundsTest()
 {
   int nbad = 0;
@@ -6181,6 +6208,7 @@ void ScribbleTest::runAll(bool runsynctest)
   nUnitFailed += timerBacklogTest();
   nUnitFailed += zeroSizeLayoutTest();
   nUnitFailed += windingFillBoundsTest();
+  nUnitFailed += addPageLayoutTest();
   nUnitFailed += thumbRendererTest();
   nUnitFailed += shapeTapEditTest();
   nUnitFailed += drawLinesTest();

@@ -67,6 +67,8 @@ public:
   int zeroSizeLayoutTest();
   // nanovg_gl fills: the read pass's quad covers every winding quad (no winding left behind outside a clip)
   int windingFillBoundsTest();
+  // Add Page: "Same as previous" skips PDF/scan pages back to a ruled one; tiles use the ruling dialog's names
+  int addPageLayoutTest();
   // closing and reopening the sidebar's Pages view leaves one thumbnail renderer, not one per opening
   int thumbRendererTest();
   // shape edit mode without the Select tool: a finger tap on a shape selects it, a tap elsewhere and the

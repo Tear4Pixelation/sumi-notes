@@ -14,6 +14,15 @@ writes two values) offers A4, Letter, their landscape forms and the screen size;
 way shows as Custom and is left alone on OK. Paper sizes are `RulingDialog::predefSizes`, shared with
 Page Setup. The startup Untitled document predates the answer, so it is recreated if still untouched.
 
+# Ruling spacing in real units
+
+Page units are 150 per inch (A4 = 1240 wide), so the presets in mm: Wide ruled 45 = 7.6 mm, Medium 40 = 6.8 mm,
+Narrow 35 = 5.9 mm; Coarse grid 35 = 5.9 mm, Medium 30 = 5.1 mm, Fine 20 = 3.4 mm. There is no unit bug - they are as
+intended, just compact: real paper is college ruled ~7.1 mm, wide ~8.7 mm, grid 5 mm (Coarse grid is already above it).
+"Wide" is thus between college and wide ruled, and the only sizes a user with large handwriting has beyond it are
+custom ones. Raising the presets would change what "Wide ruled" means for existing documents' next pages, so they
+were left alone; recommendation: add a larger tier (~52 units = 8.8 mm, plus a ~45 grid / 9 mm) rather than moving these.
+
 # Dotted paper
 
 `PageProperties::dotRadius` > 0 turns a standard ruling into dots of that radius (page units):
@@ -64,7 +73,15 @@ inserted after, read from `Page::getProperties()`: x/y ruling, margin, dots, sta
 so the default choice (the entries it equals are dropped from the rest of the row). It carries the **ruling
 only**: the size stays "document default" (a page grown by writing, or a PDF/scan page, has a size that was
 never a layout choice), and **ruling regions (Paper Patch) do not carry over** - a patch is a local fix to
-one page's paper, not its layout. Falls back to the default layout if the current page is out of range. The "+" switches the same popup to the full grid: 13 built-in
+one page's paper, not its layout. Falls back to the default layout if there is no such page.
+The page it reads is the nearest one at or before the current page that is **not an image-only page** (`previousRuledPage()`:
+`hasImageBackground()` with no x/y ruling - a PDF/scan page, whose empty ruling says nothing about what the user
+writes on), so a page added after an imported PDF page copies the last real ruling before it; an all-PDF document
+falls back to the default. Convert to Subpage's chooser (same `LayoutChooser`) gets this too.
+**The popup's short row is at most 3 tiles wide and 2 rows tall** (`RECENT_COLS`/`RECENT_ROWS`; "More" always takes
+the last slot, extra tiles are dropped). **Tile labels use the ruling dialog's preset names** ("Coarse grid", "Wide
+ruled"; `layoutPresetName()` matches x/y ruling and dots-or-not, margin ignored, via `RulingDialog::presetName()`,
+the same function that fills Page Setup's combo); only a layout that is no preset keeps "Grid 36" style labels. The "+" switches the same popup to the full grid: 13 built-in
 layouts (three each of Lined, Squared, Dotted, then Special's four - Plain, Dotted lines, Wide margin, Music), then the user's custom layouts
 (`customPageLayouts`) and a "New layout" tile. Both views are built on open and only toggled visible
 afterwards - rebuilding from the "+" handler would free the widget being dispatched to.
