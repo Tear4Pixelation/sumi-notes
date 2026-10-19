@@ -801,24 +801,7 @@ void MainWindow::buildRegionPanel()
   addPanel({regionKindBtn});
 
   // spacing: squared and dotted keep their cells square
-  // the color picker's slider in miniature: a rounded bar, and a caret with a gap in the panel's color
-  //  cut around it (colors in theme.cpp, .region-panel)
-  static const char* sliderSVG = R"#(
-    <g class="slider" box-anchor="hfill" layout="box">
-      <g box-anchor="hfill" layout="box" margin="0 6">
-        <rect width="100" height="32" fill="none"/>
-        <rect class="slider-bg" box-anchor="hfill" width="100" height="12" rx="6" ry="6"/>
-      </g>
-      <g class="slider-handle-container" box-anchor="left">
-        <rect width="12" height="32" fill="none"/>
-        <g class="slider-handle" transform="translate(6,0)">
-          <rect class="slider-caret-gap" x="-4.5" y="3" width="9" height="26" rx="4.5" ry="4.5"/>
-          <rect class="slider-caret" x="-2.5" y="6" width="5" height="20" rx="2.5" ry="2.5"/>
-        </g>
-      </g>
-    </g>)#";
-  static std::unique_ptr<SvgNode> sliderProto(loadSVGFragment(sliderSVG));
-  regionSpacingSlider = new Slider(sliderProto->clone());
+  regionSpacingSlider = createSlider();
   regionSpacingText = createTextBox("40");
   regionSpacingText->setMargins(0, 0, 0, floatPad);
   regionSpacingSlider->onValueChanged = [this](real pos){

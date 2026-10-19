@@ -614,23 +614,8 @@ Widget* ImageCropDialog::createShapeBar()
   Widget* roundIconWidget = new Widget(roundIcon);
   roundIconWidget->setMargins(0, 6, 0, 6);
   barRow->addWidget(roundIconWidget);
-  // the ruling region panel's slider (mainwindow.cpp), colored from the floating bar's variables
-  static const char* sliderSVG = R"#(
-    <g class="slider" box-anchor="hfill" layout="box">
-      <g box-anchor="hfill" layout="box" margin="0 6">
-        <rect width="100" height="32" fill="none"/>
-        <rect class="slider-bg" box-anchor="hfill" width="100" height="12" rx="6" ry="6"/>
-      </g>
-      <g class="slider-handle-container" box-anchor="left">
-        <rect width="12" height="32" fill="none"/>
-        <g class="slider-handle" transform="translate(6,0)">
-          <rect class="slider-caret-gap" x="-4.5" y="3" width="9" height="26" rx="4.5" ry="4.5"/>
-          <rect class="slider-caret" x="-2.5" y="6" width="5" height="20" rx="2.5" ry="2.5"/>
-        </g>
-      </g>
-    </g>)#";
-  static std::unique_ptr<SvgNode> sliderProto(loadSVGFragment(sliderSVG));
-  radiusSlider = new Slider(sliderProto->clone());
+  // the standard slider, on the floating bar's colors (imagecrop stylesheet below)
+  radiusSlider = createSlider();
   radiusSlider->onValueChanged = [this](real pos){ cropWidget->setRadius(pos*cropWidget->maxRadius()); };
   setupTooltip(radiusSlider, _("Corner radius"));
   Widget* sliderBox = new Widget(new SvgG());

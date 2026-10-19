@@ -30,8 +30,8 @@ snaps to whole percents while dragging and is not rewritten by its own change.
 
 Two UI traps: the long press handler must set `gui->pressedWidget = NULL` after opening the popup, or the
 release that ends the press also toggles the button (and, with a right click, the popup never shows); and the
-stock slider track is the popup's own colour, so `PenToolbar::stylesheet` (registered in `createStylesheet()`)
-gives `.center-offset-slider .slider-bg` the `--base` token. In agent-display a right click is the long press
+popup's slider is a plain `createSlider()` (the standard slider, see Spin boxes below; no per-use
+styling). In agent-display a right click is the long press
 (a held left press sends no `LONG_PRESS` there).
 
 Tests: the math and the storage (every hundredth round trips, old flags read 0, one-line marker ignores the
@@ -905,5 +905,14 @@ Every numeric field in the app is a `createTextSpinBox()`; the fixes live in the
   A step is whole percents divided by 100 (`round(value*100) + n` / 100), not `value + 0.01`, so no
   drift: 0.03 stays the literal 0.03 and a width of 0.0311 snaps to a whole percent on its first step.
   Absolute widths still step through `PEN_WIDTHS` (0.1, 0.25, 0.5, ... not a fixed 0.02).
+- **Field width**: the minimum width belongs to the *field* (`.min-width-rect` inside `.spinbox_field`,
+  default 96, `createTextSpinBox`'s `minwidth` argument sets it), not the whole control, so the -/+ container
+  never eats into it; the field takes whatever width the row gives the control. The popups no longer pass a
+  `minwidth` of 120 (that was the total, which left ~50 for "100%").
+- **The standard slider** (ugui `#slider`, `createSlider()`): the rounded bar and caret that the ruling region
+  panel and crop bar used to build themselves (those two now call `createSlider()`). Colors are theme
+  tokens in `theme.cpp`, scoped to `.slider-plain` so the gradient color sliders keep their own fills:
+  bar `--button`, caret `--text`, caret gap `--dark` (the popup/panel surface). The crop bar overrides the
+  three with its floating-bar tokens (`.imagecrop-bar` in `screenshot.cpp`). `PenToolbar::stylesheet` is gone.
 - Not verified here: the iPad behaviour (keyboard/popup). The cause of the popup closing was not
   found in the code; the fix removes the trigger (the button tap no longer starts text input).

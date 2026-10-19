@@ -326,8 +326,7 @@ PenToolbar::PenToolbar(bool _compact)
   if (compact)
     colorPicker->selectFirst(".colorbox_text")->removeFromParent();
 
-  spinWidth = createTextSpinBox(1.25, 0.01, 0, 200, ABSOLUTE_WIDTH_FORMAT,
-                                120); // 3 significant digits
+  spinWidth = createTextSpinBox(1.25, 0.01, 0, 200, ABSOLUTE_WIDTH_FORMAT);  // 3 significant digits
   // Return re-parses the text, which "%.3g" has rounded: a value that only reads back what the box
   //  already shows is no edit, and must not round the pen (0.0311111 -> 0.0311)
   spinWidth->onValueChanged = [this](Dim w) {
@@ -546,7 +545,7 @@ PenToolbar::PenToolbar(bool _compact)
   // Like the tip, a value on the pen rather than a pref.  0% is a pen whose width never follows pressure
   //  (the marker's default); the default pens are 90%.  Shown in percent because the stored fraction,
   //  wRatio, means nothing to anyone who has not read strokebuilder.cpp.
-  spinPressure = createTextSpinBox(0, 10, 0, 100, "%.0f%%", 120);
+  spinPressure = createTextSpinBox(0, 10, 0, 100, "%.0f%%");
   spinPressure->onValueChanged = [this](Dim percent) {
     // setPen() pushing the pen's own (rounded) value into the box, which must not rewrite the pen
     if (percent == std::round(100*pen.pressureSensitivity()))
@@ -595,11 +594,10 @@ PenToolbar::PenToolbar(bool _compact)
   //  ruling.  A slider for the gesture and a percent box for an exact value, like Pressure.
   centerOffsetPopup = createArrowPopup(Menu::VERT_LEFT);
   centerOffsetSlider = createSlider();
-  centerOffsetSlider->node->addClass("center-offset-slider");
   centerOffsetSlider->onValueChanged = [this](real position) {
     setCenterOffset(std::round((2*position - 1)*CenterOffset::STEPS)/CenterOffset::STEPS, true);
   };
-  spinCenterOffset = createTextSpinBox(0, 5, -100, 100, "%.0f%%", 120);
+  spinCenterOffset = createTextSpinBox(0, 5, -100, 100, "%.0f%%");
   spinCenterOffset->onValueChanged = [this](Dim percent) {
     // showCenterOffset() pushing the pen's own value into the box must not rewrite the pen
     if (percent == std::round(100*pen.centerOffset()))
@@ -1058,7 +1056,7 @@ Widget *PenToolbar::createSingleWidth(std::function<void()> onWidthChanged, bool
   // the presets, filled in on each open since the list can change in between (see openSingleWidth)
   sw->presetRow = createRow({}, "0 0", "flex-start");
   sw->popup->addWidget(sw->presetRow);
-  sw->spin = createTextSpinBox(1.25, 0.01, 0, 200, ABSOLUTE_WIDTH_FORMAT, 120);
+  sw->spin = createTextSpinBox(1.25, 0.01, 0, 200, ABSOLUTE_WIDTH_FORMAT);
   // spinWidth always holds the same value as this one (setSingleWidth), so its stepping applies as is
   sw->spin->onStep = spinWidth->onStep;
   sw->spin->onValueChanged = [this, sw](Dim width) {
@@ -1250,10 +1248,6 @@ void PenToolbar::rebuildGrids() {
   }
   updateSelected();
 }
-
-const char* PenToolbar::stylesheet = R"#(
-.center-offset-slider .slider-bg { fill: var(--base); stroke: none; }
-)#";
 
 // the offset from the slider or the box; the other control follows
 void PenToolbar::setCenterOffset(Dim offset, bool fromSlider) {

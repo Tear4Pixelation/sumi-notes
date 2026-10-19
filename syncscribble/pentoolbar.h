@@ -36,9 +36,6 @@ public:
 class PenToolbar : public Toolbar
 {
 public:
-  // the offset slider's track, added to the window stylesheet by createStylesheet() (resources.cpp): the
-  //  stock track is the popup's own color, which leaves a bare handle floating
-  static const char* stylesheet;
   // compact: the desktop floating panel's draw options row, which follows the design mockup - saved
   //  colors as circles, thickness presets as bare lines, and none of the hex box/overflow/help/close
   //  buttons that the roomier phone and vertical-toolbar layouts show
