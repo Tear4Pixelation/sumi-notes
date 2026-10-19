@@ -36,6 +36,7 @@ void ScribbleConfig::init()
   cfg["growWithPen"] = 1;
   // reflow w/ insert space tool ... always does live reflow now
   cfg["reflow"] = 1;
+  cfg["separatorEndsReflow"] = 1;
   // if selection is cleared on cursor down, don't do anything until cursor up
   cfg["clearSelOnly"] = 1;
   // group strokes (by setting com.y of all to same value) based on time, proximity

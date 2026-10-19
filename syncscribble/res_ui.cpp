@@ -175,6 +175,8 @@ const char* prefInfoXML = R"#(
       title="Insert space reflow" description="Wrap strokes to next line when inserting space" />
   <pref name="insSpaceErase" type="bool" group="Ruled Tools"
       title="Erase when removing space" description="Erase strokes covered by ruled insert space" />
+  <pref name="separatorEndsReflow" type="bool" group="Ruled Tools"
+      title="Horizontal line ends reflow" description="A long line drawn along a rule is the end of the page for insert space, reflow and Resize Handwriting" />
   <pref name="columnDetectMode" type="int" group="Ruled Tools"
       enum="None;Normal;Full page"
       title="Column detection" description="Detect columns created by tall strokes" />

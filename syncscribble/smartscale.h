@@ -10,6 +10,7 @@
 //  y in [k*yr, (k+1)*yr) - handwriting sits on the rule at the bottom of its band, (k+1)*yr.
 
 #include <vector>
+#include <functional>
 #include "basics.h"
 #include "ulib/path2d.h"
 
@@ -38,6 +39,11 @@ struct SmartScaleParams
   // where in its band a line's rule is, as a fraction of the pitch: 1 = the band's bottom.  With Skip Lines
   //  a band is a text line plus the blank line below (pitch doubled) and the rule is at the middle, 0.5.
   Dim baseline = 1;
+  // Separators (column stops) beside the text: given a word, its scale and the local y its rule will be at,
+  //  the range [minX, maxX] its left edge may take on that line so that its ink stays between them - from
+  //  the ink, at each height, so a diagonal is followed (StopEdge, docs/agent/pen-and-tools.md).  Unset:
+  //  only `right` limits a line.  A word that fits nowhere still gets a line of its own.
+  std::function<void(const SmartScaleWord& word, Dim scale, Dim ruleY, Dim& minX, Dim& maxX)> bounds;
 };
 
 struct SmartScaleLayout

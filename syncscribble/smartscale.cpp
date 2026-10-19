@@ -76,12 +76,25 @@ SmartScaleLayout smartScaleLayout(const std::vector<SmartScaleItem>& items, Dim 
     for(size_t i = para; i < paraEnd; ++i) {
       const SmartScaleWord& word = words[i];
       const Dim width = scale*(word.right - word.left);
+      // where separators let the word sit on this line, and on the next if it wraps
+      auto boundsOn = [&](int line, Dim& minX, Dim& maxX) {
+        minX = MIN_DIM;
+        maxX = MAX_DIM;
+        if(params.bounds)
+          params.bounds(word, scale, (line + params.baseline)*yr, minX, maxX);
+      };
+      Dim minX, maxX;
+      boundsOn(newLine, minX, maxX);
       // a word too wide for any line still goes on a line of its own
-      if(!lineEmpty && x + width > params.right) {
+      if(!lineEmpty && (x + width > params.right || std::max(x, minX) > maxX)) {
         ++newLine;
         x = indent;
         lineEmpty = true;
+        boundsOn(newLine, minX, maxX);
       }
+      // a line starts clear of a separator on its left
+      if(lineEmpty)
+        x = std::max(x, minX);
       const Point from(word.left, (word.line + params.baseline)*yr);
       const Point to(x, (newLine + params.baseline)*yr);
       for(int idx : word.items) {

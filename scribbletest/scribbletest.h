@@ -116,6 +116,10 @@ public:
   int smartScaleTest();
   int skippedLinesTest();
   int insSpaceAxisTest();
+  // separators (pen-and-tools.md "Separators"): ruled select takes writing beside a diagonal up to the line
+  //  at each height, a horizontal line along a rule ends Insert Lines like the end of the page, and Resize
+  //  Handwriting keeps grown text clear of a diagonal and moves only its own column below
+  int separatorTest();
   // persistent undo (docs/agent/undo-persistence.md): strokes, a layer, a layer move, a page, an outline
   //  entry and a page deletion undo back step by step after save and reopen, redo survives too, and a
   //  file changed behind the sidecar's back opens with no history at all

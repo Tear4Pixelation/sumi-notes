@@ -342,6 +342,11 @@ protected:
     RulingFrame frame;
     bool ruled = false;
     int blockedLine = INT_MIN;  // lowest line of the selection's range holding other ink (it stays)
+    // ruled: the column's separators (RuledSelector::findStops() from the text), per line of `frame`,
+    //  and per item its ink in the frame, which params.bounds holds against them
+    std::vector<StopEdge> ledges, redges;
+    std::vector<std::vector<Point>> ink;
+    std::map<int, Point> slack;  // per word (its first item): how far its ink already crossed (left, right)
     Point anchor;  // unruled: the scale origin (left edge, baseline estimate)
     Point corner;  // the selection's top left: the drag is measured from it
     Dim scale = 1;

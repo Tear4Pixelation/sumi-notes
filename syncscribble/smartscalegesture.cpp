@@ -89,21 +89,92 @@ void ScribbleArea::smartScaleStart()
   }
   // lines fill up to the text's own right edge: the column the writer used, wherever the page ends
   gesture.params.right = right;
-  // What follows the text moves with it, by whole lines, like Insert Lines: everything editable on this
-  //  ruling below the selection's last line.  Other ink on the selection's own lines stays, and the text
-  //  below is never pulled up past it (blockedLine); ink in the page margin (bookmarks) does not block.
+  // The column the text is in: separators (vertical, diagonal) found from the first word as ruled select
+  //  finds them, held as shapes so a reflowed word is kept clear of a diagonal where it actually is.
   const Dim marginLeft = frame.region ? MIN_DIM : page->props.marginLeft;
+  const SmartScaleItem* firstItem = &gesture.items.front();
+  for(const SmartScaleItem& item : gesture.items) {
+    if(item.line < firstItem->line || (item.line == firstItem->line && item.box.left < firstItem->box.left))
+      firstItem = &item;
+  }
+  const Dim colX = firstItem->box.center().x;
   tempSelection = new Selection(page, Selection::STROKEDRAW_NORMAL);
   tempSelection->ruling = frame;
+  RuledSelector* later = new RuledSelector(tempSelection, selColMode);
+  later->findStops(colX, firstLine);
+  gesture.ledges = later->ledges;
+  gesture.redges = later->redges;
+  if(!gesture.redges.empty()) {
+    for(Element* s : gesture.strokes) {
+      std::vector<Point> pts;
+      if(s->isPathElement()) {
+        const Path2D* path = static_cast<SvgPath*>(s->node)->path();
+        Path2D flat = path->isSimple() ? *path : path->toFlat();
+        flat.transform(frame.localTransform() * s->node->totalTransform());
+        pts = flat.points;
+      }
+      else {
+        Rect box = localElementBBox(frame, s);
+        pts = {box.origin(), Point(box.right, box.top), Point(box.left, box.bottom), Point(box.right, box.bottom)};
+      }
+      gesture.ink.push_back(std::move(pts));
+    }
+    SmartScaleGesture* g = &gesture;
+    // how far each word's ink is between the separators on line `line` when its rule is at ruleY
+    auto wordBounds = [g](const SmartScaleWord& word, Dim scale, Dim ruleY, Dim& minX, Dim& maxX) {
+      const Dim pitch = g->params.yRuling;
+      const int line = int(std::floor(ruleY/pitch - g->params.baseline + 0.5));
+      minX = MIN_DIM;
+      maxX = MAX_DIM;
+      if(line < 0 || line >= int(g->redges.size()))
+        return;
+      const Dim oldRuleY = (word.line + g->params.baseline)*pitch;
+      for(int idx : word.items) {
+        for(const Point& p : g->ink[idx]) {
+          Dim dx = scale*(p.x - word.left), y = ruleY + scale*(p.y - oldRuleY);
+          minX = std::max(minX, g->ledges[line].at(y, false) - dx);
+          maxX = std::min(maxX, g->redges[line].at(y, true) - dx);
+        }
+      }
+    };
+    // ink the writer already put across a separator is not pushed off its line for it: each word keeps
+    //  the slack it had where it was, so scale 1 is still exactly where it started
+    for(const SmartScaleWord& word : smartScaleWords(gesture.items, gesture.params.minWordGap)) {
+      Dim minX, maxX;
+      wordBounds(word, 1, (word.line + gesture.params.baseline)*yr, minX, maxX);
+      gesture.slack[word.items.front()] = Point(std::max(Dim(0), minX - word.left), std::max(Dim(0), word.left - maxX));
+    }
+    gesture.params.bounds = [g, wordBounds](const SmartScaleWord& word, Dim scale, Dim ruleY, Dim& minX, Dim& maxX) {
+      wordBounds(word, scale, ruleY, minX, maxX);
+      auto it = g->slack.find(word.items.front());
+      if(it != g->slack.end()) {
+        minX -= it->second.x;
+        maxX += it->second.y;
+      }
+    };
+  }
+  // What follows the text moves with it, by whole lines, like Insert Lines: everything editable on this
+  //  ruling below the selection's last line, in its column, down to a horizontal separator (the end of
+  //  the page for reflow, findSectionEnd()).  Other ink in the column on the selection's own lines stays,
+  //  and the text below is never pulled up past it (blockedLine); ink in the page margin (bookmarks) does
+  //  not block.
+  int endRule = RuledSelector::separatorEndsSection ? later->findSectionEnd(colX, lastLine) : -1;
+  if(endRule != lastLine + 1)
+    later->selectRuled(MIN_DIM, lastLine + 1, MAX_DIM, endRule > lastLine ? endRule - 1 : MAX_LINE_NUM - 1);
   for(Element* s : page->children()) {
     if(s->selection() || s->isRulingRegion() || !page->isEditable(s))
       continue;
     if(page->rulingAt(s->com()).region != frame.region)
       continue;
     int line = frame.line(s->com(), Page::BLANK_Y_RULING);
-    if(line > lastLine)
-      tempSelection->addStroke(s);
-    else if(line >= firstLine && localElementBBox(frame, s).right > marginLeft)
+    if(line < firstLine || line > lastLine)
+      continue;
+    Rect box = localElementBBox(frame, s);
+    // a separator through these lines bounds the column, it is not text on them
+    if(box.height() > RuledSelector::MIN_DIV_HEIGHT*yr)
+      continue;
+    if(box.right > std::max(marginLeft, later->lstopOver(line, box.top, box.bottom))
+        && box.left < later->rstopOver(line, box.top, box.bottom))
       gesture.blockedLine = std::max(gesture.blockedLine, line);
   }
 }
