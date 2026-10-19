@@ -186,7 +186,10 @@ mechanism is the same for all three draw tools, and only the default differs.
     units; editing one in the selection's preset editor (tap the checked preset, type) stored the
     selection's 3.2 *units* raw into the line-height list, and the pen then drew 3.2 line heights.
     Now a selection reads presets through `presetWidth()` (`WidthPresets::inUnit()`, resolved against
-    the current page's line height) and writes them back through `WidthPresets::setFrom()`.
+    the current page's line height) and **never writes them**: the editor opened from a selection edits
+    the selection's width only (`updateWidth()` redefines a preset in `PEN_MODE` alone). Writing it
+    back through `WidthPresets::setFrom()` kept the unit right but still changed the pen's preset from
+    a stroke's width, so the next tap on it moved a relative pen (pen-storage.md, root cause 4).
   - A saved pen recalled with the other relative setting (`penSelected()`, then keys 1-8; saved pens are
     gone now) kept the list in the old unit. In `PEN_MODE` `prepareWidths()` converts the list to the
     pen's unit whenever they differ, exactly as the toggle does.

@@ -90,9 +90,29 @@ Widths drifting, "often 0.01 smaller than set":
    fraction while the box shows `"%.3g%%"` of the fraction times 100. The two round differently in binary:
    0.4365 shows as "43.6%" but its own `"%.3g"` is "0.437", so the unedited text read back as 0.436, an
    edit. It now compares through the box's own scale and format; any new display scale must go there too.
-Not writers, checked again: tab switches, rulings, tool switches, selections, preset taps on the selected
-preset, Return without an edit, the width editor opening and closing with focus in the box, theme changes.
-`penPersistTest()` drives all of these 300 times and requires every width and preset bit-identical.
+4. **A selection's width edit redefined the pen's preset** (found after the user said Relative size is
+   always on for them, widths 3-7%). With the select tool in hand the toolbar row is the selection's and
+   shows the pen's presets resolved to units; the stroke drawn at a preset is ringed, and tapping the
+   ringed one opens the same detail editor as on the pen. A step, a scrub or a typed width there went
+   through `updateWidth()`, which "redefines that preset while the editor is open" - in any mode, so the
+   pen's preset became the stroke's new absolute width over the selection's line height. The pen itself
+   was untouched until its next tap on that preset, which then gave it a width the user never set for the
+   pen: a 5% preset stepped down on a selection on a 40 unit ruling (2.0 -> 1.8 units in `PEN_WIDTHS`)
+   came back 4.5%, and in a Paper Patch the step is measured against the patch's line instead. It looks exactly like "the pen lost a bit while Relative size stayed on". Fix: `updateWidth()` redefines
+   a preset in `PEN_MODE` only; from a selection the editor edits the selection's width and nothing else.
+   This was a deliberate design from the 144 line height fix (store the selection's width "in the list's
+   own unit") - the unit was right, writing the pen's list from a selection at all was the bug.
+Not writers, checked again: tab switches, rulings, tool switches, Switch Back with ink still selected,
+selections on the page and in a Paper Patch, the selection popup's width item (presets, steps), undo of a
+selection's width, preset taps on the selected preset, Return without an edit (pen and selection), the
+width editor opening and closing with focus in the box, theme changes, restarts. Also read and ruled out:
+`ScribbleArea::resolvedPen()` (resolves for drawing, never writes back), `readPen()`/`loadModes()` (exact,
+the marker conversion is once), number keys and Pencil double tap (tools, not widths), sync and undo (no
+pen in a document or the history), the relative step (whole percents, `round(w*100) +- n`, so 3% stays the
+literal 0.03). Unproven, left alone: an accidental -/+ tap or scrub on iPad would be a 1% step, which is a
+real edit as far as the code can tell.
+`penPersistTest()` drives the first group 300 times, and part three drives a relative pen through real
+selections 1200 times; both require every width and preset bit-identical.
 
 Swatches after switching tabs:
 3. **`refreshPalette()` reseeded the whole row when any swatch was not an exact member of the active
@@ -119,12 +139,22 @@ Swatches after switching tabs:
   an edited swatch survives the round trip, the pen follows its slot, the ring stays and a tap after the
   switch is ringed; the custom editor keeps the marker's colour; the row is saved as slots. Part two is the
   300 step width run (set, switch tool, other ruling, other theme, selection and back, restart, toggle off
-  and on, toggle off/other ruling/on, preset tap, Return, width editor open/close, single toggle).
+  and on, toggle off/other ruling/on, preset tap, Return, width editor open/close, single toggle). Part
+  three keeps Relative size on with a 3-7% pen and puts real strokes into the active document, on the page
+  and in a Paper Patch with its own line, each drawn at the pen's resolved width; it selects them with the
+  select tool and edits their width every way the UI offers (a preset, the ringed preset's editor with a
+  step, a typed width, a scrub, Return; the selection popup's presets and steps), undoes, deselects, puts
+  the pen back with ink still selected, changes the ruling and restarts, 1200 steps. Only the pen's own
+  edits (width set, preset tap, the pen's preset editor) may move the pen or its presets.
+  `penWidthPresetTest()` checks the same rule once: a width typed into the editor opened from a selection
+  goes to the selection, and the pen's presets are bit-identical afterwards.
 - `scribbletest/widthpresettest.cpp`: `exactNumber()` round trips and is short; a converted list survives
   50 save/load cycles. `scribbletest/colortest.cpp` `testColorRefSlots()`: slots resolve across themes and
   back, the marker's vivid colour is its family's slot, config text round trips, legacy entries parse.
 - Mutation-checked (see the commit): 6 digit `writePen()`, no toggle restore, no `followPalette()`, no
-  `syncPalette()`, the custom editor without `toolColor()` - each fails a check.
+  `syncPalette()`, the custom editor without `toolColor()` - each fails a check. `updateWidth()` without
+  its `mode == PEN_MODE` gate fails part three (step 43, a typed width on a selection: the 6% preset became
+  1.86%) and the `penWidthPresetTest()` check.
 
 ## Open
 

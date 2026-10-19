@@ -999,7 +999,10 @@ int ScribbleTest::penWidthPresetTest()
   toolbar->selectWidth(0);
   check(near(toolbar->pen.width, 1.4), "a relative pen's preset applied to a selection is in document units");
 
-  // edit the middle preset from the selection: tap it, tap it again to open its editor, type 3.2
+  // the middle preset's editor opened from the selection: tap it, tap it again, type 3.2.  That is the
+  //  selection's width, never the pen's preset - it used to redefine the preset as 3.2/lineHeight, which
+  //  moved the relative pen on its next tap with no edit of the pen (docs/agent/pen-storage.md)
+  std::vector<Dim> presetsBefore = toolbar->activeWidths();
   toolbar->selectWidth(1);
   check(near(toolbar->pen.width, 3.0), "the middle preset gives the selection 3 units");
   toolbar->selectWidth(1);
@@ -1007,16 +1010,15 @@ int ScribbleTest::penWidthPresetTest()
   if(toolbar->widthPopup->isVisible()) {
     toolbar->spinWidth->setValue(3.2);
     toolbar->updateWidth();
+    check(near(toolbar->pen.width, 3.2), "a width typed into the editor goes to the selection");
     toolbar->widthPopup->setVisible(false);
   }
-  // back on the pen, still relative: the edited preset must read as 3.2 units, i.e. 3.2/lineHeight
   toolbar->setPen(relPen, PenToolbar::PEN_MODE);
   const std::vector<Dim>& widths = toolbar->activeWidths();
   check(widths.size() == 3, "the pen still has three presets");
-  if(widths.size() == 3) {
-    check(near(widths[1], 3.2/lineHeight), "a width edited on a selection lands in the pen's list in line heights");
-    check(widths[1] <= 4, "no preset is past the relative spinbox limit, so every one stays editable");
-  }
+  check(widths == presetsBefore, "a width edited on a selection leaves the pen's presets exactly as they were");
+  for(Dim width : widths)
+    check(width <= 4, "no preset is past the relative spinbox limit, so every one stays editable");
 
   // a pen saved past the spinbox limit for its unit (here 144 line heights) is clamped on load, so the
   //  spinbox can show it and it stays editable
@@ -1568,6 +1570,215 @@ int ScribbleTest::penPersistTest()
   }
   check(!failed, "every tool's width and presets stay exactly as set through 300 steps of switching, "
       "saving and loading");
+
+  // --- part three: a relative pen (Relative size on throughout, 3-7% of a line) through what a user does
+  //  with ink while it is in hand: selections on the page and in a Paper Patch, their widths edited from
+  //  the toolbar row (a preset, the ringed preset's editor: steps, a typed width, a scrub, Return) and from
+  //  the selection popup's width item, undo, Switch Back, other rulings, restarts.  None of that is an
+  //  edit of the pen, so the pen and its presets must come out bit-identical; only the pen's own edits
+  //  (a width set, a preset tapped, the pen's preset editor) move them.
+  ScribbleArea* area = app->activeArea();
+  Page* apage = area ? area->currPage : NULL;
+  if(apage) {
+    size_t stepsStart = adoc->history->undoSteps();
+    app->setDrawTool(ScribbleMode::DRAWTOOL_PEN);
+    app->setMode(MODE_STROKE);
+    app->setPen(ScribblePen(Color::BLACK, 0.05, ScribblePen::TIP_ROUND | ScribblePen::WIDTH_RELATIVE));
+    toolbar->savedWidths.parse("rel:0.03,0.05,0.07");
+    toolbar->shownValid = false;
+    app->updatePenToolbar();
+    Dim expPen = 0.05;
+    std::vector<Dim> expPresets = toolbar->savedWidths.widths;
+    // a Paper Patch with its own, finer line
+    Rect patchRect = Rect::ltwh(apage->width()*0.55, apage->height()*0.5, apage->width()*0.4, apage->height()*0.3);
+    Element* patch = area->addRulingRegion(patchRect);
+    if(patch) {
+      RulingRegionParams params = patch->regionParams();
+      params.yRuling = 100/3.0;
+      area->setSelRegionParams(params);
+    }
+    area->clearSelection();
+    size_t stepsWithPatch = adoc->history->undoSteps();
+    auto addInk = [&](bool inPatch) {
+      Point a = inPatch ? Point(patchRect.left + 20 + rnd(100), patchRect.top + 30 + rnd(100))
+                        : Point(140 + rnd(200), 120 + rnd(300));
+      SvgPath* node = new SvgPath();
+      node->path()->moveTo(a);
+      node->path()->lineTo(a + Point(60 + rnd(40), rnd(9) - 4));
+      node->setAttr<color_t>("fill", Color::NONE);
+      setSvgStrokeColor(node, Color::BLACK);
+      // as the pen draws it: its relative width resolved against the line it is drawn in
+      node->setAttr<float>("stroke-width", float(area->resolvedPen(a).width));
+      node->setAttr<int>("stroke-linecap", Painter::RoundCap);
+      node->addClass(Element::STROKE_PEN_CLASS);
+      Element* s = new Element(node);
+      adoc->startAction(area->getCurrPageNum());
+      apage->addStroke(s);
+      adoc->endAction();
+      return s;
+    };
+    // select one new stroke with the select tool in hand: the toolbar row is then the selection's
+    auto selectInk = [&](bool inPatch) {
+      Element* s = addInk(inPatch);
+      area->clearSelection();
+      Selection* sel = new Selection(apage);
+      new RectSelector(sel, 1, true);
+      s->setSelected(sel);
+      sel->strokes.push_back(s);
+      sel->shrink();
+      area->currSelection = sel;
+      app->setMode(MODE_SELECTRECT);
+      app->updatePenToolbar();
+    };
+    PenToolbar::SingleWidth* selItem = NULL;
+    for(auto& sw : toolbar->singleWidths)
+      if(sw->selectionOnly)
+        selItem = sw.get();
+    auto ringedPreset = [&]() {
+      for(int idx = 0; idx < int(toolbar->activeWidths().size()); ++idx)
+        if(WidthPresets::sameWidth(toolbar->presetWidth(idx), toolbar->pen.width))
+          return idx;
+      return -1;
+    };
+    auto penMode = [&]() { return toolbar->mode == PenToolbar::PEN_MODE; };
+    const char* selOpNames[] = {"pen: set width", "pen: preset tap", "select ink on the page",
+        "select ink in the patch", "selection: preset tap", "selection: ringed preset's editor, step",
+        "selection: ringed preset's editor, typed width", "selection: ringed preset's editor, scrub",
+        "selection: ringed preset's editor, Return", "selection popup: preset", "selection popup: step",
+        "undo", "deselect, pen back", "Switch Back (pen in hand, ink still selected)", "other ruling",
+        "restart (save and load)", "pen: its ringed preset's editor, step"};
+    bool selFailed = false;
+    for(int step = 0; step < 1200 && !selFailed; ++step) {
+      int op = rnd(17);
+      switch(op) {
+      case 0:
+        if(penMode()) {
+          toolbar->spinWidth->setValue(0.03 + rnd(4001)/100000.0);
+          toolbar->updateWidth();
+          expPen = toolbar->spinWidth->value();
+        }
+        break;
+      case 1:
+        if(penMode()) {
+          int idx = rnd(3);
+          if(!WidthPresets::sameWidth(toolbar->presetWidth(idx), toolbar->pen.width))
+            expPen = toolbar->presetWidth(idx);
+          toolbar->selectWidth(idx);
+          closeAutoClosePopup(toolbar->widthPopup);
+        }
+        break;
+      case 2:
+      case 3:
+        selectInk(op == 3);
+        break;
+      case 4:
+        if(toolbar->mode == PenToolbar::SELECTION_MODE) {
+          toolbar->selectWidth(rnd(3));
+          closeAutoClosePopup(toolbar->widthPopup);
+        }
+        break;
+      case 5: case 6: case 7: case 8:
+        if(toolbar->mode == PenToolbar::SELECTION_MODE) {
+          // the stroke at a preset's width, ringed, then the ringed preset tapped: its editor opens
+          if(ringedPreset() < 0)
+            toolbar->selectWidth(rnd(3));
+          int idx = ringedPreset();
+          if(idx < 0)
+            break;
+          toolbar->selectWidth(idx);
+          SpinBox* spin = toolbar->spinWidth;
+          if(op == 5)
+            spin->updateValue(spin->onStep(rnd(2) ? 1 : -1));
+          else if(op == 6)
+            spin->updateValueFromText(fstring("%.2f", 0.5 + rnd(300)/100.0).c_str());
+          else if(op == 7) {
+            spin->onScrubBegin();
+            for(int nn = 1 + rnd(3); nn > 0; --nn)
+              spin->updateValue(spin->onStep(-1));
+            spin->updateValue(spin->onStep(1));
+            spin->onScrubEnd();
+          }
+          else {
+            TextBox* text = static_cast<TextBox*>(spin->containerNode()->selectFirst(".spinbox_text")->ext());
+            spin->updateValueFromText(text->text().c_str());
+          }
+          closeAutoClosePopup(toolbar->widthPopup);
+        }
+        break;
+      case 9:
+      case 10:
+        if(selItem && area->hasSelection()) {
+          app->updatePenToolbar(true);  // the selection popup opening
+          if(op == 9)
+            toolbar->setSingleWidth(selItem, toolbar->presetWidth(rnd(3)));
+          else
+            selItem->spin->updateValue(selItem->spin->onStep(rnd(2) ? 1 : -1));
+          app->updatePenToolbar();  // ...and closing
+        }
+        break;
+      case 11:
+        if(adoc->history->undoSteps() > stepsWithPatch) {  // the patch and its ruling stay
+          adoc->doCommand(ID_UNDO);
+          app->updatePenToolbar();
+        }
+        break;
+      case 12:
+        area->clearSelection();
+        app->setMode(MODE_STROKE);
+        app->updatePenToolbar();
+        break;
+      case 13:
+        app->setMode(MODE_STROKE);
+        app->updatePenToolbar();
+        break;
+      case 14:
+        apage->props.yRuling = rulings[rnd(5)];
+        app->updatePenToolbar();
+        break;
+      case 15: {
+        std::string modes = appMode->saveModes();
+        appMode->loadModes(modes.c_str());
+        app->currPen = appMode->currDrawPen();
+        std::string text = toolbar->savedWidths.serialize();
+        toolbar->savedWidths.parse(text.c_str());
+        toolbar->shownValid = false;
+        app->updatePenToolbar();
+        break;
+      }
+      case 16:
+        if(penMode()) {
+          int idx = ringedPreset();
+          if(idx < 0)
+            break;
+          toolbar->selectWidth(idx);  // opens the pen's preset editor
+          toolbar->spinWidth->updateValue(toolbar->spinWidth->onStep(rnd(2) ? 1 : -1));
+          expPen = toolbar->spinWidth->value();
+          expPresets[idx] = expPen;
+          closeAutoClosePopup(toolbar->widthPopup);
+        }
+        break;
+      }
+      const ScribblePen& drawPen = appMode->penForDrawTool(ScribbleMode::DRAWTOOL_PEN);
+      if(drawPen.width != expPen || !drawPen.hasFlag(ScribblePen::WIDTH_RELATIVE)
+          || toolbar->savedWidths.widths != expPresets || !toolbar->savedWidths.isRelative()) {
+        printf("pen persist: relative pen, step %d, %s: width %.17g (expected %.17g), presets", step,
+            selOpNames[op], drawPen.width, expPen);
+        for(Dim w : toolbar->savedWidths.widths)
+          printf(" %.17g", w);
+        printf(" (expected");
+        for(Dim w : expPresets)
+          printf(" %.17g", w);
+        printf(")\n");
+        selFailed = true;
+      }
+    }
+    check(!selFailed, "a relative pen and its presets stay exactly as set through selections, their width "
+        "edits, undo and Switch Back");
+    area->clearSelection();
+    app->setMode(MODE_STROKE);
+    while(adoc->history->undoSteps() > stepsStart && adoc->history->canUndo())
+      adoc->doCommand(ID_UNDO);
+  }
 
   // put everything back
   if(page)

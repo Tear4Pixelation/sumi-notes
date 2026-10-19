@@ -77,7 +77,8 @@ clamping into the spinbox limits, refilling two presets to three, dropping a fou
 Mutation-checked: storing a selection's width raw, returning presets raw, no clamp, no refill, no
 truncation, the old `%.3f` format and dropping the prefix each fail it. `ScribbleTest::penWidthPresetTest()`
 drives the real `PenToolbar`: a relative pen's preset applied to a selected 3.2 unit stroke, a width
-edited in the selection's preset editor landing back in line heights, and a 144 line height pen clamped by
+edited in the selection's preset editor going to the selection and leaving the pen's presets bit-identical
+(it used to redefine the preset), and a 144 line height pen clamped by
 `loadModes()`. Its toolbar checks fail three ways against the pre-fix toolbar, and the load check fails
 with the clamp removed.
 
@@ -90,7 +91,9 @@ the pen unchanged (fails with the `ShownContext` check removed from the early re
 
 `ScribbleTest::penPersistTest()` (pen-storage.md): swatches, the pen's colour and the selection ring across
 a tab switch to another theme, in memory and freshly loaded, for the pen and the marker; then 300
-pseudo-random steps that must leave every draw tool's width and presets bit-identical. **It, and the key
+pseudo-random steps that must leave every draw tool's width and presets bit-identical; then 1200 steps with
+a relative pen (3-7%) and real ink in the active document, on the page and in a Paper Patch, selected and
+width-edited from the row and the selection popup, undone, deselected, Switch Back, rulings, restarts. **It, and the key
 checks in `penWidthWriteTest()`, must use `app->scribbleMode`**: `--test` builds `ScribbleTest(path)`, whose
 `scribbleMode` is the test document's own, not the app's - the key checks read that one and failed on every
 run. Mutation-checked: 6 digit `writePen()`, no toggle pair, no `followPalette()`, no `syncPalette()`, the

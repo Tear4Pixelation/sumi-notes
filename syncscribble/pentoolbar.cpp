@@ -1470,11 +1470,15 @@ void PenToolbar::updateWidth() {
   // a pen's dash pattern is sized by its width (a selection's is rescaled element by element)
   if (mode != SELECTION_MODE)
     pen.setDashStyle(dashStyle);
-  // editing the width while the detail popup is open redefines that preset
-  if (widthPopup->isVisible() && widthPopupIdx >= 0 &&
+  // editing the pen's width while the detail popup is open redefines that preset.  Only the pen's: with
+  //  the row on a selection (the select tool in hand) the ringed preset opens the same editor, and a width
+  //  stepped, scrubbed or typed there is the selection's.  It used to redefine the pen's preset too, from
+  //  the stroke's absolute width divided by the selection's line height, so the next tap on that preset
+  //  gave the pen a width nobody set for it - a relative pen 5% wide came back 4.5% after a step on a
+  //  selection, with Relative size on the whole time (docs/agent/pen-storage.md)
+  if (mode == PEN_MODE && widthPopup->isVisible() && widthPopupIdx >= 0 &&
       widthPopupIdx < int(activeWidths().size())) {
-    // in the list's own unit: a selection's width is absolute while the pen's list may be relative,
-    //  and storing it raw is what turned a 3.2 unit stroke into a 3.2 line height (144 unit) preset
+    // in the list's own unit (a legacy unit-less list takes the pen's)
     activePresets().setFrom(widthPopupIdx, pen.width, relativeWidths(), lineHeight());
     widthPalette->items[widthPopupIdx]
         ->containerNode()
