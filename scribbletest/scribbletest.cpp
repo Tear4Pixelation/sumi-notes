@@ -1206,11 +1206,15 @@ int ScribbleTest::penWidthWriteTest()
     const ScribblePen keyPen(Color::BLUE, 0.4, ScribblePen::TIP_ROUND | ScribblePen::WIDTH_RELATIVE);
     app->setPen(keyPen);
     app->updatePenToolbar();
+    // the keys act on the app's tools: app->scribbleMode, not this test's own ScribbleMode, which
+    //  ScribbleTest(path) builds for its document and which no key reaches - checking that one is why
+    //  these two failed on every run
+    ScribbleMode* appMode = app->scribbleMode;
     pressKey(SDLK_1);
-    check(scribbleMode->getMode() == MODE_PAN, "key 1 picks Pan, the toolbar's first tool");
+    check(appMode->getMode() == MODE_PAN, "key 1 picks Pan, the toolbar's first tool");
     pressKey(SDLK_SEMICOLON);
     pressKey(SDLK_QUOTE);
-    check(scribbleMode->drawPen == keyPen, "number and pen-cycling keys leave the pen alone");
+    check(appMode->currDrawPen() == keyPen, "number and pen-cycling keys leave the pen alone");
     app->setMode(MODE_STROKE);
   }
 
@@ -1313,6 +1317,260 @@ int ScribbleTest::penToolbarRefreshTest()
   app->setPen(oldPen);
   app->updatePenToolbar();
   scribbleDoc->newDocument();
+  return nbad;
+}
+
+// A pen stays exactly as the user set it (docs/agent/pen-storage.md).  Part one is the swatch row across a
+//  tab switch: the active document's palette changes under the toolbar (in memory - no loadConfig() - and
+//  freshly loaded), and the row, the pen's colour and the selection ring have to follow it by slot, with
+//  the user's edits kept.  Part two drives every tool's width through a long pseudo-random run of the
+//  things that happen to a pen without the user touching its width, and requires it bit-identical.
+int ScribbleTest::penPersistTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: pen persist: %s\n", what); }
+  };
+  ScribbleApp* app = scribbleDoc->app;
+  PenToolbar* toolbar = app ? app->penToolbar : NULL;
+  ScribbleDoc* adoc = app && app->activeArea() ? app->activeArea()->scribbleDoc : NULL;
+  if(!toolbar || !adoc) {
+    check(false, "no pen toolbar or active document");
+    return nbad;
+  }
+  // the app's tools, not this test's own ScribbleMode (ScribbleTest(path) builds one for its document)
+  ScribbleMode* appMode = app->scribbleMode;
+  // everything changed here is put back at the end
+  std::string modesBefore = appMode->saveModes();
+  std::vector<ColorRef> swatchesBefore = toolbar->swatches;
+  WidthPresets* lists[4] = {&toolbar->savedWidths, &toolbar->savedMarkerWidths,
+      &toolbar->savedEphemeralWidths, &toolbar->savedTapeWidths};
+  WidthPresets listsBefore[4] = {*lists[0], *lists[1], *lists[2], *lists[3]};
+  ColorRef refsBefore[4];
+  std::copy(std::begin(app->penColorRefs), std::end(app->penColorRefs), refsBefore);
+  PaletteRecipe recipeBefore = adoc->cfg->themeRecipe();
+  Page* page = toolbar->currentPage();
+  Dim rulingBefore = page ? page->props.yRuling : 0;
+
+  PaletteRecipe recipeA = paletteThemeRecipe(*paletteThemeByIndex(0), false);
+  PaletteRecipe recipeB = paletteThemeRecipe(*paletteThemeByIndex(1), false);
+  Palette palA, palB;
+  generatePalette(recipeA, &palA);
+  generatePalette(recipeB, &palB);
+  // a switch to another tab is, for the toolbar, the active document's palette changing under it: in
+  //  memory (no loadConfig(), which is what a tab already loaded gets) or freshly loaded from its file
+  auto showTheme = [&](const PaletteRecipe& recipe, bool fresh) {
+    adoc->cfg->setThemeRecipe(recipe);
+    adoc->invalidatePalette();
+    if(fresh)
+      adoc->loadConfig(false);
+    app->updatePenToolbar();  // what refreshUI() runs after every switch
+  };
+  auto ringed = [&](size_t idx) {
+    return idx < toolbar->colorPalette->items.size() && toolbar->colorPalette->items[idx]->isChecked();
+  };
+  auto pick = [&](int idx) {
+    if(!ringed(idx))
+      toolbar->selectColor(idx);  // a tap on the ringed one opens its editor instead
+    closeAutoClosePopup(toolbar->palettePopup);
+  };
+
+  // --- part one: swatches and the pen's colour across tab switches
+  for(int tool : {int(ScribbleMode::DRAWTOOL_PEN), int(ScribbleMode::DRAWTOOL_HIGHLIGHT)}) {
+    bool marker = tool == ScribbleMode::DRAWTOOL_HIGHLIGHT;
+    const char* toolName = marker ? "marker" : "pen";
+    auto penSlot = [&](const Palette& pal, int family) {
+      return marker ? vividMarker(pal.families[family].hl, pal.recipe.vividness) : pal.families[family].base;
+    };
+    showTheme(recipeA, true);
+    app->setDrawTool(tool);
+    app->updatePenToolbar();
+    toolbar->swatches = {ColorRef::inPalette(&palA, palA.neutral), ColorRef::inPalette(&palA, palA.families[2].base),
+        ColorRef::inPalette(&palA, palA.families[5].base), ColorRef::inPalette(&palA, palA.families[8].base)};
+    toolbar->rebuildGrids();
+    pick(1);
+    check(ringed(1), fstring("%s: a picked swatch is ringed", toolName).c_str());
+    // the user edits swatch 3 through the theme grid (tap the ringed swatch, pick another colour)
+    toolbar->setSwatchColor(3, palA.families[10].base);
+    pick(1);
+    for(bool fresh : {false, true}) {
+      const char* how = fresh ? "loaded tab" : "tab in memory";
+      showTheme(recipeB, fresh);
+      check(toolbar->swatchColor(3) == palB.families[10].base && toolbar->swatchColor(1) == palB.families[2].base,
+          fstring("%s, %s: the row shows the other theme's colours in the same slots", toolName, how).c_str());
+      // ...and draws them: a tab in memory runs no loadConfig(), so nothing rebuilt the row
+      Widget* dot = toolbar->colorPalette->items.size() > 3 ? toolbar->colorPalette->items[3]->selectFirst(".btn-color") : NULL;
+      check(dot && dot->node->getColorAttr("fill") == ScribbleApp::displayColor(toolbar->toolColor(palB.families[10].base)),
+          fstring("%s, %s: the swatch is drawn in the other theme's colour", toolName, how).c_str());
+      check(app->getPen()->color == penSlot(palB, 2) && appMode->penForDrawTool(tool).color == penSlot(palB, 2),
+          fstring("%s, %s: the pen follows to its slot's colour", toolName, how).c_str());
+      check(ringed(1) && !ringed(2), fstring("%s, %s: its swatch is still ringed", toolName, how).c_str());
+      pick(2);
+      check(ringed(2) && !ringed(1), fstring("%s, %s: a swatch picked after the switch is ringed", toolName, how).c_str());
+      pick(1);
+      showTheme(recipeA, fresh);
+      check(toolbar->swatchColor(3) == palA.families[10].base,
+          fstring("%s, %s: the edited swatch is still there back in the first theme", toolName, how).c_str());
+      check(app->getPen()->color == penSlot(palA, 2) && ringed(1),
+          fstring("%s, %s: the pen comes back to the first theme's colour exactly, ringed", toolName, how).c_str());
+    }
+    // the custom colour editor on the ringed swatch: the pen gets the tool's colour (the marker's vivid,
+    //  translucent one), not the opaque ink - which drew the marker solid and lost the ring
+    toolbar->colorPopupIdx = 1;
+    toolbar->colorPopupPicker->onColorChanged(palA.families[6].base);
+    check(ringed(1) && app->getPen()->color == penSlot(palA, 6),
+        fstring("%s: a colour from the custom editor keeps the swatch ringed and the tool's colour", toolName).c_str());
+    toolbar->colorPopupIdx = -1;
+    // the row's config text brings back the same slots
+    ScribbleConfig saved;
+    toolbar->saveConfig(&saved);
+    std::vector<ColorRef> reloaded;
+    for(auto& token : splitStringRef(saved.String("savedSwatches", ""), ',', true)) {
+      ColorRef ref;
+      if(ColorRef::parse(token.toString().c_str(), &ref))
+        reloaded.push_back(ref);
+    }
+    bool same = reloaded.size() == toolbar->swatches.size();
+    for(size_t ii = 0; same && ii < reloaded.size(); ++ii)
+      same = reloaded[ii].family == toolbar->swatches[ii].family && reloaded[ii].variant == toolbar->swatches[ii].variant;
+    check(same, fstring("%s: the row is saved as its slots", toolName).c_str());
+  }
+
+  // --- part two: widths
+  const int tools[4] = {ScribbleMode::DRAWTOOL_PEN, ScribbleMode::DRAWTOOL_HIGHLIGHT,
+      ScribbleMode::DRAWTOOL_EPHEMERAL, ScribbleMode::DRAWTOOL_TAPE};
+  Dim expected[4];
+  std::vector<Dim> expectedPresets[4];
+  for(int tool : tools) {
+    app->setDrawTool(tool);
+    app->updatePenToolbar();
+    expected[tool] = appMode->penForDrawTool(tool).width;
+    expectedPresets[tool] = lists[tool]->widths;
+  }
+  unsigned int seed = 20261019;
+  auto rnd = [&](int n) { seed = seed*1103515245u + 12345u; return int((seed >> 16) % unsigned(n)); };
+  // widths with every digit used, as a converted or typed width has
+  auto userWidth = [&](int tool) {
+    bool rel = appMode->penForDrawTool(tool).hasFlag(ScribblePen::WIDTH_RELATIVE);
+    return rel ? 0.01 + rnd(2000)/1000.0/(1 + rnd(7)) : 0.1 + rnd(1000)/(7.0 + rnd(9));
+  };
+  const Dim rulings[] = {0, 40, 1500/37.8, 45, 100/3.0};
+  const char* opNames[] = {"set width", "switch tool", "other ruling (tab with another paper)",
+      "tab with another theme", "selection and back", "restart (save and load)", "Relative size off and on",
+      "preset tap", "Return without an edit", "width editor opened and closed", "Relative size toggled once",
+      "Relative size off, another ruling, on"};
+  bool failed = false;
+  for(int step = 0; step < 300 && !failed; ++step) {
+    int tool = appMode->drawTool;
+    int op = rnd(12);
+    switch(op) {
+    case 0:
+      toolbar->spinWidth->setValue(userWidth(tool));
+      toolbar->updateWidth();
+      expected[tool] = toolbar->spinWidth->value();
+      break;
+    case 1:
+      app->setDrawTool(tools[rnd(4)]);
+      app->updatePenToolbar();
+      break;
+    case 2:
+      if(page)
+        page->props.yRuling = rulings[rnd(5)];
+      app->updatePenToolbar();
+      break;
+    case 3:
+      showTheme(rnd(2) ? recipeA : recipeB, rnd(2) != 0);
+      break;
+    case 4:
+      toolbar->setPen(ScribblePen(Color::RED, rnd(2) ? 1.59 : 0.3), PenToolbar::SELECTION_MODE);
+      app->updatePenToolbar();
+      break;
+    case 5: {
+      std::string modes = appMode->saveModes();
+      appMode->loadModes(modes.c_str());
+      app->currPen = appMode->currDrawPen();
+      for(WidthPresets* list : lists) {
+        std::string text = list->serialize();
+        list->parse(text.c_str());
+      }
+      toolbar->shownValid = false;  // as a new toolbar would be
+      app->updatePenToolbar();
+      break;
+    }
+    case 6: {
+      bool rel = toolbar->relativeWidths();
+      toolbar->setRelativeWidth(!rel);
+      toolbar->setRelativeWidth(rel);
+      break;
+    }
+    case 7: {
+      int idx = rnd(3);
+      if(!WidthPresets::sameWidth(toolbar->presetWidth(idx), toolbar->pen.width))
+        expected[tool] = toolbar->presetWidth(idx);
+      toolbar->selectWidth(idx);
+      closeAutoClosePopup(toolbar->widthPopup);
+      break;
+    }
+    case 8: {
+      TextBox* text = static_cast<TextBox*>(toolbar->spinWidth->containerNode()->selectFirst(".spinbox_text")->ext());
+      toolbar->spinWidth->updateValueFromText(text->text().c_str());
+      break;
+    }
+    case 9:
+      for(int idx = 0; idx < 3; ++idx) {
+        if(WidthPresets::sameWidth(toolbar->presetWidth(idx), toolbar->pen.width)) {
+          toolbar->selectWidth(idx);  // the ringed preset: opens its editor
+          app->gui->setFocused(toolbar->spinWidth);
+          closeAutoClosePopup(toolbar->widthPopup);
+          app->gui->setFocused(app->activeArea()->widget);
+          break;
+        }
+      }
+      break;
+    case 10:
+      toolbar->setRelativeWidth(!toolbar->relativeWidths());
+      expected[tool] = appMode->penForDrawTool(tool).width;
+      expectedPresets[tool] = lists[tool]->widths;
+      break;
+    case 11: {
+      bool rel = toolbar->relativeWidths();
+      toolbar->setRelativeWidth(!rel);
+      if(page)
+        page->props.yRuling = rulings[rnd(5)];
+      app->updatePenToolbar();
+      toolbar->setRelativeWidth(rel);
+      break;
+    }
+    }
+    for(int tt : tools) {
+      if(appMode->penForDrawTool(tt).width != expected[tt] || lists[tt]->widths != expectedPresets[tt]) {
+        printf("pen persist: step %d, %s: tool %d width %.17g, expected %.17g\n", step, opNames[op], tt,
+            appMode->penForDrawTool(tt).width, expected[tt]);
+        failed = true;
+        break;
+      }
+    }
+  }
+  check(!failed, "every tool's width and presets stay exactly as set through 300 steps of switching, "
+      "saving and loading");
+
+  // put everything back
+  if(page)
+    page->props.yRuling = rulingBefore;
+  adoc->cfg->setThemeRecipe(recipeBefore);
+  adoc->invalidatePalette();
+  adoc->loadConfig(false);
+  appMode->loadModes(modesBefore.c_str());
+  for(int ii = 0; ii < 4; ++ii)
+    *lists[ii] = listsBefore[ii];
+  toolbar->swatches = swatchesBefore;
+  std::copy(std::begin(refsBefore), std::end(refsBefore), app->penColorRefs);
+  app->penRecipeValid = false;
+  app->currPen = appMode->currDrawPen();
+  app->setMode(MODE_STROKE);
+  toolbar->shownValid = false;
+  toolbar->refreshPalette();
+  app->updatePenToolbar();
   return nbad;
 }
 
@@ -6166,6 +6424,7 @@ void ScribbleTest::runAll(bool runsynctest)
   nUnitFailed += penSelectionTest();
   nUnitFailed += penWidthWriteTest();
   nUnitFailed += penToolbarRefreshTest();
+  nUnitFailed += penPersistTest();
   nUnitFailed += outlineTest();
   nUnitFailed += imageCropTest();
   nUnitFailed += outlineNestTest();

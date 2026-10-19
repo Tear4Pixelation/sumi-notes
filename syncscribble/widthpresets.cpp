@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <cstdio>
 
 // out-of-line definitions, needed before C++17 since std::min/max take them by reference
 constexpr int WidthPresets::COUNT;
@@ -44,13 +45,24 @@ void WidthPresets::parse(const char* str)
   }
 }
 
+std::string exactNumber(double value)
+{
+  char buf[40];
+  for(int digits = 6; digits <= 17; ++digits) {
+    snprintf(buf, sizeof(buf), "%.*g", digits, value);
+    if(strtod(buf, NULL) == value)
+      break;
+  }
+  return buf;
+}
+
 std::string WidthPresets::serialize() const
 {
   std::string out = unit == UNIT_RELATIVE ? REL_PREFIX : (unit == UNIT_ABSOLUTE ? ABS_PREFIX : "");
-  char buf[32];
   for(size_t i = 0; i < widths.size(); ++i) {
-    snprintf(buf, sizeof(buf), i > 0 ? ",%.6g" : "%.6g", double(widths[i]));
-    out += buf;
+    if(i > 0)
+      out += ',';
+    out += exactNumber(double(widths[i]));
   }
   return out;
 }

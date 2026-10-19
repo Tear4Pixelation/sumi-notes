@@ -6,6 +6,7 @@
 #include "basics.h"
 #include "application.h"
 #include "scribblepen.h"
+#include "colorref.h"
 #include "tablist.h"
 #if PLATFORM_ANDROID
 #include "android/androidhelper.h"
@@ -176,6 +177,13 @@ public:
   PenToolbar* penToolbar;
   ScribblePen currPen = {Color::BLACK, 1};
   Color bookmarkColor = Color::BLUE;
+  // Each draw tool's colour as a theme slot (docs/agent/pen-storage.md), indexed by DRAWTOOL_*: when the
+  //  active palette changes (a tab switch, a theme change), a pen still on its slot's colour is moved to
+  //  the new theme's colour at the same slot, as the swatch row is.  Saved as `penColorRefs`.
+  ColorRef penColorRefs[4];
+  PaletteRecipe penRecipe;  // the palette the pens' colours were last checked against
+  bool penRecipeValid = false;
+  void followPalette();
 
   std::string tempPath;
   std::string savedPath;

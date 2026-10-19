@@ -92,10 +92,13 @@ ScribblePen& ScribbleMode::penForDrawTool(int tool)
 // the last word of saveModes(); see loadModes()
 static const char* MARKER_UNIT_KEPT = "markerunit";
 
+// every number exactly (exactNumber): an ostream's default 6 significant digits reloaded a converted width
+//  as a different number, and the pen then no longer equalled its preset (docs/agent/pen-storage.md)
 static void writePen(std::ostream& ss, const ScribblePen& pen)
 {
-  ss << ' ' << pen.color.color << ' ' << pen.flags << ' ' << pen.width << ' ' << pen.wRatio
-     << ' ' << pen.prParam << ' ' << pen.spdMax << ' ' << pen.dirAngle << ' ' << pen.dash << ' ' << pen.gap;
+  ss << ' ' << pen.color.color << ' ' << pen.flags << ' ' << exactNumber(pen.width)
+     << ' ' << exactNumber(pen.wRatio) << ' ' << exactNumber(pen.prParam) << ' ' << exactNumber(pen.spdMax)
+     << ' ' << exactNumber(pen.dirAngle) << ' ' << exactNumber(pen.dash) << ' ' << exactNumber(pen.gap);
 }
 
 static void readPen(std::istream& ss, ScribblePen& pen, unsigned int reqflags)

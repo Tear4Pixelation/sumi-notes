@@ -12,6 +12,7 @@
 
 #include <stdio.h>
 #include <cmath>
+#include <cstdlib>
 
 #include "widthpresets.h"
 
@@ -156,9 +157,36 @@ static void testWidthPresetNormalize()
   widthPresetCheck(!fine.normalize(TEST_DEFAULTS, false, LINE_HEIGHT), "a good list is left alone");
 }
 
+// A width saved and loaded any number of times is the width the user set, bit for bit
+//  (docs/agent/pen-storage.md).  "%.6g" turned 33.75/45 into 0.75 but 1.6/45 into 0.0355556, which reads
+//  back as a different number - the pen then no longer equalled the preset it was picked from.
+static void testWidthPresetExact()
+{
+  const Dim widths[] = {1.6, 0.0311111111111, 1.6/45, 0.75*39.68/45, 1/3.0, 200, 0.0005, 2.0/3*1e-3};
+  int nInexact = 0;
+  for(Dim width : widths) {
+    if(strtod(exactNumber(width).c_str(), NULL) != width)
+      ++nInexact;
+  }
+  widthPresetCheck(nInexact == 0, "exactNumber() reads back as the same double");
+  widthPresetCheck(exactNumber(1.6) == "1.6" && exactNumber(0.75) == "0.75",
+      "...and is no longer than it needs to be");
+  // many save/load cycles of a converted list: the numbers never move
+  WidthPresets list;
+  list.parse("abs:1.6,2.4,6");
+  list.convertTo(true, 45);
+  std::vector<Dim> converted = list.widths;
+  for(int cycle = 0; cycle < 50; ++cycle) {
+    std::string saved = list.serialize();
+    list.parse(saved.c_str());
+  }
+  widthPresetCheck(list.isRelative() && list.widths == converted, "a converted list survives 50 save/load cycles exactly");
+}
+
 int runWidthPresetTests()
 {
   nWidthPresetChecksFailed = 0;
+  testWidthPresetExact();
   testWidthPresetRoundTrip();
   testWidthPresetSelectionUnits();
   testWidthPresetConvert();

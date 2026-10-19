@@ -5,6 +5,7 @@
 #include "scribbleconfig.h"
 #include "scribblepen.h"
 #include "widthpresets.h"
+#include "colorref.h"
 #include <memory>
 
 
@@ -47,6 +48,9 @@ public:
   // Repopulates the swatches from the active document's theme (COLORS_SPEC.md §6). Called when the
   //  theme changes and when the document changes; harmless when theming is off.
   void refreshPalette();
+  // refreshPalette() if the active document's palette is not the one the row was resolved against;
+  //  true if it was not
+  bool syncPalette();
   void refreshDisplayColors();
   void updateColor();
   void updateWidth();
@@ -207,7 +211,20 @@ private:
 
   int changesSinceFocused = -1;
   int contextMenuIdx;
-  std::vector<Color> savedColors;
+  // The swatch row (docs/agent/pen-storage.md).  Each is a theme slot (family + variant) or a literal
+  //  colour, so the same row shows each document theme's own colours in the same places; swatchColor()
+  //  resolves one in the active document's palette.  Saved as `savedSwatches`; `savedColors` (literal
+  //  colours, every build before this) is only read, once, when there is no `savedSwatches` yet.
+  std::vector<ColorRef> swatches;
+  // the row came from legacy `savedColors`: the first themed refresh may still seed the theme's own row
+  //  over it (the old black/red/green/blue default), and then never again - after that the row is the
+  //  user's and nothing replaces it
+  bool swatchesLegacy = false;
+  Color swatchColor(size_t idx) const;
+  // the recipe the row was last resolved against, so a change of active palette (a tab switch, which
+  //  does not run ScribbleDoc::loadConfig()) re-resolves it; see syncPalette()
+  PaletteRecipe swatchRecipe;
+  bool swatchRecipeValid = false;
   // One preset list per draw tool, each held in that tool's own unit - absolute, or multiples of the
   //  line height while that tool's relative size toggle is on (see setRelativeWidth).  They cannot
   //  share a list: two tools can be in different units at the same time, and one list would then be
@@ -219,6 +236,13 @@ private:
   WidthPresets savedTapeWidths;       // DRAWTOOL_TAPE
   // which of those lists is currently on the row
   int widthsTool = 0;
+  // both renderings of the active tool's pen width and presets while the Relative size toggle is flipped
+  //  with no edit in between, so flipping it back is exact (setRelativeWidth)
+  struct RelToggle {
+    bool valid = false;
+    int tool = 0;
+    struct Rendering { Dim pen = 0; std::vector<Dim> presets; } absolute, relative;
+  } relToggle;
   // What setPen()'s full refresh last drew besides the pen itself, so an unchanged pen can skip it only
   //  when none of these moved either (see setPen)
   struct ShownContext {

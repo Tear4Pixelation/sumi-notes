@@ -153,9 +153,9 @@ reverts the strokes while the paper stays on the new theme.
 ## The themed picker (phases 3-4)
 
 - **With the marker in hand every swatch is offered as its family's highlighter variant**
-  (`PenToolbar::toolColor()`): the saved list holds ink colors, shared by all three draw tools, so
+  (`PenToolbar::toolColor()`): the saved list holds ink slots, shared by all three draw tools, so
   storing it per tool would split the user's picks into three lists that drift apart. It is applied at
-  the four points a swatch reaches the pen - the row, the grid, `selectColor()` and `setSwatchColor()` -
+  every point a swatch reaches the pen - the row, the grid, `selectColor()`, `setSwatchColor()`, the custom color editor and Delete Swatch (the last two were missing, and gave the marker opaque ink) -
   and to the selected-swatch comparison, or the ring lands on nothing. The neutral and an off-palette
   color have no highlighter variant and simply take the marker's alpha. Without this, a themed document
   reseeded the row with opaque ink colors and the marker drew solid.
@@ -168,11 +168,15 @@ reverts the strokes while the paper stays on the new theme.
   and leads to the hex/slider popup, so the theme's own answer is always offered first and an outside
   color costs one more deliberate step. With no theme, the `+` keeps its original meaning and goes
   straight to the color editor.
-- `refreshPalette()` **reseeds the row only when every swatch fails to belong to the theme** - not when
-  merely one does. The legacy default is black/red/green/blue and black *is* the neutral, so an
-  "any member" test counts that whole list as themed and leaves three unreachable colors on the row.
-  Reseeding is skipped entirely when `themeOffPalette` is on, or a deliberate custom swatch would be
-  deleted on every launch.
+- **Swatches are theme slots, not colors** (`ColorRef`, [pen-storage.md](pen-storage.md)): family
+  ordinal + variant, the neutral, or a literal custom color, saved as `savedSwatches`. The same row shows
+  each document theme's own colors in the same places, and the draw pens' colors follow their slot on a
+  tab switch (`ScribbleApp::followPalette()`). `refreshPalette()` **never reseeds a row because it does
+  not belong to the theme** - it did (literal colors, reseed if any swatch was not a member), which threw
+  the user's row away on every document with another theme. It seeds only an empty row, or once, a legacy
+  `savedColors` list in which no family made it (the old black/red/green/blue). `PenToolbar::syncPalette()`
+  re-resolves the row whenever the active palette changes, since a switch to a tab already in memory runs
+  no `loadConfig()`.
 - **Snapping lives in `updateColor()`**, the single point every route into the pen color passes
   through, and it pushes the snapped value back into the picker only when it actually moved - otherwise
   `setColor()` re-enters. `colorPopupPicker->onColorChanged` needs its **own** snap, because it writes
