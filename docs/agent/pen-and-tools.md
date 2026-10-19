@@ -703,6 +703,69 @@ right, a press right of the line moves only the right, and a line starting on th
 it. Mutation-checked: without the whole-line stops 2 checks fail; with them but the erase still finding
 stops the old way, 2 fail (one is the erase check). Verified in agent-display on lined paper.
 
+# Separators (vertical, diagonal, horizontal)
+
+Every ruled tool asks one place where a column ends: `RuledSelector::findStops()` (`selection.cpp`), which
+ruled select, ruled erase, Insert Lines / Insert Space in Line (and their reflow), the negative-space erase
+and Resize Handwriting all go through. Fix separator behaviour there, not per tool.
+
+**A separator has a shape, not one x per line.** `findStops()` used to keep only `lstops`/`rstops`, each
+line's extreme: for a diagonal, its least x over the band (a "/" at the band's bottom). So writing beside a
+diagonal's upper end on a "/", on the correct side, had its box right of that x and was left out of a ruled
+selection ("cuts off as soon as it touches the line"), reflow wrapped it too early, and smart scale, which
+had no stops at all, ran grown text across it. Now each line also has a `StopEdge` per side
+(`ledges`/`redges`): the separator's flattened outline clipped to the band plus half a line either side
+(so ink reaching a little out of its band is judged where the separator really is) and split at the pen's
+x, and `StopEdge::over(y0, y1)` gives its x over any height range (`inner` = nearest the column, else the
+farthest). A box-only barrier (an image) is `flat`, one x for the band. `lstops`/`rstops` stay, now set
+from the edges, for code that wants one x per line (wrap start, indent, drawing the selection).
+
+- **Ruled select / erase** (`containedRuled()`/`overlapRuled()`, `betweenStops()`): box against the stop
+  over the box's own height first; only if that fails beside a shaped stop, the ink point by point against
+  the separator's x at each point's height. Tall strokes were already tested per point; they now use the x
+  at the point's height too. `RuledRange` carries the edges per range line (`ledges`/`redges`); the first
+  line's x0 and the last line's x1 are folded into `flat`.
+- **Reflow** (`reflowStrokes()`): a stroke overflows if its box passes the right stop at its own heights,
+  and, beside a shaped stop, if a point of its ink (where the reflow has moved it so far: path + scratch,
+  mirroring `localElementBBox()`) is within half a word gap of the separator at that height. A wrapped
+  word starts right of a left separator where it will sit on the next line.
+- **Resize Handwriting** (`smartScaleStart()`): stops are found from the selection's first word (centre of
+  its first stroke) on its first line, and copied into the gesture with every stroke's flattened ink.
+  `SmartScaleParams::bounds` asks, per word, scale and line, the range its left edge may take so all of its
+  scaled ink is between the separators (`smartScaleLayout()` wraps on it and starts a line at its minimum).
+  Each word keeps the slack it already had (ink the writer put across a line), so scale 1 is still
+  identity. Later content is now a `RuledSelector` (`selectRuled()` after `findStops()`), so only the
+  text's column moves, and a separator through the selection's lines no longer counts as blocking ink.
+
+**A horizontal line along a rule is the end of the page** for every reflow tool
+(`RuledSelector::findSectionEnd()`, called from `selectRuledAfter()` and by smart scale for its later
+content). A separator is a path no taller than 0.35 lines, its middle within 0.3 lines of a rule, at least 3
+lines long and across at least half of its column (the stops on the line above it, else margin to page
+edge); the first such rule below the start line ends the range, and the line itself is never selected
+(`sectionEnd`, its centre can sit just inside the last line). So Insert Lines moves the column's lines down
+to it and leaves it and everything under it; with a vertical separator the column test means a horizontal
+line under one column ends only that column. Pref `separatorEndsReflow` (Ruled Tools, also in the Insert
+Space settings button), on by default, read into the static `RuledSelector::separatorEndsSection` by
+`ScribbleArea::loadConfig()` - which a new document reruns, so a test must set the flag after `newDocument()`.
+A heading's long underline counts as one; turn the pref off if that bites.
+
+Not handled: text pushed down past the separator (Insert Lines, a reflow wrapping onto it, grown smart-scale
+text) overlaps it and what is below, exactly as text pushed past the page end would - the separator does not
+move out of the way. Plain Insert Space (`MODE_INSSPACEVERT`) and ruled select ignore horizontal separators.
+The selection background (`RuledSelector::drawBG()`) still draws one x per line. A word judged by its points
+uses the stroke's centre line for stroked paths (Line shapes), the outline for pen strokes.
+
+Tested by `ScribbleTest::separatorTest()`: ruled select beside a shallow "/" takes slanted writing whose box
+crosses the line's band minimum (both lines) and not the word beyond; reflow keeps such a word on its line
+after a 1 unit push and wraps it clear of the line when pushed past; Insert Lines above a horizontal line
+leaves the line and the text below (and moves everything with the pref off); an underline is not a
+separator; Resize Handwriting grown 1.2 beside a "/" keeps every box left of it and moves only its own column
+below. Against the old code 6 of these fail (both select checks, both horizontal-line checks, grown text
+crossing, the other column moving); the reflow check fails with the overflow test put back to the band
+extreme. `smartscaletest` covers `bounds` standalone (ignoring it fails 3). Verified in agent-display (Debug,
+lined paper): Insert Lines above a long line along a rule moved the two lines above it, the line and the
+word under it stayed.
+
 # Marker: vivid colour and alpha
 
 The marker used to read as a pale wash. Now: alpha **165** (was 127 for the default pen, 97 for a themed

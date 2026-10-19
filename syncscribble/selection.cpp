@@ -660,16 +660,48 @@ void Selection::reflowStrokes(Dim dx, int dline, Dim minWordSep)
   Dim marginLeft = ruling.region ? extent.left : page->props.marginLeft;
   Dim left = marginLeft;
   Dim right = extent.right - 0.5*minWordGap;
+  RuledSelector* stops = static_cast<RuledSelector*>(selector);
+  bool knownLine = false;
+  // where a stroke on the current line overflows: the column's right stop at the stroke's own heights, so
+  //  text beside a diagonal separator fills up to the separator where it is (StopEdge)
+  //  - its box against the stop over the box's heights, then, where that is not enough beside a separator
+  //  with a shape, its ink point by point, as ruled select judges it (betweenStops())
+  const Dim pad = 0.5*minWordGap;
+  auto overflows = [&](Element* s, const Rect& box) {
+    if(!knownLine)
+      return box.right >= right;
+    if(box.right < stops->rstopOver(currline, box.top, box.bottom) - pad)
+      return false;
+    if(!s->isPathElement() || currline >= int(stops->redges.size()) || stops->redges[currline].segs.empty()
+        || box.left >= stops->rstopOver(currline, box.top, box.bottom, false) - pad)
+      return true;
+    // the stroke where the reflow has it so far: its current position plus the reflow's offset
+    const ScribbleTransform& pending = s->pendingTransform();
+    Transform2D tf = ruling.localTransform() * (s->pendingDeferred() ? pending.tf() : Transform2D())
+        * s->node->totalTransform();
+    const Point shift = s->scratch - pendingLocalOffset(s, ruling);
+    const StopEdge& edge = stops->redges[currline];
+    PathPointIter pts(*static_cast<SvgPath*>(s->node)->path(), tf, yruling/8);
+    while(pts.hasNext()) {
+      Point p = pts.next() + shift;
+      if(p.x >= edge.at(p.y, true) - pad)
+        return true;
+    }
+    return false;
+  };
   while(1) {
     // (a Skip Lines frame starts on the pressed line, so a move up reaches negative lines, which have no stops)
-    if(currline >= 0 && currline+1 < int(((RuledSelector*)selector)->lstops.size())) {
-      left = MAX(marginLeft, static_cast<RuledSelector*>(selector)->lstops[currline+1]);
-      right = static_cast<RuledSelector*>(selector)->rstops[currline] - 0.5*minWordGap;
+    knownLine = currline >= 0 && currline+1 < int(stops->lstops.size());
+    if(knownLine) {
+      left = MAX(marginLeft, stops->lstops[currline+1]);
+      // the extreme over the line; overflows() asks for the stop at each stroke's height
+      right = stops->rstopOver(currline, currline*yruling, (currline + 1)*yruling, false) - 0.5*minWordGap;
     }
     // Step 1: find last word break before overflow
     while(1) {
-      currRight = MAX(currRight, workingBBox(*curr, ruling).right);
-      if(currRight >= right)
+      Rect box = workingBBox(*curr, ruling);
+      currRight = MAX(currRight, box.right);
+      if(overflows(*curr, box))
         break;
       curr++;
       // no strokes beyond right on this line means we are all done reflowing
@@ -684,6 +716,17 @@ void Selection::reflowStrokes(Dim dx, int dline, Dim minWordSep)
     // Step 1.5: find first stroke of next line so we can start strokes moved down at same position
     //  if the next line is empty, strokes moved down start where the paragraph's text does (never left of
     //  the margin or column stop), or at (left + minWordGap) if that is unknown
+    // a left separator's x where the moved words will sit, from their heights on the next line
+    if(knownLine) {
+      Dim top = MAX_DIM, bottom = MIN_DIM;
+      for(auto ii = wordbreak; ii != strokes.end() && workingLine(*ii, ruling) == currline; ++ii) {
+        Rect box = workingBBox(*ii, ruling);
+        top = MIN(top, box.top);
+        bottom = MAX(bottom, box.bottom);
+      }
+      if(top <= bottom)
+        left = MAX(marginLeft, stops->lstopOver(currline+1, top + yruling, bottom + yruling));
+    }
     dx = reflowIndent < MAX_DIM ? MAX(left, reflowIndent) : left + minWordGap;
     while(++curr != strokes.end()) {
       if(workingLine(*curr, ruling) == currline)
@@ -1097,7 +1140,45 @@ RuledRange& RuledRange::translate(Dim dx, Dim dy)
   ymax += dy;
   lstops.clear();
   rstops.clear();
+  ledges.clear();
+  redges.clear();
   return *this;
+}
+
+Dim StopEdge::over(Dim y0, Dim y1, bool right, bool inner) const
+{
+  if(segs.empty())
+    return flat;
+  // a right edge's inner x is its least, a left edge's its greatest
+  const bool wantMin = right == inner;
+  auto better = [wantMin](Dim a, Dim b) { return wantMin ? std::min(a, b) : std::max(a, b); };
+  Dim best = NAN, nearestX = NAN, nearestDist = MAX_DIM;
+  for(const auto& seg : segs) {
+    Point a = seg.first, b = seg.second;
+    if(a.y > b.y)
+      std::swap(a, b);
+    Dim lo = std::max(y0, a.y), hi = std::min(y1, b.y);
+    if(lo <= hi) {
+      // x is linear along the segment, so its extremes over [lo, hi] are at the ends
+      Dim xlo = b.y > a.y ? a.x + (b.x - a.x)*(lo - a.y)/(b.y - a.y) : better(a.x, b.x);
+      Dim xhi = b.y > a.y ? a.x + (b.x - a.x)*(hi - a.y)/(b.y - a.y) : better(a.x, b.x);
+      Dim x = better(xlo, xhi);
+      best = std::isnan(best) ? x : better(best, x);
+    }
+    else if(std::isnan(best)) {
+      // the ink does not reach these heights (yet): its nearest end stands in
+      for(const Point& p : {a, b}) {
+        Dim dist = p.y < y0 ? y0 - p.y : p.y - y1;
+        if(dist < nearestDist || (dist == nearestDist && better(p.x, nearestX) == p.x)) {
+          nearestDist = dist;
+          nearestX = p.x;
+        }
+      }
+    }
+  }
+  if(std::isnan(best))
+    best = nearestX;
+  return right ? std::min(flat, best) : std::max(flat, best);
 }
 
 Dim RuledRange::lstop(int idx) const
@@ -1118,7 +1199,42 @@ Dim RuledRange::rstop(int idx) const
   return (idx >= 0 && idx < nlines()) ? MAX_DIM : MAX_DIM;  //MIN_X_DIM
 }
 
+Dim RuledRange::lstopOver(int idx, Dim y0, Dim y1, bool inner) const
+{
+  return idx >= 0 && idx < int(ledges.size()) ? ledges[idx].over(y0, y1, false, inner) : lstop(idx);
+}
+
+Dim RuledRange::rstopOver(int idx, Dim y0, Dim y1, bool inner) const
+{
+  return idx >= 0 && idx < int(redges.size()) ? redges[idx].over(y0, y1, true, inner) : rstop(idx);
+}
+
 Dim RuledSelector::MIN_DIV_HEIGHT = 2;
+bool RuledSelector::separatorEndsSection = true;
+
+// Is the element on line dl of the range between that line's stops?  Its box against the stops over the
+//  box's own height first; where a separator has a shape (a diagonal) and the box reaches past it, the
+//  ink itself, each point against the separator's x at that point's height - writing close to a diagonal,
+//  on the right side of it, has a box corner across the line's x at another height.
+static bool betweenStops(const RuledRange& range, int dl, Element* s, const Rect& bbox)
+{
+  if(bbox.left >= range.lstopOver(dl, bbox.top, bbox.bottom) && bbox.right <= range.rstopOver(dl, bbox.top, bbox.bottom))
+    return true;
+  if(!range.hasEdges(dl) || !s->isPathElement())
+    return false;
+  // past even the farthest x the separator reaches at these heights: no point can be inside
+  if(bbox.right < range.lstopOver(dl, bbox.top, bbox.bottom, false)
+      || bbox.left > range.rstopOver(dl, bbox.top, bbox.bottom, false))
+    return false;
+  const Path2D& path = *static_cast<SvgPath*>(s->node)->path();
+  PathPointIter pts(path, range.frame.localTransform() * s->node->totalTransform(), range.yruling/8);
+  while(pts.hasNext()) {
+    Point p = pts.next();
+    if(p.x < range.lstopOver(dl, p.y, p.y) || p.x > range.rstopOver(dl, p.y, p.y))
+      return false;
+  }
+  return true;
+}
 
 // If findStops() did not run (e.g., due to cursor down in left margin) left = MIN_X_DIM and strokes in the
 //  left margin will be selected and manipulated.  If findStops() did run, strokes in left margin will not be
@@ -1140,7 +1256,7 @@ static bool containedRuled(const RuledRange& range, Element* s)
     int lastline = floor((bbox.bottom - range.ymin)/range.yruling);
     int ii = floor((bbox.top - range.ymin)/range.yruling);
     for(; ii <= lastline; ++ii) {
-      if(bbox.left < range.lstop(ii) || bbox.right > range.rstop(ii))
+      if(bbox.left < range.lstopOver(ii, bbox.top, bbox.bottom) || bbox.right > range.rstopOver(ii, bbox.top, bbox.bottom))
         return false;
     }
     return true;
@@ -1148,7 +1264,7 @@ static bool containedRuled(const RuledRange& range, Element* s)
 
   if(bbox.height() < 1.75*range.yruling) {
     int dl = floor((range.frame.toLocal(s->com()).y - range.ymin)/range.yruling);
-    return dl >= 0 && dl < range.nlines() && bbox.left >= range.lstop(dl) && bbox.right <= range.rstop(dl);
+    return dl >= 0 && dl < range.nlines() && betweenStops(range, dl, s, bbox);
   }
   if(bbox.top < range.ymin - 0.25*range.yruling || bbox.bottom > range.ymax + 0.25*range.yruling)
     return false;
@@ -1164,7 +1280,7 @@ static bool containedRuled(const RuledRange& range, Element* s)
     }
     else {
       int dl = floor((p.y - range.ymin)/range.yruling);
-      if(p.x < range.lstop(dl) || p.x > range.rstop(dl))
+      if(p.x < range.lstopOver(dl, p.y, p.y) || p.x > range.rstopOver(dl, p.y, p.y))
         return false;
     }
   }
@@ -1185,13 +1301,16 @@ static bool overlapRuled(const RuledRange& range, Element* s)
       return false;
     int l0 = int(floor((bbox.top - range.ymin)/range.yruling));
     int l1 = int(floor((bbox.bottom - range.ymin)/range.yruling));
+    // touching a line's column: left of the farthest x its right stop reaches at the box's heights, and
+    //  right of its left stop's
+    auto touches = [&](int ii) { return bbox.left < range.rstopOver(ii, bbox.top, bbox.bottom, false)
+        && bbox.right > range.lstopOver(ii, bbox.top, bbox.bottom, false); };
     if(s->node->type() == SvgNode::IMAGE)
-      return (l0 >= 0 && l0 < range.nlines() && bbox.left < range.rstop(l0) && bbox.right > range.lstop(l0))
-          || (l1 >= 0 && l1 < range.nlines() && bbox.left < range.rstop(l1) && bbox.right > range.lstop(l1));
+      return (l0 >= 0 && l0 < range.nlines() && touches(l0)) || (l1 >= 0 && l1 < range.nlines() && touches(l1));
     // this would apply to text and opaque <g>s
     int lastline = std::min(l1, range.nlines() - 1);
     for(int ii = std::max(0, l0); ii <= lastline; ++ii) {
-      if(bbox.left < range.rstop(ii) && bbox.right > range.lstop(ii))
+      if(touches(ii))
         return true;
     }
     return false;
@@ -1199,7 +1318,8 @@ static bool overlapRuled(const RuledRange& range, Element* s)
 
   if(bbox.height() < 1.75*range.yruling) {
     int dl = floor((range.frame.toLocal(s->com()).y - range.ymin)/range.yruling);
-    return dl >= 0 && dl < range.nlines() && bbox.left < range.rstop(dl) && bbox.right > range.lstop(dl);
+    return dl >= 0 && dl < range.nlines() && bbox.left < range.rstopOver(dl, bbox.top, bbox.bottom, false)
+        && bbox.right > range.lstopOver(dl, bbox.top, bbox.bottom, false);
   }
   if(bbox.bottom < range.ymin + 0.25*range.yruling || bbox.top > range.ymax - 0.25*range.yruling)
     return false;
@@ -1210,7 +1330,7 @@ static bool overlapRuled(const RuledRange& range, Element* s)
     Point p = pts.next();
     if(p.y >= range.ymin && p.y < range.ymax) {
       int dl = floor((p.y - range.ymin)/range.yruling);
-      if(p.x < range.rstop(dl) && p.x > range.lstop(dl))
+      if(p.x < range.rstopOver(dl, p.y, p.y) && p.x > range.lstopOver(dl, p.y, p.y))
         return true;
     }
   }
@@ -1247,6 +1367,9 @@ bool RuledSelector::selectHit(Element* s)
   // ink belongs to the ruling it was written on: a ruled gesture in a region acts on that region's ink
   //  only, and one on the page's ruling leaves every region's ink alone
   if(sameRulingOnly && selRange.frame.region != selection->page->regionAt(s->com()))
+    return false;
+  // the separator ending the range sits on its last rule, so its centre can be just inside the last line
+  if(s == sectionEnd)
     return false;
   switch(selMode) {
   case SEL_CONTAINED:
@@ -1292,6 +1415,16 @@ void RuledSelector::selectRuled(Dim x0, int line0, Dim x1, int line1)
       selRange.lstops.push_back(lstops[++line]);
     }
     selRange.rstops.push_back(MIN(rstops[line1], x1));
+    // and their shape: the range's first line starts at x0 and its last ends at x1 whatever a separator
+    //  does there, which is what flat is for (a left edge takes the greater, a right the lesser)
+    if(redges.size() == rstops.size()) {
+      for(int line = line0; line <= line1; ++line) {
+        selRange.ledges.push_back(ledges[line]);
+        selRange.redges.push_back(redges[line]);
+      }
+      selRange.ledges.front().clip(x0, false);
+      selRange.redges.back().clip(x1, true);
+    }
   }
 
   selection->doSelect();
@@ -1308,7 +1441,75 @@ void RuledSelector::selectRuled(const RuledRange& range)
 // select all strokes to the right of x on rule line linenum, down to the end of the page
 void RuledSelector::selectRuledAfter(Dim x, int linenum)
 {
-  selectRuled(x, linenum, MAX_DIM, MAX_LINE_NUM - 1);
+  // a horizontal separator below is the end of the page for every reflow tool: the column's lines down to
+  //  it move, it and everything under it stay
+  int lastLine = MAX_LINE_NUM - 1;
+  sectionEnd = NULL;
+  if(separatorEndsSection) {
+    findStops(x, linenum);  // the separator has to span the column, so the column comes first
+    int endRule = findSectionEnd(x, linenum);
+    if(endRule > linenum)
+      lastLine = endRule - 1;
+  }
+  selectRuled(x, linenum, MAX_DIM, lastLine);
+}
+
+Dim RuledSelector::lstopOver(int line, Dim y0, Dim y1, bool inner) const
+{
+  if(line < 0 || line >= int(lstops.size()))
+    return MIN_DIM;
+  return line < int(ledges.size()) ? ledges[line].over(y0, y1, false, inner) : lstops[line];
+}
+
+Dim RuledSelector::rstopOver(int line, Dim y0, Dim y1, bool inner) const
+{
+  if(line < 0 || line >= int(rstops.size()))
+    return MAX_DIM;
+  return line < int(redges.size()) ? redges[line].over(y0, y1, true, inner) : rstops[line];
+}
+
+// A horizontal separator: a straight stroke along a rule - no taller than HSEP_MAX_HEIGHT lines, its middle
+//  within HSEP_RULE_DIST lines of the rule - at least HSEP_MIN_LENGTH lines long and across at least
+//  HSEP_COLUMN_SHARE of its column (the column's stops on the line above it, else margin to page edge), so
+//  an underlined word is not one.  An underline as long as half the column is.
+static constexpr Dim HSEP_MAX_HEIGHT = 0.35, HSEP_RULE_DIST = 0.3, HSEP_MIN_LENGTH = 3, HSEP_COLUMN_SHARE = 0.5;
+
+int RuledSelector::findSectionEnd(Dim x, int linenum)
+{
+  Page* page = selection->page;
+  const RulingFrame& f = selection->ruling;
+  if(!(f.yRuling > 0))
+    return -1;  // no rules to draw it along
+  const Dim yr = f.yRuling;
+  Rect extent = page->frameExtent(f);
+  Dim marginLeft = f.region ? extent.left : std::max(extent.left, page->props.marginLeft);
+  int best = -1;
+  for(Element* s : selection->sourceNode->children()) {
+    if(!s->isPathElement() || s->isRulingRegion() || page->regionAt(s->com()) != f.region)
+      continue;
+    if(s->selection() && s->selection() != selection)
+      continue;  // being moved by something else (smart scale's own selection)
+    Rect bbox = localElementBBox(f, s);
+    if(bbox.height() > HSEP_MAX_HEIGHT*yr || bbox.width() < HSEP_MIN_LENGTH*yr)
+      continue;
+    Dim cy = bbox.center().y;
+    int rule = int(std::floor(cy/yr + 0.5));
+    if(rule <= linenum || std::abs(cy - rule*yr) > HSEP_RULE_DIST*yr || (best >= 0 && rule >= best))
+      continue;
+    // its column: the stops on the line above it, as far as they are known
+    int above = rule - 1;
+    Dim colL = marginLeft, colR = extent.right;
+    if(above >= 0 && above < int(lstops.size())) {
+      colL = std::max(colL, lstopOver(above, (above + 0.5)*yr, rule*yr));
+      colR = std::min(colR, rstopOver(above, (above + 0.5)*yr, rule*yr));
+    }
+    Dim covered = std::min(colR, bbox.right) - std::max(colL, bbox.left);
+    if(colR > colL && covered >= HSEP_COLUMN_SHARE*(colR - colL)) {
+      best = rule;
+      sectionEnd = s;
+    }
+  }
+  return best;
 }
 
 // find column bounds for specified point
@@ -1337,6 +1538,8 @@ void RuledSelector::findStops(Dim x, int linenum)
   if(nlines < 1) return;
   lstops.resize(nlines, margins.left);
   rstops.resize(nlines, margins.right);
+  ledges.assign(nlines, StopEdge(margins.left));
+  redges.assign(nlines, StopEdge(margins.right));
   auto localLine = [&](Dim localy) { return int(std::floor(localy/yruling)); };
   const Transform2D localtf = f.localTransform();
   // only want to scan stroke list once
@@ -1353,33 +1556,61 @@ void RuledSelector::findStops(Dim x, int linenum)
       // require stroke extend at least 1/4 of the way into line to form a barrier
       int line0 = MAX(0, localLine(bbox.top + 0.25*yruling));
       int line1 = MIN((int)lstops.size()-1, localLine(bbox.bottom - 0.25*yruling));
-      for(int ll = line0; ll <= line1; ll++) {
-        if(!s->isPathElement()) {
+      if(line1 < line0)
+        continue;
+      if(!s->isPathElement()) {
+        // no outline to follow: its box is the barrier, one x for the whole band
+        for(int ll = line0; ll <= line1; ll++) {
           if(bbox.left > x)
-            rstops[ll] = MIN(bbox.left, rstops[ll]);
+            redges[ll].clip(bbox.left, true);
           else if(bbox.right < x)
-            lstops[ll] = MAX(bbox.right, lstops[ll]);
+            ledges[ll].clip(bbox.right, false);
           else
             break;  // go to next stroke
         }
-        // before processing each point of stroke, check bbox to see if it can move bounds
-        else if(bbox.left < rstops[ll] || bbox.right > lstops[ll]) {
-          const Path2D& path = *static_cast<SvgPath*>(s->node)->path();
-          PathPointIter pts(path, localtf * s->node->totalTransform(), yruling/8);
-          while(pts.hasNext()) {
-            Point p = pts.next();
-            int pline = localLine(p.y);
-            if(pline >= line0 && pline <= line1) {
-              if(p.x > x)
-                rstops[pline] = MIN(p.x, rstops[pline]);
-              else if(p.x < x)
-                lstops[pline] = MAX(p.x, lstops[pline]);
-            }
+        continue;
+      }
+      // The separator's own outline, flattened, clipped to each band it is a barrier in (plus half a line
+      //  either side, so ink reaching a little out of its band is judged against the separator where it
+      //  is) and split at the pen's x: what lies right of the pen bounds the column on the right.  Every
+      //  later test asks the edge for its x at the height in question (StopEdge::over()), so a diagonal is
+      //  a diagonal - it used to be only its least x over each band, which cut off writing beside its
+      //  upper end on a "/".
+      Path2D flat = flatOutline(s->node);
+      flat.transform(localtf);
+      for(int ii = 1; ii < flat.size(); ++ii) {
+        if(flat.command(ii) == Path2D::MoveTo)
+          continue;
+        Point a = flat.point(ii - 1), b = flat.point(ii);
+        if(a.y > b.y)
+          std::swap(a, b);
+        int sl0 = std::max(line0, localLine(a.y - 0.5*yruling)), sl1 = std::min(line1, localLine(b.y + 0.5*yruling));
+        for(int ll = sl0; ll <= sl1; ++ll) {
+          Dim top = std::max(a.y, (ll - 0.5)*yruling), bottom = std::min(b.y, (ll + 1.5)*yruling);
+          if(top > bottom)
+            continue;
+          auto xAt = [&](Dim y) { return b.y > a.y ? a.x + (b.x - a.x)*(y - a.y)/(b.y - a.y) : a.x; };
+          Point p(xAt(top), top), q(b.y > a.y ? xAt(bottom) : b.x, bottom);
+          if(p.x > q.x)
+            std::swap(p, q);
+          // split at the pen: the part left of x is a left stop, the part right of it a right stop
+          if(q.x <= x)
+            ledges[ll].segs.emplace_back(p, q);
+          else if(p.x >= x)
+            redges[ll].segs.emplace_back(p, q);
+          else {
+            Point m(x, p.y + (q.y - p.y)*(x - p.x)/(q.x - p.x));
+            ledges[ll].segs.emplace_back(p, m);
+            redges[ll].segs.emplace_back(m, q);
           }
-          break;  // stroke has been completely processed - go to next stroke
         }
       }
     }
+  }
+  // each line's extreme, for everything that wants one x per line (reflow's wrap, the indent, drawing)
+  for(int ll = 0; ll < nlines; ++ll) {
+    lstops[ll] = std::max(margins.left, ledges[ll].over(ll*yruling, (ll + 1)*yruling, false));
+    rstops[ll] = std::min(margins.right, redges[ll].over(ll*yruling, (ll + 1)*yruling, true));
   }
   // post processing - clear all stops below a line w/o stops
   // TODO: we may want to set stops so nothing below end of column is selected!
@@ -1388,6 +1619,8 @@ void RuledSelector::findStops(Dim x, int linenum)
     if(clearstops) {
       lstops[ll] = margins.left;
       rstops[ll] = margins.right;
+      ledges[ll] = StopEdge(margins.left);
+      redges[ll] = StopEdge(margins.right);
     }
     else if(lstops[ll] == margins.left && rstops[ll] == margins.right)
       clearstops = true;

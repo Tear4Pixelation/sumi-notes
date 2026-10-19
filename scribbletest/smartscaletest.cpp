@@ -159,6 +159,33 @@ int runSmartScaleTests()
     smartScaleCheck(layout.newLastLine == 1, "skip lines: two text lines of one word each fit on one");
   }
 
+  // separators (params.bounds): a line on the right that is at 690 on line 2 and 560 from line 3 down, and
+  //  one on the left at 150 from line 4 down.  Words wrap where the right one is on their line, and a line
+  //  starts clear of the left one; at scale 1 too (the gesture adds each word's own slack, not this)
+  {
+    SmartScaleParams bounded = params;
+    auto sepRight = [](int line) { return line <= 2 ? Dim(690) : Dim(560); };
+    auto sepLeft = [](int line) { return line >= 4 ? Dim(150) : Dim(0); };
+    bounded.bounds = [&](const SmartScaleWord& word, Dim scale, Dim ruleY, Dim& minX, Dim& maxX) {
+      int line = int(std::floor(ruleY/yr + 0.5)) - 1;
+      minX = sepLeft(line);
+      maxX = sepRight(line) - scale*(word.right - word.left);
+    };
+    SmartScaleLayout layout = smartScaleLayout(para, 1, bounded);
+    std::vector<SmartScaleWord> paraWords = smartScaleWords(para, params.minWordGap);
+    int inside = 0, line3 = 0;
+    for(const SmartScaleWord& word : paraWords) {
+      Rect box;
+      for(int idx : word.items) box.rectUnion(placedBox(para, layout, idx));
+      int line = int(std::floor(box.bottom/yr - 0.5));
+      if(box.right <= sepRight(line) + 1E-6 && box.left >= sepLeft(line) - 1E-6) ++inside;
+      if(line == 3) ++line3;
+    }
+    smartScaleCheck(inside == int(paraWords.size()), "separators: every word between them on its line");
+    smartScaleCheck(line3 == 4, "separators: the line where the right one is closer holds a word less");
+    smartScaleCheck(layout.newLastLine > layout.oldLastLine, "separators: the words they push on take more lines");
+  }
+
   // unruled: the baseline estimate ignores descenders
   {
     std::vector<Rect> boxes = {Rect::ltrb(0, 10, 5, 50), Rect::ltrb(6, 20, 9, 50), Rect::ltrb(10, 30, 14, 70),

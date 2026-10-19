@@ -303,6 +303,25 @@ private:
   Dim mZoom;
 };
 
+// One side of a column within one line band (RuledSelector::findStops(), docs/agent/pen-and-tools.md
+//  "Separators").  `segs` are the separators' ink clipped to the band (plus half a line either side), in
+//  the frame's local coordinates, so a diagonal's x is known at every height instead of only at its
+//  extreme over the band; `flat` is one x for the whole band (a barrier with no outline: an image).
+//  Every column test asks this, so ruled select, reflow, Insert Lines and smart scale agree on where a
+//  separator is.
+struct StopEdge
+{
+  Dim flat;
+  std::vector<std::pair<Point, Point>> segs;
+
+  StopEdge(Dim f = 0) : flat(f) {}
+  // the boundary's x over local y in [y0, y1]: `inner` = nearest the column (a right edge's least x, a
+  //  left edge's greatest), else farthest.  Heights the ink does not reach take its nearest end.
+  Dim over(Dim y0, Dim y1, bool right, bool inner = true) const;
+  Dim at(Dim y, bool right) const { return over(y, y, right); }
+  void clip(Dim limit, bool right) { flat = right ? std::min(flat, limit) : std::max(flat, limit); }
+};
+
 struct RuledRange
 {
   RulingFrame frame;
@@ -314,6 +333,9 @@ struct RuledRange
   Dim yruling;
   std::vector<Dim> lstops;
   std::vector<Dim> rstops;
+  // the same stops with their shape, per line of the range (empty: lstops/rstops only)
+  std::vector<StopEdge> ledges;
+  std::vector<StopEdge> redges;
 
   RuledRange(Dim _x0, Dim _ymin, Dim _x1, Dim _ymax, Dim _xruling, Dim _yruling,
       const RulingFrame& f = RulingFrame()) :
@@ -325,6 +347,12 @@ struct RuledRange
 
   Dim lstop(int idx) const;
   Dim rstop(int idx) const;
+  // the stops of range line idx over local y in [y0, y1] (see StopEdge::over()); lstop()/rstop() where
+  //  the line has no shape
+  Dim lstopOver(int idx, Dim y0, Dim y1, bool inner = true) const;
+  Dim rstopOver(int idx, Dim y0, Dim y1, bool inner = true) const;
+  bool hasEdges(int idx) const { return idx >= 0 && idx < int(redges.size())
+      && (!ledges[idx].segs.empty() || !redges[idx].segs.empty()); }
   // clamped: "to the end" is MAX_LINE_NUM (INT_MAX) lines, so a range starting above line 0 - a press just
   //  outside a region's top edge - spans one more than an int holds, and the overflow selected nothing
   int nlines() const { Dim n = (ymax - ymin)/yruling; return n >= Dim(INT_MAX) ? INT_MAX : int(n); }
@@ -337,6 +365,11 @@ public:
   enum ColMode {COL_NONE=0, COL_NORMAL=1, COL_AGGRESSIVE=2} colMode;
   std::vector<Dim> lstops;
   std::vector<Dim> rstops;
+  // the separators' shape per line (StopEdge), beside lstops/rstops, which stay each line's extreme
+  std::vector<StopEdge> ledges;
+  std::vector<StopEdge> redges;
+  // a horizontal separator that ended selectRuledAfter() (findSectionEnd()), never selected itself
+  Element* sectionEnd = NULL;
   // a ruled gesture acts only on ink of its own ruling (region or page); display-only callers that just
   //  want "what is on this line" (the bookmark list) turn it off
   bool sameRulingOnly = true;
@@ -349,6 +382,12 @@ public:
   void selectRuledAfter(Dim x, int linenum);
   //void selectRuledBelow(int linenum);
   void findStops(Dim x, int linenum);
+  // The first rule below line `linenum` with a horizontal separator on it - a long straight stroke along
+  //  the rule, across most of the column - or -1.  Reflow tools treat it as the end of the page.
+  int findSectionEnd(Dim x, int linenum);
+  // the column's stops on `line` over local y in [y0, y1] (StopEdge::over()); MIN_DIM/MAX_DIM without stops
+  Dim lstopOver(int line, Dim y0, Dim y1, bool inner = true) const;
+  Dim rstopOver(int line, Dim y0, Dim y1, bool inner = true) const;
   bool selectHit(Element* s) override;
   bool cannotHit(Element* s) override;
   void shrink() override;
@@ -356,6 +395,8 @@ public:
   void drawBG(Painter* painter) override;
 
   static Dim MIN_DIV_HEIGHT;
+  // the separatorEndsReflow pref: selectRuledAfter() stops at findSectionEnd()
+  static bool separatorEndsSection;
 
 private:
   RuledRange selRange;

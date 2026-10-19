@@ -41,8 +41,11 @@ like the page). The frame is the one holding most of the strokes' centres - `sel
   own first line at its first word's x; continuation lines start at the leftmost start of the paragraph's
   later lines (the first line's own start if it has none), so an indented first line keeps its indent.
 - **Lines fill to the selection's own right edge** (the rightmost ink), not the page's: that is the column the
-  writer used, so margins and columns are respected without detecting them. A word wider than a line still
-  gets a line of its own.
+  writer used. A word wider than a line still gets a line of its own.
+- **Separators** (`SmartScaleParams::bounds`): beside a vertical or diagonal line the gesture also keeps each
+  word's scaled ink between the column's stops at each height (pen-and-tools.md "Separators"); a diagonal "/"
+  used to have grown text run across it on the lower lines, since the right edge came from the top line.
+  Each word keeps whatever it already crossed, so scale 1 stays identity.
 - Greedy fill, `O(words)`: cheap enough to rerun on every move, so **the preview is live** (see below).
 
 ## The gesture
@@ -55,8 +58,9 @@ like the page). The frame is the one holding most of the strokes' centres - `sel
   previous move, so nothing accumulates and dragging back to 1 restores exactly. `internalScale` is 1, so the
   scale goes into the node transform and **stroke widths scale with the ink** (the pen-button variant of the
   plain scale handle does the same). Strokes are not rewritten until release.
-- **Later content** (everything editable on the same ruling below the selection's last line, not a region) is
-  held in `tempSelection` and translated by whole lines: down by the lines grown text took, up by the lines
+- **Later content** (everything editable on the same ruling below the selection's last line, in the text's
+  column, down to a horizontal separator - a `RuledSelector`, so column stops and `findSectionEnd()` apply;
+  not a region) is held in `tempSelection` and translated by whole lines: down by the lines grown text took, up by the lines
   shrunk text freed. **Other ink on the selection's own lines blocks the pull-up**: it is never pulled past the
   lowest such line (`blockedLine`), so text below cannot land on it. Ink in the page margin does not block
   (bookmarks), and a region's frame has no margin.
@@ -89,8 +93,8 @@ step. Not for unruled/staff paper (nothing to skip). Toggling does not re-layout
 
 ## Known gaps
 
-- Later content is everything below on that ruling, across the page's width: with two columns, the other
-  column moves too (Insert Lines' column stops are not applied).
+- Grown text pushed past a horizontal separator overlaps it (the separator ends the later content, it does
+  not move).
 - Ink right of the selection on its last line is not part of the paragraph and stays where it was.
 - A word that the reflow word break joins (strokes closer than `minWordSep`) is scaled as one; a word broken
   by a wide letter gap is two.

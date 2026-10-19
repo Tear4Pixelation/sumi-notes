@@ -29,6 +29,10 @@ The smart scale layout ([smart-scale.md](smart-scale.md)) is tested the same way
 `scribbletest/smartscaletest.cpp` (`runSmartScaleTests()`; command in its header); the gesture end to end
 (one undo step, later content pulled up) in `ScribbleTest::smartScaleTest()`.
 
+Separators ([pen-and-tools.md](pen-and-tools.md#separators-vertical-diagonal-horizontal)): ruled select,
+reflow, Insert Lines and Resize Handwriting beside a diagonal or above a horizontal line, in
+`ScribbleTest::separatorTest()`; `params.bounds` of the layout standalone in `smartscaletest`.
+
 Pen-up stroke simplification ([stroke-input.md](stroke-input.md)): `scribbletest/simplifytest.cpp`
 (`runSimplifyTests()`; command in its header) for the geometry, `ScribbleTest::strokeSimplifyTest()` for
 every pen kind through the real builders and pen-up path. `--simplifybenchtest` (`simplifybench.cpp`,

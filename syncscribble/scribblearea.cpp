@@ -51,6 +51,7 @@ void ScribbleArea::loadConfig(ScribbleConfig* _cfg)
   centerPages = cfg->Bool("centerPages");
   reflowWordSep = cfg->Float("minWordSep", 0.3f);
   selColMode = RuledSelector::ColMode(cfg->Int("columnDetectMode"));
+  RuledSelector::separatorEndsSection = cfg->Bool("separatorEndsReflow");
   drawCursor = cfg->Int("drawCursor");
   //scribbleInput->enableHoverEvents = (drawCursor == 2);
 #ifdef ONE_TIME_TIPS

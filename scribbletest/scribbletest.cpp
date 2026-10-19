@@ -5550,6 +5550,217 @@ int ScribbleTest::insSpaceAxisTest()
   return nbad;
 }
 
+int ScribbleTest::separatorTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: separators: %s\n", what); }
+  };
+  auto at = [&](Point pagept, int ev) {
+    Point scr = scribbleArea->dimToScreen(scribbleArea->pageDimToDim(pagept));
+    ie(scr.x, scr.y, 0, pen, ev);
+  };
+  const Dim pitch = 40;
+  auto lastElement = [&]() {
+    Element* last = NULL;
+    for(Element* s : scribbleArea->currPage->children()) last = s;
+    return last;
+  };
+  // a straight pen stroke, drawn in 16 steps
+  auto line = [&](Point a, Point b) {
+    scribbleMode->setMode(MODE_STROKE);
+    at(a, press);
+    for(int ii = 1; ii <= 16; ++ii) at(a + (b - a)*(ii/16.0), INPUTEVENT_MOVE);
+    at(b, release);
+    return lastElement();
+  };
+  // four zigzag letters 14 apart, each 11 wide, in 0.35 - 0.85 of the band: 53 wide
+  auto word = [&](Dim x, int ln) {
+    std::vector<Element*> letters;
+    scribbleMode->setMode(MODE_STROKE);
+    for(int ii = 0; ii < 4; ++ii) {
+      Dim lx = x + ii*14, top = ln*pitch;
+      at(Point(lx, top + 0.35*pitch), press);
+      at(Point(lx + 4, top + 0.85*pitch), INPUTEVENT_MOVE);
+      at(Point(lx + 8, top + 0.35*pitch), INPUTEVENT_MOVE);
+      at(Point(lx + 11, top + 0.85*pitch), INPUTEVENT_MOVE);
+      at(Point(lx + 11, top + 0.85*pitch), release);
+      letters.push_back(lastElement());
+    }
+    return letters;
+  };
+  auto lineOf = [&](const Element* s) { return int(std::floor(s->com().y/pitch)); };
+  auto allOn = [&](const std::vector<Element*>& strokes, int ln) {
+    for(Element* s : strokes) if(lineOf(s) != ln) return false;
+    return true;
+  };
+  auto fresh = [&]() {
+    scribbleDoc->newDocument();
+    doCommand(ID_RESETZOOM);
+    scribbleDoc->app->setPen(ScribblePen(Color::BLACK, 2, ScribblePen::TIP_ROUND));
+    PageProperties props(768, 1024, 0, pitch, 0, Color::WHITE, Color::BLUE, 1.5);
+    scribbleDoc->setPageProperties(&props, true, false, false, false);
+  };
+  // a "/" diagonal from (760, 60) to (160, 360): x = 880 - 2y, so it moves 80 left per line
+  auto diagX = [](Dim y) { return 880 - 2*y; };
+  auto diagonal = [&]() { return line(Point(760, 60), Point(160, 360)); };
+  const bool wasEnding = RuledSelector::separatorEndsSection;
+
+  {
+    // ruled select from line 3 to 4 beside a shallow "/" (x = 720 - 2y, 80 left per line): a word of
+    //  letters slanting up to the right like the line, its last letter's foot 6 left of the line, so all of
+    //  its ink is on the left - but its box's right edge is right of the line's least x over the band (its
+    //  x at the band's bottom), which is where the selection used to end.  A word right of the line stays
+    //  out.
+    fresh();
+    line(Point(600, 60), Point(120, 300));
+    auto slanted = [&](Dim x, int ln) {
+      std::vector<Element*> letters;
+      scribbleMode->setMode(MODE_STROKE);
+      for(int ii = 0; ii < 4; ++ii) {
+        Dim lx = x + ii*14, top = ln*pitch;
+        at(Point(lx, top + 0.85*pitch), press);
+        at(Point(lx + 5, top + 0.6*pitch), INPUTEVENT_MOVE);
+        at(Point(lx + 11, top + 0.35*pitch), INPUTEVENT_MOVE);
+        at(Point(lx + 11, top + 0.35*pitch), release);
+        letters.push_back(lastElement());
+      }
+      return letters;
+    };
+    // feet at y 154 and 194, where the line is at x 412 and 332; its least x over the bands is 400 and 320
+    std::vector<Element*> near3 = slanted(412 - 6 - 42, 3), near4 = slanted(332 - 6 - 42, 4);
+    std::vector<Element*> far3 = word(480, 3);
+    std::vector<Element*> left3 = word(110, 3);
+    scribbleMode->setMode(MODE_SELECTRULED);
+    at(Point(100, 3.5*pitch), press);
+    for(int ii = 1; ii <= 8; ++ii) at(Point(100 + 75*ii, 3.5*pitch + pitch*ii/8), INPUTEVENT_MOVE);
+    at(Point(700, 4.5*pitch), release);
+    Selection* sel = scribbleArea->currSelection;
+    auto selected = [&](const std::vector<Element*>& strokes) {
+      for(Element* s : strokes) if(!sel || s->selection() != sel) return false;
+      return true;
+    };
+    auto noneSelected = [&](const std::vector<Element*>& strokes) {
+      for(Element* s : strokes) if(sel && s->selection() == sel) return false;
+      return true;
+    };
+    check(selected(left3), "ruled select beside a diagonal: the text is selected");
+    check(selected(near3), "ruled select beside a diagonal: writing close to it on the first line is selected");
+    check(selected(near4), "ruled select beside a diagonal: writing close to it on the next line is selected");
+    check(noneSelected(far3), "ruled select beside a diagonal: writing on the other side is not");
+    scribbleDoc->clearSelection();
+
+    // Insert Space in Line pushing the line right: the slanted word, its foot 14 left of the line, still
+    //  fits after a 1 unit push (reflow keeps half a word gap, 6, from the line) - it used to wrap at once,
+    //  its box being right of the line's least x over the band - and wraps once pushed past it
+    fresh();
+    line(Point(600, 60), Point(120, 300));
+    word(110, 3);
+    std::vector<Element*> slant = slanted(412 - 14 - 42, 3);
+    auto pushRight = [&](Dim dx) {
+      scribbleMode->setMode(MODE_INSSPACERULED);
+      const Point from(110 + 53 + 8, 3.5*pitch);
+      at(from, press);
+      for(int ii = 1; ii <= 8; ++ii) at(from + Point(dx*ii/8, 0), INPUTEVENT_MOVE);
+      at(from + Point(dx, 0), release);
+    };
+    pushRight(1);
+    check(allOn(slant, 3), "reflow beside a diagonal: writing that still fits at its height stays on the line");
+    pushRight(60);
+    bool clear = allOn(slant, 4);
+    for(Element* s : slant) clear = clear && s->bbox().right < 720 - 2*s->bbox().bottom;
+    check(clear, "reflow beside a diagonal: pushed past it, the writing wraps to the next line, clear of it");
+    scribbleDoc->clearSelection();
+  }
+
+  // Insert Lines pressed on the rule above line 3, one line down
+  auto downDrag = [&](Point from, Dim dy) {
+    scribbleMode->setMode(MODE_INSSPACEAUTO);
+    at(from, press);
+    for(int ii = 1; ii <= 8; ++ii) at(Point(from.x, from.y + dy*ii/8), INPUTEVENT_MOVE);
+    at(Point(from.x, from.y + dy), release);
+  };
+  for(bool ending : {true, false}) {
+    // a long horizontal line along rule 6, text above and below it (the pref, set after the new document,
+    //  which reloads the config into the flag)
+    fresh();
+    RuledSelector::separatorEndsSection = ending;
+    std::vector<Element*> l3 = word(110, 3), l4 = word(110, 4), l7 = word(110, 7);
+    Element* rule6 = line(Point(100, 6*pitch), Point(700, 6*pitch));
+    const Rect ruleBox = rule6->bbox();
+    downDrag(Point(130, 3*pitch + 3), pitch);
+    check(allOn(l3, 4) && allOn(l4, 5), "horizontal separator: the text above it moves down");
+    if(ending) {
+      check(allOn(l7, 7), "horizontal separator: the text below it stays (the end of the page)");
+      check(approxEq(rule6->bbox(), ruleBox, 0.5), "horizontal separator: the line itself stays");
+    }
+    else
+      check(allOn(l7, 8), "horizontal separator, turned off: everything below moves as before");
+  }
+  {
+    // an underlined word is not a separator: the underline is short, so what is below still moves
+    fresh();
+    RuledSelector::separatorEndsSection = true;
+    std::vector<Element*> l3 = word(110, 3), l7 = word(110, 7);
+    line(Point(105, 4*pitch), Point(170, 4*pitch));
+    downDrag(Point(130, 3*pitch + 3), pitch);
+    check(allOn(l3, 4) && allOn(l7, 8), "an underline is not a separator");
+  }
+
+  {
+    // Resize Handwriting beside the diagonal: three lines written up to it, grown by 1.2.  The text used to
+    //  fill every line to the first line's right end, across the diagonal on the lines below; and what is
+    //  below moved in both columns
+    fresh();
+    Element* diag = diagonal();
+    std::vector<Element*> text;
+    for(int ln = 3; ln <= 5; ++ln) {
+      for(Dim x = 20; x + 53 + 6 < diagX((ln + 1)*pitch); x += 53 + 16) {
+        std::vector<Element*> w = word(x, ln);
+        text.insert(text.end(), w.begin(), w.end());
+      }
+    }
+    std::vector<Element*> belowLeft = word(20, 8), belowRight = word(300, 8);
+    scribbleMode->setMode(MODE_SELECTRECT);
+    at(Point(5, 3*pitch + 2), press);
+    at(Point(400, 4*pitch), INPUTEVENT_MOVE);
+    at(Point(700, 6*pitch - 2), INPUTEVENT_MOVE);
+    at(Point(700, 6*pitch - 2), release);
+    Selection* sel = scribbleArea->currSelection;
+    check(sel && sel->count() == int(text.size()) && diag->selection() != sel, "smart scale: the text is selected");
+    if(sel) {
+      doCommand(ID_SMARTSCALE);
+      RectSelector* selector = sel->selector && sel->selector->offersSmartScale() ?
+          static_cast<RectSelector*>(sel->selector) : NULL;
+      if(selector) {
+        Rect r = selector->rect();
+        const Point corner = sel->getBBox().origin(), grip(r.right, r.bottom);
+        at(grip, press);
+        for(int ii = 1; ii <= 4; ++ii)
+          at(grip + (grip - corner)*(0.05*ii), INPUTEVENT_MOVE);
+        at(grip + (grip - corner)*0.2, release);
+        int crossing = 0, grown = 0;
+        for(Element* s : text) {
+          Rect box = s->bbox();
+          // a "/" is furthest left at the box's bottom, so the bottom right corner is the test
+          if(box.right > diagX(box.bottom)) ++crossing;
+          if(box.height() > 1.2*20) ++grown;
+        }
+        check(grown == int(text.size()), "smart scale beside a diagonal: the text grew");
+        check(crossing == 0, "smart scale beside a diagonal: grown text stays left of the diagonal");
+        check(lineOf(belowLeft.front()) > 8 && allOn(belowLeft, lineOf(belowLeft.front())),
+            "smart scale beside a diagonal: the column below moves down");
+        check(allOn(belowRight, 8), "smart scale beside a diagonal: the other column below stays");
+      }
+      else
+        check(false, "smart scale: a rect selection");
+    }
+    scribbleDoc->clearSelection();
+  }
+  RuledSelector::separatorEndsSection = wasEnding;
+  return nbad;
+}
+
 int ScribbleTest::imageSaveCacheTest()
 {
   int nbad = 0;
@@ -6305,6 +6516,7 @@ void ScribbleTest::runAll(bool runsynctest)
   nUnitFailed += smartScaleTest();
   nUnitFailed += skippedLinesTest();
   nUnitFailed += insSpaceAxisTest();
+  nUnitFailed += separatorTest();
   nUnitFailed += undoPersistTest();
   nUnitFailed += undoCapTest();
   nUnitFailed += imageSaveCacheTest();

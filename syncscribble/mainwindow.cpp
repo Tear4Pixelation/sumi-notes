@@ -2160,7 +2160,7 @@ void MainWindow::createToolBars()
     {"ic_menu_switch_back.svg", "Switch Back", "Returns to the previous tool after inserting space once."} })));
   insSpaceRow->addWidget(createStretch());
   insSpaceRow->addWidget(smallFloatBtn(createToolSettingsButton("Insert Space Settings",
-      {"reflow", "insSpaceErase", "minWordSep", "columnDetectMode", "blankYRuling"})));
+      {"reflow", "separatorEndsReflow", "insSpaceErase", "minWordSep", "columnDetectMode", "blankYRuling"})));
   floatRow(insSpaceRow);
 
   // thin divider between the tools row and the open options row (both are one panel)
