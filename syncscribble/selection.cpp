@@ -621,7 +621,14 @@ void Selection::measureReflowInk(Dim minWordGap)
 void Selection::reflowStrokes(Dim dx, int dline, Dim minWordSep)
 {
   const Dim yruling = rulingYr(ruling);
-  if(yruling == 0 || strokes.empty() || workingLine(strokes.front(), ruling) + dline < 0)
+  if(yruling == 0 || strokes.empty())
+    return;
+  // never above the frame's first whole line: the page's (or region's) top, not line 0 of the frame.  They
+  //  are the same for the page's own ruling, but a Skip Lines frame starts on the pressed line, so a 0 here
+  //  refused every move up while the erase of the text it would land on still ran - the text above vanished
+  //  (and was deleted on release) while the line did not move
+  const int topLine = int(std::ceil(page->frameExtent(ruling).top/yruling - 1E-3));
+  if(workingLine(strokes.front(), ruling) + dline < topLine)
     return;
   if(dx != 0) {
     int currline = workingLine(strokes.front(), ruling);
@@ -654,7 +661,8 @@ void Selection::reflowStrokes(Dim dx, int dline, Dim minWordSep)
   Dim left = marginLeft;
   Dim right = extent.right - 0.5*minWordGap;
   while(1) {
-    if(currline+1 < int(((RuledSelector*)selector)->lstops.size())) {
+    // (a Skip Lines frame starts on the pressed line, so a move up reaches negative lines, which have no stops)
+    if(currline >= 0 && currline+1 < int(((RuledSelector*)selector)->lstops.size())) {
       left = MAX(marginLeft, static_cast<RuledSelector*>(selector)->lstops[currline+1]);
       right = static_cast<RuledSelector*>(selector)->rstops[currline] - 0.5*minWordGap;
     }
