@@ -6,6 +6,28 @@
 class ScribbleDoc;
 class ColorEditBox;
 
+// Change Margin (overflow menu): the current page's margin line, set in line heights (ruling line spacing).
+//  Snapping to whole lines is on by default; one undo step through ScribbleDoc::setPageProperties.
+class MarginDialog : public PopupDialog
+{
+public:
+  explicit MarginDialog(ScribbleDoc* doc);
+
+private:
+  void valueChanged();
+  void updatePreview();
+  void accept();
+
+  ScribbleDoc* scribbleDoc;
+  PageProperties props;
+  Dim lineHeight;
+  SpinBox* spinLines;
+  CheckBox* cbSnap;
+  Widget* preview;
+  Dim lastLines = 0;
+  bool updating = false;
+};
+
 class RulingDialog : public PopupDialog
 {
 public:

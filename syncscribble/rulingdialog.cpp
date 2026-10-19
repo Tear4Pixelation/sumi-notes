@@ -316,3 +316,84 @@ void RulingDialog::setRuleType(int index)
     ruleColorPicker->setColor(Color::fromArgb(scribbleDoc->cfg->Int("ruleColor")));
   updatePreview();
 }
+
+// ---- MarginDialog ----
+
+static const Dim MARGIN_PREVIEW_W = 220;
+static const Dim MARGIN_PREVIEW_H = 280;
+
+MarginDialog::MarginDialog(ScribbleDoc* doc)
+    : PopupDialog(createPopupDialogNode()), scribbleDoc(doc)
+{
+  props = doc->activeArea->getCurrPage()->getProperties();
+  lineHeight = props.yRuling;
+  const Dim maxLines = std::max(Dim(1), std::floor(0.8*props.width/lineHeight));
+  // starts on the page's real margin; snapping applies once the value is changed or the toggle is turned on
+  spinLines = createTextSpinBox(props.marginLeft/lineHeight, 1, 0.25, maxLines, "%.2f");
+  spinLines->onValueChanged = [this](Dim){ valueChanged(); };
+  lastLines = spinLines->value();
+  cbSnap = createCheckBox("", true);
+  cbSnap->onToggled = [this](bool){ valueChanged(); };
+  setupTooltip(cbSnap, _("Snap the margin to whole line heights"));
+
+  preview = createRow({}, "8 0", "center");
+  preview->addWidget(new Widget(
+      AddPageMenu::createPagePreviewNode(props, MARGIN_PREVIEW_W, MARGIN_PREVIEW_H)));
+  SvgText* caption = createTextNode(_("Margin width in line heights"));
+  caption->addClass("weak");
+
+  Widget* body = selectFirst(".body-container");
+  body->setMargins(0, 8);
+  body->addWidget(preview);
+  body->addWidget(new Widget(caption));
+  body->addWidget(createTitledRow(_("Margin (line heights)"), spinLines));
+  body->addWidget(createTitledRow(_("Snap to whole lines"), cbSnap));
+
+  setTitle(_("Change Margin"));
+  acceptBtn = addButton(_("OK"), [this](){ accept(); finish(ACCEPTED); });
+  cancelBtn = addButton(_("Cancel"), [this](){ finish(CANCELLED); });
+  setWinBounds(Rect::centerwh(ScribbleApp::win->winBounds().center(), 0, 0));
+}
+
+void MarginDialog::valueChanged()
+{
+  if(updating)
+    return;
+  updating = true;
+  if(cbSnap->isChecked()) {
+    spinLines->setLimits(1, std::max(Dim(1), std::floor(0.8*props.width/lineHeight)));
+    // a step from a fractional value (2.5 -> 3.5) lands on the whole line in its direction, not 3.5 rounded up
+    Dim value = spinLines->value();
+    if(std::abs(std::abs(value - lastLines) - 1) < 0.01)
+      value = value > lastLines ? std::floor(value) : std::ceil(value);
+    spinLines->setValue(std::max(Dim(1), std::round(value)));
+  }
+  else
+    spinLines->setLimits(0.25, std::max(Dim(1), std::floor(0.8*props.width/lineHeight)));
+  lastLines = spinLines->value();
+  updating = false;
+  updatePreview();
+}
+
+void MarginDialog::updatePreview()
+{
+  SvgGui* gui = window() ? window()->gui() : NULL;
+  if(!gui)
+    return;
+  PageProperties shown = props;
+  shown.marginLeft = spinLines->value()*lineHeight;
+  gui->deleteContents(preview);
+  preview->addWidget(new Widget(
+      AddPageMenu::createPagePreviewNode(shown, MARGIN_PREVIEW_W, MARGIN_PREVIEW_H)));
+}
+
+void MarginDialog::accept()
+{
+  Dim margin = spinLines->value()*lineHeight;
+  if(cbSnap->isChecked())
+    margin = std::max(Dim(1), std::round(spinLines->value()))*lineHeight;
+  if(std::abs(margin - props.marginLeft) < 0.01)
+    return;
+  props.marginLeft = margin;
+  scribbleDoc->setPageProperties(&props, false, false, false);  // one undo step
+}

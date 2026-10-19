@@ -79,6 +79,7 @@ public:
   void resetDocPrefs();
   void setMode(int mode);
   void showPageSetup();
+  void changeMargin();  // MarginDialog: margin width in line heights
   void convertToSubpage();  // chooses the new page's layout, then ScribbleDoc::convertToSubpage
   void showThemePicker();
   // shows TagDocList; openResult = false leaves acting on the result to the caller

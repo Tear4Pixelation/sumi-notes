@@ -112,6 +112,7 @@ public:
   Action* actionSave;
   Action* actionPage_Setup;
   Action* actionConvert_Subpage;
+  Action* actionChange_Margin;
   Action* actionTheme;
   Action* actionShow_Sidebar = NULL;
   // opens the sidebar in its Tabs view for a moment, leaving its own view, pin and open state alone

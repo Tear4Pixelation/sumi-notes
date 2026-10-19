@@ -29,6 +29,8 @@ struct UIState {
   int pageNum;
   int totalPages;
   int currPageStrokes;
+  // the current page's ruling has a margin line (Change Margin is offered only then)
+  bool pageHasMargin = false;
   int currSelStrokes;
   Dim pageWidth;
   Dim pageHeight;

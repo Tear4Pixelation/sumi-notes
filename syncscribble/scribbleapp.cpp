@@ -3712,6 +3712,12 @@ void ScribbleApp::showPageSetup()
   asyncDialog(new RulingDialog(activeDoc()));
 }
 
+void ScribbleApp::changeMargin()
+{
+  if(activeDoc() && activeArea()->getCurrPage()->props.marginLeft > 0)
+    asyncDialog(new MarginDialog(activeDoc()));
+}
+
 // Convert to Subpage (docs/agent/ruling-regions.md): the new page's layout comes from the Add Page chooser
 void ScribbleApp::convertToSubpage()
 {
