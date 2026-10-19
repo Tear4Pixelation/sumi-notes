@@ -284,13 +284,16 @@ public:
 
   int originHandleIndex() const { return int(region->regionParams().corners.size()); }
   int resizeHandleIndex() const { return originHandleIndex() + 1; }
-  // the outline of `start` stretched about its top-left corner (in its own frame) by a size handle drag
-  //  from startPos to pos; the ruling and the ink stay where they are
-  RulingRegionParams resized(const RulingRegionParams& start, Point startPos, Point pos) const;
+  // the second size handle, past the top-left corner: stretches about the bottom-right one
+  int resizeHandleTopLeftIndex() const { return originHandleIndex() + 3; }
+  // the outline of `start` stretched by a size handle drag (handle index) from startPos to pos, about the
+  //  opposite corner of its box (in its own frame); the ruling and the ink stay where they are
+  RulingRegionParams resized(const RulingRegionParams& start, int handleIndex, Point startPos, Point pos) const;
   // the ink a region carries: its bbox centre is inside the outline
   static bool carries(const RulingRegionParams& params, Element* s);
 
   Point scaleHandlePos() const;
+  Point scaleHandleTopLeftPos() const;
 
   Element* region;
   static Dim HANDLE_SIZE;

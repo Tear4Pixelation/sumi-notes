@@ -113,6 +113,24 @@ int runRegionTests()
     regionCheck(turn.bottomRightCorner() == 0, "ruling upright over a turned outline: corner 0 is now bottom right");
   }
 
+  // the two size handles stretch about opposite corners, freely in x and y
+  {
+    RulingRegionParams box = RulingRegionParams::fromRect(Rect::ltrb(100, 100, 200, 160), 0, 10);
+    RulingRegionParams br = box.resizedByHandle(Point(200, 160), Point(240, 190), false, 8);
+    Rect brBounds = br.bounds();
+    regionCheck(brBounds.left == 100 && brBounds.top == 100, "bottom-right handle holds the top-left corner");
+    regionCheck(std::abs(brBounds.right - 240) < 1e-6 && std::abs(brBounds.bottom - 190) < 1e-6,
+        "bottom-right handle moves the bottom-right corner with the pointer");
+    RulingRegionParams tl = box.resizedByHandle(Point(100, 100), Point(70, 90), true, 8);
+    Rect tlBounds = tl.bounds();
+    regionCheck(tlBounds.right == 200 && tlBounds.bottom == 160, "top-left handle holds the bottom-right corner");
+    regionCheck(std::abs(tlBounds.left - 70) < 1e-6 && std::abs(tlBounds.top - 90) < 1e-6,
+        "top-left handle moves the top-left corner with the pointer");
+    RulingRegionParams tiny = box.resizedByHandle(Point(100, 100), Point(400, 400), true, 8);
+    regionCheck(tiny.bounds().width() >= 8 - 1e-6 && tiny.bounds().right == 200, "top-left handle stops at the minimum size");
+    regionCheck(tl.origin == box.origin && tl.yRuling == box.yRuling, "resizing leaves the ruling alone");
+  }
+
   // a mirror cannot be expressed; the frame must keep local y pointing down the (mirrored) ink's lines
   //  rather than turn upside down, or a band's line numbers would run up the page
   {

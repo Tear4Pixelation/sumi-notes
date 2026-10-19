@@ -184,6 +184,11 @@ struct RulingRegionParams
   // corner index (0-3) of the outline's bottom-right corner as seen in the ruling's frame - where the
   //  region's "..." button sits
   int bottomRightCorner() const;
+  // the outline stretched, freely in x and y in the ruling's frame, by dragging a size handle from startPos
+  //  to pos; the ruling is untouched.  The bottom-right handle (fromTopLeft false) holds the top-left
+  //  corner of the outline's local box still, the top-left one holds the bottom-right corner; neither
+  //  makes the box smaller than minSize in a direction.  `*this` is the outline at drag start.
+  RulingRegionParams resizedByHandle(Point startPos, Point pos, bool fromTopLeft, Dim minSize) const;
 
   // an axis-aligned region over `r` with the given ruling, lines phased from r's top-left corner; new
   //  regions are outlined, so they can be told apart from the page

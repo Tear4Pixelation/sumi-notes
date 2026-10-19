@@ -70,9 +70,12 @@ selection in `RegionSelector` (`selection.cpp`), the UI in `ScribbleArea` and th
   bbox centre is inside the outline, re-decided at the start of each gesture (`refreshRegionSelection`),
   drawn as ordinary ink (`STROKEDRAW_NORMAL`). A tap, or a drop off the window or on another page, is not
   a move.
-- **The size handle makes more paper, not bigger lines** (`RegionSelector::resized()`). It is a shape
-  handle (`resizeHandleIndex()`, a `RegionChangedItem` like a corner drag), not a scale handle: it stretches
-  the outline about its top-left corner in the region's frame, freely in x and y, and leaves origin, angle,
+- **The size handles make more paper, not bigger lines** (`RegionSelector::resized()` ->
+  `RulingRegionParams::resizedByHandle()`, tested in regiontest). There are two, past opposite corners: bottom-right
+  (`resizeHandleIndex()`) stretches about the top-left corner, top-left (`resizeHandleTopLeftIndex()`, index
+  `n+3`; `n+2` is the move grip) about the bottom-right one, so every edge can move. Each is a shape
+  handle (a `RegionChangedItem` like a corner drag), not a scale handle: it stretches
+  the outline about the opposite corner in the region's frame, freely in x and y, and leaves origin, angle,
   pitches and the ink alone - scaling ink under lines that did not scale would lift it off them. Line
   spacing is the panel's slider. `RulingRegionParams::transform()` still scales pitches, for transforms
   that move the ink with the region.
@@ -235,3 +238,8 @@ self-intersecting outline; the hover cursor for a relative-width marker uses the
 on PDF/scan pages keep the colors `setTheme()` leaves on those pages; no detection of a scan's lines yet
 (`quaddetect`'s Hough pass could fill pitch and angle). Tested by `ScribbleTest::rulingRegionTest()`
 (mutation-tested, see the file) and `runRegionTests()`.
+
+- **Paper Patch is single use and returns to the pen.** After the drag the tool does not stay on the Shapes
+  tool (whose last shape - e.g. the box - used to be left active, so the next stroke drew a rectangle):
+  `MODE_DRAWSHAPE` release calls `app->setMode(MODE_STROKE)` together with clearing `drawRegion`/`drawAxes`.
+  Only done for a kept region; a discarded sliver leaves the tool armed.
