@@ -31,9 +31,13 @@ static const Dim MARKER_WIDTHS[] = {0.5, 0.75, 1.0};
 static const Dim TAPE_WIDTHS[] = {0.6, 0.9, 1.2};
 // initial presets for every other tool, in document units - the same values as the pen's config default
 static const Dim DEFAULT_WIDTHS[] = {1.4, 3.0, 6.0};
-// one step of the relative width spinbox - a twentieth of a line height is about as fine as this is
-//  worth setting, and it keeps the value readable at the "%.3g" the spinbox formats with
-static const Dim RELATIVE_WIDTH_STEP = 0.05;
+// The relative width spinbox shows the fraction as a percent of a line height and steps 1% a press (a
+//  width is typically 3-7%, so 5% was far too coarse).  The value stays the fraction: the box multiplies by
+//  this for display and divides typed text by it, and a step is whole percents divided by it (never
+//  value + 0.01, which would drift), so 0.03 stays 0.03.
+static const Dim RELATIVE_WIDTH_PERCENT = 100;
+static const char *const RELATIVE_WIDTH_FORMAT = "%.3g%%";
+static const char *const ABSOLUTE_WIDTH_FORMAT = "%.3g";
 
 // The add-color grid: 4 columns of smaller-than-toolbar swatches, so the theme's 16 entries
 //  (neutral + 15 families) land as a compact 4x4 block rather than a long strip.
@@ -307,7 +311,7 @@ PenToolbar::PenToolbar(bool _compact)
   if (compact)
     colorPicker->selectFirst(".colorbox_text")->removeFromParent();
 
-  spinWidth = createTextSpinBox(1.25, 0.01, 0, 200, "%.3g",
+  spinWidth = createTextSpinBox(1.25, 0.01, 0, 200, ABSOLUTE_WIDTH_FORMAT,
                                 120); // 3 significant digits
   // Return re-parses the text, which "%.3g" has rounded: a value that only reads back what the box
   //  already shows is no edit, and must not round the pen (0.0311111 -> 0.0311)
@@ -323,8 +327,7 @@ PenToolbar::PenToolbar(bool _compact)
     // PEN_WIDTHS is a list of absolute pen sizes; in fractions of a line height it means nothing, so
     //  relative widths step by a fixed fraction instead
     if (relativeWidths())
-      return std::max(RELATIVE_WIDTH_STEP,
-          (std::round(oldw/RELATIVE_WIDTH_STEP) + nsteps)*RELATIVE_WIDTH_STEP);
+      return std::max(1.0, std::round(oldw*RELATIVE_WIDTH_PERCENT) + nsteps)/RELATIVE_WIDTH_PERCENT;
     if (nsteps > 0) {
       const Dim *next =
           std::upper_bound(std::begin(PEN_WIDTHS), std::end(PEN_WIDTHS), oldw);
@@ -435,6 +438,7 @@ PenToolbar::PenToolbar(bool _compact)
 
   trackEditFocus(colorPicker);
   trackEditFocus(spinWidth);
+  trackScrub(spinWidth);
 
   Menu *overflowMenu = createMenu(Menu::VERT_LEFT);
   cbSnaptoGrid = createCheckBoxMenuItem(_("Snap to Grid"));
@@ -840,6 +844,13 @@ void PenToolbar::trackEditFocus(Widget *field) {
   });
 }
 
+// a drag scrubbing a spin box is one edit: the first change makes an undo item and the rest replace it
+//  (as the changes of one focus do).  Not while the field is being typed in, which has its own run
+void PenToolbar::trackScrub(SpinBox *spin) {
+  spin->onScrubBegin = [this]() { changesSinceFocused = 0; };
+  spin->onScrubEnd = [this]() { changesSinceFocused = -1; };
+}
+
 // the menu a single control sits in (the selection popup), or NULL on a toolbar row
 static Widget *enclosingMenu(Widget *widget) {
   for (Widget *ancestor = widget->parent(); ancestor; ancestor = ancestor->parent()) {
@@ -976,7 +987,7 @@ Widget *PenToolbar::createSingleWidth(std::function<void()> onWidthChanged, bool
   // the presets, filled in on each open since the list can change in between (see openSingleWidth)
   sw->presetRow = createRow({}, "0 0", "flex-start");
   sw->popup->addWidget(sw->presetRow);
-  sw->spin = createTextSpinBox(1.25, 0.01, 0, 200, "%.3g", 120);
+  sw->spin = createTextSpinBox(1.25, 0.01, 0, 200, ABSOLUTE_WIDTH_FORMAT, 120);
   // spinWidth always holds the same value as this one (setSingleWidth), so its stepping applies as is
   sw->spin->onStep = spinWidth->onStep;
   sw->spin->onValueChanged = [this, sw](Dim width) {
@@ -986,6 +997,7 @@ Widget *PenToolbar::createSingleWidth(std::function<void()> onWidthChanged, bool
       setSingleWidth(sw, width);
   };
   trackEditFocus(sw->spin);
+  trackScrub(sw->spin);
   sw->spinRow = createTitledRow(_("Width"), sw->spin);
   sw->popup->addWidget(sw->spinRow);
 
@@ -1555,11 +1567,13 @@ void PenToolbar::updateWidthPopup() {
   bool rel = relativeWidths();
   // in line heights, 4 is already absurdly thick and 200 would be nonsense
   spinWidth->setLimits(WidthPresets::minWidth(rel), WidthPresets::maxWidth(rel));
+  spinWidth->setDisplay(rel ? RELATIVE_WIDTH_PERCENT : 1, rel ? RELATIVE_WIDTH_FORMAT : ABSOLUTE_WIDTH_FORMAT);
   widthSpinRow->selectFirst(".row-text")
-      ->setText(rel ? _("Line heights") : _("Width"));
+      ->setText(rel ? _("% of line") : _("Width"));
   for (auto &sw : singleWidths) {
     sw->spin->setLimits(WidthPresets::minWidth(rel), WidthPresets::maxWidth(rel));
-    sw->spinRow->selectFirst(".row-text")->setText(rel ? _("Line heights") : _("Width"));
+    sw->spin->setDisplay(rel ? RELATIVE_WIDTH_PERCENT : 1, rel ? RELATIVE_WIDTH_FORMAT : ABSOLUTE_WIDTH_FORMAT);
+    sw->spinRow->selectFirst(".row-text")->setText(rel ? _("% of line") : _("Width"));
   }
   // the display is always up, so an absolute width is shown against the ruling too - it is drawn from
   //  the width in line heights either way, which is what the display's scale is

@@ -237,6 +237,7 @@ private:
   // whether a width the spin box reports is the pen's own as the box shows it ("%.3g"): Return without an
   //  edit re-parses the rounded text, and that must not round the pen
   bool showsPenWidth(Dim w) const;
+  void trackScrub(SpinBox *spin);
   int singlesDashStyle = -2;  // the line style updateSingles() last drew (-2: never)
   static std::unique_ptr<SvgNode> widthBtnNode;
   static std::unique_ptr<SvgNode> compactWidthBtnNode;
