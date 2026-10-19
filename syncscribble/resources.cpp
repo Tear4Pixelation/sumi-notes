@@ -1,6 +1,7 @@
 #include "resources.h"
 #include "topbar.h"
 #include "scandialog.h"
+#include "pentoolbar.h"
 #include "screenshot.h"
 #include <fstream>
 #include <unordered_map>
@@ -219,6 +220,8 @@ SvgCssStylesheet* createStylesheet()
   styleSheet->parse_stylesheet(TopBar::stylesheet);
   // and the scan dialog's review grid (scandialog.cpp)
   styleSheet->parse_stylesheet(ScanDialog::stylesheet);
+  // the marker offset slider (pentoolbar.cpp)
+  styleSheet->parse_stylesheet(PenToolbar::stylesheet);
   // the crop dialog (screenshot, image editing) and its shape bar: screenshot.cpp
   styleSheet->parse_stylesheet(imageCropStylesheet);
   styleSheet->sort_rules();

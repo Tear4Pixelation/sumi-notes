@@ -37,6 +37,7 @@
 #include "notefultest.cpp"
 #include "pagetagtest.cpp"
 #include "widthpresettest.cpp"
+#include "markeroffsettest.cpp"
 #include "jumphistorytest.cpp"
 #include "benchtest.cpp"
 #include "canvaslayertest.cpp"
@@ -6043,7 +6044,7 @@ void ScribbleTest::runAll(bool runsynctest)
   UndoPersist::enabled = false;
   int nThumbsFailed = 0;
   int nUnitFailed = runScanTests() + runShapeTests() + runColorTests() + runLayerTests() + runLibraryTests()
-      + runRegionTests() + runNotefulTests() + runPageTagTests() + runWidthPresetTests() + runTabTests()
+      + runRegionTests() + runNotefulTests() + runPageTagTests() + runWidthPresetTests() + runMarkerOffsetTests() + runTabTests()
       + runJumpHistoryTests() + runEraseTests() + runSmartScaleTests() + runSimplifyTests() + runCropShapeTests();
   std::vector<std::string> slFailed;
   void (ScribbleTest::*tests[])() = {

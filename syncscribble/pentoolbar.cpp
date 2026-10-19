@@ -10,6 +10,7 @@
 #include "ugui/textedit.h"
 #include "usvg/svgparser.h" // for parseNumbersList
 #include "markercolor.h"
+#include "centeroffset.h"
 
 // or have spinbox buttons step by 1.25x or 0.8x of current value?
 const Dim PenToolbar::PEN_WIDTHS[] = {
@@ -554,7 +555,7 @@ PenToolbar::PenToolbar(bool _compact)
        {"ic_menu_settings2.svg", "Pen Settings",
         "Smoothing, simplification and other pen preferences."},
        {"ic_menu_toggle_ruled.svg", "Center on Line",
-        "Marker only: draws a straight line along the middle of the ruled line you start in."},
+        "Marker only: draws a straight line along the middle of the ruled line you start in. Long press to shift it up or down."},
        {"ic_menu_overflow.svg", "More Options",
         "Snap strokes to the grid or draw straight lines."},
        {"ic_menu_cancel.svg", "Close", "Hides this options row."}});
@@ -569,8 +570,35 @@ PenToolbar::PenToolbar(bool _compact)
     if (onChanged)
       onChanged(PEN_CHANGED);
   };
-  setupTooltip(centerLineToggle, _("Draw along the middle of the ruled line"));
+  setupTooltip(centerLineToggle,
+      altTooltip(_("Draw along the middle of the ruled line"), _("Long press to offset")));
   centerLineToggle->setVisible(false);
+
+  // the offset moves the centred stroke toward the bottom (-) or top (+) ruling of its line, for writing that
+  //  sits low or high: -100% glues the stroke's bottom edge to the line below, +100% its top edge to the top
+  //  ruling.  A slider for the gesture and a percent box for an exact value, like Pressure.
+  centerOffsetPopup = createArrowPopup(Menu::VERT_LEFT);
+  centerOffsetSlider = createSlider();
+  centerOffsetSlider->node->addClass("center-offset-slider");
+  centerOffsetSlider->onValueChanged = [this](real position) {
+    setCenterOffset(std::round((2*position - 1)*CenterOffset::STEPS)/CenterOffset::STEPS, true);
+  };
+  spinCenterOffset = createTextSpinBox(0, 5, -100, 100, "%.0f%%", 120);
+  spinCenterOffset->onValueChanged = [this](Dim percent) {
+    // showCenterOffset() pushing the pen's own value into the box must not rewrite the pen
+    if (percent == std::round(100*pen.centerOffset()))
+      return;
+    setCenterOffset(percent/100);
+  };
+  trackEditFocus(spinCenterOffset);
+  centerOffsetPopup->addWidget(createTitledRow(_("Offset"), createStretch(), spinCenterOffset));
+  centerOffsetPopup->addWidget(centerOffsetSlider);
+  setupAutoClosePopup(centerOffsetPopup);
+  centerLineToggle->addWidget(centerOffsetPopup);
+  SvgGui::setupRightClick(centerLineToggle, [this](SvgGui *gui, Widget *, Point) {
+    openAutoClosePopup(centerOffsetPopup);
+    gui->pressedWidget = NULL;  // the release that ends this press must not also toggle the button
+  });
 
   static const char *spacerSVG =
       R"(<rect fill="none" width="12" height="20"/>)";
@@ -1180,6 +1208,25 @@ void PenToolbar::rebuildGrids() {
   updateSelected();
 }
 
+const char* PenToolbar::stylesheet = R"#(
+.center-offset-slider .slider-bg { fill: var(--base); stroke: none; }
+)#";
+
+// the offset from the slider or the box; the other control follows
+void PenToolbar::setCenterOffset(Dim offset, bool fromSlider) {
+  pen.setCenterOffset(offset);
+  showCenterOffset(pen.centerOffset(), fromSlider);
+  if (onChanged)
+    onChanged(PEN_CHANGED);
+}
+
+// only shows: never touches the pen or calls onChanged.  keepSlider: the slider is the one being dragged.
+void PenToolbar::showCenterOffset(Dim offset, bool keepSlider) {
+  if (!keepSlider)
+    centerOffsetSlider->setValue((offset + 1)/2);
+  spinCenterOffset->setValue(std::round(100*offset));
+}
+
 // tapping the already selected preset opens the detail editor for it
 void PenToolbar::selectWidth(int idx) {
   if (WidthPresets::sameWidth(presetWidth(idx), pen.width)) {
@@ -1271,6 +1318,7 @@ void PenToolbar::setPen(const ScribblePen &newpen, Mode m, int selDashStyle) {
   centerLineToggle->setVisible(mode == PEN_MODE
       && (tool == ScribbleMode::DRAWTOOL_HIGHLIGHT || tool == ScribbleMode::DRAWTOOL_TAPE));
   centerLineToggle->setChecked(newpen.hasFlag(ScribblePen::CENTER_ON_LINE));
+  showCenterOffset(newpen.centerOffset());
   // MainWindow::refreshUI() lands here after every stroke and edit, nearly always with the same pen, and
   //  the full path below rewrites the color box, its sliders and hex text, the width display and every
   //  swatch (~110K instructions).  It is skipped only when the pen and everything else that path draws
