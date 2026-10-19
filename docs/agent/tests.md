@@ -88,6 +88,14 @@ stores and zeroes the padding, which made a first version pass either way), a re
 pen leaves the color box alone, a new color reaches it, and a recolored page reaches the width display with
 the pen unchanged (fails with the `ShownContext` check removed from the early return).
 
+`ScribbleTest::penPersistTest()` (pen-storage.md): swatches, the pen's colour and the selection ring across
+a tab switch to another theme, in memory and freshly loaded, for the pen and the marker; then 300
+pseudo-random steps that must leave every draw tool's width and presets bit-identical. **It, and the key
+checks in `penWidthWriteTest()`, must use `app->scribbleMode`**: `--test` builds `ScribbleTest(path)`, whose
+`scribbleMode` is the test document's own, not the app's - the key checks read that one and failed on every
+run. Mutation-checked: 6 digit `writePen()`, no toggle pair, no `followPalette()`, no `syncPalette()`, the
+custom editor without `toolColor()` each fail it.
+
 The relative-width reference for a selection (`selectionLineHeight()`: patch pitch, plurality across regions, tie to earliest stroke) is pinned in `scribbletest/regiontest.cpp`; mutation-checked by returning the fallback.
 
 The page tag summary and the tag index's document cache are tested in `scribbletest/pagetagtest.cpp`

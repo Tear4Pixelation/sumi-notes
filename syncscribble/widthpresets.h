@@ -16,6 +16,13 @@
 // the same typedef as basics.h (repeating an identical typedef is legal), so this builds without it
 typedef double Dim;
 
+// The shortest text that reads back as exactly `value` (strtod), so a width saved and loaded any number
+//  of times is the width the user set, bit for bit (docs/agent/pen-storage.md).  "%.6g" (the presets)
+//  and an ostream's default 6 digits (the pens, in toolModes) were lossy: harmless for 1.6, but a width
+//  that came out of a unit conversion (0.75 line heights of a 45 unit ruling, 33.75/40 ...) reloaded as
+//  a different number, so the pen no longer equalled the preset it was set from.
+std::string exactNumber(double value);
+
 struct WidthPresets
 {
   // prefixed: wingdi.h #defines ABSOLUTE and RELATIVE

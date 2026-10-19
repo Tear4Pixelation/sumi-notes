@@ -258,13 +258,22 @@ PenToolbar::PenToolbar(bool _compact)
   if (!compactWidthBtnNode)
     compactWidthBtnNode.reset(loadSVGFragment(compactWidthBtnSVG.c_str()));
 
-  const char *colorStr =
-      ScribbleApp::cfg->String("savedColors", "black,red,green,blue");
-  auto colorStrSplit = splitStringRef(colorStr, ',', true);
-  for (auto &s : colorStrSplit) {
-    Color color = parseColor(s);
-    if (color.isValid())
-      savedColors.push_back(color);
+  // the row as theme slots (savedSwatches); a config from before slots has only literal colours
+  //  (savedColors), read once and adopted into slots by the first refreshPalette() (pen-storage.md)
+  const char *swatchStr = ScribbleApp::cfg->String("savedSwatches", "");
+  swatchesLegacy = !swatchStr[0];
+  const char *colorStr = swatchesLegacy
+      ? ScribbleApp::cfg->String("savedColors", "black,red,green,blue") : swatchStr;
+  for (auto &token : splitStringRef(colorStr, ',', true)) {
+    std::string tok = token.toString();
+    ColorRef ref;
+    if (ColorRef::parse(tok.c_str(), &ref))
+      swatches.push_back(ref);
+    else {
+      Color color = parseColor(token);
+      if (color.isValid())
+        swatches.push_back(ColorRef::ofLiteral(color));
+    }
   }
 
   // I think we may want to increase size of circles or use a short stroke
@@ -286,15 +295,20 @@ PenToolbar::PenToolbar(bool _compact)
   // context menu for preview button?
   colorCtxMenu = createMenu(Menu::FLOATING, false);
   colorCtxMenu->addItem(_("Insert Current"), [this]() {
-    savedColors.erase(
-        std::remove(savedColors.begin(), savedColors.end(), pen.color),
-        savedColors.end());
-    int pos = std::min(contextMenuIdx + 1, int(savedColors.size()));
-    savedColors.insert(savedColors.begin() + pos, pen.color);
+    for (size_t ii = 0; ii < swatches.size();) {
+      if (swatchColor(ii) == pen.color)
+        swatches.erase(swatches.begin() + ii);
+      else
+        ++ii;
+    }
+    int pos = std::min(contextMenuIdx + 1, int(swatches.size()));
+    swatches.insert(swatches.begin() + pos, ColorRef::inPalette(docPalette(), pen.color));
     rebuildGrids();
   });
   colorMenuDelete = colorCtxMenu->addItem(_("Delete"), [this]() {
-    savedColors.erase(savedColors.begin() + contextMenuIdx);
+    if (contextMenuIdx < 0 || contextMenuIdx >= int(swatches.size()))
+      return;
+    swatches.erase(swatches.begin() + contextMenuIdx);
     rebuildGrids();
   });
 
@@ -403,7 +417,7 @@ PenToolbar::PenToolbar(bool _compact)
   colorPopupPicker = createColorEditBox(true, colorPopupSliders);
   colorPopupPicker->setMargins(0, 0, 0, 4);
   colorPopupPicker->onColorChanged = [this](Color c) {
-    if (colorPopupIdx < 0 || colorPopupIdx >= int(savedColors.size()))
+    if (colorPopupIdx < 0 || colorPopupIdx >= int(swatches.size()))
       return;
     // This edits a swatch directly, bypassing updateColor(), so it needs its own snap - otherwise the
     //  custom-color route is a hole straight through the palette.
@@ -415,12 +429,14 @@ PenToolbar::PenToolbar(bool _compact)
         c.setAlpha(alpha);
       }
     }
-    savedColors[colorPopupIdx] = c;
+    swatches[colorPopupIdx] = ColorRef::inPalette(docPalette(), c);
     colorPalette->items[colorPopupIdx]
         ->selectFirst(".btn-color")
-        ->node->setAttr<color_t>("fill", ScribbleApp::displayColor(c).color);
+        ->node->setAttr<color_t>("fill", ScribbleApp::displayColor(toolColor(c)).color);
+    // through toolColor(), as every other route into the pen colour: the marker given the opaque ink
+    //  drew solid, and no longer matched its own swatch (no ring)
     if (colorPalette->items[colorPopupIdx]->isChecked()) {
-      colorPicker->setColor(c);
+      colorPicker->setColor(toolColor(c));
       updateColor();
     }
   };
@@ -485,18 +501,18 @@ PenToolbar::PenToolbar(bool _compact)
   paletteDeleteBtn = createToolbutton(
       SvgGui::useFile("icons/ic_menu_discard.svg"), _("Delete Swatch"));
   paletteDeleteBtn->onClicked = [this]() {
-    if (paletteEditIdx < 0 || paletteEditIdx >= int(savedColors.size()))
+    if (paletteEditIdx < 0 || paletteEditIdx >= int(swatches.size()))
       return;
     closeAutoClosePopup(palettePopup);
     int deleted = paletteEditIdx;
-    savedColors.erase(savedColors.begin() + deleted);
+    swatches.erase(swatches.begin() + deleted);
     paletteEditIdx = -1;
     rebuildGrids();
     // The deleted swatch is the selected one - this route is only reachable by tapping it - so the pen
     //  would otherwise be left on a color the row no longer offers, with no swatch ringed.
-    int next = std::min(deleted, int(savedColors.size()) - 1);
+    int next = std::min(deleted, int(swatches.size()) - 1);
     if (next >= 0) {
-      colorPicker->setColor(savedColors[next]);
+      colorPicker->setColor(toolColor(swatchColor(next)));
       updateColor();
     }
   };
@@ -690,32 +706,32 @@ PenToolbar::PenToolbar(bool _compact)
   updateWidthPopup();
 }
 
-// Is this color one the current theme can produce? Any variant of any family counts, plus the neutral.
-static bool isPaletteMember(const Palette *pal, Color c) {
-  if (!pal)
-    return false;
-  if (c == pal->neutral)
-    return true;
-  for (const PaletteFamily &fam : pal->families) {
-    for (int vv = 0; vv < PALETTE_NUM_VARIANTS; ++vv) {
-      if (fam.variant(vv) == c)
-        return true;
-    }
-  }
-  return false;
-}
-
 // The toolbar's *default* working set: the neutral plus a handful of families spread around the wheel.
 // Deliberately small. The whole palette belongs in the add-color grid, not on the options row - a row
 //  of thirteen swatches is a row nobody reads, and picking from it is slower than picking from five.
-static std::vector<Color> defaultThemeSwatches(const Palette *pal) {
-  std::vector<Color> out;
-  out.push_back(pal->neutral);
+static std::vector<ColorRef> defaultThemeSwatches(const Palette *pal) {
+  std::vector<ColorRef> out;
+  out.push_back(ColorRef::inPalette(pal, pal->neutral));
   const int want = 5;
   int n = int(pal->families.size());
   for (int kk = 0; kk < want && n > 0; ++kk)
-    out.push_back(pal->families[(kk * n) / want].base);
+    out.push_back(ColorRef::inPalette(pal, pal->families[(kk * n) / want].base));
   return out;
+}
+
+// A swatch in the active document's palette.  A slot is that theme's colour at the slot; a literal is
+//  itself, or - in a themed document that does not allow off-palette colours - the theme's nearest,
+//  which is what a tap on it gives the pen anyway (updateColor() snaps), so the row shows what it draws.
+Color PenToolbar::swatchColor(size_t idx) const {
+  if (idx >= swatches.size())
+    return Color::BLACK;
+  const ColorRef &ref = swatches[idx];
+  const Palette *pal = themed ? docPalette() : NULL;
+  if (ref.isSlot() || !pal || offPaletteAllowed())
+    return ref.resolve(pal);
+  Color snapped = pal->nearest(ref.literal);
+  snapped.setAlpha(ref.literal.alpha());
+  return snapped;
 }
 
 // every swatch and preview shows its color through ScribbleApp::displayColor(), so a dark mode toggle
@@ -726,38 +742,65 @@ void PenToolbar::refreshDisplayColors() {
   updateWidthPopup();
 }
 
+// The swatches are the user's picks, the theme only the menu they were picked from - so the row is never
+//  replaced because it does not belong to the document's theme.  It used to be (literal colours, "every
+//  swatch a member of this theme or reseed"), and since another theme has none of this one's colours,
+//  opening or switching to a document with another theme threw the user's row away, and a swatch edited
+//  there was thrown away again by the next document (pen-storage.md).  Now each swatch is a slot and
+//  shows each theme's own colour; nothing is reseeded except an empty row, or once, a legacy list.
 void PenToolbar::refreshPalette() {
   const Palette *pal = docPalette();
   themed = pal && !pal->families.empty();
   if (themed) {
-    // Unlike the widths, these are the user's picks, not the theme's - the theme only supplies the
-    //  menu to pick from. So the list is left alone unless it plainly belongs to some other theme,
-    //  which is what happens after a theme change (and on the first run, where the config still holds
-    //  the old black/red/green/blue defaults). Reseeding then is what keeps a themed document from
-    //  showing swatches its own palette cannot produce.
-    // Every swatch must belong to the theme, not merely one of them: the legacy default is
-    //  black/red/green/blue, and black *is* the neutral, so an "any member" test counts that whole
-    //  list as themed and leaves three colors the palette cannot produce sitting on the row.
-    // Skipped when off-palette colors are allowed, since then a deliberate custom swatch is legal and
-    //  reseeding would delete it on every launch.
-    bool allMembers = true;
-    for (Color c : savedColors)
-      allMembers = allMembers && isPaletteMember(pal, c);
-    if (savedColors.empty() || (!allMembers && !offPaletteAllowed()))
-      savedColors = defaultThemeSwatches(pal);
+    // a literal that is exactly one of this theme's colours is that slot: a legacy list's colours, and
+    //  a custom colour that landed on the palette
+    for (ColorRef &ref : swatches) {
+      if (!ref.isSlot())
+        ref = ColorRef::inPalette(pal, ref.literal);
+    }
+    // Seeding: an empty row, or a legacy list in which no family made it (the old black/red/green/blue
+    //  default has only the neutral).  Not when off-palette colours are allowed, where a custom swatch
+    //  is legal, and only for the first themed document a legacy list meets - after that it is the
+    //  user's row.
+    bool anyFamily = false;
+    for (const ColorRef &ref : swatches)
+      anyFamily = anyFamily || ref.family >= 0;
+    if (swatches.empty() || (swatchesLegacy && !anyFamily && !offPaletteAllowed()))
+      swatches = defaultThemeSwatches(pal);
+    swatchesLegacy = false;
+    // what each slot is in this theme, kept as its fallback for a document with no theme (and so a
+    //  config read by a build without slots still finds sensible colours)
+    for (ColorRef &ref : swatches) {
+      if (ref.isSlot())
+        ref.literal = ref.resolve(pal);
+    }
   }
+  swatchRecipe = pal ? pal->recipe : PaletteRecipe();
+  swatchRecipeValid = pal != NULL;
   rebuildGrids();
 }
 
+bool PenToolbar::syncPalette() {
+  const Palette *pal = docPalette();
+  if (swatchRecipeValid && pal && pal->recipe == swatchRecipe
+      && themed == !pal->families.empty())
+    return false;
+  refreshPalette();
+  return true;
+}
+
 int PenToolbar::addSwatchColor(Color color) {
-  auto it = std::find(savedColors.begin(), savedColors.end(), color);
-  if (it == savedColors.end()) {
-    savedColors.push_back(color);
-    it = savedColors.end() - 1;
+  int idx = -1;
+  for (size_t ii = 0; ii < swatches.size() && idx < 0; ++ii) {
+    if (swatchColor(ii) == color)
+      idx = int(ii);
   }
-  int idx = int(it - savedColors.begin());
+  if (idx < 0) {
+    swatches.push_back(ColorRef::inPalette(themed ? docPalette() : NULL, color));
+    idx = int(swatches.size()) - 1;
+  }
   rebuildGrids();
-  colorPicker->setColor(toolColor(savedColors[idx]));
+  colorPicker->setColor(toolColor(swatchColor(idx)));
   updateColor();
   return idx;
 }
@@ -765,11 +808,11 @@ int PenToolbar::addSwatchColor(Color color) {
 // Replaces one swatch in place, keeping its position on the row - the edit route must never grow the
 //  row, which is the thing it exists to be able to undo.
 void PenToolbar::setSwatchColor(int idx, Color color) {
-  if (idx < 0 || idx >= int(savedColors.size()))
+  if (idx < 0 || idx >= int(swatches.size()))
     return;
-  savedColors[idx] = color;
+  swatches[idx] = ColorRef::inPalette(themed ? docPalette() : NULL, color);
   rebuildGrids();
-  colorPicker->setColor(toolColor(color));
+  colorPicker->setColor(toolColor(swatchColor(idx)));
   updateColor();
 }
 
@@ -778,16 +821,16 @@ void PenToolbar::setSwatchColor(int idx, Color color) {
 //  always the first answer offered and a custom color is the deliberate second step.
 void PenToolbar::openCustomColor(int editIdx) {
   closeAutoClosePopup(palettePopup);
-  int idx = editIdx >= 0 && editIdx < int(savedColors.size())
+  int idx = editIdx >= 0 && editIdx < int(swatches.size())
       ? editIdx : addSwatchColor(colorPicker->color());
   // rebuildGrids() (via addSwatchColor) resets colorPopupIdx, so this must come after it
   colorPopupIdx = idx;
-  colorPopupPicker->setColor(savedColors[idx]);
+  colorPopupPicker->setColor(swatchColor(idx));
   openAutoClosePopup(colorPopup);
 }
 
 void PenToolbar::openPaletteGrid(int editIdx) {
-  bool editing = editIdx >= 0 && editIdx < int(savedColors.size());
+  bool editing = editIdx >= 0 && editIdx < int(swatches.size());
   const Palette *pal = docPalette();
   if (!pal || pal->families.empty()) {
     // no theme: there is no grid to show, so both routes fall through to the color editor
@@ -797,7 +840,7 @@ void PenToolbar::openPaletteGrid(int editIdx) {
   paletteEditIdx = editing ? editIdx : -1;
   paletteHeader->setVisible(editing);
   // the row must keep at least one swatch, as the pen's color has to come from somewhere
-  paletteDeleteBtn->setEnabled(editing && savedColors.size() > 1);
+  paletteDeleteBtn->setEnabled(editing && swatches.size() > 1);
 
   fillColorGrid(paletteGrid, [this](Color c) {
     int idx = paletteEditIdx;
@@ -1158,8 +1201,8 @@ void PenToolbar::rebuildGrids() {
   colorPalette->clear();
   widthPalette->clear();
 
-  for (size_t ii = 0; ii < savedColors.size(); ++ii) {
-    Color color = toolColor(savedColors[ii]);
+  for (size_t ii = 0; ii < swatches.size(); ++ii) {
+    Color color = toolColor(swatchColor(ii));
     Button *btn =
         compact ? new Button(compactColorBtnNode->clone()) : createColorBtn();
     btn->selectFirst(".btn-color")->node->setAttr<color_t>("fill", ScribbleApp::displayColor(color).color);
@@ -1185,7 +1228,7 @@ void PenToolbar::rebuildGrids() {
       btn->setMargins(
           0); // the swatch cell already includes the mockup's spacing
   }
-  colorMenuDelete->setEnabled(savedColors.size() > 1);
+  colorMenuDelete->setEnabled(swatches.size() > 1);
 
   const std::vector<Dim> &widths = activeWidths();
   bool relwidths = relativeWidths();
@@ -1246,7 +1289,9 @@ void PenToolbar::selectWidth(int idx) {
 // Tapping the already selected swatch opens the theme's grid on it: the same menu the "+" gives, plus
 //  cancel and delete, so a swatch added by mistake can be replaced or taken back where it sits.
 void PenToolbar::selectColor(int idx) {
-  if (toolColor(savedColors[idx]) == pen.color) {
+  if (idx < 0 || idx >= int(swatches.size()))
+    return;
+  if (toolColor(swatchColor(idx)) == pen.color) {
     if (palettePopup->isVisible() || colorPopup->isVisible()) {
       closeAutoClosePopup(palettePopup);
       closeAutoClosePopup(colorPopup);
@@ -1257,14 +1302,14 @@ void PenToolbar::selectColor(int idx) {
   }
   closeAutoClosePopup(palettePopup);
   closeAutoClosePopup(colorPopup);
-  colorPicker->setColor(toolColor(savedColors[idx]));
+  colorPicker->setColor(toolColor(swatchColor(idx)));
   updateColor();
 }
 
 void PenToolbar::updateSelected() {
   for (size_t ii = 0;
-       ii < colorPalette->items.size() && ii < savedColors.size(); ++ii) {
-    bool sel = toolColor(savedColors[ii]) == pen.color;
+       ii < colorPalette->items.size() && ii < swatches.size(); ++ii) {
+    bool sel = toolColor(swatchColor(ii)) == pen.color;
     colorPalette->items[ii]->setChecked(sel);
     // a circular swatch has no background to tint, so mark the selected one
     // with a ring instead
@@ -1279,14 +1324,13 @@ void PenToolbar::updateSelected() {
 }
 
 void PenToolbar::saveConfig(ScribbleConfig *cfg) const {
-  // Always saved, themed or not: these are the user's chosen working set, picked from the theme rather
-  //  than generated by it. refreshPalette() reseeds them only when they plainly belong to some other
-  //  theme, so persisting them is what makes a pick stick across a restart.
+  // Always saved, themed or not: the user's working set, as theme slots and literal colours (ColorRef).
+  //  savedColors, the literal list older builds read, is left as it was: it is read only when there is
+  //  no savedSwatches, and writing a second copy would be a second source of truth to drift.
   std::vector<std::string> colorStrs;
-  for (Color c : savedColors)
-    colorStrs.emplace_back(
-        fstring("#%02X%02X%02X%02X", c.alpha(), c.red(), c.green(), c.blue()));
-  cfg->set("savedColors", joinStr(colorStrs, ",").c_str());
+  for (const ColorRef &ref : swatches)
+    colorStrs.emplace_back(ref.serialize());
+  cfg->set("savedSwatches", joinStr(colorStrs, ",").c_str());
 
   // the unit goes into the same string as the numbers, so no save or load can pair them wrongly.  Not
   //  "%.3f" as before: a pen width in line heights is around 0.04, and three decimals of that would
@@ -1595,9 +1639,32 @@ void PenToolbar::setRelativeWidth(bool relative) {
   if (mode != PEN_MODE || settingPen || relative == pen.hasFlag(ScribblePen::WIDTH_RELATIVE))
     return;
   Dim lh = lineHeight();
-  activePresets().convertTo(relative, lh);
+  WidthPresets &presets = activePresets();
+  // The toggle keeps both renderings of the pen and its presets - the absolute and the relative numbers
+  //  - for as long as neither is edited, and flipping it only switches between them.  So off and on again
+  //  is exactly what it was, on any ruling, however many times.  Converting back multiplied by the line
+  //  height of the page in hand: a pen set to 1.6, turned relative on a 40 unit ruling and back on
+  //  another (a blank page is 60, a Paper Patch or another document's paper anything) came back 1.59 or
+  //  2.4, its presets with it; and even on the same ruling w/lh*lh is not always w
+  //  (docs/agent/pen-storage.md).  A width or preset edit, or another tool, ends the pair.
+  bool wasRelative = pen.hasFlag(ScribblePen::WIDTH_RELATIVE);
+  RelToggle::Rendering &current = wasRelative ? relToggle.relative : relToggle.absolute;
+  RelToggle::Rendering &target = relative ? relToggle.relative : relToggle.absolute;
+  if (!(relToggle.valid && relToggle.tool == widthsTool && current.pen == pen.width
+      && current.presets == presets.widths)) {
+    relToggle.valid = true;
+    relToggle.tool = widthsTool;
+    current.pen = pen.width;
+    current.presets = presets.widths;
+    WidthPresets converted = presets;
+    converted.convertTo(relative, lh);
+    target.pen = relative ? pen.width/lh : pen.width*lh;
+    target.presets = converted.widths;
+  }
+  pen.width = target.pen;
+  presets.widths = target.presets;
+  presets.unit = relative ? WidthPresets::UNIT_RELATIVE : WidthPresets::UNIT_ABSOLUTE;
   pen.setFlag(ScribblePen::WIDTH_RELATIVE, relative);
-  pen.width = relative ? pen.width/lh : pen.width*lh;
   pen.setDashStyle(dashStyle);  // the pattern is in the width's unit
   updateWidthPopup();  // new limits for the new unit, so this must precede setValue
   spinWidth->setValue(pen.width);

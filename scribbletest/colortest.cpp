@@ -19,6 +19,7 @@
 
 #include "ulib/palettegen.h"
 #include "syncscribble/markercolor.h"
+#include "syncscribble/colorref.h"
 
 static int nColorChecksFailed = 0;
 
@@ -552,6 +553,46 @@ static void testShippedThemes()
       "a recipe from outside the shipped set resolves to no theme");
 }
 
+// Swatches and pen colours are theme slots (syncscribble/colorref.h, docs/agent/pen-storage.md): the same
+//  slot shows each theme's own colour, and back again, and survives its config text.
+static void testColorRefSlots()
+{
+  Palette palA, palB;
+  generatePalette(paletteThemeRecipe(*paletteThemeByIndex(0), false), &palA);
+  generatePalette(paletteThemeRecipe(*paletteThemeByIndex(1), true), &palB);
+  int nBad = 0;
+  for(size_t ii = 0; ii < palA.families.size() && ii < palB.families.size(); ++ii) {
+    ColorRef ref = ColorRef::inPalette(&palA, palA.families[ii].base);
+    if(ref.family != int(ii) || !(ref.resolve(&palB) == palB.families[ii].base)
+        || !(ref.resolve(&palA) == palA.families[ii].base))
+      ++nBad;
+    // the marker's vivid colour is the family's slot for a pen, and moves to the other theme's vivid one
+    Color vividA = vividMarker(palA.families[ii].hl, palA.recipe.vividness);
+    ColorRef penRef = ColorRef::ofPen(&palA, vividA, true);
+    Color vividB = vividMarker(palB.families[ii].hl, palB.recipe.vividness);
+    if(penRef.family != int(ii) || !(penRef.resolvePen(&palB, true, vividA.alpha()) == vividB))
+      ++nBad;
+  }
+  colorCheckTrue(nBad == 0, "a palette colour is its slot and resolves to the same slot in another theme");
+  ColorRef neutral = ColorRef::inPalette(&palA, palA.neutral);
+  colorCheckTrue(neutral.family == ColorRef::NEUTRAL && neutral.resolve(&palB) == palB.neutral,
+      "the neutral is the neutral in every theme");
+  ColorRef custom = ColorRef::inPalette(&palA, Color(12, 34, 56));
+  colorCheckTrue(!custom.isSlot() && custom.resolve(&palB) == Color(12, 34, 56), "a custom colour stays itself");
+  ColorRef parsed;
+  ColorRef slot = ColorRef::inPalette(&palA, palA.families[3].dark);
+  colorCheckTrue(ColorRef::parse(slot.serialize().c_str(), &parsed) && parsed.family == 3
+      && parsed.variant == PALETTE_DARK && parsed.literal == slot.literal, "a slot survives its config text");
+  colorCheckTrue(ColorRef::parse(custom.serialize().c_str(), &parsed) && !parsed.isSlot()
+      && parsed.literal == custom.literal, "...and so does a literal");
+  colorCheckTrue(ColorRef::parse("#FF000000", &parsed) && parsed.literal == Color(0, 0, 0),
+      "a legacy savedColors entry reads as a literal");
+  colorCheckTrue(!ColorRef::parse("black", &parsed) && !ColorRef::parse("@x#FF000000", &parsed),
+      "a colour name or a bad slot is not this format");
+  // no theme to resolve in: the slot shows what it last was
+  colorCheckTrue(slot.resolve(NULL) == palA.families[3].dark, "a slot with no theme shows its last colour");
+}
+
 int runColorTests()
 {
   nColorChecksFailed = 0;
@@ -566,6 +607,7 @@ int runColorTests()
   testUnknownGenerator();
   testBeatsNaive();
   testShippedThemes();
+  testColorRefSlots();
   return nColorChecksFailed;
 }
 

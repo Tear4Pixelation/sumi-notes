@@ -232,6 +232,16 @@ void ScribbleApp::init()
   scribbleMode = new ScribbleMode(cfg);
   scribbleMode->loadModes(cfg->String("toolModes"));
   scribbleMode->setMode(MODE_STROKE);
+  // the pens' theme slots; one that no longer matches its pen's colour is simply re-derived (followPalette)
+  {
+    int tool = 0;
+    for(auto& token : splitStringRef(cfg->String("penColorRefs", ""), ' ', true)) {
+      ColorRef ref;
+      if(tool < 4 && ColorRef::parse(token.toString().c_str(), &ref))
+        penColorRefs[tool] = ref;
+      ++tool;
+    }
+  }
 
   // create android helper needed to emit signals for Android callbacks since those run on different thread
 #if PLATFORM_ANDROID
@@ -613,6 +623,12 @@ void ScribbleApp::saveConfig()
   }
   // save mode of tools
   cfg->set("toolModes", scribbleMode->saveModes().c_str());
+  {
+    std::vector<std::string> refs;
+    for(const ColorRef& ref : penColorRefs)
+      refs.push_back(ref.serialize());
+    cfg->set("penColorRefs", joinStr(refs, " ").c_str());
+  }
   if(penToolbar)
     penToolbar->saveConfig(cfg);
   // moved here from ~ScribbleApp(), which usually is never called on mobile
@@ -1503,6 +1519,45 @@ void ScribbleApp::setPen(const ScribblePen& pen)
     currPen.color = Color::INVALID_COLOR;
   // keep the active draw tool's stored pen up to date so it survives a tool switch and app restart
   scribbleMode->currDrawPen() = currPen;
+  // the colour just set is a slot of the palette it was picked in (or a literal): recorded now, since a
+  //  tab switch before the next toolbar refresh would otherwise judge it against the next palette
+  followPalette();
+}
+
+// A pen's colour follows the document theme the way the swatch row does (docs/agent/pen-storage.md):
+//  every draw tool's pen that still holds its slot's colour (penColorRefs) is moved to the active
+//  palette's colour at that slot when the palette changes, so after a switch to a document with another
+//  theme the pen draws that theme's red and its swatch is still the ringed one.  This is the one place
+//  the app changes a pen's colour itself; a width is never touched.  A pen whose colour is not its
+//  slot's (a custom colour, a config from an older build) is left alone and its slot re-derived.
+void ScribbleApp::followPalette()
+{
+  ScribbleDoc* doc = activeArea() ? activeArea()->scribbleDoc : NULL;
+  if(!doc || !scribbleMode)
+    return;
+  const Palette& pal = doc->palette();
+  // no theme to resolve a slot in: keep the slots as they are for the next themed document
+  if(pal.families.empty()) {
+    penRecipeValid = false;
+    return;
+  }
+  bool changed = !penRecipeValid || pal.recipe != penRecipe;
+  for(int tool = ScribbleMode::DRAWTOOL_PEN; tool <= ScribbleMode::DRAWTOOL_TAPE; ++tool) {
+    ScribblePen& pen = scribbleMode->penForDrawTool(tool);
+    ColorRef& ref = penColorRefs[tool];
+    if(!pen.color.isValid())
+      continue;  // tape with no colour picked follows the theme already (docs/agent/tape.md)
+    if(!changed && ref.literal == pen.color)
+      continue;
+    bool marker = tool == ScribbleMode::DRAWTOOL_HIGHLIGHT;
+    if(changed && ref.isSlot() && ref.literal == pen.color)
+      pen.color = ref.resolvePen(&pal, marker, pen.color.alpha());
+    ref = ColorRef::ofPen(&pal, pen.color, marker);
+  }
+  penRecipe = pal.recipe;
+  penRecipeValid = true;
+  if(changed && currPen.color.isValid())
+    currPen.color = scribbleMode->currDrawPen().color;
 }
 
 void ScribbleApp::setDrawTool(int tool)
@@ -1530,6 +1585,10 @@ bool ScribbleApp::penToolbarEditsSelection(const ScribbleArea* area, int mode, b
 
 void ScribbleApp::updatePenToolbar(bool forSelPopup)
 {
+  // the active document may carry another palette than the one the pens and the swatch row were last
+  //  resolved in: a switch to a tab already in memory runs no ScribbleDoc::loadConfig()
+  followPalette();
+  penToolbar->syncPalette();
   bool selPopupOpen = forSelPopup || (win && win->selPopup && win->selPopup->isVisible());
   if(penToolbarEditsSelection(activeArea(), scribbleMode->getMode(), selPopupOpen)) {
     int dashStyle;

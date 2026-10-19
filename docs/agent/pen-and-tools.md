@@ -128,6 +128,9 @@ compiled on Mesa's GLES 3.2 but has not run (iOS only).
 
 # Relative pen width
 
+(How pens are stored, saved exactly and kept from drifting - and swatches as theme slots - is
+[pen-storage.md](pen-storage.md).)
+
 Any pen's thickness can be expressed as a **multiple of the page's line height** rather than in
 document units - `ScribblePen::WIDTH_RELATIVE`, with `width` holding the fraction. The **Relative size**
 toggle in the Width popup (`PenToolbar`) switches a pen between the two, and is **on by default for the
@@ -160,7 +163,10 @@ mechanism is the same for all three draw tools, and only the default differs.
   compile-checked only.
 - **The toggle converts, it does not reinterpret.** Flipping it multiplies or divides the pen's width
   *and its presets* by the current line height, so nothing changes thickness on screen: 0.75 of a 40 unit
-  ruling becomes 30, and back. Without that, turning it off would leave a 0.75 unit hairline.
+  ruling becomes 30, and back. Without that, turning it off would leave a 0.75 unit hairline. **Flipping
+  it back with nothing edited in between restores the numbers from before exactly**, on any ruling
+  (`PenToolbar::relToggle`): converting back at another page's line height was what turned 1.6 into 1.59
+  (pen-storage.md).
 - **One preset list per draw tool** (`savedWidths`, `savedMarkerWidths`, `savedEphemeralWidths`). They
   cannot share a list: two tools can be in different units at the same time, and the shared list would
   then be read in the wrong one by whichever tool is not holding it - three identical-looking hairlines,
@@ -197,8 +203,8 @@ mechanism is the same for all three draw tools, and only the default differs.
   the spinbox clamps, so the pen never equals the preset, so the second tap never opens the editor - the
   preset can never be selected or edited, and Delete was the only way out. Presets are compared with
   `WidthPresets::sameWidth()` (relative tolerance), not `==`, since a converted width is not bit-identical.
-  The lists are written with `%.6g`, not the old `%.3f`, which rounded 1.6 units in line heights (0.0356)
-  far enough to unselect the preset after a restart.
+  The lists are written exactly (`exactNumber()`, pen-storage.md), not the old `%.3f`, which rounded 1.6
+  units in line heights (0.0356) far enough to unselect the preset after a restart, nor the `%.6g` after it.
 - `PenToolbar::widthPreview()` **scales the whole preset set down** once any of them exceeds the swatch
   cap (`penWidthPreviewMax`), instead of clamping each. Every marker preset is past the cap, so clamping
   drew three identical bars. A pen's presets are all below it, so pen swatches are unchanged.

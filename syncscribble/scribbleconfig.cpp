@@ -348,7 +348,11 @@ void ScribbleConfig::init()
   cfgS["recentPageRulings"] = "";
   // for pen toobar
   // three of each, matching the design mockup's draw options row
-  cfgS["savedColors"] = "black,red,blue";
+  cfgS["savedColors"] = "black,red,blue";  // legacy literal list, read only while savedSwatches is empty
+  // the swatch row as theme slots and literal colours (ColorRef, docs/agent/pen-storage.md)
+  cfgS["savedSwatches"] = "";
+  // each draw tool's colour as a theme slot, so it follows the document theme (ScribbleApp::followPalette)
+  cfgS["penColorRefs"] = "";
   // one thickness preset list per draw tool (the marker's are far thicker: it has to cover text), each
   //  stored with its unit as "rel:..." or "abs:..." and seeded on first use, once the tool's unit is
   //  known - see WidthPresets and PenToolbar::prepareWidths

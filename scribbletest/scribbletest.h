@@ -37,6 +37,9 @@ public:
   // equal pens compare equal whatever their padding holds (memcmp did not), and the pen toolbar's
   //  per-refresh early-out still follows a new color and a recolored page
   int penToolbarRefreshTest();
+  // a pen stays as the user set it (docs/agent/pen-storage.md): widths exact through tool and tab switches,
+  //  rulings, selections, restarts and a toggle flipped back; swatches as theme slots across tab switches
+  int penPersistTest();
   int outlineTest();
   // Edit image: shaped crop, the kept original through save and load, one undo step (screenshot.md)
   int imageCropTest();
