@@ -72,6 +72,7 @@ TagDocList::TagDocList(const char* root) : Window(createWindowNode(tagDocListWin
   // one tag index per document root, next to the documents themselves
   tagStore = TagStore(docRoot.child(".write-tags").c_str());
   tagStore.load();
+  applyDefaultTag();
 
   createUI();
   setTitle(_("Documents"));
@@ -169,7 +170,7 @@ static void shrinkChevronButton(Button* chevron)
   bg->setRect(Rect::ltwh(r.left, r.top, r.width(), 28));
 }
 
-Widget* TagDocList::createTagRow(const std::string& tagId, int depth)
+Widget* TagDocList::createTagRow(const std::string& tagId, int depth, bool pinnedRow)
 {
   const TagNode* tagNode = tagStore.tag(tagId);
   if(!tagNode)
@@ -198,7 +199,7 @@ Widget* TagDocList::createTagRow(const std::string& tagId, int depth)
   tagIcon->addClass("icon");
   row->selectFirst(".icon-container")->containerNode()->addChild(tagIcon);
 
-  if(!tagNode->childIds.empty() && tagSearchQuery.empty()) {
+  if(!pinnedRow && !tagNode->childIds.empty() && tagSearchQuery.empty()) {
     bool expanded = expandedTags.count(tagId) > 0;
     Button* chevron = createToolbutton(
         SvgGui::useFile(expanded ? "icons/chevron_up.svg" : "icons/ic_menu_expanddown.svg"), "");
@@ -229,6 +230,9 @@ Widget* TagDocList::createTagRow(const std::string& tagId, int depth)
   SvgGui::setupRightClick(row, [this, tagId, row](SvgGui* gui, Widget* w, Point p){
     showTagMenu(tagId, row);
   });
+  // a pinned row is a shortcut to the tag, not a place in the tree: it is no drag source or target
+  if(pinnedRow)
+    return row;
   auto key = dragTagKeys.emplace(tagId, int(dragTagIds.size()));
   if(key.second)
     dragTagIds.push_back(tagId);
@@ -326,8 +330,16 @@ void TagDocList::rebuildTagTree()
   closeAutoClosePopup(tagContextPopup);
   tagContextPopup->removeFromParent();
   tagDrag->clear();
-  if(gui())
+  if(gui()) {
     gui()->deleteContents(tagTreeView, ".listitem");
+    gui()->deleteContents(pinnedTagsView, ".listitem");
+  }
+  for(const std::string& id : pinnedTagIds()) {
+    if(Widget* row = createTagRow(id, 0, true)) {
+      pinnedTagsView->addWidget(row);
+      elideTagRowTitle(row, 0);
+    }
+  }
 
   std::function<void(const std::string&, int)> appendRecursive = [&](const std::string& id, int depth){
     Widget* row = createTagRow(id, depth);
@@ -746,6 +758,7 @@ void TagDocList::setRoot(const char* root)
   tagStore.load();
   // tag ids are per root, so a filter from the old root would match nothing here
   activeTags.clear();
+  applyDefaultTag();
   expandedTags.clear();
   refresh();
 }
@@ -769,10 +782,74 @@ void TagDocList::toggleTagFilter(const std::string& tagId)
   }
   else {
     bool wasActive = activeTags.count(tagId) > 0;
-    activeTags.clear();
-    if(!wasActive)
-      activeTags.insert(tagId);
+    // the default tag stays on when another is picked; only pressing it turns it off
+    std::string defaultId = defaultTagId();
+    if(tagId == defaultId) {
+      if(wasActive)
+        activeTags.erase(tagId);
+      else
+        activeTags.insert(tagId);
+    }
+    else {
+      bool keepDefault = !defaultId.empty() && activeTags.count(defaultId) > 0;
+      activeTags.clear();
+      if(keepDefault)
+        activeTags.insert(defaultId);
+      if(!wasActive)
+        activeTags.insert(tagId);
+    }
   }
+  refresh();
+}
+
+std::vector<std::string> TagDocList::pinnedTagIds() const
+{
+  std::vector<std::string> ids;
+  for(const std::string& id : TagStore::parseTagList(ScribbleApp::cfg->String("pinnedTags", ""))) {
+    if(tagStore.tag(id))  // a deleted tag keeps its pin in the config, so undoing the delete restores it
+      ids.push_back(id);
+  }
+  return ids;
+}
+
+bool TagDocList::isTagPinned(const std::string& tagId) const
+{
+  std::vector<std::string> ids = TagStore::parseTagList(ScribbleApp::cfg->String("pinnedTags", ""));
+  return std::find(ids.begin(), ids.end(), tagId) != ids.end();
+}
+
+// the default tag, only while it is pinned and exists
+std::string TagDocList::defaultTagId() const
+{
+  std::string id = ScribbleApp::cfg->String("defaultTag", "");
+  return !id.empty() && tagStore.tag(id) && isTagPinned(id) ? id : std::string();
+}
+
+void TagDocList::applyDefaultTag()
+{
+  std::string id = defaultTagId();
+  if(!id.empty())
+    activeTags.insert(id);
+}
+
+void TagDocList::setTagPinned(const std::string& tagId, bool pinned)
+{
+  std::vector<std::string> ids = TagStore::parseTagList(ScribbleApp::cfg->String("pinnedTags", ""));
+  ids.erase(std::remove(ids.begin(), ids.end(), tagId), ids.end());
+  if(pinned)
+    ids.push_back(tagId);
+  ScribbleApp::cfg->set("pinnedTags", TagStore::formatTagList(ids).c_str());
+  // unpinning takes the default with it (it stays on as an ordinary filter for this session)
+  if(!pinned && std::string(ScribbleApp::cfg->String("defaultTag", "")) == tagId)
+    ScribbleApp::cfg->set("defaultTag", "");
+  rebuildTagTree();
+}
+
+void TagDocList::setTagDefault(const std::string& tagId, bool on)
+{
+  ScribbleApp::cfg->set("defaultTag", on ? tagId.c_str() : "");
+  if(on)
+    activeTags.insert(tagId);
   refresh();
 }
 
@@ -783,9 +860,21 @@ void TagDocList::toggleMultiSelect()
   if(!multiSelectMode && activeTags.size() > 1) {
     // dropping back to single-select with several tags active would otherwise leave a filter state
     // that single-select's own click handling (replace, not accumulate) could never have produced
-    std::string keep = *activeTags.begin();
+    // (the default tag stays, plus one other)
+    std::string defaultId = defaultTagId();
+    std::string keep;
+    for(const std::string& id : activeTags) {
+      if(id != defaultId) {
+        keep = id;
+        break;
+      }
+    }
+    bool keepDefault = !defaultId.empty() && activeTags.count(defaultId) > 0;
     activeTags.clear();
-    activeTags.insert(keep);
+    if(keepDefault)
+      activeTags.insert(defaultId);
+    if(!keep.empty())
+      activeTags.insert(keep);
   }
   refresh();
 }
@@ -808,6 +897,10 @@ void TagDocList::toggleMultiSelect()
 void TagDocList::showTagMenu(const std::string& tagId, Widget* row)
 {
   contextMenuTagId = tagId;
+  bool pinned = isTagPinned(tagId);
+  tagPinItem->setTitle(pinned ? _("Unpin Tag") : _("Pin Tag"));
+  tagDefaultItem->setVisible(pinned);
+  tagDefaultItem->setTitle(defaultTagId() == tagId ? _("Not Active by Default") : _("Active by Default"));
   tagContextPopup->removeFromParent();
   row->addWidget(tagContextPopup);
   openAutoClosePopup(tagContextPopup);
@@ -1473,6 +1566,15 @@ void TagDocList::createUI()
     moveTagUnder(dragTagIds[src], parentId, afterId);
   };
 
+  // pinned tags, straight below All Documents; no heading, and empty (zero height) until a tag is pinned
+  pinnedTagsView = new Widget(new SvgG());
+  pinnedTagsView->node->setAttribute("box-anchor", "hfill");
+  pinnedTagsView->node->setAttribute("layout", "flex");
+  pinnedTagsView->node->setAttribute("flex-direction", "column");
+  // same bleed as the tag tree below, so a pinned row's highlight spans the sidebar like the tree's rows
+  pinnedTagsView->setMargins(0, -TAG_LIST_BLEED_RIGHT, 0, -TAG_LIST_BLEED_LEFT);
+  sidebarContent->addWidget(pinnedTagsView);
+
   // no top margin here: allDocumentsBtn's own bottom margin (from createNavRow, matching its top
   // margin) already provides the gap, symmetric with the gap between sep1 and the row above it
   Widget* sep2 = createHRule();
@@ -1771,6 +1873,11 @@ void TagDocList::createUI()
   tagContextPopup = createArrowPopup(Menu::VERT_RIGHT);
   tagContextPopup->addItem(_("Add Subtag"), SvgGui::useFile("icons/ic_tag.svg"), [this](){ addTag(contextMenuTagId); });
   tagContextPopup->addItem(_("Rename"), SvgGui::useFile("icons/ic_tag.svg"), [this](){ renameTag(contextMenuTagId); });
+  tagPinItem = tagContextPopup->addItem(_("Pin Tag"), SvgGui::useFile("icons/ic_tag.svg"),
+      [this](){ setTagPinned(contextMenuTagId, !isTagPinned(contextMenuTagId)); });
+  // only offered for a pinned tag (showTagMenu())
+  tagDefaultItem = tagContextPopup->addItem(_("Active by Default"), SvgGui::useFile("icons/ic_tag.svg"),
+      [this](){ setTagDefault(contextMenuTagId, defaultTagId() != contextMenuTagId); });
   tagContextPopup->addItem(_("Delete"), SvgGui::useFile("icons/ic_tag.svg"), [this](){
     const TagNode* n = tagStore.tag(contextMenuTagId);
     if(!n)

@@ -129,6 +129,7 @@ relevant file before changing that area.
 - [night-mode.md](docs/agent/night-mode.md) - Invert Colors as a render-time `ColorMap`, mirrored theme vs lightness flip, never a document edit
 - [screenshot.md](docs/agent/screenshot.md) - region kept dashed after a selection (even an empty one), capture wider than the selection with the crop preset to it, capture without paper/ruling, white-to-alpha, crop dialog (rectangle, polygon, rounded corners; `cropshape.h`), Copy / Add to page, Edit Image on a selected image (original kept in `__croporig` for uncropping, one undo step)
 - [themes.md](docs/agent/themes.md) - palette generator (`cusp-walk-1` is FROZEN), theme storage, restyle, themed picker, `ThemeChangedItem`
+- [pinned-tags.md](docs/agent/pinned-tags.md) - library sidebar: pinned tags under All Documents, the tag menu's Pin / Active by Default items, config `pinnedTags`/`defaultTag`, how the default tag keeps its filter
 - [outlines.md](docs/agent/outlines.md) - per-page outline entries, `PageOutlineItem`, why no document-level index
 - [page-tags.md](docs/agent/page-tags.md) - tags on pages as `write-pagetag` elements, the toolbar tag button and placing tags on the pointer, to-do tags (ticked = page untagged), the `pagetags` summary and page thumbnails, page cards, inheritance and the blink
 - [layers.md](docs/agent/layers.md) - `__layer` tag not `<g>`, edit gate, lock semantics, `LayerTableItem`, sync of the table

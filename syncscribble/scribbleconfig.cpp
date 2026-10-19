@@ -337,6 +337,9 @@ void ScribbleConfig::init()
   cfgS["recentDocs"] = "";
   // the open tabs, in order, as recentDocs: paths joined by ":::"
   cfgS["openTabs"] = "";
+  // library sidebar: pinned tag ids (comma separated) and the pinned one that is a filter on start
+  cfgS["pinnedTags"] = "";
+  cfgS["defaultTag"] = "";
   cfgS["currFolder"] = "";
   cfgS["libraryPath"] = "";  // "" until the first run acquires one (ScribbleApp::initLibrary)
   cfgS["toolModes"] = "";

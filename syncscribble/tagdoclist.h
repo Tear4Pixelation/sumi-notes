@@ -71,6 +71,13 @@ protected:
   void elideTagRowTitle(Widget* row, int depth);
   void rebuildDocGrid();
   void toggleTagFilter(const std::string& tagId);
+  // pinned tags and the default one (config pinnedTags / defaultTag; docs/agent/pinned-tags.md)
+  std::vector<std::string> pinnedTagIds() const;
+  bool isTagPinned(const std::string& tagId) const;
+  std::string defaultTagId() const;
+  void applyDefaultTag();
+  void setTagPinned(const std::string& tagId, bool pinned);
+  void setTagDefault(const std::string& tagId, bool on);
   void toggleMultiSelect();
   void showTagMenu(const std::string& tagId, Widget* row);
   void addTag(const std::string& parentId);
@@ -116,7 +123,7 @@ private:
   // tags from the TagStore cache when the cache's mtime still matches, else via
   // ScribbleDoc::extractDocTags() (which re-populates the cache for next time).
   std::vector<DocEntry> collectDocuments();
-  Widget* createTagRow(const std::string& tagId, int depth);
+  Widget* createTagRow(const std::string& tagId, int depth, bool pinnedRow = false);
   Widget* createNavRow(const char* iconPath, const char* title);
   Widget* createFab(const char* iconPath, real diameter, bool primary);
   Widget* createRoundedBg(real w, real h, real radius, const char* fillColor);
@@ -166,6 +173,7 @@ private:
   } lastDelete;
 
   Widget* tagTreeView;
+  Widget* pinnedTagsView;
   Widget* docGrid;
   ScrollWidget* docScrollWidget;
   TextEdit* tagSearchEdit;
@@ -203,6 +211,8 @@ private:
   // built once in createUI() and reused, matching DocumentList's own persistent contextMenu.
   ArrowPopup* tagContextPopup;
   std::string contextMenuTagId;
+  Button* tagPinItem;
+  Button* tagDefaultItem;
 
   // Document long-press menu (Manage Tags / Rename / Delete) and the tag-assignment popup it opens.
   ArrowPopup* docContextPopup;
