@@ -759,3 +759,34 @@ are gone; cropping moves to a dialog). Instead:
   colour), not as dots in a fixed colour, so they do not read as crop handles.
 - Known limit: handles act in page axes, so a rotated image scaled from a side shears, as free corner scaling
   of any rotated selection already did.
+
+# Spin boxes (`SpinBox`, ugui `widgets.cpp`)
+
+Every numeric field in the app is a `createTextSpinBox()`; the fixes live in the shared widget.
+
+- **The - / + buttons are their own container** (`.spinbox_buttons` in `theme.cpp`: `--button` fill,
+  `--button-radius`, 8 from the field), beside a field that is only the text (`.spinbox_field`). Both
+  used to sit in one box whose focusable widget was the SpinBox, so a press on a button was a press
+  on the field: it took focus and the soft keyboard came up (on iPad the popup then went with it).
+  `Widget::noFocusOnPress` now makes `SvgGui::setFocused(.., REASON_PRESSED)` stop at the button, the
+  container and the buttons themselves; focus stays wherever it was. An earlier fix (a FOCUS_GAINED
+  veto inside `SpinBox`) failed inside popups; do not bring it back.
+- **Scrubbing**: a press on the *unfocused* field is held back (`SCRUB_PENDING`). A horizontal move
+  past 8 units starts a scrub (right = `onStep(1)`, left = `onStep(-1)` per 10 units, from where
+  the drag began); it never focuses the text or opens the keyboard. A tap (no such move) replays the
+  held press to the text, so tapping still focuses and edits exactly as before. A vertical move
+  drops the press. A focused field (being typed in) takes presses straight to the text, so
+  cursor placement and mouse selection work. `SvgGui::dragGrabWidget` routes the drag's motion/up to
+  the box even once the pointer leaves it inside an auto-close popup (whose pressed widget is the
+  popup). Scrubbing steps through `onStep`, so it uses the same context step as the buttons.
+- **One undo step per scrub**: `onScrubBegin`/`onScrubEnd` -> `PenToolbar::trackScrub()` sets
+  `changesSinceFocused` to 0 and back to -1, so the first change makes the undo item and the rest
+  replace it (`UNDO_PREV`), as for one focus. Button taps stay one undo step each.
+- **Display scale**: `SpinBox::setDisplay(scale, format)` shows `value * scale` and divides typed
+  text by it; the value is never rounded or rescaled. The relative width shows a percent of a
+  line height (`RELATIVE_WIDTH_PERCENT` = 100, "%.3g%%"), 3 not 0.03; typing "5" or "5%" gives 0.05.
+  A step is whole percents divided by 100 (`round(value*100) + n` / 100), not `value + 0.01`, so no
+  drift: 0.03 stays the literal 0.03 and a width of 0.0311 snaps to a whole percent on its first step.
+  Absolute widths still step through `PEN_WIDTHS` (0.1, 0.25, 0.5, ... not a fixed 0.02).
+- Not verified here: the iPad behaviour (keyboard/popup). The cause of the popup closing was not
+  found in the code; the fix removes the trigger (the button tap no longer starts text input).
