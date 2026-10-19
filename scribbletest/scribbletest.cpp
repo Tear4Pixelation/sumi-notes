@@ -2169,22 +2169,37 @@ int ScribbleTest::drawLinesTest()
     check(line->node->getColorAttr("stroke", Color::NONE) == Color::RED, "in the pen's color");
     check(line->node->getFloatAttr("stroke-width") == 3, "and the pen's width");
   }
-  check(scribbleArea->currSelection && scribbleArea->currSelection->count() == 1 && scribbleArea->shapeSelector,
-      "left selected with its shape handles, like a drawn shape");
+  check(!scribbleArea->currSelection && !scribbleArea->shapeSelector,
+      "a pen's line is not put into edit mode (only the Line shape tool's is)");
 
-  // a deliberate 30 degree line stays at 30 degrees; the press outside the selected line draws through it
+  // a deliberate 30 degree line stays at 30 degrees
   ie(100, 400, 0.5, pen, press);
   ie(200, 400 - 100*std::tan(M_PI/6), 0.5, pen);
   ie(300, 400 - 200*std::tan(M_PI/6), 0.5, pen);
   ie(0, 0, 0, pen, release);
   Element* slope = lastElement();
-  check(page->strokeCount() == 2 && slope && slope->isShape(), "the next press draws a second line through the selection");
+  check(page->strokeCount() == 2 && slope && slope->isShape(), "the next press draws a second line");
   if(slope && slope->isShape() && slope->shapeParams().points.size() == 2) {
     Point delta = slope->shapeParams().points[1] - slope->shapeParams().points[0];
     check(std::abs(std::atan2(-delta.y, delta.x) - M_PI/6) < 0.01, "a 30 degree line is not snapped");
   }
   undo();
   check(page->strokeCount() == 1, "a line is one undo step");
+
+  // a Draw Lines highlighter (DRAW_UNDER) goes under the layer's ink, like its freehand strokes
+  scribbleDoc->app->setPen(ScribblePen(Color::YELLOW, 12, ScribblePen::TIP_ROUND | ScribblePen::LINE_DRAWING
+      | ScribblePen::DRAW_UNDER));
+  ie(100, 600, 0.5, pen, press);
+  ie(200, 600, 0.5, pen);
+  ie(300, 600, 0.5, pen);
+  ie(0, 0, 0, pen, release);
+  Element* firstElement = NULL;
+  for(Element* child : page->children()) {
+    firstElement = child;
+    break;
+  }
+  check(page->strokeCount() == 2 && firstElement && firstElement->isShape()
+      && firstElement->node->getFloatAttr("stroke-width") == 12, "a Draw Lines highlighter line goes under the ink");
 
   scribbleDoc->clearSelection();
   scribbleMode->shapeFlags = 0;

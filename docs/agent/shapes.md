@@ -312,3 +312,10 @@ intent, so an angle fits. Once snapped, dragging the end with the pen still down
 editing and snaps by distance like the handles (user decision): it starts from the already snapped end,
 so jitter stays inside `SHAPE_ANGLE_SNAP_DIST` and only a deliberate move off the axis unsnaps.
 - **Draw through a selection (`shapeDrawThrough`, default **on**):** the shape tool's press outside a selection only clears it when `clearSelOnly` is on, like the pen; with this on it clears and starts the shape. A press on one of the selected shape's handles is not "outside": `selectionHit()` makes it `MODE_SHAPEHANDLE` before this code runs, so the handle still drags (pinned by `shapeTapEditTest`). Pen unchanged. In Pen and Shape Settings.
+
+## Curve arrowhead follows the relaxed curve
+
+`SHAPE_CURVE` runs its spline through points relaxed towards B-spline knots by `tightness`, so the end tangent is
+along (end point - *relaxed* neighbour), not the original last segment. `buildPolylineFamilyPath()` takes the head
+direction from `fitRelaxedParams()`; using the raw points left the head skew at any tightness below 1.
+`testCurveArrowHead()` compares the head axis with the last cubic's real end tangent (fails on the old code).
