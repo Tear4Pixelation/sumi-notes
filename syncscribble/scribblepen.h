@@ -2,6 +2,7 @@
 
 #include "basics.h"
 #include "ulib/painter.h"
+#include "centeroffset.h"
 
 class ScribblePen
 {
@@ -29,6 +30,7 @@ public:
       CENTER_ON_LINE = 0x2000,
       // the Tape tool's pen (docs/agent/tape.md): a press lays a strip of tape instead of drawing a stroke
       TAPE = 0x4000;
+  // bits 16-23 (CenterOffset::MASK) hold the Center on Line offset - not a flag
 
   ScribblePen(Color c, Dim w, unsigned int _flags = 0, Dim wr = 0, Dim pr = 0, Dim spd = 0, Dim angle = 0, Dim _dash = 0, Dim _gap = 0)
       : color(c), width(w), wRatio(wr), prParam(pr), spdMax(spd), dirAngle(angle), dash(_dash), gap(_gap), flags(_flags) {}
@@ -42,6 +44,11 @@ public:
     return color == b.color && width == b.width && wRatio == b.wRatio && prParam == b.prParam
         && spdMax == b.spdMax && dirAngle == b.dirAngle && dash == b.dash && gap == b.gap && flags == b.flags;
   }
+
+  // Center on Line offset, -1..1 (centeroffset.h): stored in flags bits 16-23, so it is saved and compared
+  //  with the rest of the pen
+  Dim centerOffset() const { return CenterOffset::unpack(flags); }
+  void setCenterOffset(Dim offset) { flags = (flags & ~CenterOffset::MASK) | CenterOffset::pack(offset); }
 
   bool hasFlag(unsigned int flag) const { return (flags & flag) == flag; }
   void setFlag(unsigned int flag, bool value) { if(value) flags |= flag; else flags &= ~flag; }

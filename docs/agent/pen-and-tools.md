@@ -9,7 +9,35 @@ since Draw Lines became the Line shape (below) it is centre on line's own branch
 toolbutton on the pen options row itself, after the widths (`PenToolbar::centerLineToggle`, the ruled
 eraser's `ic_menu_toggle_ruled` icon), shown only while the marker is the active tool - visibility is set
 in `setPen()` *before* its early return, since switching tools with an identical pen still changes it.
-Not covered by automated tests.
+
+**Offset (long press the toggle).** Writing often sits low in its line, so long press (or right click) the
+toggle opens a popup with a slider and a percent box, -100%..+100%: -1 glues the stroke's bottom edge to the
+bottom ruling, +1 its top edge to the top ruling, 0 is the centre (the default, and what every older pen
+reads as), between is linear. The y is `CenterOffset::centerY(top, lineHeight, width, offset)`
+(`centeroffset.h`, no dependencies) with the *resolved* width, so a relative marker is placed by its real
+size; a stroke as thick as the line has no room to move, so the offset does nothing there (the control stays
+enabled). Applied at both press sites that fix `centerLineLocalY` (marker and Tape - Tape has its own pen,
+so its own offset).
+
+Storage is the trap to keep: the offset is a signed byte of hundredths in **bits 16-23 of
+`ScribblePen::flags`** (`setCenterOffset()`/`centerOffset()`), not a float member. `flags` is already saved
+as a decimal integer, so the offset round trips exactly with no change to the config format or to
+`operator==`, and an old config reads 0. Do not treat those bits as flags (`WIDTH_MASK`-style masks are all
+below 0x10000). If pen storage grows real float fields, this can move there; the quantisation to 1% is
+then the only thing lost. `PenToolbar::setCenterOffset()` (slider/box -> pen) and `showCenterOffset()`
+(pen -> controls, called from `setPen()`, never calls `onChanged`) are the two directions; the slider
+snaps to whole percents while dragging and is not rewritten by its own change.
+
+Two UI traps: the long press handler must set `gui->pressedWidget = NULL` after opening the popup, or the
+release that ends the press also toggles the button (and, with a right click, the popup never shows); and the
+stock slider track is the popup's own colour, so `PenToolbar::stylesheet` (registered in `createStylesheet()`)
+gives `.center-offset-slider .slider-bg` the `--base` token. In agent-display a right click is the long press
+(a held left press sends no `LONG_PRESS` there).
+
+Tests: the math and the storage (every hundredth round trips, old flags read 0, one-line marker ignores the
+offset) are `scribbletest/markeroffsettest.cpp`, standalone-buildable (command in its header) and part of
+`runAll()`; flipping the interpolation's sign or dropping the `max(.., 0)` room clamp each fail it. The
+popup and the stroke placement are checked by hand only.
 
 # Draw Lines: the pen draws Line shapes
 

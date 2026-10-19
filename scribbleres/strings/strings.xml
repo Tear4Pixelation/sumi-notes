@@ -188,6 +188,8 @@
   <string name="tp_direction">Direction</string>
   <string name="tp_dash">Dash</string>
   <string name="tp_gap">Gap</string>
+  <string name="tp_centeroffset">Offset</string>
+  <string name="tp_centeroffset_hint">Long press to offset</string>
 
   <!-- page setup dialog -->
   <string name="ps_page_size">Page size</string>

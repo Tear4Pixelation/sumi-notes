@@ -3535,7 +3535,8 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
       tapeCentered = pen->hasFlag(ScribblePen::CENTER_ON_LINE);
       if(tapeCentered) {
         Dim yr = gestureFrame.yrulingOr(Page::BLANK_Y_RULING);
-        centerLineLocalY = gestureFrame.yForLine(prevLine, Page::BLANK_Y_RULING) + yr/2;
+        centerLineLocalY = CenterOffset::centerY(gestureFrame.yForLine(prevLine, Page::BLANK_Y_RULING),
+            yr, pen->width, pen->centerOffset());
         pos = gestureFrame.toPage(Point(lx, centerLineLocalY));
       }
       tapeStart = pos;
@@ -3548,7 +3549,8 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
     //  that line is tilted too, and so is the stroke
     if(pen->hasFlag(ScribblePen::CENTER_ON_LINE)) {
       Dim yr = gestureFrame.yrulingOr(Page::BLANK_Y_RULING);
-      centerLineLocalY = gestureFrame.yForLine(prevLine, Page::BLANK_Y_RULING) + yr/2;
+      centerLineLocalY = CenterOffset::centerY(gestureFrame.yForLine(prevLine, Page::BLANK_Y_RULING),
+          yr, pen->width, pen->centerOffset());
       pos = gestureFrame.toPage(Point(lx, centerLineLocalY));
     }
     //Dim w = cfg->Bool("scalePenWithZoom") ? pen->width/mZoom : pen->width;

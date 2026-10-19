@@ -62,6 +62,9 @@ gamut, determinism, snap idempotence, `matchReference` injectivity, unknown-gene
 OKLCh measurements `COLORS_SPEC.md` argues from (the Schuler palette, and yellow being 1.1:1 at its
 cusp) - so if the spec and the code ever diverge, the tests say so.
 
+The marker offset math and its flags storage are in `scribbletest/markeroffsettest.cpp` (`runMarkerOffsetTests()`,
+standalone; see [pen-and-tools.md](pen-and-tools.md#marker-centre-on-line)).
+
 The thickness preset lists ([pen-and-tools.md](pen-and-tools.md#relative-pen-width)) are tested in
 `scribbletest/widthpresettest.cpp` (`runWidthPresetTests()`), standalone-buildable - see the command in its
 header. Its checks are the `rel:`/`abs:` round trip (and a legacy list reading as unit-unknown), a relative

@@ -35,6 +35,9 @@ public:
 class PenToolbar : public Toolbar
 {
 public:
+  // the offset slider's track, added to the window stylesheet by createStylesheet() (resources.cpp): the
+  //  stock track is the popup's own color, which leaves a bare handle floating
+  static const char* stylesheet;
   // compact: the desktop floating panel's draw options row, which follows the design mockup - saved
   //  colors as circles, thickness presets as bare lines, and none of the hex box/overflow/help/close
   //  buttons that the roomier phone and vertical-toolbar layouts show
@@ -173,6 +176,12 @@ private:
   Widget* relWidthRow;
   // marker only: draw along the centre of the ruled line (ScribblePen::CENTER_ON_LINE)
   Button* centerLineToggle;
+  // long press / right click on the toggle: nudge the centring up or down (ScribblePen::centerOffset)
+  ArrowPopup* centerOffsetPopup;
+  Slider* centerOffsetSlider;
+  SpinBox* spinCenterOffset;
+  void setCenterOffset(Dim offset, bool fromSlider = false);
+  void showCenterOffset(Dim offset, bool keepSlider = false);
   // the pen tip picks the stroke builder: flat extrudes a quad per input segment, round sweeps a disc,
   //  chisel a fixed-aspect nib.  A flag on the pen rather than a pref, so it lives in Pen Settings as
   //  an extra row rather than coming from prefNames.
