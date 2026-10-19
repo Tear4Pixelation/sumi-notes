@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -38,6 +39,14 @@ struct PageLayout {
   Dim width = 0;
   Dim height = 0;
 };
+
+// The page whose ruling "Same as previous" copies, starting at `pagenum` (the page the new one goes after)
+//  and going back past pages for which isImagePage is true - a PDF/scan page has an image where a ruling
+//  would be, so its (empty) ruling says nothing about what the user writes on.  -1 if there is none.
+int previousRuledPage(int pagenum, const std::function<bool(int)>& isImagePage);
+
+// the ruling dialog's name for the preset a layout is ("Coarse grid"), or NULL when it is not one of them
+const char* layoutPresetName(const PageLayout& layout);
 
 PageLayout layoutFromProps(const PageProperties& props);
 // the page a layout makes in this document: default size where the layout has none, theme colors

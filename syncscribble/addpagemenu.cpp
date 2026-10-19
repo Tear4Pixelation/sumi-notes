@@ -26,6 +26,8 @@ static const Dim FALLBACK_PAGE_H = 11*150;
 static const char* CUSTOM_CFG_KEY = "customPageLayouts";
 static const char* RECENT_CFG_KEY = "recentPageLayouts";
 static const size_t MAX_RECENT = 2;
+static const size_t RECENT_COLS = 3;  // the recent row's tiles: at most this many to a row ...
+static const size_t RECENT_ROWS = 2;  // ... and this many rows; "More" takes the last slot
 
 // tile geometry, in UI units: two halves side by side above a label
 static const Dim TILE_W = 156;
@@ -138,12 +140,38 @@ std::string layoutDescription(const PageLayout& layout)
   return _("Plain");
 }
 
-// short enough for a tile label; the tooltip carries the full description
+// The margin is ignored (the Margin line option strips it from the built-ins), and a dot radius only for
+//  whether there is one.
+const char* layoutPresetName(const PageLayout& layout)
+{
+  for(int i = 2; i <= RulingDialog::STAFF_PRESET; ++i) {
+    if(layout.staff == (i == RulingDialog::STAFF_PRESET)
+        && layout.xRuling == Dim(RulingDialog::predefRulings[i][0])
+        && layout.yRuling == Dim(RulingDialog::predefRulings[i][1])
+        && (layout.dotRadius > 0) == (RulingDialog::predefDotRadii[i] > 0))
+      return RulingDialog::presetName(i);
+  }
+  return NULL;
+}
+
+int previousRuledPage(int pagenum, const std::function<bool(int)>& isImagePage)
+{
+  for(int idx = pagenum; idx >= 0; --idx) {
+    if(!isImagePage(idx))
+      return idx;
+  }
+  return -1;
+}
+
+// short enough for a tile label; the tooltip carries the full description.  A layout that is one of the
+//  ruling dialog's presets goes by that preset's name, so the tile and Page Setup agree.
 static std::string shortDescription(const PageLayout& layout)
 {
   Dim spacing = layout.yRuling > 0 ? layout.yRuling : layout.xRuling;
   if(spacing <= 0)
     return _("Plain");
+  if(const char* name = layoutPresetName(layout))
+    return name;
   if(layout.staff)
     return fstring("%s %g", _("Staves"), spacing);
   const char* kind = layout.dotRadius > 0 ? _("Dots") :
@@ -556,7 +584,15 @@ static PageLayout previousPageLayout(ScribbleDoc* doc)
 {
   PageLayout layout = defaultLayout(doc);
   int pagenum = ScribbleApp::app->activeArea()->getCurrPageNum();
-  if(pagenum >= 0 && pagenum < doc->document->numPages()) {
+  if(pagenum >= doc->document->numPages())
+    pagenum = doc->document->numPages() - 1;
+  // pages that are only a PDF/scan image are skipped, back to the last one that has a ruling
+  Document* document = doc->document;
+  pagenum = previousRuledPage(pagenum, [document](int idx){
+    Page* page = document->pages[idx];
+    return page->hasImageBackground() && page->xruling() <= 0 && page->yruling() <= 0;
+  });
+  if(pagenum >= 0) {
     layout = layoutFromProps(doc->document->pages[pagenum]->getProperties());
     layout.width = 0;
     layout.height = 0;
@@ -798,7 +834,7 @@ static std::shared_ptr<LayoutChooser> createLayoutChooser(Widget* container, boo
     container->addWidget(chooser->titleRow);
   }
 
-  chooser->recentRow = createRow({}, "", "", "left");
+  chooser->recentRow = createColumn({}, "", "", "left");  // rows of tiles, see populate()
   chooser->layoutGrid = createColumn({}, "", "", "left");
   // the grid's options sit outside the grid for the same reason: toggling one rebuilds the grid
   CheckBox* marginCb = createCheckBox(_("Margin line"), ScribbleApp::cfg->Bool("layoutMarginLine", true));
@@ -844,13 +880,14 @@ static std::shared_ptr<LayoutChooser> createLayoutChooser(Widget* container, boo
     const CloseFn& close = views->close;
     const PickFn& pick = views->pick;
     PageLayout prevlayout = previousPageLayout(doc);
-    views->recentRow->addWidget(createLayoutTile(close, pick, doc, prevlayout, _("Same as previous"), -1));
+    std::vector<Widget*> tiles;
+    tiles.push_back(createLayoutTile(close, pick, doc, prevlayout, _("Same as previous"), -1));
     PageLayout deflayout = defaultLayout(doc);
     if(!sameLayout(deflayout, prevlayout))
-      views->recentRow->addWidget(createLayoutTile(close, pick, doc, deflayout, _("Default"), -1));
+      tiles.push_back(createLayoutTile(close, pick, doc, deflayout, _("Default"), -1));
     for(const PageLayout& layout : recentLayouts()) {
       if(!sameLayout(layout, deflayout) && !sameLayout(layout, prevlayout))
-        views->recentRow->addWidget(createLayoutTile(close, pick, doc, layout, shortDescription(layout).c_str(), -1));
+        tiles.push_back(createLayoutTile(close, pick, doc, layout, shortDescription(layout).c_str(), -1));
     }
     Button* more = new Button(createPlusTileNode(_("More"), PLUS_TILE_W));
     more->onClicked = [views](){
@@ -867,7 +904,18 @@ static std::shared_ptr<LayoutChooser> createLayoutChooser(Widget* container, boo
         views->onViewChanged();
     };
     setupTooltip(more, _("All layouts"));
-    views->recentRow->addWidget(more);
+    // at most RECENT_COLS tiles to a row and RECENT_ROWS rows: what does not fit is dropped, "More" last
+    //  of all (it is how the rest is reached)
+    tiles.resize(std::min(tiles.size(), size_t(RECENT_COLS*RECENT_ROWS - 1)));
+    tiles.push_back(more);
+    Widget* row = NULL;
+    for(size_t i = 0; i < tiles.size(); ++i) {
+      if(i % RECENT_COLS == 0) {
+        row = createRow({}, "", "", "left");
+        views->recentRow->addWidget(row);
+      }
+      row->addWidget(tiles[i]);
+    }
 
     buildAddPageGrid(close, pick, views->layoutGrid, doc);
   };

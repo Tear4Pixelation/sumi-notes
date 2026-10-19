@@ -73,9 +73,9 @@ RulingDialog::RulingDialog(ScribbleDoc* doc, const PageProperties* initProps, bo
   if(currPage->isCustomRuling && !newPageMode)
     comboRuling = createComboBox({_("Custom")});
   else {
-    comboRuling = createComboBox({_("Current"), _("Plain"), _("Wide ruled"), _("Medium ruled"),
-        _("Narrow ruled"), _("Coarse grid"), _("Medium grid"), _("Fine grid"), _("Dotted ruled"),
-        _("Coarse dot grid"), _("Medium dot grid"), _("Fine dot grid"), _("Music staves")});
+    comboRuling = createComboBox({_("Current"), presetName(1), presetName(2), presetName(3),
+        presetName(4), presetName(5), presetName(6), presetName(7), presetName(8), presetName(9),
+        presetName(10), presetName(11), presetName(12)});
     comboRuling->onChanged = [this](const char* s){ setRuleType(comboRuling->index()); };
   }
 
@@ -294,6 +294,25 @@ unsigned int RulingDialog::predefRulings[][3] = {
 
 Dim RulingDialog::predefDotRadii[] = {0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 1.5, 1.5, 0};
 const int RulingDialog::STAFF_PRESET = 12;
+
+const char* RulingDialog::presetName(int index)
+{
+  switch(index) {
+  case 1: return _("Plain");
+  case 2: return _("Wide ruled");
+  case 3: return _("Medium ruled");
+  case 4: return _("Narrow ruled");
+  case 5: return _("Coarse grid");
+  case 6: return _("Medium grid");
+  case 7: return _("Fine grid");
+  case 8: return _("Dotted ruled");
+  case 9: return _("Coarse dot grid");
+  case 10: return _("Medium dot grid");
+  case 11: return _("Fine dot grid");
+  case 12: return _("Music staves");
+  default: return "";
+  }
+}
 
 // music paper is a preset, but it also needs a flag the numbers cannot carry; it stays until another
 //  preset is chosen, and gives way when a dot radius or an X ruling is entered, which staves have none of

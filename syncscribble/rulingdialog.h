@@ -49,6 +49,8 @@ public:
   static Dim predefDotRadii[];
   // index of the "Music staves" preset in predefRulings
   static const int STAFF_PRESET;
+  // the combo's name for preset `index` (1..STAFF_PRESET), shared with the Add Page tiles so both say "Coarse grid"
+  static const char* presetName(int index);
 
 private:
   void setPaperType(int index);
