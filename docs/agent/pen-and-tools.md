@@ -598,6 +598,21 @@ pass either way).
 Only ruled insert space uses it (the toggle is disabled for vertical insert space); ruled select, ruled
 erase and ruled move still step single lines.
 
+**Dragged up, Skip Lines behaves as without it, in text lines** (fourth-day report: "removes the text
+above but doesn't move up until far away, and the text is gone"). There was no separate code path - the
+frame was the only difference, and one guard in `Selection::reflowStrokes()` read it wrongly: it refused any
+move that put the first moved line above **line 0 of the gesture's frame**. For the page's ruling line 0 is
+the page top, so the guard only stopped text leaving the page; in the doubled frame line 0 is the pressed
+line itself, so every move up was refused - while the negative-space erase (which does not go through
+reflow) still hid the text the line would land on, and deleted it on release. Only reflow starts were hit
+(a mid-line press with text on its line, `insertSpaceX`); whole-line starts use `insertSpace()`, which has no
+guard. The guard is now the frame's first whole line inside the page or region (`frameExtent(ruling).top`),
+which is 0 for the page's ruling (unchanged) and the page top for any other frame. So the line follows the
+pen a text line up as soon as the pen crosses into it, the text it covers is only hidden while dragging and
+comes back when dragged down again, and a release up there deletes exactly what the normal tool would.
+Pinned by the "dragged up" checks in `skippedLinesTest()` (toggle off and on; 3 of them fail against the old
+guard).
+
 **It is a toggle, not detected, on purpose.** Detection by counting strokes per line parity was built and
 worked in tests, and was removed: when a guess misfires, text lands on the wrong line with no visible
 reason, and a user would have to understand the heuristic to use the tool. (For the record, the stray ink

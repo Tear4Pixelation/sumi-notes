@@ -5227,6 +5227,62 @@ int ScribbleTest::skippedLinesTest()
   check(!line3.empty() && allOn(line3, 3), "double spaced, pressed on a blank line: the text line above stays put");
   check(!line5b.empty() && allOn(line5b, 7), "double spaced, pressed on a blank line: the text below moves two lines");
 
+  // Insert Lines dragged UP from the start of a line behaves as without Skip Lines, in text lines: the rest
+  //  follows the pen a text line up at once, the text it lands on is only hidden while dragging (back down
+  //  restores it), and releasing up there deletes only what the normal tool would.  The reflow used to
+  //  refuse any move above line 0 of the gesture's frame - the page top for the normal tool, but the pressed
+  //  line itself in the doubled frame - so the text never moved while the line above was hidden, and a
+  //  release deleted it.  Run with the toggle off (single spaced, one line) and on (two lines).
+  for(bool skip : {false, true}) {
+    scribbleMode->insSpaceSkipLines = skip;
+    const int step = skip ? 2 : 1, upper = 3, lower = upper + step;
+    auto lineStrokes = [&](int line) {
+      std::vector<Element*> found;
+      for(Element* s : scribbleArea->currPage->children()) if(lineOf(s) == line) found.push_back(s);
+      return found;
+    };
+    auto onPage = [&](const std::vector<Element*>& strokes) {
+      for(Element* s : strokes) {
+        bool found = false;
+        for(Element* t : scribbleArea->currPage->children()) if(t == s) found = true;
+        if(!found) return false;
+      }
+      return true;
+    };
+    auto movedBy = [&](const std::vector<Element*>& strokes, Dim dy) {
+      for(Element* s : strokes) if(std::abs(s->pendingTransform().yoffset() - dy) > 0.5) return false;
+      return true;
+    };
+    for(bool releaseUp : {false, true}) {
+      scribbleDoc->newDocument();
+      doCommand(ID_RESETZOOM);
+      scribbleDoc->app->setPen(ScribblePen(Color::BLACK, 2, ScribblePen::TIP_ROUND));
+      for(int line : {upper, lower}) { word(textLeft, line); word(textLeft + 4*14 + 16, line); }
+      std::vector<Element*> above = lineStrokes(upper), moving = lineStrokes(lower);
+      // just left of the line's first word, mid-line: Insert Lines splits there (the whole rest moves)
+      const Point pressAt(textLeft - 4, (lower + 0.5)*pitch);
+      scribbleMode->setMode(MODE_INSSPACEAUTO);
+      at(pressAt, INPUTEVENT_PRESS);
+      at(pressAt + Point(0, -10), INPUTEVENT_MOVE);
+      at(pressAt + Point(0, -step*pitch), INPUTEVENT_MOVE);
+      check(movedBy(moving, -step*pitch), skip ? "skip lines, dragged up: the line follows the pen a text line up"
+          : "dragged up: the line follows the pen a line up");
+      if(releaseUp) {
+        at(pressAt + Point(0, -step*pitch), INPUTEVENT_RELEASE);
+        check(!moving.empty() && allOn(moving, upper), skip ? "skip lines, released up: the line moved a text line up"
+            : "released up: the line moved a line up");
+        continue;
+      }
+      at(pressAt + Point(0, -10), INPUTEVENT_MOVE);
+      at(pressAt, INPUTEVENT_MOVE);
+      at(pressAt, INPUTEVENT_RELEASE);
+      check(!above.empty() && onPage(above) && allOn(above, upper), skip ?
+          "skip lines, dragged up and back: the text line above is restored" : "dragged up and back: the line above is restored");
+      check(!moving.empty() && allOn(moving, lower), skip ? "skip lines, dragged up and back: the line is back on its line"
+          : "dragged up and back: the line is back on its line");
+    }
+  }
+
   // off: the same double spaced text wraps onto the blank line, as ruled insert space always has
   scribbleMode->insSpaceSkipLines = false;
   wrapped = setup({5, 7, 9});
