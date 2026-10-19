@@ -176,6 +176,19 @@ Widget* TagDocList::createTagRow(const std::string& tagId, int depth, bool pinne
   if(!tagNode)
     return NULL;
 
+  if(pinnedRow) {
+    // a pinned tag is built exactly like the "All Documents" button (same chrome, margins, icon slot),
+    // so the two read as one list of buttons; only the label and icon differ
+    Button* navRow = static_cast<Button*>(createNavRow("icons/ic_tag.svg", tagNode->name.c_str()));
+    navRow->setChecked(activeTags.count(tagId) > 0);
+    navRow->onClicked = [this, tagId](){ toggleTagFilter(tagId); };
+    SvgGui::setupRightClick(navRow, [this, tagId, navRow](SvgGui* gui, Widget* w, Point p){
+      showTagMenu(tagId, navRow);
+    });
+    // a pinned row is a shortcut to the tag, not a place in the tree: it is no drag source or target
+    return navRow;
+  }
+
   static const char* rowProtoSVG = R"(
     <g class="listitem" layout="box" box-anchor="hfill">
       <rect box-anchor="fill" width="20" height="50"/>
@@ -230,9 +243,6 @@ Widget* TagDocList::createTagRow(const std::string& tagId, int depth, bool pinne
   SvgGui::setupRightClick(row, [this, tagId, row](SvgGui* gui, Widget* w, Point p){
     showTagMenu(tagId, row);
   });
-  // a pinned row is a shortcut to the tag, not a place in the tree: it is no drag source or target
-  if(pinnedRow)
-    return row;
   auto key = dragTagKeys.emplace(tagId, int(dragTagIds.size()));
   if(key.second)
     dragTagIds.push_back(tagId);
@@ -319,6 +329,17 @@ void TagDocList::elideTagRowTitle(Widget* row, int depth)
   elideTextMiddle(title, std::max(maxWidth, real(40)));
 }
 
+// Same as elideTagRowTitle() for a createNavRow() row (pinned tags): 12 margin each side, no chevron.
+void TagDocList::elideNavRowTitle(Widget* row)
+{
+  SvgText* title = static_cast<SvgText*>(row->containerNode()->selectFirst(".title"));
+  if(!title)
+    return;
+  row->node->restyle();
+  real maxWidth = SIDEBAR_WIDTH - SIDEBAR_PAD_LEFT - SIDEBAR_PAD_RIGHT - 24 - (24 + 12);
+  elideTextMiddle(title, std::max(maxWidth, real(40)));
+}
+
 void TagDocList::rebuildTagTree()
 {
   // tagContextPopup is reparented onto whichever row triggered it (see showTagMenu()'s comment) and
@@ -337,7 +358,7 @@ void TagDocList::rebuildTagTree()
   for(const std::string& id : pinnedTagIds()) {
     if(Widget* row = createTagRow(id, 0, true)) {
       pinnedTagsView->addWidget(row);
-      elideTagRowTitle(row, 0);
+      elideNavRowTitle(row);
     }
   }
 
@@ -1571,8 +1592,6 @@ void TagDocList::createUI()
   pinnedTagsView->node->setAttribute("box-anchor", "hfill");
   pinnedTagsView->node->setAttribute("layout", "flex");
   pinnedTagsView->node->setAttribute("flex-direction", "column");
-  // same bleed as the tag tree below, so a pinned row's highlight spans the sidebar like the tree's rows
-  pinnedTagsView->setMargins(0, -TAG_LIST_BLEED_RIGHT, 0, -TAG_LIST_BLEED_LEFT);
   sidebarContent->addWidget(pinnedTagsView);
 
   // no top margin here: allDocumentsBtn's own bottom margin (from createNavRow, matching its top
