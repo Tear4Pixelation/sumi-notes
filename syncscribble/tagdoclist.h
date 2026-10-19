@@ -124,6 +124,7 @@ private:
   // ScribbleDoc::extractDocTags() (which re-populates the cache for next time).
   std::vector<DocEntry> collectDocuments();
   Widget* createTagRow(const std::string& tagId, int depth, bool pinnedRow = false);
+  void elideNavRowTitle(Widget* row);
   Widget* createNavRow(const char* iconPath, const char* title);
   Widget* createFab(const char* iconPath, real diameter, bool primary);
   Widget* createRoundedBg(real w, real h, real radius, const char* fillColor);

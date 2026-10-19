@@ -10,8 +10,18 @@ below "All Documents" (`pinnedTagsView`, no heading, zero height while nothing i
 - **Config** (saved, `cfgS` in `scribbleconfig.cpp`): `pinnedTags` (ids, `TagStore::formatTagList`, pin order)
   and `defaultTag` (one id). Tag ids belong to one library's `.write-tags`, so they mean nothing after a library
   switch; unknown ids are simply not shown (`pinnedTagIds()`, `defaultTagId()`).
-- A pinned row is `createTagRow(id, 0, pinnedRow=true)`: no chevron, **not** registered with `tagDrag` (it is a
-  shortcut, not a place in the tree). Tree and pinned rows both show the active state. Pins are not removed when
+- A pinned row is `createTagRow(id, 0, pinnedRow=true)`, which returns a **`createNavRow()` row** - the very
+  construction of the "All Documents" button (same `tag-row` CSS, margins `14 12 14 12`, 24px icon slot, font,
+  hover/pressed/checked colors), only with the tag's name and `icons/ic_tag.svg`. Do not restyle it separately;
+  `pinnedTagsView` has no bleed margins, so the rows sit exactly like All Documents' and the spacing is that of a
+  list of such buttons. No chevron, **not** registered with `tagDrag` (a shortcut, not a place in the tree).
+  Long names are shortened by `elideNavRowTitle()` (no chevron slot, 12px margins). Tree and pinned rows both
+  show the active state (checked = `--checked` color on icon and text).
+- **Long-press menus stay open**: after a long press the finger is still down; its release used to reach the
+  row's Button as a click, which toggled the filter, rebuilt the list and closed the menu opened a moment
+  before. `SvgGui::setupRightClick()` (ugui) now swallows the one release that follows a LONG_PRESS (not a
+  right-click), for every item using it (tags, documents, pages, layers, pen buttons). Not reproducible in
+  agent-display: its pointer never produces LONG_PRESS (a held press behaves as a plain click). Pins are not removed when
   a tag is deleted (the row just disappears), so undoing the delete brings the pin back.
 - **Unpinning the default tag clears the default** (it stays active for the session as an ordinary filter).
 
