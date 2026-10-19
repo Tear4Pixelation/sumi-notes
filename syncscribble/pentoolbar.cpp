@@ -1581,8 +1581,15 @@ Color PenToolbar::toolColor(Color c) const {
   return out;
 }
 
+// Compared as the box shows them - scaled and formatted exactly as updateWidthPopup() set it up - never in
+//  the value's own units: a relative width is shown in percent, and 0.4365 shows as "43.6%" (43.65 is
+//  43.6499.. in binary) while "%.3g" of 0.4365 itself is "0.437", so Return on an unedited 43.6% read
+//  back as an edit and rounded the pen to 0.436 (docs/agent/pen-storage.md).
 bool PenToolbar::showsPenWidth(Dim w) const {
-  return pen.width > 0 && fstring("%.3g", w) == fstring("%.3g", pen.width);
+  bool rel = relativeWidths();
+  Dim scale = rel ? RELATIVE_WIDTH_PERCENT : 1;
+  const char *format = rel ? RELATIVE_WIDTH_FORMAT : ABSOLUTE_WIDTH_FORMAT;
+  return pen.width > 0 && fstring(format, w*scale) == fstring(format, pen.width*scale);
 }
 
 bool PenToolbar::relativeWidths() const {

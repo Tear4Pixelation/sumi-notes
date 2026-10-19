@@ -85,6 +85,11 @@ Widths drifting, "often 0.01 smaller than set":
 2. **Lossy saving**: 6 significant digits in `toolModes` and the preset lists (above). Invisible in the
    `%.3g` box by itself, but it meant no width that had been through a conversion survived a restart
    intact, and the pen stopped equalling its preset.
+3. **Return on an unedited relative width rounded it** (after the box began showing line heights as a
+   percent). `showsPenWidth()`, which tells "Return without an edit" from an edit, compared `"%.3g"` of the
+   fraction while the box shows `"%.3g%%"` of the fraction times 100. The two round differently in binary:
+   0.4365 shows as "43.6%" but its own `"%.3g"` is "0.437", so the unedited text read back as 0.436, an
+   edit. It now compares through the box's own scale and format; any new display scale must go there too.
 Not writers, checked again: tab switches, rulings, tool switches, selections, preset taps on the selected
 preset, Return without an edit, the width editor opening and closing with focus in the box, theme changes.
 `penPersistTest()` drives all of these 300 times and requires every width and preset bit-identical.

@@ -1194,6 +1194,13 @@ int ScribbleTest::penWidthWriteTest()
   app->updatePenToolbar();
   spin->updateValueFromText(spinText->text().c_str());
   check(app->getPen()->width == fine, "Return on the unchanged width does not round it");
+  // ...shown in percent: 0.4365 shows as "43.6%" while "%.3g" of the fraction is "0.437", so a check made
+  //  in the fraction's own units took the unedited text for an edit and set 0.436 (pen-storage.md)
+  const Dim percentEdge = 0.4365;
+  app->setPen(ScribblePen(Color::BLACK, percentEdge, ScribblePen::TIP_ROUND | ScribblePen::WIDTH_RELATIVE));
+  app->updatePenToolbar();
+  spin->updateValueFromText(spinText->text().c_str());
+  check(app->getPen()->width == percentEdge, "Return on an unchanged width shown in percent does not round it");
 
   // number keys pick tools, and no key recalls a pen: 1-8 (and ; and ') used to load a saved pen over the
   //  current one, the only width writer outside the quick settings left (saved pens are gone)
@@ -1515,7 +1522,13 @@ int ScribbleTest::penPersistTest()
     }
     case 8: {
       TextBox* text = static_cast<TextBox*>(toolbar->spinWidth->containerNode()->selectFirst(".spinbox_text")->ext());
-      toolbar->spinWidth->updateValueFromText(text->text().c_str());
+      std::string shown = text->text();
+      Dim penBefore = toolbar->pen.width, spinBefore = toolbar->spinWidth->value();
+      int modeBefore = toolbar->mode;
+      toolbar->spinWidth->updateValueFromText(shown.c_str());
+      if(appMode->penForDrawTool(tool).width != expected[tool])
+        printf("pen persist: Return on '%s', toolbar pen %.17g, spin %.17g, toolbar mode %d, tool %d widthsTool %d\n",
+            shown.c_str(), penBefore, spinBefore, modeBefore, tool, toolbar->widthsTool);
       break;
     }
     case 9:
