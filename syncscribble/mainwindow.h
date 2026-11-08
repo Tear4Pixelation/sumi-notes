@@ -210,6 +210,7 @@ public:
   ArrowPopup* historyTip = NULL;
   bool historyTipShown = false;
   Button* titleButton;
+  Widget* titleSeparator = NULL;  // the divider after it in the page ops panel
   Button* iapButton = NULL;  // iOS IAP
   Widget* toolBarStretch;
   Widget* selPopup = NULL;

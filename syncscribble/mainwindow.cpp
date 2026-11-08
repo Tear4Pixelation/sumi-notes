@@ -1282,6 +1282,23 @@ void MainWindow::applyTopBarMode()
       btn->setVisible(!inEditor);
     }
   }
+  // the title button (app icon + document name) is redundant beside the tabs: home opens the library and
+  //  the active tab names the document.  Its long press (Recent Documents) moves to home's.
+  titleButton->node->setXmlClass((inEditor ? addWord(titleButton->node->xmlClass(), "topbar-moved")
+      : removeWord(titleButton->node->xmlClass(), "topbar-moved")).c_str());
+  titleButton->setVisible(!inEditor);
+  if(titleSeparator) {
+    titleSeparator->node->setXmlClass((inEditor ? addWord(titleSeparator->node->xmlClass(), "topbar-moved")
+        : removeWord(titleSeparator->node->xmlClass(), "topbar-moved")).c_str());
+    titleSeparator->setVisible(!inEditor);
+  }
+  if(topBar && menuRecent_Files && menuRecent_Files->parent()) {
+    Widget* host = inEditor ? static_cast<Widget*>(topBar->homeBtn) : titleButton;
+    if(menuRecent_Files->parent() != host) {
+      menuRecent_Files->removeFromParent();
+      host->addWidget(menuRecent_Files);
+    }
+  }
   if(sidebar)
     sidebar->setTabsViewAvailable(!inEditor);
   orientationChanged();  // the insets move between the toolbar and the bar
@@ -1587,6 +1604,15 @@ void MainWindow::setupUI(ScribbleApp* a)
         topBar->refresh();
     });
   };
+  topBar->homeBtn->addHandler([this](SvgGui* gui, SDL_Event* event){
+    if(menuRecent_Files->parent() == topBar->homeBtn && isLongPressOrRightClick(event)) {
+      gui->showMenu(menuRecent_Files);
+      gui->setPressed(menuRecent_Files);
+      topBar->homeBtn->node->addClass("pressed");
+      return true;
+    }
+    return false;
+  });
   applyTopBarMode();
   applyStatusBar(true);
 
@@ -1888,7 +1914,8 @@ void MainWindow::createToolBars()
     titleButton->node->addClass("float-wide-btn");  // sized by its label, not the button grid
     pageopsRow->addWidget(titleButton);
     addTBWidget(titleButton, 2);
-    addTBWidget(pageopsRow->addSeparator(), -100);
+    titleSeparator = pageopsRow->addSeparator();  // hidden with the title (applyTopBarMode)
+    addTBWidget(titleSeparator, -100);
     // The sidebar button sits at the left end of the page ops panel: the sidebar itself defaults to
     //  the left edge, so the control is on the side of what it opens.  Bookmarks is off the toolbar
     //  for now; Ctrl+B still toggles the panel.
