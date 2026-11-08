@@ -1800,6 +1800,84 @@ int ScribbleTest::penPersistTest()
   return nbad;
 }
 
+// The start-up drift (docs/agent/pen-storage.md, root cause 5, "start-up").  ScribbleApp::init() refreshed the UI for its
+//  untitled document while currPen was still the member's placeholder {black, 1} - absolute - so the
+//  toolbar was shown a pen in the other unit from the active tool's relative presets, and prepareWidths()
+//  converted the list to units at the untitled page's line height.  The next refresh, from opening the
+//  last document, showed the real relative pen and converted the list back at *that* document's line
+//  height: every start that reopened a document ruled differently from new pages scaled the presets by
+//  the ratio of the two (40 vs 39.54 is +1.2%), and the next preset tap gave the pen the scaled width.
+//  The rule checked here: showing the toolbar a pen in the other unit never rewrites a preset list.
+int ScribbleTest::penStartupTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: pen startup: %s\n", what); }
+  };
+  ScribbleApp* app = scribbleDoc->app;
+  PenToolbar* toolbar = app ? app->penToolbar : NULL;
+  Page* page = toolbar ? toolbar->currentPage() : NULL;
+  if(!toolbar || !page) {
+    check(false, "no pen toolbar or page");
+    return nbad;
+  }
+  ScribbleMode* appMode = app->scribbleMode;
+  std::string modesBefore = appMode->saveModes();
+  WidthPresets widthsBefore = toolbar->savedWidths, markerBefore = toolbar->savedMarkerWidths;
+  Dim rulingBefore = page->props.yRuling;
+
+  struct Case { int tool; WidthPresets* list; const char* presets; ScribblePen pen; const char* name; };
+  Case cases[] = {
+    {ScribbleMode::DRAWTOOL_PEN, &toolbar->savedWidths, "rel:0.03,0.05,0.07",
+        ScribblePen(Color::BLACK, 0.05, ScribblePen::TIP_ROUND | ScribblePen::WIDTH_RELATIVE), "pen"},
+    {ScribbleMode::DRAWTOOL_HIGHLIGHT, &toolbar->savedMarkerWidths, "rel:0.5,0.75,1",
+        ScribblePen(Color(255, 64, 224, 165), 0.75, ScribblePen::TIP_CHISEL | ScribblePen::DRAW_UNDER
+            | ScribblePen::WIDTH_RELATIVE), "marker"}
+  };
+  for(const Case& c : cases) {
+    page->props.yRuling = 40;
+    app->setDrawTool(c.tool);
+    app->setPen(c.pen);
+    c.list->parse(c.presets);
+    toolbar->shownValid = false;
+    app->updatePenToolbar();
+    const std::vector<Dim> expected = c.list->widths;
+    // start-up, three times over: the untitled document (new pages ruled 45) shown the placeholder pen,
+    //  then the last document (ruled 39.54, as an imported notebook can be) shown the tool's own pen
+    for(int start = 0; start < 3; ++start) {
+      page->props.yRuling = 45;
+      app->currPen = ScribblePen(Color::BLACK, 1);
+      toolbar->shownValid = false;
+      app->updatePenToolbar();
+      page->props.yRuling = 39.54;
+      app->currPen = appMode->currDrawPen();
+      app->updatePenToolbar();
+    }
+    bool same = c.list->widths == expected && c.list->isRelative();
+    if(!same)
+      printf("pen startup: %s presets %.17g %.17g %.17g, set %.17g %.17g %.17g\n", c.name,
+          c.list->widths.size() > 0 ? c.list->widths[0] : -1, c.list->widths.size() > 1 ? c.list->widths[1] : -1,
+          c.list->widths.size() > 2 ? c.list->widths[2] : -1, expected[0], expected[1], expected[2]);
+    check(same, c.name == std::string("pen") ? "a pen in the other unit shown at start-up leaves the pen's "
+        "relative presets exactly as set" : "a pen in the other unit shown at start-up leaves the marker's "
+        "relative presets exactly as set");
+    // ...and a tap on the first preset gives the pen the width it was set to, not a scaled one
+    toolbar->selectWidth(0);
+    closeAutoClosePopup(toolbar->widthPopup);
+    check(app->getPen()->width == expected[0], "a preset tapped after start-up gives the width it was set to");
+  }
+
+  page->props.yRuling = rulingBefore;
+  appMode->loadModes(modesBefore.c_str());
+  toolbar->savedWidths = widthsBefore;
+  toolbar->savedMarkerWidths = markerBefore;
+  app->currPen = appMode->currDrawPen();
+  app->setMode(MODE_STROKE);
+  toolbar->shownValid = false;
+  app->updatePenToolbar();
+  return nbad;
+}
+
 // Edit image (docs/agent/screenshot.md): the cropped pixels, the kept original and its shape surviving a save
 //  and a load as attributes, and applying an edit as one undo step that brings the image back as it was
 int ScribbleTest::imageCropTest()
@@ -6988,6 +7066,7 @@ void ScribbleTest::runAll(bool runsynctest)
   nUnitFailed += penWidthWriteTest();
   nUnitFailed += penToolbarRefreshTest();
   nUnitFailed += penPersistTest();
+  nUnitFailed += penStartupTest();
   nUnitFailed += outlineTest();
   nUnitFailed += imageCropTest();
   nUnitFailed += outlineNestTest();

@@ -212,8 +212,11 @@ mechanism is the same for all three draw tools, and only the default differs.
     back through `WidthPresets::setFrom()` kept the unit right but still changed the pen's preset from
     a stroke's width, so the next tap on it moved a relative pen (pen-storage.md, root cause 4).
   - A saved pen recalled with the other relative setting (`penSelected()`, then keys 1-8; saved pens are
-    gone now) kept the list in the old unit. In `PEN_MODE` `prepareWidths()` converts the list to the
-    pen's unit whenever they differ, exactly as the toggle does.
+    gone now) kept the list in the old unit. `prepareWidths()` then converted the list to the pen's unit
+    in place; it no longer does (only the toggle converts a list), since start-up showed the toolbar a
+    placeholder absolute pen and that conversion, undone at another document's line height, scaled the
+    presets a little on every start (pen-storage.md, root cause 5). A list in another unit is read through
+    `presetWidth()`.
   - A list from an older config has no prefix (`UNIT_UNKNOWN`); it takes that tool's pen's unit once,
     which is the pairing the old code assumed, and is written with a prefix from then on.
   `penSelected()` with **applyPenToSel** also resolved nothing, giving a selection a relative pen's

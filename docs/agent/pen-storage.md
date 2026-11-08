@@ -40,11 +40,14 @@ width) and `PenToolbar::setRelativeWidth()` (the Relative size toggle), both rea
   paper, 1.6 came back 1.59 or 2.4, and its three presets with it. Even on the same ruling `w/lh*lh` is
   not always `w`. A width edit, a preset tap or another tool ends the pair; the next flip converts.
 - What is still a conversion, and why it is allowed: the first toggle (the user asks for a unit change; the
-  thickness on screen is kept), a legacy unit-less preset list taking its tool's unit once
-  (`prepareWidths()`), and `loadModes()` converting a pre-relative-width marker once. `prepareWidths()` also
-  converts a list whose unit differs from its pen's in PEN_MODE; nothing in the app can produce that pairing
-  any more (the toggle converts both, each tool has its own list), so it only ever repairs a hand-edited or
-  very old config.
+  thickness on screen is kept) and `loadModes()` converting a pre-relative-width marker once. A legacy
+  unit-less preset list takes its tool's unit once (`prepareWidths()`, from the tool's *stored* pen), which
+  sets the unit and changes no number.
+- **Only the toggle converts a preset list.** `prepareWidths()` used to convert the active tool's list in
+  place whenever the pen the toolbar was shown had the other unit. That is a round trip through two line
+  heights the moment the toolbar is shown such a pen and then the real one on another ruling - which is
+  exactly what start-up did (root cause 5). A list in another unit than the pen shown is now left alone and
+  read through `presetWidth()` (`WidthPresets::inUnit()`), which resolves without writing.
 - `readPen()` clamps a loaded width into the spin box's range for its unit (0.0005-4 line heights,
   0.01-200 units), as before: a width outside it could never be shown or edited.
 
@@ -102,6 +105,23 @@ Widths drifting, "often 0.01 smaller than set":
    a preset in `PEN_MODE` only; from a selection the editor edits the selection's width and nothing else.
    This was a deliberate design from the 144 line height fix (store the selection's width "in the list's
    own unit") - the unit was right, writing the pen's list from a selection at all was the bug.
+
+Root cause 5 (Nov 2026), "start-up": the sub-percent drift with Relative size always on (-1% to +1.2%, the
+same values seen again and again):
+5. **Every start scaled the active tool's relative presets by the ratio of two line heights.**
+   `ScribbleApp::init()` called `doc->newDocument()` - whose `refreshUI()` shows the pen toolbar the pen -
+   *before* `currPen = scribbleMode->currDrawPen()`, so the toolbar was shown the member's placeholder
+   `{black, 1}`, an absolute pen. `PenToolbar::setPen()` -> `prepareWidths()` saw a relative list with an
+   absolute pen and converted the list to units at the untitled page's line height (new pages' ruling,
+   `yRuling` in the config). Opening the last document (`openDocument()` -> `doRefresh()`) showed the real
+   relative pen, and the list was converted back at *that* document's line height. Reproduced with new
+   pages ruled 45 and a document ruled 40: `rel:0.03,0.05,0.07` became `0.03375,0.05625,0.07875`. With 40
+   against an imported notebook's 39.54 it is x1.0116: 3% -> 3.03%, 5% -> 5.06%, 7% -> 7.08%, and the
+   other way round 4.94% - the reported -1% / +1.15% / +1.2%. The pen itself was untouched; the next tap on a
+   preset gave it the scaled width, and the scaled list was saved, so it compounded start after start (iOS
+   restarts the app often). Earlier runs never caught it because every test runs after `init()`.
+   Fix: `currPen` is set before `newDocument()`, and `prepareWidths()` no longer converts a list to the
+   shown pen's unit (above), so no transient pen can rewrite a list again.
 Not writers, checked again: tab switches, rulings, tool switches, Switch Back with ink still selected,
 selections on the page and in a Paper Patch, the selection popup's width item (presets, steps), undo of a
 selection's width, preset taps on the selected preset, Return without an edit (pen and selection), the
@@ -146,6 +166,12 @@ Swatches after switching tabs:
   step, a typed width, a scrub, Return; the selection popup's presets and steps), undoes, deselects, puts
   the pen back with ink still selected, changes the ruling and restarts, 1200 steps. Only the pen's own
   edits (width set, preset tap, the pen's preset editor) may move the pen or its presets.
+  `penStartupTest()` replays start-up three times for the pen and the marker (the toolbar shown the
+  placeholder absolute pen on a page ruled 45, then the tool's relative pen on 39.54) and requires the
+  presets bit-identical and a preset tap to give the width it was set to; it fails against the old
+  `prepareWidths()` (presets x1.474 after three starts). The `init()` ordering itself was checked by running
+  the app (start-up reopening a 40 ruled document with new pages ruled 45, then a preset tap: config kept
+  `rel:0.03,0.05,0.07` and the pen became exactly 0.03; before, the list came out x45/40).
   `penWidthPresetTest()` checks the same rule once: a width typed into the editor opened from a selection
   goes to the selection, and the pen's presets are bit-identical afterwards.
 - `scribbletest/widthpresettest.cpp`: `exactNumber()` round trips and is short; a converted list survives
