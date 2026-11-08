@@ -2804,6 +2804,29 @@ int ScribbleTest::tapPasteTest()
   check(scribbleArea->currSelection && pasted.center().dist(where) < 60, "pasted at the tap location");
   (void)armedPos;
 
+  // the popup is a modal menu: a finger press outside it only closes it (the event is consumed), or the tap
+  //  on the canvas would offer Paste again at once.  Pen and the full selection popup let the press through.
+  MainWindow* win = app->win;
+  SvgGui* gui = ScribbleApp::gui;
+  if(win && win->selPopup && gui) {
+    SDL_Event press = {};
+    press.type = SDL_FINGERDOWN;
+    press.tfinger.touchId = SDL_TOUCH_MOUSEID;
+    auto outsidePress = [&]() { return win->selPopup->sdlUserEvent(gui, SvgGui::OUTSIDE_MODAL, 0, &press, NULL); };
+    app->showSelToolbar(Point(500, 600), true);
+    check(win->selPopup->isVisible(), "the paste popup opens");
+    check(outsidePress(), "a finger press outside the paste popup is consumed");
+    check(!win->selPopup->isVisible(), "a finger press outside closes the paste popup");
+    app->showSelToolbar(Point(500, 600), true);
+    press.tfinger.touchId = PenPointerPen;
+    check(!outsidePress(), "a pen press outside the paste popup is not consumed");
+    press.tfinger.touchId = SDL_TOUCH_MOUSEID;
+    scribbleDoc->doCommand(ID_SELALL);
+    app->showSelToolbar(Point(500, 600), false);
+    check(!outsidePress(), "a finger press outside the full selection popup is not consumed");
+    gui->closeMenus();
+  }
+
   scribbleDoc->clearSelection();
   input->singleTouchMode = wasSingle;
   input->multiTouchMode = wasMulti;

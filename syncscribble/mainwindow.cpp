@@ -1668,8 +1668,15 @@ void MainWindow::setupUI(ScribbleApp* a)
       return true;
     }
     if(event->type == SvgGui::OUTSIDE_MODAL) {
+      // the tap-to-paste offer (only Paste showing) is dismissed by a finger press elsewhere, and that press
+      //  is consumed: let through, the tap on the canvas would offer Paste again (ScribbleArea::scheduleTapPaste).
+      //  The pen still draws, and the full selection popup still lets the press through.
+      const SDL_Event* press = static_cast<const SDL_Event*>(event->user.data1);
+      bool fingerPress = press && press->type == SDL_FINGERDOWN
+          && press->tfinger.touchId != PenPointerPen && press->tfinger.touchId != PenPointerEraser;
+      bool consume = fingerPress && selPasteBtn && selPasteBtn->isVisible();
       closeSelPopup(gui);
-      return false;
+      return consume;
     }
     // don't let repeat key events close popup (happens with Ctrl key held down for sel mode on Windows)
     if(event->type == SDL_KEYDOWN && !event->key.repeat) {
