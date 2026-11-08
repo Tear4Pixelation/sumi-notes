@@ -95,6 +95,27 @@ paper unchanged.
   it too (`notefulimport.cpp`). An attribute rather than a rule because it is per stroke, travels
   through undo, sync, copy/paste and selection recolor for free (recolor only touches fill), and
   reaches export. Stylus Labs Write reads it and ignores it (`setCompOp()` there skips multiply).
+- **Every path that makes a marker element must set it.** Shapes are built by
+  `ScribbleArea::createShapeElement()`, not `StrokeBuilder`, so a **Draw Lines highlighter** line and
+  a marker stroke turned into a shape by **hold-to-snap** were source-over until Nov 2026: under the
+  handwriting (`layerFirstElement()`) but over the PDF text, tinting it - the "highlighter covers the
+  PDF" bug. `createShapeElement()` now sets `comp-op` for a `DRAW_UNDER` pen, `commitSnapShape()`
+  puts a snapped marker shape under the ink as the unsnapped stroke would have gone, and
+  `drawScreen()` sets the dark backdrop for the live shape (`currStroke`/`shapeInProgress`) as it
+  does for the live stroke. Lines drawn before the fix have neither `comp-op` nor the chisel class,
+  so `isLegacyMarker()` does not catch them (a translucent shape could equally be a pen's): they
+  stay tinted until redrawn. Tested in `drawLinesTest()` (highlighter line carries `comp-op`, a plain
+  pen's line does not).
+- **Why not draw the marker under the PDF instead?** The obvious alternative - paint the paper
+  fill, then markers, then the page image with multiply (the scan/PDF is mostly white) - was
+  rejected: the page image lives in `ruleNode`, drawn as one unit below all elements, and splitting
+  it would mean a second ruleNode pass per page in `Page::draw()`, the canvas layer, thumbnails,
+  `PdfWriter` and PNG export, plus the same for scans that are image *elements* (where "under the
+  image" is a per-layer z-order question, see "Marker over scanned images"). It also only works if
+  the image is multiplied, i.e. it is the same blend on the other node. Multiplying the marker is one
+  attribute on one node, already handled by GL, nanovg_sw (wasm, thumbnails), PDF export
+  (`/BM /Multiply`) and night mode (screen on dark paper); the visual result is identical (multiply
+  is commutative), and ruling lines under the marker darken the same way either way.
 - **Old markers** (no `comp-op`): `Element::isLegacyMarker()` - path, `write-chisel-pen` class,
   `fill-opacity` < 1 - is multiplied at render time in `Element::applyStyle()` and by PDF export
   (`PdfWriter::defaultCompOp`). Nothing is rewritten on load. Old Noteful imports (stroked, no

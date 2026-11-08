@@ -1512,6 +1512,10 @@ Element* ScribbleArea::createShapeElement(const ShapeParams& params)
   }
   // deliberately no pen class: the pen classes drive toPenPoints(), which reinterprets a path as
   //  variable-width pen geometry - meaningless for a generated shape path (spec 7.9)
+  // a marker multiplies like its freehand strokes (StrokeBuilder::create()), so a Draw Lines highlighter
+  //  or a snapped marker shape over a PDF page or scan leaves the print dark - see pen-and-tools.md
+  if(pen->hasFlag(ScribblePen::DRAW_UNDER))
+    svgPath->setAttr<int>("comp-op", Painter::CompOp_Multiply);
   Element* shape = new Element(svgPath);
   shape->setShapeParams(params);
   return shape;
@@ -1926,7 +1930,13 @@ void ScribbleArea::commitSnapShape()
   bool changed = moved*mScale > SNAP_CHANGE_MIN;
   if(changed)
     shape->setShapeParams(snapParams);
-  currPage->addStroke(shape);  // creates the StrokeAddedItem
+  // a snapped marker stroke goes under the layer's ink, as it would have unsnapped (DRAW_UNDER)
+  Element* under = currPen()->hasFlag(ScribblePen::DRAW_UNDER) ?
+      currPage->layerFirstElement(scribbleDoc->document->layers.currentId) : NULL;
+  if(under)
+    currPage->addStroke(shape, under);
+  else
+    currPage->addStroke(shape);  // creates the StrokeAddedItem
   // a shape is not handwriting, but it does end any stroke group in progress
   groupStrokes();
   if(changed) {
@@ -5462,11 +5472,18 @@ void ScribbleArea::drawScreen(Painter* painter, const Rect& dirty)
     SvgPainter(painter).drawNode(scribbleDoc->strokeBuilder->getElement()->node);
     painter->restore();
   }
-  // currStroke is used for Add Bookmark and for the in-progress drag-gesture shape
-  if(currStroke)
-    SvgPainter(painter).drawNode(currStroke->node);
-  if(shapeInProgress)
-    SvgPainter(painter).drawNode(shapeInProgress->node);
+  // currStroke is used for Add Bookmark and for the in-progress drag-gesture shape; a marker's shape
+  //  (Draw Lines highlighter) multiplies, and screens on dark paper like the stroke above
+  if(currStroke || shapeInProgress) {
+    painter->save();
+    if(Page* shapePage = page(currPageNum))
+      painter->setDarkBackdrop(Page::drawsDark(painter, shapePage->color()));
+    if(currStroke)
+      SvgPainter(painter).drawNode(currStroke->node);
+    if(shapeInProgress)
+      SvgPainter(painter).drawNode(shapeInProgress->node);
+    painter->restore();
+  }
   if(regionInProgress)
     SvgPainter(painter).drawNode(regionInProgress->node);
   drawRegionButtons(painter);

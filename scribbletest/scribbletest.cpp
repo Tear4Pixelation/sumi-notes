@@ -2710,6 +2710,12 @@ int ScribbleTest::drawLinesTest()
   }
   check(page->strokeCount() == 2 && firstElement && firstElement->isShape()
       && firstElement->node->getFloatAttr("stroke-width") == 12, "a Draw Lines highlighter line goes under the ink");
+  // ...and multiplies like a freehand marker stroke, or it covers a PDF page's text (the ruleNode image)
+  check(firstElement && firstElement->node->getIntAttr("comp-op", Painter::CompOp_SrcOver) == Painter::CompOp_Multiply,
+      "a Draw Lines highlighter line multiplies");
+  // a plain pen's line does not
+  Element* plainLine = lastElement();
+  check(plainLine && plainLine != firstElement && !plainLine->node->getAttr("comp-op"), "a Draw Lines pen line does not multiply");
 
   scribbleDoc->clearSelection();
   scribbleMode->shapeFlags = 0;
