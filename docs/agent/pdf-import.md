@@ -237,6 +237,14 @@ remaining time is longer than that. Interleaved runs measured that fling metric 
 noise: base p95 median 121 ms, new 148 ms, both ranging 100-540 ms. Guessing the worker's speed before its
 first decode had been timed made it worse, because the abandoned decode keeps the CPU busy.
 
+## Highlighting the printed text
+
+The page image is in the `ruleNode`, so every element - a marker included - is drawn **above** it.
+A marker does not try to get under it; it **multiplies** (`comp-op="multiply"`), which leaves the
+printed text black and tints only the white page. Why multiply rather than a different draw order,
+and every path that must set it (freehand marker, Draw Lines highlighter, hold-to-snap shape), is in
+[pen-and-tools.md](pen-and-tools.md#marker-multiplies-text-stays-dark).
+
 ## Insert PDF (into the open document)
 
 Document menu > **Insert PDF...** (all platforms; disabled when read-only in sync or without PDF support) adds
