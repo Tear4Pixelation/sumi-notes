@@ -3941,6 +3941,31 @@ void ScribbleApp::sendPageImage()
   sendFile(_("See attached image"), pngfile);
 }
 
+void ScribbleApp::shareImage(const Image& image, const std::string& name)
+{
+#if PLATFORM_MOBILE || PLATFORM_EMSCRIPTEN
+  std::string pngfile = FSPath(tempPath).childPath(name + ".png");
+  if(!writePng(image, pngfile)) {
+    messageBox(Error, _("Share"), _("Error saving image."));
+    return;
+  }
+#if PLATFORM_EMSCRIPTEN
+  downloadFile(pngfile);
+#else
+  sendFile(_("See attached image"), pngfile);
+#endif
+#else
+  // no share sheet on desktop: save the PNG where the user chooses (the image is copied, as the dialog is async)
+  auto shared = std::make_shared<Image>(image.copy());
+  FilePicker::saveFile(_("Save Screenshot"), name + ".png", "png", [shared](const std::string& filename){
+    if(writePng(*shared, filename))
+      return true;
+    messageBox(Error, _("Save Screenshot"), _("Error saving image. Please try a different folder."));
+    return false;
+  });
+#endif
+}
+
 void ScribbleApp::sendPDF()
 {
   std::string basename = activeDoc()->fileName()[0] ?

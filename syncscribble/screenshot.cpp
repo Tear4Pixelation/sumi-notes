@@ -510,9 +510,12 @@ void ImageCropDialog::build(bool screenshot, bool hasBackground, const CropShape
     copyBtn->onClicked = [this](){ choice = CHOICE_COPY; finish(ACCEPTED); };
     Button* addBtn = createPushbutton(_("Add to page"));
     addBtn->onClicked = [this](){ choice = CHOICE_ADD; finish(ACCEPTED); };
+    Button* shareBtn = createPushbutton(_("Share"));
+    shareBtn->onClicked = [this](){ choice = CHOICE_SHARE; finish(ACCEPTED); };
     acceptBtn = addBtn;  // Enter adds; Esc cancels
     addBtn->setMargins(0, 0, 0, BUTTON_SPACING);
-    acceptButtons = {copyBtn, addBtn};
+    shareBtn->setMargins(0, 0, 0, BUTTON_SPACING);
+    acceptButtons = {copyBtn, shareBtn, addBtn};
   }
   else {
     Button* applyBtn = createPushbutton(_("Apply"));

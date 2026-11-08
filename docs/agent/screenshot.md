@@ -22,10 +22,22 @@ an image. Made for copying an exercise off a worksheet onto the page you are wor
    page right away gives exactly what was selected, and dragging a handle outwards takes in the
    surroundings (a heading above an exercise, a figure beside it). The scale is worked out for the wider
    region, so a large selection loses a little resolution to the margin (`SHOT_MAX_DIM` caps the long side).
-5. **The dialog** (below). Copy -> app clipboard as one `SvgImage` element at its real size and original
+5. **The dialog** (below). Share -> `ScribbleApp::shareImage()`, see Share below. Copy -> app clipboard as one `SvgImage` element at its real size and original
    position, so Paste in another page lands where it was. Add to page -> pasted at the middle of the view,
    selected. Either way the whole capture goes along as the image's kept original (see below), so Edit
    image can still widen it later.
+
+## Share
+
+Header button **Share** (`CHOICE_SHARE`, between Copy and Add to page, text only like its neighbours) shares the
+cropped result as a PNG and adds nothing to the document, so it skips the kept-original and paste steps in
+`captureScreenshot()`. `ScribbleApp::shareImage(image, name)` reuses the page-image export plumbing:
+- Android / iOS: PNG written to `tempPath`, then `sendFile()` (`AndroidHelper::sendFile` ACTION_SEND through
+  the FileProvider, `iosSendFile` UIActivityViewController) - the same path as Share page image.
+- wasm: `downloadFile()` (browser download).
+- Linux / Windows / macOS (no share sheet): `FilePicker::saveFile` "Save Screenshot" with `Screenshot.png`
+  suggested; the image is copied into a `shared_ptr` since the dialog is async.
+The file is always PNG (a plain rectangle crop of the render is PNG too, there is no JPEG source).
 
 ## The dialog (`ImageCropDialog`)
 
@@ -33,7 +45,7 @@ One class, two constructors: a screenshot (`RenderFn`, layer checkboxes, Copy / 
 an image (its original pixels and current shape, Apply). Everything else - the crop widget, the shape bar,
 the header row - is shared, not copied.
 
-- **Header row** built in the body: X (cancel) and the title top left, the choices top right. The popup
+- **Header row** built in the body: X (cancel) and the title top left, the choices (Copy, Share, Add to page) top right. The popup
   dialog's own button row and title are hidden, and its vertical padding trimmed to `HEADER_PADDING`. The
   pushbuttons get `box-anchor="vfill"`: `#pushbutton` is `fill`, which in a row makes them share the free
   width with the stretch and look over-padded. Enter = Add to page / Apply, Esc = cancel. The choice
@@ -156,6 +168,9 @@ from the floating-bar variables. Only the white behind the image is fixed, as it
   close before the camera button's action runs.
 - **Edit re-checks the selection after the dialog** (`selectedImage() != target`): the dialog pumps
   events, and sync or another view could have taken the image away meanwhile.
+- Share on desktop needs the xdg portal (or zenity); the nested agent-display session has no portal, so the
+  Save dialog does not appear there ("File chooser portal unavailable" in the session log). Android and iOS
+  share paths were not run.
 - A debug build quits on an Esc nothing else handles (`SCRIBBLE_DEBUG` in `keyPressEvent`) - not a crash.
 - **Driving it in agent-display**: run with `-- --historyHintDone=1`. The history hint is an arrow popup
   that comes back with new history and swallows the next canvas press as an outside press, so lasso and

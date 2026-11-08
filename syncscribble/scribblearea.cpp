@@ -2772,6 +2772,10 @@ void ScribbleArea::captureScreenshot()
   Image shot = dialog.takeCropped(&crop);
   if(shot.width <= 0 || shot.height <= 0)
     return;
+  if(dialog.choice == ImageCropDialog::CHOICE_SHARE) {
+    app->shareImage(shot, "Screenshot");  // the PNG only; nothing is added to the document
+    return;
+  }
   // at its real size: the crop in page units, where it was on the source page
   Rect bbox = Rect::ltwh(region.left + crop.left/scale, region.top + crop.top/scale,
       crop.width()/scale, crop.height()/scale);

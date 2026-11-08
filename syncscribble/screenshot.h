@@ -55,7 +55,7 @@ class Slider;
 class ImageCropDialog : public PopupDialog
 {
 public:
-  enum Choice { CHOICE_NONE, CHOICE_COPY, CHOICE_ADD, CHOICE_APPLY };
+  enum Choice { CHOICE_NONE, CHOICE_COPY, CHOICE_ADD, CHOICE_SHARE, CHOICE_APPLY };
   // renders the region with the given ScreenshotLayers; called again whenever a checkbox changes, always
   //  at the same size, so the crop carries over
   typedef std::function<Image(int layers)> RenderFn;

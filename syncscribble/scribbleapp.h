@@ -67,6 +67,8 @@ public:
   bool doSaveAs();
   bool openHelp();
   void sendPageImage();
+  // share an image as a PNG: share sheet on mobile, download in the browser, Save As dialog on desktop
+  void shareImage(const Image& image, const std::string& name);
   void sendPDF();
   void sendDocument();
   void about();

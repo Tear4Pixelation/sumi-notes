@@ -13,6 +13,8 @@
   <string name="menu_smart_scale">Resize Handwriting</string>
   <string name="smart_scale_tip">Drag the round handle to resize the handwriting on its lines</string>
   <string name="screenshot_add_to_page">Add to page</string>
+  <string name="screenshot_share">Share</string>
+  <string name="screenshot_save_title">Save Screenshot</string>
   <string name="screenshot_background">PDF / image background</string>
   <string name="screenshot_annotations">Annotations</string>
   <string name="screenshot_keep_white">Keep white</string>
