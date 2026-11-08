@@ -945,3 +945,37 @@ Result recognize(const std::vector<Vec2>& stroke, const Params& params)
 }
 
 }  // namespace shaperec
+
+namespace shaperec {
+
+Params looseHoldParams()
+{
+  Params params;
+  // line: a stroke swung from the wrist or drawn quickly can bow a quarter of its length
+  params.lineMaxRms = 0.11;
+  params.lineMaxDev = 0.28;
+  params.lineMinStraightness = 0.6;
+  // closed shapes: stops well short of closing, bowed sides, rounded or missed corners
+  params.maxClosureGap = 0.55;
+  params.closedMaxErr = 0.2;
+  params.cornerMinTurnDeg = 30;
+  params.coarseCornerMinTurnDeg = 28;
+  params.rectMaxSideSkewDeg = 45;
+  params.minCornerAngleDeg = 18;
+  params.ellipseMaxStraightFrac = 0.7;
+  return params;
+}
+
+Result recognizeHold(const std::vector<Vec2>& stroke)
+{
+  Result strict = recognize(stroke);
+  if(strict.kind != Kind::None)
+    return strict;
+  Result loose = recognize(stroke, looseHoldParams());
+  if(loose.kind == Kind::None)
+    return strict;  // the strict reasons are the ones worth reading
+  loose.reason = "hold, loose: " + loose.reason;
+  return loose;
+}
+
+}  // namespace shaperec

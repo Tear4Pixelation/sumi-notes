@@ -193,6 +193,21 @@ arcs, wide zigzags, sloppier closed shapes) is the one that found the recognizer
 bowed over 10% of its length, a circle stopping 55 degrees short and any zigzag leaning past 45 degrees
 were all refused. 240 Hz sampling by itself cost nothing.
 
+- **The hold is eager about shapes: a loose second pass.** The hold runs `recognizeHold()`: `recognize()`
+  with the usual tolerances first (a stroke it takes is never altered), and only if that finds nothing,
+  `recognize(looseHoldParams())`. Holding is an explicit "snap this", so the best fit wins over strict
+  tolerances. Changed (strict -> loose): `lineMaxRms` 0.05 -> 0.11, `lineMaxDev` 0.13 -> 0.28,
+  `lineMinStraightness` 0.8 -> 0.6 (a line with a sagitta of 25% of its length snaps), `maxClosureGap`
+  0.25 -> 0.55 (a circle stopping ~125 degrees short), `closedMaxErr` 0.09 -> 0.2, `cornerMinTurnDeg`
+  45 -> 30, `coarseCornerMinTurnDeg` 40 -> 28, `rectMaxSideSkewDeg` 30 -> 45, `minCornerAngleDeg`
+  25 -> 18, `ellipseMaxStraightFrac` 0.5 -> 0.7. Scratch-out params are untouched in both passes (scribble is
+  tested first, so a scribble is never reclassified as a shape), `liftParams()` and the pen-lift scratch-out
+  are unchanged, and only the hold calls `recognizeHold()`. Cost: the "other" class (spirals, wanders,
+  stars) now snaps to a shape ~65% of the time (was ~45%), not gated; still left as ink are strokes with a gap
+  past 0.55 (a C or semicircle), non-closing wanders and scribbles that fail every fit. The lab's
+  `evaluate` has a "Sloppy strokes" block (bowed lines, open circles, a bowed open rectangle) asserting
+  strict `recognize()` refuses each and `recognizeHold()` snaps it - keep them failing against strict.
+
 - **A scratch-out's scrub axis has a fallback.** The mean chord direction is wrong for a wide zigzag
   (half of a line scratched out at speed), so when it fails other axes are tried - but the mean always
   goes first, and a fallback axis must carry 40% of the motion, or the wobble across a plain line reads

@@ -151,5 +151,11 @@ Result recognizeScribble(const std::vector<Vec2>& stroke, const Params& params =
 //  1 careful, 2 normal (anything else: normal).  Both need longer scratch-outs than the hold - a short
 //  one of four passes is what holding is for
 Params liftParams(int level);
+// The hold's second chance: much looser line / closed-shape tolerances, same scratch-out rules.  Holding
+//  is an explicit request to snap, so a sloppy stroke should become its best-fitting shape.
+Params looseHoldParams();
+// What the hold runs: recognize() with the usual tolerances, and only if that finds nothing,
+//  again with looseHoldParams().  A stroke the strict pass takes is never changed by the loose one.
+Result recognizeHold(const std::vector<Vec2>& stroke);
 
 }  // namespace shaperec

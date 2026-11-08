@@ -191,7 +191,7 @@ Outcome evaluateOne(const TestStroke& stroke)
 {
   Outcome out;
   out.stroke = &stroke;
-  out.result = shaperec::recognize(stroke.points);
+  out.result = shaperec::recognizeHold(stroke.points);
   out.correct = out.result.kind == expectedKind(stroke.label);
   if(out.correct && stroke.label == "circle")
     out.correct = out.result.circle;
@@ -481,6 +481,63 @@ figcaption { font-size:11px; color:var(--muted); overflow-wrap:anywhere; } figca
 
 }  // namespace
 
+// Sloppy strokes for the hold's loose second pass (shaperec::looseHoldParams).  Built deterministically
+//  from parametric paths with smooth wobble; each must be refused by recognize() (that is what makes
+//  them a test of the loose pass) and become the intended shape under recognizeHold().
+constexpr double PI = 3.14159265358979323846;
+struct SloppyCase { const char* name; Kind expected; std::vector<Vec2> points; };
+
+std::vector<SloppyCase> sloppyCases()
+{
+  std::vector<SloppyCase> cases;
+  std::mt19937 rng(7);
+  std::uniform_real_distribution<double> unit(-1, 1);
+  auto wobble = [&](double amp) { return amp*unit(rng); };
+  auto holdAtEnd = [&](std::vector<Vec2>& pts) {
+    for(int i = 0; i < 20; ++i)
+      pts.push_back(pts.back() + Vec2(wobble(0.3), wobble(0.3)));
+  };
+  // line bowed by `bow` of its length
+  for(double bow : {0.2, 0.25}) {
+    std::vector<Vec2> pts;
+    for(int i = 0; i <= 60; ++i) {
+      double t = i/60.0;
+      pts.push_back(Vec2(200*t, -bow*200*std::sin(PI*t) + wobble(0.8)));
+    }
+    holdAtEnd(pts);
+    cases.push_back({bow > 0.22 ? "line sagitta 25%" : "line sagitta 20%", Kind::Line, pts});
+  }
+  // circle that stops short by gapDeg, with a lumpy radius
+  for(double gapDeg : {110.0, 125.0}) {
+    std::vector<Vec2> pts;
+    double sweep = 2*PI - gapDeg*PI/180;
+    for(int i = 0; i <= 80; ++i) {
+      double angle = sweep*i/80;
+      double lump = 1 + 0.08*std::sin(3*angle + 1) + wobble(0.01);
+      pts.push_back(Vec2(50*lump*std::cos(angle), 50*lump*std::sin(angle)));
+    }
+    holdAtEnd(pts);
+    cases.push_back({gapDeg > 120 ? "circle open 125deg" : "circle open 110deg", Kind::Ellipse, pts});
+  }
+  // rectangle in one go: bowed sides, last side stops halfway
+  {
+    std::vector<Vec2> corners = {Vec2(0, 0), Vec2(120, 6), Vec2(116, 80), Vec2(-4, 74)};
+    std::vector<Vec2> pts;
+    for(int side = 0; side < 4; ++side) {
+      Vec2 from = corners[side], to = corners[(side + 1)%4];
+      Vec2 normal = (to - from).perp().normalized();
+      int steps = side == 3 ? 9 : 24;
+      for(int i = 0; i < steps; ++i) {
+        double t = i/24.0;
+        pts.push_back(from + (to - from)*t + normal*(22*std::sin(PI*t)) + Vec2(wobble(0.8), wobble(0.8)));
+      }
+    }
+    holdAtEnd(pts);
+    cases.push_back({"rectangle bowed, open corner", Kind::Quad, pts});
+  }
+  return cases;
+}
+
 int main(int argc, char* argv[])
 {
   int count = 1000;
@@ -591,6 +648,17 @@ int main(int argc, char* argv[])
         pass = false;
       }
     }
+  }
+
+  printf("\nSloppy strokes (hold only: refused by recognize(), snapped by recognizeHold())\n");
+  for(const SloppyCase& sloppy : sloppyCases()) {
+    Kind strict = shaperec::recognize(sloppy.points).kind;
+    shaperec::Result holdResult = shaperec::recognizeHold(sloppy.points);
+    Kind hold = holdResult.kind;
+    if(hold != sloppy.expected) printf("    %s\n", holdResult.reason.c_str());
+    bool ok = strict == Kind::None && hold == sloppy.expected;
+    printf("  %-30s strict %-8s hold %-8s%s\n", sloppy.name, kindName(strict), kindName(hold), ok ? "" : "  FAIL");
+    pass = pass && ok;
   }
 
   writeReport(reportPath, {{"Recorded strokes", &recordedOut}, {"Synthetic strokes", &synthOut},

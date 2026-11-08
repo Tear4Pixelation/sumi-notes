@@ -1773,7 +1773,7 @@ bool ScribbleArea::snapStroke()
   stroke.reserve(snapSamples.size());
   for(const Point& pt : snapSamples)
     stroke.emplace_back(pt.x*mScale, pt.y*mScale);
-  shaperec::Result result = shaperec::recognize(stroke);
+  shaperec::Result result = shaperec::recognizeHold(stroke);
   if(cfg->Int("recordShapeStrokes") && !ScribbleApp::app->libraryRoot.empty()) {
     // the lab's .strokes format (labs/shape-recognition/strokefile.h); the label is left for a person to
     //  fill in with what was meant, the comment says what the recognizer made of it
