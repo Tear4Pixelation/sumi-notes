@@ -40,6 +40,7 @@ public:
   // a pen stays as the user set it (docs/agent/pen-storage.md): widths exact through tool and tab switches,
   //  rulings, selections, restarts and a toggle flipped back; swatches as theme slots across tab switches
   int penPersistTest();
+  int penStartupTest();
   int outlineTest();
   // Edit image: shaped crop, the kept original through save and load, one undo step (screenshot.md)
   int imageCropTest();

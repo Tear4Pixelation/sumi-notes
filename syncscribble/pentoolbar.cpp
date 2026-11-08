@@ -1528,24 +1528,23 @@ Dim PenToolbar::presetWidth(size_t idx) const {
 
 // A preset list's numbers mean nothing without its unit, so the list carries one (WidthPresets).  Lists
 //  start empty and are seeded here, once the tool is in hand and its unit is known: a fixed default in
-//  the config could only be in one unit.  In PEN_MODE the list is kept in the pen's unit, converted
-//  (never reinterpreted) when they differ - a config whose list and pen were saved in different units, say.
-//  A selection or a bookmark leaves the list alone and reads it through presetWidth() instead, since
-//  its pen is absolute whatever the draw pen is.
+//  the config could only be in one unit.  Only the Relative size toggle converts a list
+//  (setRelativeWidth()); a list in another unit than the pen shown - in any mode - is left as it is and
+//  read through presetWidth(), which resolves it against the current line height without writing it.
+//  Converting it in place here was a round trip through two line heights: at start-up the toolbar was
+//  shown a placeholder absolute pen, the relative list went into units at the untitled page's line
+//  height and came back at the reopened document's, a few percent off each start (pen-storage.md).
 bool PenToolbar::prepareWidths() {
   WidthPresets &presets = activePresets();
   Dim lh = lineHeight();
   bool changed = false;
   if (presets.unit == WidthPresets::UNIT_UNKNOWN) {
-    // a list saved before the unit was: the pairing the old code assumed, with that tool's own pen
+    // a list saved before the unit was: the pairing the old code assumed, with that tool's own pen (the
+    //  stored one, not whatever the toolbar is showing).  Only the unit is set; no number changes.
     ScribbleMode *scribbleMode = ScribbleApp::app ? ScribbleApp::app->scribbleMode : NULL;
-    bool toolRelative = mode == PEN_MODE ? relativeWidths()
-        : (scribbleMode && scribbleMode->penForDrawTool(widthsTool).hasFlag(ScribblePen::WIDTH_RELATIVE));
+    bool toolRelative = scribbleMode ? scribbleMode->penForDrawTool(widthsTool).hasFlag(ScribblePen::WIDTH_RELATIVE)
+        : (mode == PEN_MODE && relativeWidths());
     presets.convertTo(toolRelative, lh);
-    changed = true;
-  }
-  if (mode == PEN_MODE && presets.isRelative() != relativeWidths()) {
-    presets.convertTo(relativeWidths(), lh);
     changed = true;
   }
   bool marker = widthsTool == ScribbleMode::DRAWTOOL_HIGHLIGHT;

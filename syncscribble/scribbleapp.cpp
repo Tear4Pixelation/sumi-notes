@@ -307,11 +307,14 @@ void ScribbleApp::init()
   overlayWidget = win->overlayWidget;
 
   loadConfig();
+  // restore the pen of the last used draw tool - before newDocument(), whose refreshUI() shows the pen
+  //  toolbar the pen: it was shown the member's placeholder {black, 1}, absolute, and with a relative
+  //  tool that rewrote the tool's presets into units at the untitled page's line height, to be converted
+  //  back at the line height of the document opened next (docs/agent/pen-storage.md, "start-up")
+  currPen = scribbleMode->currDrawPen();
   // newDocument results in a call to refreshUI(), so all UI components have to be initialized!
   doc->newDocument();
 
-  // restore the pen of the last used draw tool
-  currPen = scribbleMode->currDrawPen();
   bookmarkColor = Color::fromArgb(cfg->Int("bookmarkColor"));
 
   const char* recentDocsStr = cfg->String("recentDocs");
