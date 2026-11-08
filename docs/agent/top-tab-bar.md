@@ -63,6 +63,14 @@ icons 33/42 -> 21.7/27.6. Everything below is the board's value; multiply by `s`
   and its mirror item in the overflow menu is never shown. The sidebar's Tabs view leaves its selector
   (`Sidebar::setTabsViewAvailable`), falling back to the outline **without storing it**, so turning the
   bar off brings Tabs back.
+- **The title button (app icon + document name) is hidden in mode 2** (`applyTopBarMode`): the active tab
+  names the document and home is the way back to All Documents. It and the divider after it
+  (`titleSeparator`) get `topbar-moved` like the buttons above, so auto-adjust leaves them hidden; modes 0 and 1
+  show them as before. What it did: click = library (home does it), long press / right click = Recent Documents
+  (`menuRecent_Files`, reparented onto home's button in mode 2, back on the title button otherwise; home
+  has the long-press handler), icon swaps to a cloud while a whiteboard syncs (**lost in mode 2**; the
+  overflow menu's Whiteboard item still shows the sync state). Narrow/vertical toolbar: same hiding. Not run on
+  a phone-size window; Recent Documents long press not exercised (the fixture had no recents).
 - **The overflow popup is one widget that moves** (`hostOverflowPopup`): it holds the auto-adjust mirror
   items, and an ArrowPopup is positioned relative to its parent, so a press on either host button
   reparents it there first. View popups are cheap, so each button gets its own (`createViewPopup`).
