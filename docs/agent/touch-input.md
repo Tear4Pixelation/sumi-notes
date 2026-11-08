@@ -74,6 +74,18 @@ Not offered when the touch tool draws (no pan, no `doTouchTap`). The button is `
 Pinned by `tapPasteTest` (arming, second press, pen and pan after the tap, two finger tap, pen tap, paste
 position). Gotcha: timestamps have millisecond resolution, so test steps need a few ms between them.
 
+### The paste popup reopened when a finger press elsewhere closed it
+
+The popup is a modal menu. A finger press outside it reaches the popup's `OUTSIDE_MODAL` handler
+(`SvgGui::sdlEvent`), which closed it but returned false, so the same press went on to the canvas; its tap
+(`doTouchTap` -> `scheduleTapPaste`) then offered Paste again 560 ms later. (`OUTSIDE_PRESSED` is only for a
+popup that holds `pressedWidget`, so it never fired here.) Now, with only Paste showing (`selPasteBtn`
+visible), a *finger* press (not pen) outside returns true: the popup closes and the press is consumed - the
+finger up is dropped by SvgGui (no `pressedWidget`). The pen still draws through it and the full selection
+popup still lets the press through. Pinned by `tapPasteTest` (sends `OUTSIDE_MODAL` to `selPopup`), which
+failed on the old handler. Worktree note: submodule dirs are empty in a fresh worktree; copy them from the
+main checkout (and delete their `.git` files) to build.
+
 ## Not changed - hypotheses for the device
 
 Each of these is real code behaviour, but whether it is what the user hits needs the iPad. None was changed.
