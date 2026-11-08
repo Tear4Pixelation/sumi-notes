@@ -7,7 +7,6 @@
 #include "mainwindow.h"
 #include "scribblewidget.h"
 #include "strokebuilder.h"
-#include "bookmarkview.h"
 #include "shaperec.h"
 #include <fstream>
 
@@ -2041,15 +2040,6 @@ void ScribbleArea::groupStrokes(Element* b)
         // special handling needed for whiteboarding since we are making a change outside the undo system
         scribbleDoc->strokesUpdated(recentStrokes);
       }
-      // check for strokes in margin
-      if(cfg->Int("bookmarkMode") == BookmarkView::MARGIN_CONTENT) {
-        for(Element* s : recentStrokes) {
-          if(s->bbox().right < currPage->marginLeft()) {
-            scribbleDoc->document->bookmarksDirty = true;
-            break;
-          }
-        }
-      }
       // all done!
       recentStrokes.clear();
       strokeGroupYCenter = 0;
@@ -2299,6 +2289,12 @@ void ScribbleArea::doDblClickAction(Point pos)
 
 bool ScribbleArea::viewHref(const char* href)
 {
+  // a page (anchor or number) rather than an element on one (docs/agent/links.md)
+  int pagetarget = scribbleDoc->document->findPageTarget(href);
+  if(pagetarget >= 0) {
+    jumpToPage(pagetarget);
+    return true;
+  }
   int targetpagenum = currPageNum;  // search is done backwards from this page
   SvgNode* n = scribbleDoc->document->findNamedNode(href, &targetpagenum);
   if(!n)
@@ -2330,7 +2326,7 @@ bool ScribbleArea::doClickAction(Point pos)
     return true;
   }
   const char* href = page(pagenum)->getHyperRef(dimToPageDim(gpos));
-  // check for bookmark link
+  // "#..." is within this document: a page anchor, a page number or (older documents) a bookmark's id
   if(!href || !href[0]) {}
   else if(href[0] == '#')
     viewHref(href);
@@ -2481,13 +2477,25 @@ void ScribbleArea::pasteAtTap()
 // consolidated fn for setting properties of current selection, including hyperref and bookmark creation
 // initial motivation was to ensure only one undo item was created; also reduces code duplication
 void ScribbleArea::setSelProperties(const StrokeProperties* props, const char* target, Element* bkmktarget,
-    const char* idstr, bool forcenormal)
+    const char* idstr, bool forcenormal, Page* anchorpage)
 {
   doCancelAction();
   if(!currSelection)
     return;
   viewSelection();
   scribbleDoc->startAction(currPageNum);
+
+  // a link to a page names the page's anchor; the first link to a page assigns it, in this same undo step
+  std::string anchorhref;
+  if(anchorpage && !target && !bkmktarget && anchorpage->ensureLoaded()) {
+    if(anchorpage->anchorId.empty()) {
+      if(scribbleDoc->history->undoable())
+        scribbleDoc->history->addItem(new PageAnchorItem(anchorpage));  // records the previous (no) anchor
+      anchorpage->setAnchorId(("pg-" + randomStr(10)).c_str());
+    }
+    anchorhref = "#" + anchorpage->anchorId;
+    target = anchorhref.c_str();
+  }
 
   if(props && (props->color != Color::INVALID_COLOR || props->width > 0))
     currSelection->setStrokeProperties(*props);

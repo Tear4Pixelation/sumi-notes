@@ -85,7 +85,6 @@ public:
   // bring the tagged pages' thumbnails up to date and write the summary into cfg's "pagetags"
   static void updatePageTagSummary(Document* doc, ScribbleConfig* docCfg);
   static Image extractPageThumbnail(const char* filename, int pagenum);
-  void bookmarkHit(int pagenum, Element* bookmark);
   // show the top of a page in the active view (a page card in the document browser)
   void gotoPage(int pagenum);
   void jumpToPage(int pagenum);  // recorded in jumpHistory, for outline, pages view, page cards, last page

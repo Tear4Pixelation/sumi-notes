@@ -525,8 +525,6 @@ void ScribbleDoc::newDocument()
   //fileName = "";
   fileLastMod = 0;
   uiChanged(UIState::SetDoc);
-  document->bookmarksDirty = false;
-  app->repaintBookmarks(true);
   doRefresh();
 }
 
@@ -686,8 +684,6 @@ Document::loadresult_t ScribbleDoc::openDocument(IOStream* strm, bool delayload)
   if(res == Document::LOAD_OK && scribbleMode)
     UndoPersist::restore(this);
   uiChanged(UIState::SetDoc);
-  document->bookmarksDirty = false;
-  app->repaintBookmarks(true);
   doRefresh();
 #if !PLATFORM_IOS
   fileLastMod = getFileMTime(fileName());
@@ -813,7 +809,6 @@ void ScribbleDoc::undoRedoUpdate(int pagenum, int prevpages, bool viewdirty)
   if(prevpages != npages || pagenum < 0 || pagenum >= npages) {
     // try to restore each area's position
     pageCountChanged(pagenum, prevpages);
-    document->bookmarksDirty = true;
     if(viewdirty && pagenum >= 0) {
       if(pagenum < npages) {
         // page removed - show top of next page ... do this for page added too
@@ -831,7 +826,6 @@ void ScribbleDoc::undoRedoUpdate(int pagenum, int prevpages, bool viewdirty)
     pagedirty = page->rect();
   else if(pagedirty.contains(page->rect())) {
     pageSizeChanged();
-    document->bookmarksDirty = true;
   }
   for(size_t ii = 0; ii < nViews; ++ii) {
     if(multipage)
@@ -969,7 +963,6 @@ bool ScribbleDoc::convertToSubpage(int pagenum, const PageProperties& props)
   endAction();
   if(pagenum >= document->numPages() - 1)
     updateGhostPage();
-  document->bookmarksDirty = true;
   pageCountChanged(pagenum, document->numPages());
   activeArea->gotoPage(pagenum);
   uiChanged(UIState::InsertPage);
@@ -1020,7 +1013,6 @@ void ScribbleDoc::deletePages()
   endAction();
   if(where >= document->numPages())
     updateGhostPage();
-  document->bookmarksDirty = true;  // deleted page may have contained bookmarks
   pageCountChanged(where, prevpages);  // this will set curr page to "where"
   // restore view position
   // what if no deleted pages were visible initially? ... difficult to determine if this is the case
@@ -1046,11 +1038,14 @@ void ScribbleDoc::pastePages(Clipboard* clipboard, int where)
     Page* p = new Page;
     if(n->type() == SvgNode::DOC)
       p->loadSVG(static_cast<SvgDocument*>(n->clone()));
+    // a copy of a page must not take over the original's link anchor (docs/agent/links.md); not yet in
+    //  the document, so this needs no undo
+    if(!p->anchorId.empty() && document->findPageTarget(p->anchorId.c_str()) >= 0)
+      p->setAnchorId("");
     document->insertPage(p, where++);
   }
   endAction();
   updateGhostPage();
-  document->bookmarksDirty = true;
   pageCountChanged(where - numpaste, prevpages);
 
   activeArea->gotoPos(prevpospage->getPageNum(), prevpos.pos, false);
@@ -1506,7 +1501,6 @@ bool ScribbleDoc::nestOutlineEntry(int srcpage, int parentpage)
   endAction();
 
   if(movepages) {
-    document->bookmarksDirty = true;
     pageCountChanged(std::min(firstpage, dest), document->numPages());
     activeArea->gotoPage(dest);
     uiChanged(UIState::InsertPage);
@@ -1570,7 +1564,6 @@ bool ScribbleDoc::movePages(std::vector<int> pages, int after, int* destOut)
 
   // the ghost page copies the last page's custom ruling, and the last page may be another one now
   updateGhostPage();
-  document->bookmarksDirty = true;
   pageCountChanged(firstchanged, npages);
   activeArea->gotoPage(dest);
   uiChanged(UIState::MovePage);
@@ -1640,9 +1633,14 @@ bool ScribbleDoc::savePagesCopy(const std::vector<int>& pages, const char* path)
 
 void ScribbleDoc::openURL(const char* url)
 {
-  // address starting with a '.' (so '.' or '..') is assumed to point to a local file
-  if(url[0] == '.') {
-    FSPath urlfile = FSPath(fileName()).parent().child(url);
+  // address starting with a '.' (so '.' or '..') is assumed to point to a local file, relative to this
+  //  document; one starting with '/' (or file://) is a local file too - what a link into another document
+  //  is written as when this one has no folder to be relative to yet (docs/agent/links.md)
+  bool relative = url[0] == '.';
+  if(strncmp(url, "file://", 7) == 0 && url[7] == '/')
+    url += 7;
+  if(relative || url[0] == '/') {
+    FSPath urlfile = relative ? FSPath(fileName()).parent().child(url) : FSPath(url);
     std::string href;
     if(!urlfile.exists()) {
       size_t pnd = urlfile.path.find_last_of('#');
@@ -1653,8 +1651,14 @@ void ScribbleDoc::openURL(const char* url)
     }
     // assume link to local HTML file is a Write document
     // QProcess::startDetached(QApplication::applicationFilePath(), QStringList(filename));
-    if(urlfile.exists() && urlfile.extension() == cfg->String("docFileExt")) {
-      if(app->openDocument(canonicalPath(urlfile)) && !href.empty())
+    std::string ext = urlfile.extension();
+    if(urlfile.exists() && (ext == cfg->String("docFileExt") || ext == "svgz" || ext == "svg" || ext == "html")) {
+      // a link into this same document is just a jump
+      if(fileName()[0] && canonicalPath(urlfile) == canonicalPath(FSPath(fileName()))) {
+        if(!href.empty())
+          activeArea->viewHref(href.c_str());
+      }
+      else if(app->openDocument(canonicalPath(urlfile)) && !href.empty())
         app->activeArea()->viewHref(href.c_str());
     }
     else
@@ -1807,10 +1811,6 @@ void ScribbleDoc::doRefresh()
   for(ScribbleArea* view : views)
     view->reqRepaint();  // then update dirtyRectScreen for each view and set PIXELS_DIRTY if needed
 
-  if(document->bookmarksDirty) {
-    app->repaintBookmarks();
-    document->bookmarksDirty = false;
-  }
   if(uiDirty)
     app->refreshUI(this, uiDirty);
   uiDirty = 0;
@@ -1820,17 +1820,6 @@ void ScribbleDoc::uiChanged(int reason)
 {
   ASSERT((1 << reason) > 0 && "Too many UIChangeFlags values!");
   uiDirty |= (1 << reason);
-}
-
-void ScribbleDoc::bookmarkHit(int pagenum, Element* bookmark)
-{
-  Page* page = document->pages[pagenum];
-  Point cornerpos(bookmark->bbox().left - 5,
-      MIN(bookmark->bbox().top - 5, page->getYforLine(page->getLine(bookmark))));
-
-  activeArea->doGotoPos(pagenum, cornerpos, false);
-  if(cfg->Bool("autoHideBookmarks"))
-    app->hideBookmarks();
 }
 
 int ScribbleDoc::getScribbleMode(int modemod)

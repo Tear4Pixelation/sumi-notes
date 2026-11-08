@@ -64,10 +64,14 @@ public:
   int getCurrPageNum() const { return currPageNum; }
   void createHyperRef(Element* b, const StrokeProperties* props = NULL) { setSelProperties(props, NULL, b); }
   void createHyperRef(const char* target, const StrokeProperties* props = NULL) { setSelProperties(props, target); }
+  // link to a page of this document by its anchor, which is assigned in the same undo step if the page
+  //  has none yet (docs/agent/links.md)
+  void createPageLink(Page* targetpage, const StrokeProperties* props = NULL)
+      { setSelProperties(props, NULL, NULL, NULL, false, targetpage); }
   const char* getHyperRef() const;
   const char* getIdStr() const;
   void setSelProperties(const StrokeProperties* props, const char* target = NULL,
-      Element* bkmktarget = NULL, const char* idstr = NULL, bool forcenormal = false);
+      Element* bkmktarget = NULL, const char* idstr = NULL, bool forcenormal = false, Page* anchorpage = NULL);
   // returns where the image went, in document coordinates; passing that back as `below` places the next
   //  image underneath it rather than on top of it (scanning several pages with Add more)
   void insertImage(Image image, Dim fitWidth = 0, Dim fitHeight = 0);

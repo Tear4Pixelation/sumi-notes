@@ -2,7 +2,6 @@
 #define SCRIBBLETEST_H
 
 #include "scribbledoc.h"
-#include "bookmarkview.h"
 
 struct BenchRng;  // benchtest.cpp
 
@@ -11,7 +10,7 @@ class ScribbleTest
 friend class ScribbleApp;
 public:
   ScribbleTest(const std::string &path);
-  ScribbleTest(ScribbleDoc* sd, BookmarkView* bv, ScribbleMode* sm);
+  ScribbleTest(ScribbleDoc* sd, ScribbleMode* sm);
   ~ScribbleTest();
 
   void runAll(bool runsynctest = false);
@@ -41,6 +40,7 @@ public:
   //  rulings, selections, restarts and a toggle flipped back; swatches as theme slots across tab switches
   int penPersistTest();
   int outlineTest();
+  int linkTest();
   // Edit image: shaped crop, the kept original through save and load, one undo step (screenshot.md)
   int imageCropTest();
   int outlineNestTest();
@@ -155,7 +155,6 @@ private:
   ScribbleDoc* scribbleDoc;
   ScribbleArea* scribbleArea;
   ScribbleMode* scribbleMode;
-  BookmarkView* bookmarkArea;
   Image* screenImg;
   Painter* screenPaint;
   Rect screenRect;

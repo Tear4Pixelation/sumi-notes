@@ -70,7 +70,7 @@ cd sumi-notes/syncscribble && make mupdf-submodules
 - `scribblemode.cpp`/`.h`, `scribbleinput.cpp`/`.h`, `strokebuilder.cpp`/`.h` - pen/touch input handling and stroke construction
 - `syncundo.cpp`/`.h` - `UndoHistory`, undo/redo and the change representation shared with sync
 - `scribblesync.cpp`/`.h` - `ScribbleSync`, real-time document sync between clients (shared whiteboard) over a `syncServer`, built on `unet.h` and the undo history's change log
-- `selection.cpp`/`.h`, `documentlist.cpp`/`.h`, `bookmarkview.cpp`/`.h`, `clippingview.cpp`/`.h`, `pentoolbar.cpp`/`.h`, `configdialog.cpp`/`.h`, `rulingdialog.cpp`/`.h`, `linkdialog.cpp`/`.h`, `syncdialog.cpp`/`.h`, `scandialog.cpp`/`.h`, `touchwidgets.cpp`/`.h` - selection tool, document browser/bookmarks, and the various dialogs/toolbars, all built as ugui `Widget`/`Dialog` trees
+- `selection.cpp`/`.h`, `documentlist.cpp`/`.h`, `clippingview.cpp`/`.h`, `pentoolbar.cpp`/`.h`, `configdialog.cpp`/`.h`, `rulingdialog.cpp`/`.h`, `linkdialog.cpp`/`.h`, `syncdialog.cpp`/`.h`, `scandialog.cpp`/`.h`, `touchwidgets.cpp`/`.h` - selection tool, document browser, and the various dialogs/toolbars, all built as ugui `Widget`/`Dialog` trees
 - `mainwindow.cpp`/`.h` - top-level window assembly and menu/toolbar wiring
 - `resources.cpp`/`.h`, `res_ui.cpp` - embedded resources (icons, default theme SVG, strings)
 - Per-platform subdirs (`android/`, `ios/`, `linux/`, `macos/`, `windows/`, `wasm/`) - platform glue code and packaging
@@ -132,6 +132,7 @@ relevant file before changing that area.
 - [themes.md](docs/agent/themes.md) - palette generator (`cusp-walk-1` is FROZEN), theme storage, restyle, themed picker, `ThemeChangedItem`
 - [pinned-tags.md](docs/agent/pinned-tags.md) - library sidebar: pinned tags under All Documents, the tag menu's Pin / Active by Default items, config `pinnedTags`/`defaultTag`, how the default tag keeps its filter
 - [outlines.md](docs/agent/outlines.md) - per-page outline entries, `PageOutlineItem`, why no document-level index
+- [links.md](docs/agent/links.md) - bookmarks removed from the UI (old ones and `#b-` links still work, `MODE_BOOKMARK` kept only for fixtures); Create Link dialog (Outline / Page / URL); page anchors `#pg-` (`__pageid`, `PageAnchorItem` in the link's undo step), `<path>#page=N` into other documents, unchanged OK keeps the old href
 - [page-tags.md](docs/agent/page-tags.md) - tags on pages as `write-pagetag` elements, the toolbar tag button and placing tags on the pointer, to-do tags (ticked = page untagged), the `pagetags` summary and page thumbnails, page cards, inheritance and the blink
 - [layers.md](docs/agent/layers.md) - `__layer` tag not `<g>`, edit gate, lock semantics, `LayerTableItem`, sync of the table
 - [sidebar.md](docs/agent/sidebar.md) - outline/layers/pages/tabs sidebar, pinned vs floating, sizing traps, row drag (`rowdrag.cpp`)

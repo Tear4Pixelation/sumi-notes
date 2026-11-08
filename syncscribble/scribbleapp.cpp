@@ -8,7 +8,6 @@
 #include "scribbledoc.h"
 #include "scribblewidget.h"
 #include "scribblesync.h"
-#include "bookmarkview.h"
 #include "scribbleinput.h"
 #include "documentlist.h"
 #include "tagdoclist.h"
@@ -295,8 +294,6 @@ void ScribbleApp::init()
   scribbleAreas.push_back(mActiveArea);
   scribbleDocs.push_back(doc);
 
-  bookmarkArea = new BookmarkView(cfg, doc);  //bookmarkArea->setScribbleDoc(doc);
-
   // create UI elements
   win->setupUI(this);
   // add window to SvgGui
@@ -481,7 +478,6 @@ ScribbleApp::~ScribbleApp()
   gui->closeWindow(win);
   // TODO: should use unique_ptr for these ... but then we need a bunch of get()s
   delete documentList;
-  delete bookmarkArea;
   for(ScribbleDoc* doc : scribbleDocs)
     delete doc;
   // background tabs' documents are owned by their tabs
@@ -662,8 +658,6 @@ void ScribbleApp::setActiveArea(ScribbleArea* area)
     setWinTitle(area->scribbleDoc->fileName());  // refreshUI will take care of adding '*' if modified
   area->scribbleDoc->activeArea = area;
   mActiveArea = area;
-  if(activeDoc() != olddoc)
-    repaintBookmarks(true);
   gui->setFocused(area->widget);  // this will find the focusable ancestor
   refreshUI(activeDoc(), UIState::SetDoc);
 }
@@ -997,7 +991,6 @@ bool ScribbleApp::keyPressEvent(SDL_Event* event)
     break;
 #if PLATFORM_ANDROID
   case SDLK_AC_BACK:
-    // hide bookmarks if autohide enabled; otherwise, display document list
     // use Android 4.4 immersive mode instead of disabling back button
     if(cfg->Bool("backKeyEnabled")) {
       // back key press on android which is not accepted generates a close event; this seems to
@@ -1487,8 +1480,6 @@ void ScribbleApp::penChanged(int changed)
     if(newPen.width != pen.width || newPen.hasFlag(ScribblePen::WIDTH_RELATIVE) != pen.hasFlag(ScribblePen::WIDTH_RELATIVE))
       updatePenToolbar();
   }
-  else if(penToolbar->mode == PenToolbar::BOOKMARK_MODE)
-    bookmarkColor = pen.color;
   else if(penToolbar->mode == PenToolbar::SELECTION_MODE) {
     // A selection takes only its color, width and line style.  Anything else (a pen-only flag such as
     //  centre on line) is ignored - it once meant "Use as Pen" and wrote the selection into the draw pen,
@@ -1595,8 +1586,6 @@ void ScribbleApp::updatePenToolbar(bool forSelPopup)
     ScribblePen pen = activeArea()->getPenForSelection(&dashStyle);
     penToolbar->setPen(pen, PenToolbar::SELECTION_MODE, dashStyle);
   }
-  else if(scribbleMode->getMode() == MODE_BOOKMARK)
-    penToolbar->setPen(ScribblePen(bookmarkColor, -1), PenToolbar::BOOKMARK_MODE);
   else {
     ScribblePen shown = currPen;
     // the Tape tool's "no color picked" is the document theme's color
@@ -1717,15 +1706,6 @@ void ScribbleApp::refreshUI(ScribbleDoc* doc, int reason)
   win->refreshUI(doc, reason);
 }
 
-// newdoc means change of Document or of ScribbleDoc - in either case we want to reset scroll position
-void ScribbleApp::repaintBookmarks(bool newdoc)
-{
-  if(newdoc)
-    bookmarkArea->setScribbleDoc(activeDoc());  // use this to reset scroll position
-  if(win->actionShow_Bookmarks->checked())
-    bookmarkArea->repaintBookmarks();  // force refresh
-}
-
 void ScribbleApp::doCommand(int cmd)
 {
   activeDoc()->doCommand(cmd);
@@ -1755,12 +1735,6 @@ void ScribbleApp::setMode(int mode)
     }
   }
   win->updateMode();
-}
-
-void ScribbleApp::hideBookmarks()
-{
-  if(win->bookmarkPanel->isVisible())
-    win->toggleBookmarks();
 }
 
 void ScribbleApp::showSelToolbar(Point pos, bool pasteOnly)
@@ -2548,7 +2522,6 @@ bool ScribbleApp::doOpenDocument(IOStream* filestrm)
     ScribbleDoc* otherDoc = (activeDoc() == scribbleDocs[0]) ? scribbleDocs[1] : scribbleDocs[0];
     activeDoc()->removeArea(activeArea());
     otherDoc->addArea(activeArea()); // this makes otherDoc the active doc
-    repaintBookmarks(true);
     for(ScribbleArea* area : scribbleAreas) {
       if(area != activeArea())
         area->widget->fileNameLabel->setText(docShortName(area->scribbleDoc->fileName()).c_str());
@@ -2562,7 +2535,6 @@ bool ScribbleApp::doOpenDocument(IOStream* filestrm)
       activeDoc()->newDocument();  // close the doc being hidden!
       activeDoc()->removeArea(activeArea());
       otherDoc->addArea(activeArea()); // this makes otherDoc the active doc
-      repaintBookmarks(true);
       for(ScribbleArea* area : scribbleAreas)
         area->widget->fileNameLabel->setVisible(false);
       onLoadFile(activeDoc()->fileName());
@@ -2581,7 +2553,6 @@ bool ScribbleApp::doOpenDocument(IOStream* filestrm)
       rebuildShownDocs();  // deletes the failed one
       (void)failed;
       tabInsertAnchor = -1;
-      repaintBookmarks(true);
     }
     else
       rebuildShownDocs();
@@ -3565,8 +3536,12 @@ void ScribbleApp::writePDF(std::ostream& strm, const std::vector<int>& pages)
   // a link names its target by the document's page number, which is not the PDF's when only some pages
   //  are written; a link to a page left out goes nowhere
   pdf.resolveLink = [doc, pagenums](const char* href, int* pgnum) -> SvgNode* {
-    int docpage = doc->numPages() - 1;
-    SvgNode* target = doc->findNamedNode(href, &docpage);
+    int docpage = doc->findPageTarget(href);  // a page anchor targets the top of its page
+    SvgNode* target = docpage >= 0 ? doc->pages[docpage]->svgDoc.get() : NULL;
+    if(!target) {
+      docpage = doc->numPages() - 1;
+      target = doc->findNamedNode(href, &docpage);
+    }
     auto it = std::find(pagenums.begin(), pagenums.end(), docpage);
     if(!target || it == pagenums.end())
       return NULL;
@@ -3836,7 +3811,6 @@ void ScribbleApp::reloadConfig()
   loadConfig();
   for(ScribbleDoc* doc : scribbleDocs)
     doc->loadConfig(true);
-  bookmarkArea->loadConfig(cfg);
   // the topTabBar setting (docs/agent/top-tab-bar.md); the library takes it in TagDocList::applyInsets()
   if(win)
     win->applyTopBarMode();
@@ -4458,39 +4432,39 @@ std::string ScribbleApp::runTest(std::string runtype)
     return test.resultStr;
   }
   else if(runtype == "perftest") {
-    ScribbleTest test(activeDoc(), bookmarkArea, scribbleMode);
+    ScribbleTest test(activeDoc(), scribbleMode);
     test.performanceTest();
     return test.resultStr;
   }
   else if(runtype == "benchtest") {
-    ScribbleTest test(activeDoc(), bookmarkArea, scribbleMode);
+    ScribbleTest test(activeDoc(), scribbleMode);
     test.benchTest();
     return test.resultStr;
   }
   else if(runtype == "pdfsizetest") {
-    ScribbleTest test(activeDoc(), bookmarkArea, scribbleMode);
+    ScribbleTest test(activeDoc(), scribbleMode);
     test.pdfSizeTest();
     return test.resultStr;
   }
   else if(runtype == "simplifybenchtest") {
-    ScribbleTest test(activeDoc(), bookmarkArea, scribbleMode);
+    ScribbleTest test(activeDoc(), scribbleMode);
     test.simplifyBench();
     return test.resultStr;
   }
   else if(runtype == "canvaslayertest") {
-    ScribbleTest test(activeDoc(), bookmarkArea, scribbleMode);
+    ScribbleTest test(activeDoc(), scribbleMode);
     test.canvasLayerTest();
     return test.resultStr;
   }
   else if(runtype == "topbartest") {
     // the top bar's state checks alone (also part of `test`, which currently aborts earlier, in test7)
-    ScribbleTest test(activeDoc(), bookmarkArea, scribbleMode);
+    ScribbleTest test(activeDoc(), scribbleMode);
     int nbad = test.topBarStateTest();
     return fstring("top bar state: %d failed\n", nbad);
   }
   else if(runtype == "inputtest") {
     // see 83a76eea88eb for TouchInputFilter::notifyTouchEvent test
-    ScribbleTest test(activeDoc(), bookmarkArea, scribbleMode);
+    ScribbleTest test(activeDoc(), scribbleMode);
     test.inputTest();
     return test.resultStr;
   }

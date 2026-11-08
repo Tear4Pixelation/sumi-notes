@@ -12,20 +12,6 @@ const char* mainWindowSVG = R"#(
 
     <g id="main-container" box-anchor="fill" layout="box">
       <g class="sub-window-layout" box-anchor="fill" layout="flex" flex-direction="row">
-        <g id="bookmark-panel" display="none" box-anchor="vfill" layout="flex" flex-direction="column">
-          <g class="panel-header" box-anchor="hfill" layout="box">
-            <rect class="background" box-anchor="fill" width="20" height="20"/>
-            <!-- text display="none" class="title panel-title" box-anchor="left" margin="10 10">Bookmarks</text -->
-            <g id="bookmarks-combo-container" box-anchor="left" layout="box"></g>
-            <g id="bookmarks-toolbar-container" box-anchor="right" layout="box"></g>
-          </g>
-          <rect class="hrule title background" box-anchor="hfill" width="20" height="2"/>
-          <g id="bookmark-container" box-anchor="fill" layout="box">
-            <rect id="bookmark-split-sizer" fill="none" box-anchor="vfill" width="320" height="20"/>
-          </g>
-        </g>
-        <rect id="bookmark-splitter" class="background splitter" display="none" box-anchor="vfill" width="10" height="10"/>
-
         <g id="scribble-split-layout" box-anchor="fill" layout="flex" flex-direction="column">
           <g id="scribble-focus-container" box-anchor="fill" layout="flex" flex-direction="column">
             <rect id="scribble-focus" class="hrule title background" box-anchor="hfill" width="20" height="2"/>

@@ -39,9 +39,6 @@ public:
   Timestamp minTimestamp = MAX_TIMESTAMP;
   Timestamp maxTimestamp = 0;
   Document* document = NULL;  // parent document
-  std::list<Element*> bookmarks;
-  Dim maxBookmarkWidth = 0;
-  int numBookmarks = -1;
   // Outline (table of contents) entry for this page; an empty title means the page has no entry.
   // These are a cache of the __outline/__outlinelevel attributes on contentNode - the page's own SVG
   // is the storage, deliberately, rather than a list of {page number, title} on Document.  A
@@ -50,6 +47,10 @@ public:
   // those was missed.  Living on the page, an entry moves with its page for free.
   std::string outlineTitle;
   int outlineLevel = 0;
+  // Link anchor (docs/agent/links.md): a stable name for this page that a link targets as "#pg-...", so
+  //  the link survives the page moving.  Cache of the __pageid attribute on contentNode, assigned on the
+  //  first link to the page (PageAnchorItem) and stored in the page like the outline entry.
+  std::string anchorId;
   // Page tags (docs/agent/page-tags.md).  The write-pagetag elements are the storage; pageTagIds is a
   //  cache of their ids, kept by onAddStroke/onRemoveStroke, so the document's summary can be written
   //  on save without loading every page.  A page not loaded yet has whatever the summary said when the
@@ -213,6 +214,7 @@ public:
   bool hasOutlineEntry() const { return !outlineTitle.empty(); }
   // set (or clear, with a NULL/empty title) this page's outline entry, writing through to the SVG
   void setOutlineEntry(const char* title, int level);
+  void setAnchorId(const char* id);
   void setSelected(bool sel);
   void unload();
 

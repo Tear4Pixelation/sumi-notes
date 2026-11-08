@@ -63,6 +63,7 @@ public:
   static constexpr unsigned int PAGE_ITEM              = 0x00000008;
   static constexpr unsigned int PAGE_CHANGED_ITEM      = 0x00010008;
   static constexpr unsigned int PAGE_OUTLINE_ITEM      = 0x00020008;
+  static constexpr unsigned int PAGE_ANCHOR_ITEM       = 0x00040008;  // not 0x30008: isA() would take that for PAGE_CHANGED_ITEM
   static constexpr unsigned int DOCUMENT_ITEM          = 0x00000010;
   static constexpr unsigned int PAGE_ADDED_ITEM        = 0x00010010;
   static constexpr unsigned int PAGE_DELETED_ITEM      = 0x00020010;
@@ -246,6 +247,22 @@ public:
   void commit() override;
   ADDRM_UNDO_ITEM_METHODS
   unsigned int type() const override { return PAGE_OUTLINE_ITEM; }
+};
+
+// A page's link anchor (Page::anchorId, docs/agent/links.md) being assigned, as part of the action that
+//  creates the first link to the page - so undoing the link takes the anchor with it, and a sync peer
+//  gets the anchor its copy of the link points at
+class PageAnchorItem : public UndoHistoryItem {
+public:
+  Page* p;
+  std::string anchorId;
+  void swapAnchor();
+//public:
+  PageAnchorItem(Page* p_) : p(p_), anchorId(p_->anchorId) {}
+  PageAnchorItem(Page* p_, const char* id_) : p(p_), anchorId(id_ ? id_ : "") {}
+  void commit() override;
+  ADDRM_UNDO_ITEM_METHODS
+  unsigned int type() const override { return PAGE_ANCHOR_ITEM; }
 };
 
 // Document level undo items

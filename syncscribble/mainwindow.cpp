@@ -5,7 +5,6 @@
 #include "scribblearea.h"
 #include "scribblewidget.h"
 #include "scribblesync.h"
-#include "bookmarkview.h"
 #include "scribbledoc.h"
 #include "pentoolbar.h"
 #include "touchwidgets.h"
@@ -327,8 +326,6 @@ void MainWindow::refreshUI(ScribbleDoc* doc, int reason)
         refreshCommonUI(adoc, &areaState);
     }
   }
-  areaState.zoom = app->bookmarkArea->getZoom();
-  refreshScribbleWidget(app->bookmarkArea->widget, &areaState);
   updateMode();
   syncRegionRow();
   syncTagPlaceHint();
@@ -360,7 +357,6 @@ Action* MainWindow::modeToAction(int mode)
         case ScribbleMode::DRAWTOOL_TAPE:  return actionTape;
         default:  return actionDraw;
       }
-    case MODE_BOOKMARK:  return actionAdd_Bookmark;
     // the active shape is shown by the options row, not by the tools row icon
     case MODE_DRAWSHAPE:  return actionShapes;
     // erase submode is shown by the two toggles on the erase options row, not by the top row icon
@@ -409,7 +405,7 @@ void MainWindow::updateMode()
     if(subaction != checkedSubMode) {
       if(checkedSubMode)
         checkedSubMode->setChecked(false);
-      if(subaction != actionCustom_Pen) // && subaction != actionAdd_Bookmark)
+      if(subaction != actionCustom_Pen)
         subaction->setChecked(true);
       checkedSubMode = subaction;
     }
@@ -994,21 +990,6 @@ void MainWindow::setEraserMode()
       : (ruled ? MODE_ERASEFREERULED : MODE_ERASEFREE));
 }
 
-void MainWindow::toggleBookmarks()
-{
-  bool show = !actionShow_Bookmarks->checked();
-  actionShow_Bookmarks->setChecked(show);
-  if(show) {
-    // we must do this before showing panel, since it could make parent bounds too big!
-    Dim parentw = std::min(bookmarkPanel->parent()->node->bounds().width(), winBounds().width());
-    if(bookmarkPanel->node->bounds().width() > 0.75*parentw)
-      bookmarkSplitter->setSplitSize(0.75*parentw);
-    app->repaintBookmarks();
-  }
-  bookmarkPanel->setVisible(show);
-  bookmarkSplitter->setVisible(show);
-}
-
 void MainWindow::toggleFullscreen()
 {
   bool fs = !(SDL_GetWindowFlags(sdlWindow) & SDL_WINDOW_FULLSCREEN);  // toggle
@@ -1202,7 +1183,6 @@ ArrowPopup* MainWindow::createViewPopup(bool forLibrary)
     Button* splitviewbtn = viewPopup->addAction(actionSplitView);
     if(splitviewbtn->mPopup)
       splitviewbtn->mPopup->setAlign(Menu::HORZ_LEFT);
-    viewPopup->addAction(actionShow_Bookmarks);  // in case hidden from toolbar
   }
   viewPopup->addAction(actionFullscreen);
   if(!forLibrary)
@@ -1506,29 +1486,6 @@ void MainWindow::setupUI(ScribbleApp* a)
   // create and populate toolbars
   createToolBars();
 
-  // if split is prevented from reaching min size set for spliiter, behavior will be incorrect on next drag
-  bookmarkSplitter = new Splitter(containerNode()->selectFirst("#bookmark-splitter"),
-      containerNode()->selectFirst("#bookmark-split-sizer"), Splitter::LEFT, 120);
-  bookmarkPanel = selectFirst("#bookmark-panel");
-  //bookmarkPanel->selectFirst(".panel-title")->setText(_("Bookmarks"));
-
-  ComboBox* combobkmk = createComboBox({_("Bookmarks"), _("Margin Content")});
-  combobkmk->isFocusable = false;
-  combobkmk->setIndex(ScribbleApp::cfg->Int("bookmarkMode") == BookmarkView::MARGIN_CONTENT ? 1 : 0);
-  combobkmk->onChanged = [this, combobkmk](const char* s){
-    int mode = combobkmk->index() == 1 ? BookmarkView::MARGIN_CONTENT : BookmarkView::BOOKMARKS;
-    ScribbleApp::cfg->set("bookmarkMode", mode);
-    app->repaintBookmarks();
-  };
-  // don't put combo box on toolbar to allow narrower bookmark panel width (with toolbar covering combo box)
-  selectFirst("#bookmarks-combo-container")->addWidget(combobkmk);
-
-  Toolbar* bookmarkstb = createToolbar();
-  bookmarkstb->addAction(actionAdd_Bookmark);
-  bookmarkstb->addAction(actionBookmarksPin);
-  bookmarkstb->addAction(actionBookmarksClose);
-  selectFirst("#bookmarks-toolbar-container")->addWidget(bookmarkstb);
-
   Widget* scribbleContainer = selectFirst("#scribble-container");
   ScribbleWidget* areaWidget = createScribbleAreaWidget(scribbleContainer, app->activeArea());
   areaWidget->focusIndicator = selectFirst("#scribble-focus");
@@ -1541,9 +1498,6 @@ void MainWindow::setupUI(ScribbleApp* a)
       containerNode()->selectFirst("#scribble-split-sizer"), Splitter::BOTTOM, 120);
   focusIndicator2 = selectFirst("#scribble-focus-2");
 
-  ScribbleWidget* bkmkWidget = ScribbleWidget::create(selectFirst("#bookmark-container"), app->bookmarkArea);
-  bkmkWidget->zoomLabel = createTextLabel("bottom left", 0, 0, 6, 6);
-  selectFirst("#bookmark-container")->addWidget(bkmkWidget->zoomLabel);
 
   // overlay for rendering on top of everything else
   Widget* subWinLayout = selectFirst(".sub-window-layout");
@@ -1890,8 +1844,7 @@ void MainWindow::createToolBars()
     addTBWidget(titleButton, 2);
     addTBWidget(pageopsRow->addSeparator(), -100);
     // The sidebar button sits at the left end of the page ops panel: the sidebar itself defaults to
-    //  the left edge, so the control is on the side of what it opens.  Bookmarks is off the toolbar
-    //  for now; Ctrl+B still toggles the panel.
+    //  the left edge, so the control is on the side of what it opens.
     Widget* sidebarBtn = pageopsRow->addAction(actionShow_Sidebar);
     addTBWidget(sidebarBtn, actionShow_Sidebar->priority, {actionShow_Sidebar});
     // the open documents, next to the sidebar they appear in
@@ -2393,7 +2346,7 @@ void MainWindow::setupActions()
   actionSplitView = createAction("actionSplitView",
       "&Split View", ":/icons/ic_menu_split_tb.svg", "Ctrl+T", [this](){ toggleSplitView(SPLIT_TOGGLE); });
   actionSplitView->setCheckable(true);
-  actionSplitView->setPriority(Action::NormalPriority - 2);  // below bookmarks
+  actionSplitView->setPriority(Action::NormalPriority - 2);
   splitState = -std::min(std::max(1, std::abs(ScribbleApp::cfg->Int("splitLayout"))), int(SPLIT_V21));
   toggleSplitView(splitState);  // set icon for actionSplitView
 
@@ -2469,13 +2422,6 @@ void MainWindow::setupActions()
   //actionSave_Single_File = createAction("actionSave_Single_File", "Save As Single File...", "", "", SLOT(saveSingleFile()));
   actionRevert = createAction("actionRevert", "Discard Changes...", ":/icons/ic_menu_no_save.svg", "Ctrl+W", SLOT(revert()));
 
-  // changed from "Show Bookmarks" to "Bookmarks" because it was the longest menu text - if it overflows to
-  //  menu (text isn't shown otherwise), that means we're on a narrow screen and need to conserve horz. space!
-  actionShow_Bookmarks = createAction("actionShow_Bookmarks",
-      "Bookmarks", ":/icons/ic_menu_bookmark.svg", "Ctrl+B", [this](){ toggleBookmarks(); });
-  actionShow_Bookmarks->setCheckable(true);
-  // demote slightly so next page/prev page have higher priority
-  actionShow_Bookmarks->setPriority(Action::NormalPriority - 1);
   actionPage_Setup = createAction("actionPage_Setup",
       "Page Setup...", ":/icons/ic_menu_document.svg", "", SLOT(showPageSetup()));
   // the page becomes a Paper Patch (or image) on a new page (docs/agent/ruling-regions.md)
@@ -2540,16 +2486,6 @@ void MainWindow::setupActions()
       [this](){ app->insertDocumentContent(); });
   actionAddPhoto = createAction("actionAddPhoto", "Insert Photo", ":/icons/ic_menu_add_pic.svg", "",
       [this](){ app->insertImage(); });
-
-  actionBookmarksClose = createAction("actionBookmarksClose",
-      "Close", ":/icons/ic_menu_cancel.svg", "", [this](){ toggleBookmarks(); });
-  auto tgBkmkPin = [this](){
-    bool ah = !app->cfg->Bool("autoHideBookmarks");
-    app->cfg->set("autoHideBookmarks", ah);
-    actionBookmarksPin->setChecked(!ah);
-  };
-  actionBookmarksPin = createAction("actionBookmarksPin", "Keep Open", ":/icons/ic_menu_pin.svg", "", tgBkmkPin);
-  actionBookmarksPin->setChecked(!cfg->Bool("autoHideBookmarks"));
 
   actionExport_PDF = createAction("actionExport_PDF", "Export PDF...", "", "", SLOT(exportPDF()));
   // every page as an image (the sidebar's Pages view exports a chosen set the same way)
@@ -2622,14 +2558,10 @@ void MainWindow::setupActions()
       [this](){ selectDrawTool(ScribbleMode::DRAWTOOL_TAPE); });
   actionTape->setCheckable(true);
   actionTape->tooltip = _("Cover part of the page with tape\nTap a strip to see through it");
-  // 1-9 pick the toolbar's tools (below, after Insert Space); 0 for bookmark
+  // 1-9 pick the toolbar's tools (below, after Insert Space)
   actionCustom_Pen = createAction("actionCustom_Pen",
       "Pen Setup...", ":/icons/ic_menu_set_pen.svg", "", [this](){ togglePenToolbar(); });
   actionCustom_Pen->tooltip = _("Show the pen's options row");
-  actionAdd_Bookmark = createAction("actionAdd_Bookmark",
-      "Add Bookmark", ":/icons/ic_menu_add_bookmark.svg", "0", SLOT(setMode(MODE_BOOKMARK)));
-  actionAdd_Bookmark->setCheckable(true);
-  actionAdd_Bookmark->tooltip = _("Drop beside text to show in bookmark pane");
 
   actionShapes = createAction("actionShapes", "Shapes", ":/icons/ic_menu_shapes.svg", "",
       [this](){ selectTool(MODE_DRAWSHAPE); });

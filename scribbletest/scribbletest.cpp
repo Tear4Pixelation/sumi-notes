@@ -98,8 +98,6 @@ ScribbleTest::ScribbleTest(const std::string& path)
   scribbleDoc = new ScribbleDoc(ScribbleApp::app, scribbleConfig, scribbleMode);
   scribbleArea = new ScribbleArea();
   scribbleDoc->addArea(scribbleArea);
-  bookmarkArea = new BookmarkView(scribbleConfig, scribbleDoc);
-  //bookmarkArea->setScribbleDoc(scribbleDoc);
   syncSlave = NULL;
   waitForSyncDone = false;
   outPath = path;
@@ -118,12 +116,11 @@ ScribbleTest::ScribbleTest(const std::string& path)
   swbXML.first_child().append_attribute("name");
 }
 
-ScribbleTest::ScribbleTest(ScribbleDoc* sd, BookmarkView* bv, ScribbleMode* sm)
+ScribbleTest::ScribbleTest(ScribbleDoc* sd, ScribbleMode* sm)
 {
   scribbleDoc = sd;
   scribbleArea = sd->activeArea;
   scribbleMode = sd->scribbleMode;
-  bookmarkArea = bv;
   scribbleConfig = NULL;
   screenImg = NULL;
   screenPaint = NULL;
@@ -141,7 +138,6 @@ ScribbleTest::~ScribbleTest()
   if(scribbleConfig) {
     delete screenPaint;
     delete screenImg;
-    delete bookmarkArea;
     delete scribbleDoc;
     delete scribbleArea;
     delete scribbleMode;
@@ -1869,6 +1865,102 @@ int ScribbleTest::imageCropTest()
   }
   check(nImages == 1 && restored && restored->m_image.width == 40 && !restored->getStringAttr(IMAGE_CROP_ATTR),
       "one undo brings the image back as it was");
+  return nbad;
+}
+
+// Links to pages (docs/agent/links.md): a page link names the page's anchor, which follows the page,
+//  is assigned in the link's own undo step, survives save/reload and goes on the sync wire
+int ScribbleTest::linkTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: link: %s\n", what); }
+  };
+  Document* doc = scribbleDoc->document;
+  scribbleDoc->newDocument();
+  scribbleDoc->newPage();
+  scribbleDoc->newPage();  // 3 pages: 0, 1, 2
+  doc = scribbleDoc->document;
+  check(doc->numPages() == 3, "three pages to work with");
+
+  check(doc->findPageTarget("#page=2") == 1, "#page=N is 1-based");
+  check(doc->findPageTarget("#page=99") < 0 && doc->findPageTarget("#page=0") < 0,
+      "an out-of-range page number names no page");
+  check(doc->findPageTarget("#b-0123456789") < 0, "a bookmark id is not a page target");
+
+  scribbleArea->gotoPage(0);
+  s2(100, 100);
+  doCommand(ID_SELALL);
+  scribbleArea->createPageLink(doc->pages[2]);
+  std::string anchor = doc->pages[2]->anchorId;
+  check(anchor.compare(0, 3, "pg-") == 0, "linking to a page gives it an anchor");
+  const char* href = scribbleArea->getHyperRef();
+  check(href && std::string(href) == "#" + anchor, "the link names the page's anchor");
+  check(doc->findPageTarget(("#" + anchor).c_str()) == 2, "the anchor resolves to its page");
+
+  // one undo step takes both the link and the anchor; redo brings back the same anchor
+  undo();
+  check(doc->pages[2]->anchorId.empty(), "undoing the link removes the anchor it assigned");
+  check(doc->findPageTarget(("#" + anchor).c_str()) < 0, "an undone anchor resolves to nothing");
+  scribbleDoc->doCommand(ID_REDO);
+  check(doc->pages[2]->anchorId == anchor, "redo restores the same anchor");
+
+  // a second link to the same page reuses its anchor
+  scribbleArea->gotoPage(0);
+  doCommand(ID_SELALL);
+  scribbleArea->createPageLink(doc->pages[2]);
+  href = scribbleArea->getHyperRef();
+  check(doc->pages[2]->anchorId == anchor && href && std::string(href) == "#" + anchor,
+      "a second link to a page reuses its anchor");
+
+  // *** the requirement: the link follows its page when pages move ***
+  scribbleDoc->newPage(0);
+  check(doc->findPageTarget(("#" + anchor).c_str()) == 3, "the anchor follows its page when one is inserted above");
+  check(scribbleArea->viewHref(("#" + anchor).c_str()) && scribbleArea->getCurrPageNum() == 3,
+      "following the link goes to the page it was made for");
+
+  // save and reload: the anchor rides the page SVG
+  std::string file = outPath + "/link_roundtrip_out.html";
+  check(scribbleDoc->saveDocument(file.c_str()), "saving the document should succeed");
+  scribbleDoc->newDocument();
+  check(scribbleDoc->openDocument(file.c_str()) == Document::LOAD_OK, "reloading should succeed");
+  removeFile(file.c_str());
+  doc = scribbleDoc->document;
+  check(doc->findPageTarget(("#" + anchor).c_str()) == 3, "the anchor survives save/reload");
+
+  // sync wire format
+  {
+    MemStream strm;
+    PageAnchorItem item(doc->pages[3]);
+    item.serialize(strm);
+    std::string wire(strm.data(), strm.size());
+    pugi::xml_document wiredoc;
+    check(wiredoc.load_buffer(wire.data(), wire.size()), "the serialized anchor item is well-formed XML");
+    pugi::xml_node n = wiredoc.child("pageanchor");
+    check(n.attribute("pagenum").as_int(-1) == 3, "the wire format carries the page number");
+    check(anchor == n.attribute("id").as_string(), "the wire format carries the anchor");
+  }
+  // the anchor item must not pass for a PageChangedItem (ScribbleSync::removeItems() casts by isA())
+  {
+    PageAnchorItem item(doc->pages[3]);
+    check(!item.isA(UndoHistoryItem::PAGE_CHANGED_ITEM) && !item.isA(UndoHistoryItem::PAGE_OUTLINE_ITEM),
+        "the anchor item's type is distinct under isA()");
+  }
+
+  // pasting a copy of the anchored page: the copy must not take the anchor over
+  scribbleDoc->clearSelection();
+  scribbleArea->gotoPage(3);
+  scribbleDoc->selectPages(3);
+  doCommand(ID_COPYSEL);
+  scribbleDoc->clearSelection();
+  scribbleArea->gotoPage(0);
+  doCommand(ID_PASTE);
+  int anchored = 0;
+  for(Page* page : doc->pages)
+    anchored += page->anchorId == anchor ? 1 : 0;
+  check(anchored == 1, "a pasted copy of a page does not duplicate its anchor");
+
+  scribbleDoc->newDocument();
   return nbad;
 }
 
@@ -6960,6 +7052,7 @@ void ScribbleTest::runAll(bool runsynctest)
   nUnitFailed += penToolbarRefreshTest();
   nUnitFailed += penPersistTest();
   nUnitFailed += outlineTest();
+  nUnitFailed += linkTest();
   nUnitFailed += imageCropTest();
   nUnitFailed += outlineNestTest();
   nUnitFailed += pageMoveTest();
@@ -7724,9 +7817,6 @@ void ScribbleTest::test9()
   undo();
   redo();
 
-  // must refresh bookmarks so that findBookmark will work
-  //bookmarkArea->repaintBookmarks();
-  screenPaint->beginFrame();  bookmarkArea->doPaintEvent(screenPaint);  screenPaint->endFrame();
 
   doCommand(ID_NEXTPAGENEW);
   scribbleArea->gotoPos(1, Point(-10,-10));  // account for previous behavior of NEXTPAGE
@@ -7734,7 +7824,14 @@ void ScribbleTest::test9()
   hr(150, 100);
   s2(200, 100);
   doCommand(ID_SELALL);
-  scribbleArea->createHyperRef(bookmarkArea->findBookmark(scribbleDoc->document, 20));
+  // the bookmark list (and the tool) is gone from the UI, but documents still carry bookmarks and links
+  //  to them, so a link is made to the first page's bookmark directly - topmost, as the list showed it
+  Element* firstbkmk = NULL;
+  for(Element* s : scribbleDoc->document->pages[0]->children()) {
+    if(s->isBookmark() && (!firstbkmk || s->bbox().top < firstbkmk->bbox().top))
+      firstbkmk = s;
+  }
+  scribbleArea->createHyperRef(firstbkmk);
 
   // add bookmark to 2nd page ... id should not be serialized for this one
   scribbleMode->setMode(MODE_BOOKMARK);
@@ -7875,8 +7972,6 @@ void ScribbleTest::test12()
   ie(106, 100, 0, pen);
   ie(60, 60, 0, pen);
   ie(0, 0, 0, pen, release);
-  //scribbleDoc->document->drawBookmarks(screenPaint, Rect());
-  screenPaint->beginFrame();  bookmarkArea->doPaintEvent(screenPaint);  screenPaint->endFrame();
   undo();
   // back to our regularly scheduled programming...
   s2(200, 179);
