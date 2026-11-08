@@ -11,7 +11,6 @@
 #include "scribblewidget.h"
 #include "scribblesync.h"
 #include "scribbleconfig.h"
-#include "bookmarkview.h"
 #include "mainwindow.h"
 #include "sidebar.h"
 #include "tagdoclist.h"
@@ -97,8 +96,6 @@ void ScribbleApp::releaseDocIfOrphan(ScribbleDoc* doc)
   if(!doc || doc->nViews > 0 || tabs.findDoc(doc) >= 0)
     return;
   scribbleDocs.erase(std::remove(scribbleDocs.begin(), scribbleDocs.end(), doc), scribbleDocs.end());
-  if(activeArea() && activeDoc() && activeDoc() != doc)
-    bookmarkArea->setScribbleDoc(activeDoc());
   delete doc;
 }
 
@@ -152,8 +149,8 @@ bool ScribbleApp::showTabInArea(int idx, ScribbleArea* area)
   if(fresh)
     next = new ScribbleDoc(this, cfg, scribbleMode);
   detachDoc(area);
-  // attached before loading: openDocument() positions the views it has, and repaints the bookmarks of
-  //  the active pane's document, which must not be NULL meanwhile
+  // attached before loading: openDocument() positions the views it has, and refreshes the UI of the
+  //  active pane's document, which must not be NULL meanwhile
   attachDoc(next, area, NULL);
   if(fresh) {
     Document::loadresult_t res =
@@ -180,10 +177,8 @@ bool ScribbleApp::showTabInArea(int idx, ScribbleArea* area)
   if(view.isValid())
     area->restoreView(view.pagenum, Point(view.x, view.y), view.zoom);
   rebuildShownDocs();  // deletes the document left behind if it was untitled
-  if(area == activeArea()) {
+  if(area == activeArea())
     setWinTitle(next->fileName());
-    repaintBookmarks(true);
-  }
   updateSplitLabels();
   // A document kept in memory may have been changed on disk meanwhile; one just loaded cannot have been.
   //  checkExtModified() reloads it (it is unmodified - it was saved when it was left) and says so.

@@ -307,6 +307,13 @@ void PageOutlineItem::persist(UndoPersistWriter& out)
   node.append_attribute("level") = level;
 }
 
+void PageAnchorItem::persist(UndoPersistWriter& out)
+{
+  pugi::xml_node node = out.item("pageanchor");
+  node.append_attribute("pg") = out.pageRef(p).c_str();
+  node.append_attribute("id") = anchorId.c_str();
+}
+
 void PageAddedItem::persist(UndoPersistWriter& out)
 {
   pugi::xml_node node = out.item("addpage");
@@ -531,7 +538,8 @@ UndoHistoryItem* UndoPersist::readItem(const pugi::xml_node& node, ScribbleDoc* 
     return new StrokeTransformItem(s, pg, tf);
   }
   // page items
-  bool pageItem = name == "pagechanged" || name == "outlinechanged" || name == "addpage" || name == "delpage";
+  bool pageItem = name == "pagechanged" || name == "outlinechanged" || name == "pageanchor"
+      || name == "addpage" || name == "delpage";
   if(pageItem) {
     pg = rd.page(node.attribute("pg").as_string());
     if(!pg) return NULL;
@@ -546,6 +554,8 @@ UndoHistoryItem* UndoPersist::readItem(const pugi::xml_node& node, ScribbleDoc* 
   }
   if(name == "outlinechanged")
     return new PageOutlineItem(pg, node.attribute("title").as_string(), node.attribute("level").as_int());
+  if(name == "pageanchor")
+    return new PageAnchorItem(pg, node.attribute("id").as_string());
   if(name == "addpage")
     return new PageAddedItem(pg, node.attribute("pagenum").as_int(), rd.document);
   if(name == "delpage")

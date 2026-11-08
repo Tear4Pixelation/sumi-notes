@@ -955,6 +955,34 @@ SvgNode* Document::findNamedNode(const char* idstr, int* pagenumout) const
   return NULL;
 }
 
+// A link fragment naming a page rather than an element (docs/agent/links.md): "#pg-..." is a page anchor
+//  (Page::anchorId, follows the page when it moves), "#page=N" a 1-based page number (what a link into
+//  another document uses, since linking must not write into a document that is not open)
+int Document::findPageTarget(const char* href) const
+{
+  if(!href) return -1;
+  if(href[0] == '#') ++href;
+  if(strncmp(href, "page=", 5) == 0) {
+    int pagenum = atoi(href + 5) - 1;
+    return pagenum >= 0 && pagenum < numPages() ? pagenum : -1;
+  }
+  if(strncmp(href, "pg-", 3) != 0)
+    return -1;
+  // loaded pages first, since checking an unloaded one means loading it
+  for(int pass = 0; pass < 2; ++pass) {
+    for(int ii = 0; ii < numPages(); ++ii) {
+      Page* page = pages[ii];
+      if((page->loadStatus == Page::LOAD_OK) != (pass == 0))
+        continue;
+      if(pass == 1 && !page->ensureLoaded())
+        continue;
+      if(page->anchorId == href)
+        return ii;
+    }
+  }
+  return -1;
+}
+
 // we'll keep this around for possible future use (e.g. supporting unlimited number of open documents), but
 //  since we've implemented a better fix for images, disable for now
 #ifdef SCRIBBLE_MEMORY_LIMIT  // mallinfo not available on Windows, Mac, iOS

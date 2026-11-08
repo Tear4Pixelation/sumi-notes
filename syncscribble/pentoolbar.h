@@ -42,7 +42,7 @@ public:
   PenToolbar(bool compact = false);
 
   ScribblePen pen;
-  enum Mode { PEN_MODE, BOOKMARK_MODE, SELECTION_MODE } mode = PEN_MODE;
+  enum Mode { PEN_MODE, SELECTION_MODE } mode = PEN_MODE;
 
   void saveConfig(ScribbleConfig* cfg) const;
   // Repopulates the swatches from the active document's theme (COLORS_SPEC.md §6). Called when the

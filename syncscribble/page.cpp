@@ -678,7 +678,7 @@ bool Page::loadSVG(SvgDocument* doc)
       }
     }
 
-    // create elements for each stroke and find bookmarks - assuming implicit creation is disabled
+    // create elements for each stroke - assuming implicit creation is disabled
     // the page's own elements now say what it is tagged with, not the summary it was opened with
     pageTagIds.clear();
     for(SvgNode* node : contentNode->children())
@@ -738,6 +738,7 @@ bool Page::loadSVG(SvgDocument* doc)
   outlineLevel = std::min(std::max(0,
       int(contentNode->getFloatAttr("__outlinelevel", atof(contentNode->getStringAttr("__outlinelevel", "0"))))),
       int(MAX_OUTLINE_LEVEL));
+  anchorId = contentNode->getStringAttr("__pageid", "");
 
   // load content
   onPageSizeChange();
@@ -778,7 +779,6 @@ bool Page::ensureLoaded(bool checkmem)
 void Page::unload()
 {
   ASSERT(dirtyCount == 0 && "Attempting to unload a dirty page!");
-  bookmarks.clear();
   ruleNode = NULL;
   svgDoc.reset(new SvgDocument(0, 0, props.width, props.height));
   initDoc();
@@ -1048,11 +1048,6 @@ void Page::removeStroke(Element* s)
 
 void Page::onAddStroke(Element* s)
 {
-  // will cause unnecessary redraw if bookmark added outside margin in MARGIN_CONTENT mode ... not a big deal
-  if(s->isBookmark()) {
-    //bookmarks.push_back(s);
-    document->bookmarksDirty = true;
-  }
   if(s->isPageTag()) {
     refreshPageTags();
     return;
@@ -1073,12 +1068,6 @@ void Page::onAddStroke(Element* s)
 
 void Page::onRemoveStroke(Element* s)
 {
-  auto it = std::find(bookmarks.begin(), bookmarks.end(), s);  // works for bookmarks or margin content
-  if(it != bookmarks.end()) {
-    bookmarks.erase(it);
-    --numBookmarks;
-    document->bookmarksDirty = true;
-  }
   if(s->isPageTag())
     refreshPageTags(s);  // still in the page at this point
   // see if we must recalc timestamp range
@@ -1156,6 +1145,17 @@ void Page::setOutlineEntry(const char* title, int level)
     contentNode->setAttr("__outline", outlineTitle.c_str());
     contentNode->setAttr<float>("__outlinelevel", float(outlineLevel));
   }
+}
+
+// Set or clear the page's link anchor (docs/agent/links.md); written eagerly like the outline entry
+void Page::setAnchorId(const char* id)
+{
+  if(!ensureLoaded()) return;
+  anchorId = id ? id : "";
+  if(anchorId.empty())
+    contentNode->removeAttr("__pageid");
+  else
+    contentNode->setAttr("__pageid", anchorId.c_str());
 }
 
 void Page::setSelected(bool sel)

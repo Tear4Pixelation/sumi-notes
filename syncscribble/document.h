@@ -48,7 +48,6 @@ public:
   LayerList layers;
   int dirtyCount = 0;  // managed just as Page.dirtyCount
   int autoSaveSerialNum = 0;
-  bool bookmarksDirty = false;
   pugi::xml_document xmldoc;
 
   std::unique_ptr<IOStream> blockStream;
@@ -82,6 +81,8 @@ public:
   void applyLayerState();
 
   SvgNode* findNamedNode(const char* idstr, int* pagenumout = NULL) const;
+  // page number named by a link fragment ("#pg-..." page anchor or "#page=N", 1-based), or -1
+  int findPageTarget(const char* href) const;
   Page* pageForElement(const Element* s) const;
   int pageNumForElement(const Element* s) const;
 

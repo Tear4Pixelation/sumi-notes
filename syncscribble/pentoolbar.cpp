@@ -1178,8 +1178,6 @@ void PenToolbar::updateSingles() {
 }
 
 void PenToolbar::setDashStyle(int style) {
-  if (mode == BOOKMARK_MODE)
-    return;
   dashStyle = style;
   // a pen carries the pattern itself; a selection's is applied by the app, element by element, since
   //  each is sized by that element's own width
@@ -1344,7 +1342,7 @@ void PenToolbar::setPen(const ScribblePen &newpen, Mode m, int selDashStyle) {
   } settingPenGuard(settingPen);
   mode = m;
   dashStyle = m == SELECTION_MODE ? selDashStyle : newpen.dashStyle();
-  widthGroup->setEnabled(mode != BOOKMARK_MODE);
+  widthGroup->setEnabled(true);
   overflowBtn->setEnabled(mode == PEN_MODE);
   overflowBtn->setVisible(!compact && mode != SELECTION_MODE);
   settingsBtn->setVisible(mode == PEN_MODE);
@@ -1496,7 +1494,7 @@ void PenToolbar::updatePen() {
     onChanged(PEN_CHANGED);
 }
 
-// which tool's presets belong on the row: only a pen has a draw tool, so a selection's or a bookmark's
+// which tool's presets belong on the row: only a pen has a draw tool, so a selection's
 //  width falls back to the plain pen's list, which is the one in absolute units by default
 int PenToolbar::drawToolForMode(Mode m) const {
   ScribbleMode *scribbleMode =
@@ -1680,7 +1678,7 @@ void PenToolbar::setRelativeWidth(bool relative) {
 }
 
 void PenToolbar::updateWidthPopup() {
-  // a selection's or a bookmark's width is a number in the document, with no pen to carry the flag
+  // a selection's width is a number in the document, with no pen to carry the flag
   relWidthRow->setVisible(mode == PEN_MODE);
   cbRelWidth->setChecked(pen.hasFlag(ScribblePen::WIDTH_RELATIVE));
   bool rel = relativeWidths();

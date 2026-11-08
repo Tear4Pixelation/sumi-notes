@@ -40,7 +40,6 @@
   <string name="menu_viewmaster">控制视图</string>
   <string name="menu_sendimg">发送当前页图片</string>
   <string name="menu_sendpdf">发送 PDF</string>
-  <string name="menu_addbkmk">添加书签</string>
   <string name="menu_whiteboard">书写板</string>
   <string name="menu_view">视图</string>
   <string name="tp_insertcurr">插入当前页</string>
@@ -48,8 +47,6 @@
   <string name="tp_snaptogrid">网格线对齐</string>
   <string name="tp_drawlines">画线</string>
   <string name="tp_ephemeral">临时</string>
-  <string name="link_enterurl">输入 URL:</string>
-  <string name="link_choosebkmk">选择书签:</string>
   <string name="save_prompt">文件尚未保存。\n下一步</string>
   <string name="save_unsaveddoc">未保存文件</string>
   <string name="docs_opencopy">打开拷贝</string>
@@ -125,8 +122,6 @@
   <string name="conv_convertingname">新文件名 %s</string>
   <string name="conv_results">转换后文件</string>
   <!-- new translations -->
-  <string name="bookmarks">书签</string>
-  <string name="margin_content">边际的内容</string>
   <string name="untitled">无标题</string>
   <string name="menu_pathselect">笔触选择</string>
   <string name="menu_delete">删除</string>
@@ -273,7 +268,6 @@
   <string name="create">创建</string>
 
     <!-- more strings! -->
-  <string name="menu_bookmarks">显示书签</string>
   <string name="menu_prevpage">前一页</string>
   <string name="menu_nextpage">下一页</string>
   <string name="menu_selection">选择</string>
@@ -305,7 +299,6 @@
   <string name="menu_resetzoom">重置缩放</string>
   <string name="menu_webview">显示网页视图</string>
   <string name="menu_exportdocs">备份文档</string>
-  <string name="menu_addbookmark">书签</string>
   <string name="menu_strokeeraser">线条橡皮擦</string>
   <string name="menu_rulederaser">直纹橡皮擦</string>
   <string name="menu_freeeraser">自由橡皮擦</string>

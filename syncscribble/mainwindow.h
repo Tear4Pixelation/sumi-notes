@@ -50,7 +50,6 @@ public:
 
   void togglePenToolbar();
   void toggleFullscreen();
-  void toggleBookmarks();
   void toggleDisableTouch();
   void toggleSyncView();
   void toggleSyncViewMaster();
@@ -126,7 +125,6 @@ public:
   Action* actionRevert;
   Action* actionReset_Zoom;
   Action* actionNew_Document;
-  Action* actionShow_Bookmarks;
   Action* actionSend_Page;
   Action* actionStroke_Eraser;
   Action* actionRuled_Eraser;
@@ -135,7 +133,6 @@ public:
   Action* actionInsert_Space_Vert;
   Action* actionRuled_Insert_Space;  // down and/or right, picked by the drag (MODE_INSSPACEAUTO)
   Action* actionCustom_Pen;
-  Action* actionAdd_Bookmark;
   Action* actionDraw;
   Action* actionHighlight;
   Action* actionEphemeral;
@@ -185,8 +182,6 @@ public:
   Action* actionDelete_Page;
   Action* actionViewSync;
   Action* actionViewSyncMaster;
-  Action* actionBookmarksClose;
-  Action* actionBookmarksPin;
   Action* actionDisable_Touch;
   Action* actionSyncInfo;
   Action* actionInvertColors;
@@ -286,8 +281,6 @@ public:
   const SvgNode* editBoxIcon;
   const SvgNode* swbIcon;
 
-  Splitter* bookmarkSplitter;
-  Widget* bookmarkPanel;
   OverlayWidget* overlayWidget;
   // the outline/layers sidebar (sidebar.h); owned by the widget tree, not by MainWindow
   Sidebar* sidebar = NULL;

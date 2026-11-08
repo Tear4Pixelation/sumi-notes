@@ -5,13 +5,11 @@ of contents is built. The entry points are `ScribbleDoc::setPageOutline()` and
 `ScribbleDoc::outline()`; the UI over them is the outline view of the sidebar
 ([sidebar.md](sidebar.md)).
 
-Outlines are *not* a replacement for bookmarks, and the two are deliberately different things. A
-bookmark is an `Element` with class `bookmark` living at a position *within* a page, labelled by the
-user's own ink (`BookmarkView` re-draws the actual strokes; in `MARGIN_CONTENT` mode anything written
-in the margin *is* a bookmark). It is also the **link target system** - `setSelProperties` turns
-strokes into a bookmark with id `b-xxxxx` and hyperrefs are `href="#b-xxxxx"` - so removing bookmarks
-would break internal links in every existing document. An outline entry is page-level, text-labelled
-and nestable. One page, one entry: the intended way to work is a page per subject.
+Bookmarks (ink-labelled `Element`s at a position within a page, with a panel listing them) have been
+removed from the UI; outlines and page links took their place. Old documents' bookmarks and the
+`href="#b-xxxxx"` links to them still load and still navigate - see [links.md](links.md), which also
+covers how a link targets an outline entry (by its page's anchor). An outline entry is page-level,
+text-labelled and nestable. One page, one entry: the intended way to work is a page per subject.
 
 - **The entry lives in the page's own SVG**, as `__outline`/`__outlinelevel` on `contentNode`,
   alongside `xruling`/`papercolor`. `Page::outlineTitle`/`outlineLevel` are a cache of those, read in

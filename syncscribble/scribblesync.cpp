@@ -352,7 +352,9 @@ void ScribbleSync::removeItems(Element* s, Page* p)
       }
     }
     else if(p && (((*ii)->isA(UndoHistoryItem::DOCUMENT_ITEM) && p == static_cast<DocumentUndoItem*>(*ii)->p)
-        || ((*ii)->isA(UndoHistoryItem::PAGE_CHANGED_ITEM) && p == static_cast<PageChangedItem*>(*ii)->p))) {
+        || ((*ii)->isA(UndoHistoryItem::PAGE_CHANGED_ITEM) && p == static_cast<PageChangedItem*>(*ii)->p)
+        || ((*ii)->isA(UndoHistoryItem::PAGE_OUTLINE_ITEM) && p == static_cast<PageOutlineItem*>(*ii)->p)
+        || ((*ii)->isA(UndoHistoryItem::PAGE_ANCHOR_ITEM) && p == static_cast<PageAnchorItem*>(*ii)->p))) {
       delete *ii;
       *ii = &disabledItem;
     }
@@ -718,6 +720,11 @@ void ScribbleSync::processItem(pugi::xml_node& node)
     if(pagenum < doc->pages.size())
       item = new PageOutlineItem(doc->pages[pagenum], node.attribute("title").as_string(),
           node.attribute("level").as_int(0));
+  }
+  else if(nodename == "pageanchor") {
+    unsigned int pagenum = node.attribute("pagenum").as_uint(-1);
+    if(pagenum < doc->pages.size())
+      item = new PageAnchorItem(doc->pages[pagenum], node.attribute("id").as_string());
   }
   else if(nodename == "addpage") {
     Page* p = new Page();

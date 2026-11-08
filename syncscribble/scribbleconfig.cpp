@@ -112,10 +112,6 @@ void ScribbleConfig::init()
   cfg["centerPages"] = 1;
   // multiple document views
   cfg["splitLayout"] = -1;
-  // hide BookmarkView after use?
-  cfg["autoHideBookmarks"] = PLATFORM_MOBILE;
-  // bookmark view mode: any margin content considered bookmark if 1
-  cfg["bookmarkMode"] = 0;
   // after delay, completely hide scroller (1) or just dim (0)?
   cfg["autoHideScroller"] = 0;
   // show pen toolbar (several users have requested this be persisted)
@@ -175,7 +171,7 @@ void ScribbleConfig::init()
   cfg["thumbFirstPage"] = 0;
   // include rule lines when sending page
   cfg["sendRuleLines"] = 0;
-  // only load page when we first need to draw it (or draw bookmarks)
+  // only load page when we first need to draw it
   cfg["delayLoad"] = 1;
   // for Qt, reopen last open doc
   cfg["reopenLastDoc"] = 0;
@@ -371,13 +367,13 @@ void ScribbleConfig::init()
 #if PLATFORM_ANDROID || PLATFORM_IOS  // we want save button for emscripten (which is PLATFORM_MOBILE)
   // this is really the small screen setup - iPad, e.g., should be same as desktop except save btn
   //cfgS["toolBars"] = "docTitle,stretch,tools,undoRedoBtn,"
-  //    "actionSelection_Menu,actionShow_Bookmarks,actionSplitView,actionOverflow_Menu";
+  //    "actionSelection_Menu,actionSplitView,actionOverflow_Menu";
   cfgS["toolBars2"] = "docTitle,stretch,addPage,tools,separator,undoRedoBtn,separator,seltools,"
-    "separator,actionShow_Bookmarks,actionSplitView,separator,actionOverflow_Menu";
+    "separator,actionSplitView,separator,actionOverflow_Menu";
 #else
   // appropriate for Surface Pro portrait display
   cfgS["toolBars2"] = "docTitle,stretch,addPage,actionSave,separator,tools,separator,undoRedoBtn,separator,seltools,"
-    "separator,actionShow_Bookmarks,actionSplitView,separator,actionOverflow_Menu";
+    "separator,actionSplitView,separator,actionOverflow_Menu";
 #endif
   // strftime format string for doc title
   cfgS["newDocTitleFmt"] = "%b %e %Hh%M";

@@ -32,7 +32,6 @@ SOURCES = \
   nightmode.cpp \
   screenshot.cpp \
   cropshape.cpp \
-  bookmarkview.cpp \
   scribblearea.cpp \
   scribbledoc.cpp \
   scribblewidget.cpp \

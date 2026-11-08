@@ -327,6 +327,32 @@ void PageOutlineItem::redo()
   p->dirtyCount++;  p->revision++;
 }
 
+void PageAnchorItem::discard(bool undone) {}
+
+void PageAnchorItem::commit()
+{
+  p->dirtyCount++;  p->revision++;
+}
+
+void PageAnchorItem::swapAnchor()
+{
+  std::string prev = p->anchorId;
+  p->setAnchorId(anchorId.c_str());
+  anchorId = prev;
+}
+
+void PageAnchorItem::undo()
+{
+  swapAnchor();
+  p->dirtyCount--;  p->revision++;
+}
+
+void PageAnchorItem::redo()
+{
+  swapAnchor();
+  p->dirtyCount++;  p->revision++;
+}
+
 DocumentUndoItem::DocumentUndoItem(Page* p_, int pagenum_, Document* document_)
     : p(p_), pagenum(pagenum_), document(document_) {}
 
@@ -680,6 +706,17 @@ void PageOutlineItem::serialize(IOStream& strm)
   xmlwriter.save(strm);
 }
 
+// like PageOutlineItem, the current state goes on the wire (the item holds the previous one)
+void PageAnchorItem::serialize(IOStream& strm)
+{
+  XmlStreamWriter xmlwriter;
+  xmlwriter.writeStartElement("pageanchor");
+  xmlwriter.writeAttribute("pagenum", p->getPageNum());
+  xmlwriter.writeAttribute("id", p->anchorId);
+  xmlwriter.writeEndElement();
+  xmlwriter.save(strm);
+}
+
 void PageDeletedItem::serialize(IOStream& strm)
 {
   strm << fstring("<delpage pagenum='%d'/>", pagenum);
@@ -751,6 +788,11 @@ UndoHistoryItem* PageChangedItem::inverse()
 UndoHistoryItem* PageOutlineItem::inverse()
 {
   return new PageOutlineItem(*this);
+}
+
+UndoHistoryItem* PageAnchorItem::inverse()
+{
+  return new PageAnchorItem(*this);
 }
 
 

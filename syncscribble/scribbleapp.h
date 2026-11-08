@@ -39,7 +39,6 @@ class ScribbleConfig;
 class ScribbleDoc;
 class ScribbleMode;
 class ScribbleArea;
-class BookmarkView;
 class OverlayWidget;
 class DocumentList;
 class TagDocList;
@@ -134,7 +133,6 @@ public:
   void showNotify(const std::string& msg, int level = 1);
   void dismissNotify();
   void appSuspending();
-  void hideBookmarks();
   void insertDocument();
   void closeDocs(const FSPath& path);
   void maybeQuit();
@@ -166,7 +164,6 @@ public:
   ScribbleMode* scribbleMode = NULL;
   //ScribbleDoc* scribbleDoc = NULL;
   ScribbleArea* mActiveArea = NULL;
-  BookmarkView* bookmarkArea = NULL;
   OverlayWidget* overlayWidget = NULL;
   std::vector<ScribbleDoc*> scribbleDocs;
   std::vector<ScribbleArea*> scribbleAreas;
@@ -254,7 +251,6 @@ public:
   // whether the library is up (the modal TagDocList), e.g. so closing the last tab does not reopen it
   bool libraryShown() const;
 
-  void repaintBookmarks(bool newdoc = false);
   void refreshUI(ScribbleDoc* doc, int reason);
   bool oneTimeTip(const char* id, Point pos = {}, const char* message = NULL);
   void showSelToolbar(Point pos, bool pasteOnly = false);
