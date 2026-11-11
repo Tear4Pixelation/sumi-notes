@@ -1776,7 +1776,7 @@ bool ScribbleArea::snapStroke()
   stroke.reserve(snapSamples.size());
   for(const Point& pt : snapSamples)
     stroke.emplace_back(pt.x*mScale, pt.y*mScale);
-  shaperec::Result result = shaperec::recognizeHold(stroke);
+  shaperec::Result result = shaperec::recognizeHold(stroke, cfg->Bool("shapeSnapTriangle"), cfg->Bool("shapeSnapPolyline"));
   if(cfg->Int("recordShapeStrokes") && !ScribbleApp::app->libraryRoot.empty()) {
     // the lab's .strokes format (labs/shape-recognition/strokefile.h); the label is left for a person to
     //  fill in with what was meant, the comment says what the recognizer made of it
@@ -1830,6 +1830,26 @@ bool ScribbleArea::snapStroke()
     }
     break;
   }
+  case shaperec::Kind::Triangle:
+    if(result.points.size() != 3)
+      return false;
+    // left as drawn: no 45 degree snap, which would move each corner relative to an unsnapped neighbour
+    params.id = SHAPE_POLYLINE;
+    params.flags = SHAPEFLAG_CLOSED;
+    for(const shaperec::Vec2& pt : result.points)
+      params.points.push_back(toPage(pt));
+    break;
+  case shaperec::Kind::Polyline:
+    if(result.points.size() < 3)
+      return false;
+    params.id = SHAPE_POLYLINE;
+    for(const shaperec::Vec2& pt : result.points)
+      params.points.push_back(toPage(pt));
+    // each point snaps relative to the one before it, already snapped (a square root's long top turns
+    //  horizontal), and an interior point also to the next, so a corner can lock to a right angle
+    for(int i = 1; i < int(params.points.size()); ++i)
+      params.points[i] = snapRecognizedAngleAt(params, i, params.points[i]);
+    break;
   case shaperec::Kind::Ellipse:
   {
     Point center = toPage(result.center);
@@ -1868,17 +1888,20 @@ bool ScribbleArea::snapStroke()
   return true;
 }
 
-// After the snap the pen keeps control of the shape until it lifts: a line's end follows it, anything
-//  closed is scaled about its centre by how far the pen has moved towards or away from that centre.
+// After the snap the pen keeps control of the shape until it lifts: a line's or open polyline's end
+//  follows it, anything closed is scaled about its centre by how far the pen has moved towards or away from that centre.
 void ScribbleArea::scaleSnapShape(Point pos)
 {
   if(!currStroke || snapParams.points.empty())
     return;
   ShapeParams params = snapParams;
-  if(params.id == SHAPE_LINE) {
+  bool openPolyline = params.id == SHAPE_POLYLINE && !(params.flags & SHAPEFLAG_CLOSED);
+  if(params.id == SHAPE_LINE || openPolyline) {
+    // an open shape ends where the pen is held, so its end follows the pen (a square root's top is
+    //  drawn out to cover what goes under it)
     params.points.back() += pos - snapAnchor;
     // by distance, like editing: the angle snap is only for the recognized shape itself
-    params.points.back() = snapShapeAngleAt(params, 1, params.points.back());
+    params.points.back() = snapShapeAngleAt(params, int(params.points.size()) - 1, params.points.back());
   }
   else {
     Point lo = params.points.front(), hi = lo;

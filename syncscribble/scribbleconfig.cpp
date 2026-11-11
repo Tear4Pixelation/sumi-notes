@@ -289,6 +289,10 @@ void ScribbleConfig::init()
   // seconds the pen must be held still at the end of a stroke before it snaps to a line, box or ellipse
   //  (or erases, for a scratch-out); 0 turns snapping off, anything else is kept within 0.5 - 1.5
   cfgF["shapeSnapDelay"] = 0.8;
+  // what the hold may snap to besides lines, rectangles and ellipses: a closed stroke with three corners
+  //  to a triangle, an open one made of straight segments (a square root sign) to a polyline
+  cfg["shapeSnapTriangle"] = 1;
+  cfg["shapeSnapPolyline"] = 1;
   // degrees: a shape's line segment within this of a multiple of 45 degrees snaps onto it; 0 is off
   cfgF["shapeAngleSnap"] = 8;
   // 1: append every stroke held for shape snapping, with what it was recognized as, to

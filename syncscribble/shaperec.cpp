@@ -14,6 +14,8 @@ const char* kindName(Kind kind)
   case Kind::Quad: return "quad";
   case Kind::Ellipse: return "ellipse";
   case Kind::Scribble: return "scribble";
+  case Kind::Triangle: return "triangle";
+  case Kind::Polyline: return "polyline";
   default: return "none";
   }
 }
@@ -528,6 +530,42 @@ std::vector<Peak> turningPeaks(const std::vector<Vec2>& samples, int window, int
   return peaks;
 }
 
+// Line through the part of side `side` of a closed loop (from corner cornerIdx[side] to the next one)
+//  between fractions fromFrac and toFrac of its length; synthetic (never drawn) samples are skipped.
+bool fitLoopSide(const std::vector<Vec2>& samples, const std::vector<bool>& synthetic,
+    const std::vector<int>& cornerIdx, int side, double fromFrac, double toFrac, LineFit& fit)
+{
+  int count = int(samples.size());
+  int from = cornerIdx[side], to = cornerIdx[(side + 1) % cornerIdx.size()];
+  int span = (to - from + count) % count;
+  std::vector<Vec2> sidePts;
+  for(int step = int(std::lround(span*fromFrac)); step <= int(std::lround(span*toFrac)); ++step) {
+    int idx = (from + step) % count;
+    if(!synthetic[idx])
+      sidePts.push_back(samples[idx]);
+  }
+  if(sidePts.size() < 3)
+    return false;
+  fit = fitLine(sidePts);
+  // refit without points well off the line: what is left of a generously rounded corner inside
+  //  the trimmed range, which would otherwise pull the side towards the corner's centre
+  for(int pass = 0; pass < 2; ++pass) {
+    double sumSq = 0;
+    for(const Vec2& pt : sidePts)
+      sumSq += std::pow((pt - fit.centroid).cross(fit.dir), 2);
+    double limit = 2.5*std::sqrt(sumSq/sidePts.size()) + 1e-6;
+    std::vector<Vec2> inliers;
+    for(const Vec2& pt : sidePts)
+      if(std::fabs((pt - fit.centroid).cross(fit.dir)) <= limit)
+        inliers.push_back(pt);
+    if(inliers.size() < 3 || inliers.size() == sidePts.size())
+      break;
+    sidePts.swap(inliers);
+    fit = fitLine(sidePts);
+  }
+  return true;
+}
+
 // Quad.  The turning peaks only say roughly where the corners are - a drawn corner is rounded, or the
 //  pen overshoots and comes back, so the sample at the peak can be well inside or outside the corner the
 //  user meant.  Instead each side's line is fitted to its straight middle (sideTrim cut off each end, so
@@ -550,37 +588,9 @@ bool fitQuad(const std::vector<Vec2>& samples, const std::vector<bool>& syntheti
     cornerIdx.push_back(strong[i].index);
   std::sort(cornerIdx.begin(), cornerIdx.end());
 
-  // line through the part of `side` between fractions fromFrac and toFrac of its length
   int count = int(samples.size());
   auto fitSidePart = [&](int side, double fromFrac, double toFrac, LineFit& fit) {
-    int from = cornerIdx[side], to = cornerIdx[(side + 1) % 4];
-    int span = (to - from + count) % count;
-    std::vector<Vec2> sidePts;
-    for(int step = int(std::lround(span*fromFrac)); step <= int(std::lround(span*toFrac)); ++step) {
-      int idx = (from + step) % count;
-      if(!synthetic[idx])
-        sidePts.push_back(samples[idx]);
-    }
-    if(sidePts.size() < 3)
-      return false;
-    fit = fitLine(sidePts);
-    // refit without points well off the line: what is left of a generously rounded corner inside
-    //  the trimmed range, which would otherwise pull the side towards the corner's centre
-    for(int pass = 0; pass < 2; ++pass) {
-      double sumSq = 0;
-      for(const Vec2& pt : sidePts)
-        sumSq += std::pow((pt - fit.centroid).cross(fit.dir), 2);
-      double limit = 2.5*std::sqrt(sumSq/sidePts.size()) + 1e-6;
-      std::vector<Vec2> inliers;
-      for(const Vec2& pt : sidePts)
-        if(std::fabs((pt - fit.centroid).cross(fit.dir)) <= limit)
-          inliers.push_back(pt);
-      if(inliers.size() < 3 || inliers.size() == sidePts.size())
-        break;
-      sidePts.swap(inliers);
-      fit = fitLine(sidePts);
-    }
-    return true;
+    return fitLoopSide(samples, synthetic, cornerIdx, side, fromFrac, toFrac, fit);
   };
 
   double minSin = std::sin(degToRad(params.minCornerAngleDeg));
@@ -671,6 +681,282 @@ bool fitQuad(const std::vector<Vec2>& samples, const std::vector<bool>& syntheti
   res.quadErr = std::sqrt(sumSq/used)/eqRadius;
   res.points = corners;
   res.rawCorners = raw;
+  return true;
+}
+
+// Triangle: a quad's method with three corners - sides fitted to their trimmed middles, corners where
+//  they meet - and no rectangle constraint.  It needs exactly three corners: a fourth peak anywhere near
+//  as strong as the weakest of the three means a quad (or a rounded blob), and the triangle fitted across
+//  one of its corners would only win under the loose pass's wide residual limit, turning a sloppy
+//  rectangle that used to stay ink into a triangle.
+bool fitTriangle(const std::vector<Vec2>& samples, const std::vector<bool>& synthetic,
+    const std::vector<Peak>& peaks, double minTurnDeg, double eqRadius, const Params& params, Result& res,
+    std::string& why)
+{
+  std::vector<Peak> strong;
+  for(const Peak& peak : peaks)
+    if(peak.turnDeg >= minTurnDeg)
+      strong.push_back(peak);
+  if(strong.size() < 3) {
+    why = format("triangle: %.0f corners", double(strong.size()));
+    return false;
+  }
+  if(strong.size() > 3 && strong[3].turnDeg > 0.5*strong[2].turnDeg) {
+    why = format("triangle: a fourth corner turning %.0f deg", strong[3].turnDeg);
+    return false;
+  }
+  std::vector<int> cornerIdx = {strong[0].index, strong[1].index, strong[2].index};
+  std::sort(cornerIdx.begin(), cornerIdx.end());
+
+  LineFit sides[3];
+  for(int side = 0; side < 3; ++side) {
+    if(!fitLoopSide(samples, synthetic, cornerIdx, side, params.sideTrim, 1 - params.sideTrim, sides[side])) {
+      why = "triangle: side too short to fit";
+      return false;
+    }
+  }
+  double minSin = std::sin(degToRad(params.minCornerAngleDeg));
+  double maxShift = 0.4*(2*PI*eqRadius/3);
+  std::vector<Vec2> corners, raw;
+  for(int side = 0; side < 3; ++side) {
+    const LineFit& before = sides[(side + 2) % 3];
+    const LineFit& after = sides[side];
+    double denom = before.dir.cross(after.dir);
+    if(std::fabs(denom) < minSin) {
+      why = "triangle: adjacent sides nearly parallel";
+      return false;
+    }
+    double along = (after.centroid - before.centroid).cross(after.dir)/denom;
+    Vec2 corner = before.centroid + before.dir*along;
+    Vec2 peakPt = samples[cornerIdx[side]];
+    if(dist(corner, peakPt) > maxShift) {
+      why = "triangle: side lines meet far from the drawn corner";
+      return false;
+    }
+    corners.push_back(corner);
+    raw.push_back(peakPt);
+  }
+  double area2 = std::fabs((corners[1] - corners[0]).cross(corners[2] - corners[0]));
+  if(area2 < 0.05*eqRadius*eqRadius) {
+    why = "triangle: degenerate";
+    return false;
+  }
+  // The loop must enclose about the triangle's area.  A figure 8 or a wander that crosses itself has
+  //  three turning peaks and sides a triangle can be fitted to, but its signed area mostly cancels
+  //  (the lab's "other" class: 31 figure 8s and 7 wanders became triangles without this).
+  double loopArea2 = 0;
+  for(int i = 0; i < int(samples.size()); ++i)
+    loopArea2 += samples[i].cross(samples[(i + 1) % samples.size()]);
+  double areaRatio = std::fabs(loopArea2)/area2;
+  if(areaRatio < 0.75 || areaRatio > 1.3) {
+    why = format("triangle: loop encloses %.2f of the triangle's area", areaRatio);
+    return false;
+  }
+  double sumSq = 0;
+  int used = 0;
+  for(int i = 0; i < int(samples.size()); ++i) {
+    if(synthetic[i])
+      continue;
+    double best = Result::NO_FIT;
+    for(int side = 0; side < 3; ++side)
+      best = std::min(best, distToSegment(samples[i], corners[side], corners[(side + 1) % 3]));
+    sumSq += best*best;
+    ++used;
+  }
+  res.triangleErr = std::sqrt(sumSq/used)/eqRadius;
+  res.points = corners;
+  res.rawCorners = raw;
+  return true;
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Open polyline.  Corners come from Ramer-Douglas-Peucker on the resampled stroke, thinned to the ones
+//  that really turn; then each segment's line is fitted to its middle and has to be straight - a
+//  parabola fitted across that middle may hardly bow.  The straightness test is what keeps curves and
+//  handwriting out: RDP splits any curve into chords, and the thinning leaves a few long curved ones.
+//  As for a quad, the corners are where adjacent segment lines meet, not the drawn points; the two ends
+//  are the drawn ends projected onto their segment's line.
+
+// indices of the RDP vertices of pts at tolerance eps, ascending, always including both ends
+std::vector<int> simplifyRdp(const std::vector<Vec2>& pts, double eps)
+{
+  std::vector<bool> keep(pts.size(), false);
+  keep.front() = keep.back() = true;
+  std::vector<std::pair<int, int>> ranges = {{0, int(pts.size()) - 1}};
+  while(!ranges.empty()) {
+    std::pair<int, int> range = ranges.back();
+    ranges.pop_back();
+    double worst = 0;
+    int worstIdx = -1;
+    for(int i = range.first + 1; i < range.second; ++i) {
+      double deviation = distToSegment(pts[i], pts[range.first], pts[range.second]);
+      if(deviation > worst) {
+        worst = deviation;
+        worstIdx = i;
+      }
+    }
+    if(worstIdx >= 0 && worst > eps) {
+      keep[worstIdx] = true;
+      ranges.emplace_back(range.first, worstIdx);
+      ranges.emplace_back(worstIdx, range.second);
+    }
+  }
+  std::vector<int> indices;
+  for(int i = 0; i < int(pts.size()); ++i)
+    if(keep[i])
+      indices.push_back(i);
+  return indices;
+}
+
+bool fitPolyline(const std::vector<Vec2>& pts, const Params& params, Result& res, std::string& why)
+{
+  double arcLen = cumulativeLengths(pts).back();
+  double minSegLen = std::max(params.polylineMinSeg, params.polylineMinSegFrac*arcLen);
+  if(arcLen < 3*minSegLen) {
+    why = "polyline: too short";
+    return false;
+  }
+  if(dist(pts.front(), pts.back()) < params.polylineMinOpenFrac*arcLen) {
+    why = "polyline: closed";
+    return false;
+  }
+  int count = params.polylineSamples;
+  std::vector<Vec2> samples = resampleUniform(pts, count, false);
+  double spacing = arcLen/(count - 1);
+  Vec2 lo = samples.front(), hi = lo;
+  for(const Vec2& pt : samples) {
+    lo = Vec2(std::min(lo.x, pt.x), std::min(lo.y, pt.y));
+    hi = Vec2(std::max(hi.x, pt.x), std::max(hi.y, pt.y));
+  }
+  double size = std::max(hi.x - lo.x, hi.y - lo.y);
+  std::vector<int> verts = simplifyRdp(samples, std::max(params.polylineRdpMin, params.polylineRdpFrac*size));
+
+  auto vertexTurn = [&](size_t vert) {
+    return turnAt(samples, verts[vert-1], verts[vert], verts[vert+1]);
+  };
+  // thin: weakest corner first, then segments too short to be meant (a hook at an end is dropped, a
+  //  chamfer inside loses its weaker end), until nothing changes
+  for(bool changed = true; changed && verts.size() >= 3;) {
+    changed = false;
+    size_t weakest = 0;
+    double weakestTurn = Result::NO_FIT;
+    for(size_t vert = 1; vert + 1 < verts.size(); ++vert) {
+      double turn = vertexTurn(vert);
+      if(turn < weakestTurn) {
+        weakestTurn = turn;
+        weakest = vert;
+      }
+    }
+    if(weakestTurn < params.polylineMinTurnDeg) {
+      verts.erase(verts.begin() + weakest);
+      changed = true;
+      continue;
+    }
+    for(size_t seg = 0; seg + 1 < verts.size() && !changed; ++seg) {
+      if((verts[seg+1] - verts[seg])*spacing >= minSegLen)
+        continue;
+      size_t drop;
+      if(seg == 0)
+        drop = 0;
+      else if(seg + 2 == verts.size())
+        drop = seg + 1;
+      else
+        drop = vertexTurn(seg) < vertexTurn(seg + 1) ? seg : seg + 1;
+      verts.erase(verts.begin() + drop);
+      changed = true;
+    }
+  }
+  int nSegs = int(verts.size()) - 1;
+  if(nSegs < 2) {
+    why = "polyline: no corner";
+    return false;
+  }
+  if(nSegs > params.polylineMaxSegments) {
+    why = format("polyline: %.0f segments", nSegs);
+    return false;
+  }
+
+  std::vector<LineFit> lines;
+  for(int seg = 0; seg < nSegs; ++seg) {
+    int from = verts[seg], to = verts[seg+1];
+    double trimFrom = seg == 0 ? 0.03 : params.polylineTrim;
+    double trimTo = seg == nSegs - 1 ? 0.03 : params.polylineTrim;
+    std::vector<Vec2> middle;
+    for(int idx = from + int(std::lround((to - from)*trimFrom)); idx <= to - int(std::lround((to - from)*trimTo)); ++idx)
+      middle.push_back(samples[idx]);
+    if(middle.size() < 4) {
+      why = "polyline: segment too short to fit";
+      return false;
+    }
+    LineFit fit = fitLine(middle);
+    if(fit.dir.dot(samples[to] - samples[from]) < 0)
+      fit.dir = fit.dir*-1;
+    // in the line's frame: along (centred) and across; fit across = a*along^2 + b*along + c
+    std::vector<double> sums(5, 0), rhs(3, 0);
+    double alongMin = Result::NO_FIT, alongMax = -Result::NO_FIT, sumSq = 0;
+    for(const Vec2& pt : middle) {
+      double along = (pt - fit.centroid).dot(fit.dir), across = (pt - fit.centroid).cross(fit.dir);
+      alongMin = std::min(alongMin, along);
+      alongMax = std::max(alongMax, along);
+      sumSq += across*across;
+      double power = 1;
+      for(int deg = 0; deg < 5; ++deg, power *= along)
+        sums[deg] += power;
+      rhs[0] += across*along*along;
+      rhs[1] += across*along;
+      rhs[2] += across;
+    }
+    std::vector<double> coeffs;
+    if(!solveLinear({sums[4], sums[3], sums[2], sums[3], sums[2], sums[1], sums[2], sums[1], sums[0]}, rhs, coeffs)) {
+      why = "polyline: segment fit failed";
+      return false;
+    }
+    double middleLen = alongMax - alongMin;
+    double sagitta = std::fabs(coeffs[0])*0.25*middleLen*middleLen;
+    double rms = std::sqrt(sumSq/middle.size());
+    if(sagitta > params.polylineMaxSagitta*middleLen + params.polylineNoise) {
+      why = format("polyline: segment %.0f bows %.3f", seg, sagitta/middleLen);
+      return false;
+    }
+    if(rms > params.polylineMaxRms*middleLen + 0.5*params.polylineNoise) {
+      why = format("polyline: segment %.0f rms %.3f", seg, rms/middleLen);
+      return false;
+    }
+    lines.push_back(fit);
+  }
+
+  auto project = [](const LineFit& line, const Vec2& pt) {
+    return line.centroid + line.dir*(pt - line.centroid).dot(line.dir);
+  };
+  std::vector<Vec2> points = {project(lines.front(), samples.front())};
+  double minSin = std::sin(degToRad(12));
+  for(int corner = 1; corner < nSegs; ++corner) {
+    const LineFit& before = lines[corner-1];
+    const LineFit& after = lines[corner];
+    double denom = before.dir.cross(after.dir);
+    double turnDeg = std::atan2(std::fabs(denom), before.dir.dot(after.dir))*180/PI;
+    if(std::fabs(denom) < minSin || turnDeg < 0.8*params.polylineMinTurnDeg) {
+      why = format("polyline: corner %.0f turns %.0f deg", corner, turnDeg);
+      return false;
+    }
+    double along = (after.centroid - before.centroid).cross(after.dir)/denom;
+    Vec2 cornerPt = before.centroid + before.dir*along;
+    double shorter = std::min(verts[corner] - verts[corner-1], verts[corner+1] - verts[corner])*spacing;
+    if(dist(cornerPt, samples[verts[corner]]) > 0.35*shorter + 2) {
+      why = "polyline: segment lines meet far from the drawn corner";
+      return false;
+    }
+    points.push_back(cornerPt);
+  }
+  points.push_back(project(lines.back(), samples.back()));
+  for(int seg = 0; seg < nSegs; ++seg) {
+    if((points[seg+1] - points[seg]).dot(lines[seg].dir) <= 0) {
+      why = "polyline: a segment runs backwards";
+      return false;
+    }
+  }
+  res.points = points;
+  why = format("polyline: %.0f segments", nSegs);
   return true;
 }
 
@@ -869,6 +1155,23 @@ Result recognize(const std::vector<Vec2>& stroke, const Params& params)
   res.quadErr = quadRes.quadErr;
   res.rawCorners = quadRes.rawCorners;
 
+  // a triangle's corners turn ~120 degrees, so the fine scale nearly always finds them; the coarse one
+  //  is for rounded ones
+  Result triRes;
+  std::string triWhy;
+  bool triOk = false;
+  if(params.triangle) {
+    triOk = fitTriangle(samples, synthetic, peaks, params.cornerMinTurnDeg, eqRadius, params, triRes, triWhy);
+    if(!triOk) {
+      std::vector<Peak> coarse = turningPeaks(samples, std::max(3, count/13), std::max(3, count/12));
+      std::string coarseWhy;
+      triOk = fitTriangle(samples, synthetic, coarse, params.coarseCornerMinTurnDeg, eqRadius, params, triRes, coarseWhy);
+      if(!triOk)
+        triWhy += "; coarse " + coarseWhy;
+    }
+  }
+  res.triangleErr = triRes.triangleErr;
+
   EllipseFit ellipse = fitEllipse(realPts, eqRadius);
   // An ellipse turns steadily all the way round; a polygon, however rounded its corners, has stretches
   //  that barely turn at all.  This is what tells a hexagon from a circle - both fit an ellipse about
@@ -903,10 +1206,29 @@ Result recognize(const std::vector<Vec2>& stroke, const Params& params)
 
   double quadScore = quadOk ? res.quadErr : Result::NO_FIT;
   double ellipseScore = ellipseOk ? res.ellipseErr : Result::NO_FIT;
-  double best = std::min(quadScore, ellipseScore);
+  if(triOk && res.triangleErr > params.triangleMaxErr) {
+    triOk = false;
+    triWhy = format("triangle: err %.3f", res.triangleErr);
+  }
+  else if(triOk && res.triangleErr > params.triangleMaxEllipseRatio*res.ellipseErr) {
+    triOk = false;
+    triWhy = format("triangle: err %.3f, too close to the ellipse's %.3f", res.triangleErr, res.ellipseErr);
+  }
+  double triScore = triOk ? res.triangleErr : Result::NO_FIT;
+  double best = std::min(std::min(quadScore, ellipseScore), triScore);
   if(best > params.closedMaxErr) {
     res.reason = format("closed, but quad err %.3f, ellipse err %.3f", res.quadErr, res.ellipseErr)
-        + (quadWhy.empty() ? "" : "; " + quadWhy) + (ellipseWhy.empty() ? "" : "; " + ellipseWhy);
+        + (params.triangle ? format(", triangle err %.3f", res.triangleErr) : "")
+        + (quadWhy.empty() ? "" : "; " + quadWhy) + (ellipseWhy.empty() ? "" : "; " + ellipseWhy)
+        + (triWhy.empty() ? "" : "; " + triWhy);
+    return res;
+  }
+  if(triScore < quadScore && triScore < ellipseScore) {
+    res.kind = Kind::Triangle;
+    res.points = triRes.points;
+    res.rawCorners = triRes.rawCorners;
+    res.reason = format("triangle: err %.3f (quad %.3f", res.triangleErr, res.quadErr)
+        + format(", ellipse %.3f)", res.ellipseErr);
     return res;
   }
   if(quadScore <= ellipseScore) {
@@ -966,12 +1288,37 @@ Params looseHoldParams()
   return params;
 }
 
-Result recognizeHold(const std::vector<Vec2>& stroke)
+Result recognizePolyline(const std::vector<Vec2>& stroke, const Params& params)
 {
-  Result strict = recognize(stroke);
+  Result res;
+  std::vector<Vec2> pts = cleanStroke(stroke, params);
+  if(pts.size() < 3) {
+    res.reason = "too few points";
+    return res;
+  }
+  if(fitPolyline(pts, params, res, res.reason))
+    res.kind = Kind::Polyline;
+  return res;
+}
+
+Result recognizeHold(const std::vector<Vec2>& stroke, bool triangles, bool polylines)
+{
+  Params strictParams;
+  strictParams.triangle = triangles;
+  Result strict = recognize(stroke, strictParams);
   if(strict.kind != Kind::None)
     return strict;
-  Result loose = recognize(stroke, looseHoldParams());
+  // Before the loose pass, whose wide line tolerance takes a square root sign for a sloppy line.  The
+  //  polyline's own straightness test is strict, so a bowed line or a C still reaches the loose pass.
+  if(polylines) {
+    Result poly = recognizePolyline(stroke, strictParams);
+    if(poly.kind == Kind::Polyline)
+      return poly;
+    strict.reason += "; " + poly.reason;
+  }
+  Params looseParams = looseHoldParams();
+  looseParams.triangle = triangles;
+  Result loose = recognize(stroke, looseParams);
   if(loose.kind == Kind::None)
     return strict;  // the strict reasons are the ones worth reading
   loose.reason = "hold, loose: " + loose.reason;

@@ -558,7 +558,7 @@ PenToolbar::PenToolbar(bool _compact)
   setupTooltip(pressureRow, _("How much thinner a light touch draws than a full press"));
 
   settingsBtn = createToolSettingsButton(
-      "Pen Settings", {"inputSmoothing", "inputSimplify", "shapeDrawThrough", "shapeSnapDelay", "liftScratchOut", "liftScratchOutLevel"},
+      "Pen Settings", {"inputSmoothing", "inputSimplify", "shapeDrawThrough", "shapeSnapDelay", "shapeSnapTriangle", "shapeSnapPolyline", "liftScratchOut", "liftScratchOutLevel"},
       compact ? std::vector<Button *>{cbSnaptoGrid, cbLineDrawing} : std::vector<Button *>{},
       {penTipRow, pressureRow});
 

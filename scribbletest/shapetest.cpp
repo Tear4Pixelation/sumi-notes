@@ -3,16 +3,23 @@
 //  own - which is how they get run in CI, where no display is available:
 //
 //   g++ -std=c++14 -O2 -DNDEBUG -I . -I syncscribble -isystem stb -DSHAPETEST_MAIN
-//       scribbletest/shapetest.cpp syncscribble/shape.cpp ulib/geom.cpp ulib/path2d.cpp
-//       -o shapetest && ./shapetest
+//       scribbletest/shapetest.cpp syncscribble/shape.cpp syncscribble/shaperec.cpp ulib/geom.cpp
+//       ulib/path2d.cpp -o shapetest && ./shapetest
 //   (one command, run from the repo root.  NDEBUG is needed because geom.cpp's ASSERT would otherwise
 //   pull in platform_assert, which lives in the application.)
+//
+// The hold-to-snap recognizer (shaperec.cpp) has its own large gated suite in labs/shape-recognition;
+//  testShapeRecognition() here only pins the triangle and polyline cases and that line/rectangle/curve
+//  results are unchanged by them.
 //
 // runShapeTests() returns the number of failed checks and is also called from ScribbleTest::runAll().
 
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "shape.h"
+#include "shaperec.h"
 
 static int nShapeChecksFailed = 0;
 
@@ -668,6 +675,142 @@ static void testDegenerateDescriptors()
   shapeCheckTrue(buildShapePath(invalid).empty(), "an invalid descriptor builds no path");
 }
 
+// A hand-drawn stroke through `vertices` in screen units: samples about 1.5 apart with a little
+//  deterministic jitter, then the cluster of samples a hold leaves at the end.  `cornerCut` > 0 rounds
+//  each interior corner by starting the turn that far before it.
+static std::vector<shaperec::Vec2> heldStroke(std::vector<shaperec::Vec2> vertices, double cornerCut = 0)
+{
+  using shaperec::Vec2;
+  if(cornerCut > 0 && vertices.size() > 2) {
+    std::vector<Vec2> rounded = {vertices.front()};
+    for(size_t i = 1; i + 1 < vertices.size(); ++i) {
+      Vec2 before = vertices[i] + (vertices[i-1] - vertices[i]).normalized()*cornerCut;
+      Vec2 after = vertices[i] + (vertices[i+1] - vertices[i]).normalized()*cornerCut;
+      rounded.push_back(before);
+      rounded.push_back((before + after)*0.25 + vertices[i]*0.5);
+      rounded.push_back(after);
+    }
+    rounded.push_back(vertices.back());
+    vertices.swap(rounded);
+  }
+  std::vector<Vec2> stroke;
+  int sampleIdx = 0;
+  for(size_t seg = 0; seg + 1 < vertices.size(); ++seg) {
+    Vec2 from = vertices[seg], to = vertices[seg+1];
+    int steps = std::max(1, int(shaperec::dist(from, to)/1.5));
+    for(int step = 0; step < steps; ++step, ++sampleIdx) {
+      // a hand wobbles slowly; sample noise is a fraction of the sample spacing
+      Vec2 jitter(0.6*std::sin(sampleIdx*0.11) + 0.08*std::sin(sampleIdx*1.7),
+          0.6*std::cos(sampleIdx*0.07 + 1) + 0.08*std::sin(sampleIdx*2.3 + 1));
+      stroke.push_back(from + (to - from)*(double(step)/steps) + jitter);
+    }
+  }
+  for(int hold = 0; hold < 12; ++hold)
+    stroke.push_back(vertices.back() + shaperec::Vec2(0.3*std::sin(hold*2.1), 0.3*std::cos(hold*1.3)));
+  return stroke;
+}
+
+static std::vector<shaperec::Vec2> sampledCurve(double (*curveY)(double), double fromX, double toX)
+{
+  std::vector<shaperec::Vec2> vertices;
+  for(double posX = fromX; posX <= toX; posX += 2)
+    vertices.emplace_back(posX, curveY(posX));
+  return heldStroke(vertices);
+}
+
+static double sineWaveY(double posX) { return 30*std::sin(2*M_PI*posX/150); }
+// cursive "uuuu": arches meeting in cusps - corners, but nothing straight between them
+static double cursiveUY(double posX) { return 25*std::abs(std::sin(M_PI*posX/40)); }
+// a shallow arc, about 90 degrees of a circle of radius 85
+static double arcY(double posX) { return -std::sqrt(85*85 - posX*posX); }
+// a handwritten "e"-like loop opening to the right
+static std::vector<shaperec::Vec2> cursiveLoop()
+{
+  std::vector<shaperec::Vec2> vertices;
+  for(double theta = 0; theta <= 1.7*M_PI; theta += 0.08)
+    vertices.emplace_back(40 + 40*std::cos(theta + M_PI/2) + 25*theta, 40 - 40*std::sin(theta + M_PI/2));
+  return heldStroke(vertices);
+}
+
+static bool recognizedAs(const shaperec::Result& result, const char* kind)
+{
+  if(getenv("SHAPETEST_VERBOSE"))
+    printf("  recognized %s (wanted %s): %s\n", shaperec::kindName(result.kind), kind, result.reason.c_str());
+  return strcmp(shaperec::kindName(result.kind), kind) == 0;
+}
+
+static void testShapeRecognition()
+{
+  using shaperec::Vec2;
+  using shaperec::recognizeHold;
+
+  // square root sign: short stroke down, long stroke up, long horizontal
+  std::vector<Vec2> sqrtVerts = {Vec2(0, 55), Vec2(12, 80), Vec2(35, 0), Vec2(180, 0)};
+  shaperec::Result sqrtRes = recognizeHold(heldStroke(sqrtVerts));
+  shapeCheckTrue(recognizedAs(sqrtRes, "polyline"), "square root sign snaps to a polyline");
+  if(sqrtRes.points.size() == 4) {
+    for(int i = 0; i < 4; ++i)
+      shapeCheckTrue(shaperec::dist(sqrtRes.points[i], sqrtVerts[i]) < 4, "square root polyline vertex where drawn");
+  }
+  else
+    shapeCheckTrue(false, "square root polyline has 4 points");
+  shapeCheckTrue(recognizedAs(recognizeHold(heldStroke(sqrtVerts, 4)), "polyline"),
+      "square root sign with rounded corners snaps to a polyline");
+  std::vector<Vec2> smallSqrt;
+  for(const Vec2& vertex : sqrtVerts)
+    smallSqrt.push_back(vertex*0.5 + Vec2(300, 300));
+  shapeCheckTrue(recognizedAs(recognizeHold(heldStroke(smallSqrt)), "polyline"), "small square root snaps to a polyline");
+  shapeCheckTrue(recognizedAs(recognizeHold(heldStroke({Vec2(0, 0), Vec2(0, 120), Vec2(90, 120)})), "polyline"),
+      "an L snaps to a polyline");
+
+  // triangle, closed with a small overshoot past the start
+  std::vector<Vec2> triVerts = {Vec2(100, 0), Vec2(180, 140), Vec2(20, 140), Vec2(100, 0), Vec2(104, 7)};
+  shaperec::Result triRes = recognizeHold(heldStroke(triVerts));
+  shapeCheckTrue(recognizedAs(triRes, "triangle"), "triangle snaps to a triangle");
+  if(triRes.points.size() == 3) {
+    for(const Vec2& corner : {triVerts[0], triVerts[1], triVerts[2]}) {
+      double nearest = 1E9;
+      for(const Vec2& pt : triRes.points)
+        nearest = std::min(nearest, shaperec::dist(pt, corner));
+      shapeCheckTrue(nearest < 5, "triangle corner where drawn");
+    }
+  }
+  else
+    shapeCheckTrue(false, "triangle has 3 corners");
+  // started mid-side, rounded corners, stopping a little short
+  shapeCheckTrue(recognizedAs(recognizeHold(heldStroke(
+      {Vec2(60, 140), Vec2(0, 140), Vec2(70, 10), Vec2(150, 140), Vec2(70, 141)}, 6)), "triangle"),
+      "rounded triangle started mid-side snaps to a triangle");
+
+  // Curves and handwriting are never polylines or triangles.  What they are otherwise is the older
+  //  recognizer's business (the loose hold pass takes an S for a bowed line and a loop for an ellipse),
+  //  so these check that switching the two new kinds off changes nothing.
+  std::vector<std::vector<Vec2>> curves = {sampledCurve(sineWaveY, 0, 150), sampledCurve(cursiveUY, 0, 160),
+      cursiveLoop(), sampledCurve(arcY, -60, 60), sampledCurve(sineWaveY, 0, 300)};
+  for(const std::vector<Vec2>& curve : curves) {
+    shaperec::Result curveRes = recognizeHold(curve);
+    shapeCheckTrue(!recognizedAs(curveRes, "polyline") && !recognizedAs(curveRes, "triangle"),
+        "a curve is not a polyline or triangle");
+    shapeCheckTrue(curveRes.kind == recognizeHold(curve, false, false).kind,
+        "a curve is recognized as it was before triangles and polylines");
+  }
+
+  // the two settings
+  shapeCheckTrue(!recognizedAs(recognizeHold(heldStroke(sqrtVerts), true, false), "polyline"),
+      "polyline snapping off: no polyline");
+  shapeCheckTrue(!recognizedAs(recognizeHold(heldStroke(triVerts), false, true), "triangle"),
+      "triangle snapping off: no triangle");
+
+  // unchanged: line and rectangle
+  shapeCheckTrue(recognizedAs(recognizeHold(heldStroke({Vec2(0, 0), Vec2(200, 30)})), "line"), "line still a line");
+  shapeCheckTrue(recognizedAs(recognizeHold(heldStroke(
+      {Vec2(0, 0), Vec2(160, 0), Vec2(160, 100), Vec2(0, 100), Vec2(0, 0), Vec2(10, 0)})), "quad"),
+      "rectangle still a rectangle");
+  shapeCheckTrue(recognizedAs(recognizeHold(heldStroke(
+      {Vec2(0, 0), Vec2(160, 0), Vec2(160, 100), Vec2(0, 100), Vec2(0, 0), Vec2(10, 0)}, 8)), "quad"),
+      "rounded rectangle still a rectangle");
+}
+
 int runShapeTests()
 {
   nShapeChecksFailed = 0;
@@ -686,6 +829,7 @@ int runShapeTests()
   testAngleSnap();
   testEllipse();
   testDegenerateDescriptors();
+  testShapeRecognition();
   return nShapeChecksFailed;
 }
 

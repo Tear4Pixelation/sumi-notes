@@ -1,8 +1,9 @@
 #pragma once
 
 // Single-stroke recognition, run when the user holds the pen still at the end of a stroke: a line, a
-//  quadrilateral ("square"), an ellipse/circle, a scratch-out ("scribble": back and forth over something
-//  to erase it), or nothing.
+//  quadrilateral ("square"), a triangle, an ellipse/circle, an open polyline (straight segments meeting in
+//  corners, e.g. a square root sign), a scratch-out ("scribble": back and forth over something to erase
+//  it), or nothing.
 //
 // The two kinds of mistake cost very different amounts.  A line, square or circle recognized when it was
 //  not meant costs one undo, and the hold means the user asked for *something* - so those lean towards
@@ -24,7 +25,7 @@
 
 namespace shaperec {
 
-enum class Kind { None, Line, Quad, Ellipse, Scribble };
+enum class Kind { None, Line, Quad, Ellipse, Scribble, Triangle, Polyline };
 const char* kindName(Kind kind);
 
 struct Params
@@ -122,13 +123,54 @@ struct Params
   //  costs a redraw
   double ellipseMaxStraightFrac = 0.5;
   double straightTurnFrac = 0.35;
+
+  // --- triangle ---
+  // a closed stroke with three turning peaks is also fitted as a triangle (sides fitted to their trimmed
+  //  middles like a quad's, corners where they meet) and competes with the quad and ellipse on residual
+  bool triangle = true;
+  // ... and is only taken if it fits within triangleMaxErr (same measure as closedMaxErr) and at most
+  //  triangleMaxEllipseRatio of the ellipse's error, whether or not the ellipse itself was refused.
+  //  Lab "other" class, both suites: drawn triangles fit at 0.006-0.038 and under 0.19 of the ellipse;
+  //  one lobe of a figure 8 (a teardrop) at 0.086-0.095 and 0.83-1.03 of it.  The same in both passes.
+  double triangleMaxErr = 0.06;
+  double triangleMaxEllipseRatio = 0.5;
+
+  // --- open polyline (recognizePolyline) ---
+  // Corners: Ramer-Douglas-Peucker over the stroke resampled to polylineSamples points, at a tolerance
+  //  of polylineRdpFrac of the stroke's larger bbox side (at least polylineRdpMin units), then vertices
+  //  turning less than polylineMinTurnDeg are dropped, weakest first.  A curve split up by RDP turns a
+  //  little at many vertices, so what is left of it is a few long curved segments - which the
+  //  straightness test below refuses.
+  int polylineSamples = 256;
+  double polylineRdpFrac = 0.035;
+  double polylineRdpMin = 1.5;
+  double polylineMinTurnDeg = 30;
+  // at most this many segments: more is handwriting (a zigzag of many is a scratch-out, tested first)
+  int polylineMaxSegments = 6;
+  // a segment shorter than this (and polylineMinSegFrac of the arc length) is a hook at an end, dropped,
+  //  or a chamfered corner inside, merged into its neighbours
+  double polylineMinSeg = 6;
+  double polylineMinSegFrac = 0.04;
+  // Straightness, measured on the middle of each segment (polylineTrim cut off at each corner, where a
+  //  hand-drawn corner is rounded): a parabola fitted across it may bow by at most polylineMaxSagitta of
+  //  the middle's length (plus polylineNoise units), and the RMS distance from its line at most
+  //  polylineMaxRms.  The parabola is what refuses a curve: an arc of 20 degrees already bows 4.4%,
+  //  while a hand-drawn straight segment bows 1-2%.
+  double polylineTrim = 0.15;
+  double polylineMaxSagitta = 0.03;
+  double polylineMaxRms = 0.03;
+  double polylineNoise = 0.8;
+  // a stroke whose end comes back within this fraction of its arc length of the start is a closed
+  //  shape, left to the closed fits
+  double polylineMinOpenFrac = 0.15;
 };
 
 struct Result
 {
   Kind kind = Kind::None;
-  // Line: [start, end] in drawing order.  Quad: 4 corners in drawing order.  Scribble: the area to
-  //  erase, as a convex polygon (counter-clockwise in a y-up frame).
+  // Line: [start, end] in drawing order.  Quad: 4 corners in drawing order.  Triangle: 3 corners in
+  //  drawing order.  Polyline: start, the corners, end, in drawing order.  Scribble: the area to erase, as
+  //  a convex polygon (counter-clockwise in a y-up frame).
   std::vector<Vec2> points;
   // Ellipse: angle is the direction of radiusX in radians; circle == true means radiusX == radiusY
   Vec2 center;
@@ -139,7 +181,7 @@ struct Result
   //  the drawn points at the quad's turning peaks (what a naive recognizer would call the corners),
   //  and why the result was chosen or rejected
   static constexpr double NO_FIT = std::numeric_limits<double>::infinity();
-  double lineErr = NO_FIT, quadErr = NO_FIT, ellipseErr = NO_FIT;
+  double lineErr = NO_FIT, quadErr = NO_FIT, ellipseErr = NO_FIT, triangleErr = NO_FIT;
   std::vector<Vec2> rawCorners;
   std::string reason;
 };
@@ -154,8 +196,14 @@ Params liftParams(int level);
 // The hold's second chance: much looser line / closed-shape tolerances, same scratch-out rules.  Holding
 //  is an explicit request to snap, so a sloppy stroke should become its best-fitting shape.
 Params looseHoldParams();
-// What the hold runs: recognize() with the usual tolerances, and only if that finds nothing,
-//  again with looseHoldParams().  A stroke the strict pass takes is never changed by the loose one.
-Result recognizeHold(const std::vector<Vec2>& stroke);
+// Only the open polyline test: Kind::Polyline or Kind::None.  Not part of recognize(), since a stroke
+//  that is not a line, quad, triangle or ellipse under strict tolerances should be a polyline before the
+//  loose pass makes it a sloppy line - see recognizeHold().
+Result recognizePolyline(const std::vector<Vec2>& stroke, const Params& params = Params());
+// What the hold runs: recognize() with the usual tolerances; then, if that finds nothing, the open
+//  polyline test; then recognize() again with looseHoldParams().  A stroke the strict pass takes is
+//  never changed by the later ones.  `triangles` and `polylines` switch those two kinds off (the
+//  shapeSnapTriangle / shapeSnapPolyline preferences).
+Result recognizeHold(const std::vector<Vec2>& stroke, bool triangles = true, bool polylines = true);
 
 }  // namespace shaperec

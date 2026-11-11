@@ -180,7 +180,13 @@ const char* prefInfoXML = R"#(
       description="0 is roundest; higher follows the points more closely" />
   <pref name="shapeSnapDelay" type="float" min="0" max="1.5" step="0.1" group="Shapes"
       title="Snap to shape after holding"
-      description="Seconds to hold the pen still at the end of a stroke before it becomes a line, rectangle or ellipse (0.5 to 1.5); a scratch-out erases what is under it. 0 turns this off" />
+      description="Seconds to hold the pen still at the end of a stroke before it becomes a line, rectangle, triangle, ellipse or polyline (0.5 to 1.5); a scratch-out erases what is under it. 0 turns this off" />
+  <pref name="shapeSnapTriangle" type="bool" group="Shapes"
+      title="Snap to triangles"
+      description="Holding the pen still at the end of a closed stroke with three corners makes it a triangle" />
+  <pref name="shapeSnapPolyline" type="bool" group="Shapes"
+      title="Snap to polylines"
+      description="Holding the pen still at the end of a stroke made of straight segments, like a square root sign, makes it a polyline with those corners. Curves and handwriting are left alone" />
   <pref name="liftScratchOut" type="bool" group="Shapes"
       title="Scratch out without holding"
       description="Scribble back and forth over something and it is erased as soon as the pen lifts. Off: hold the pen still at the end to erase. Needs snap to shape after holding" />

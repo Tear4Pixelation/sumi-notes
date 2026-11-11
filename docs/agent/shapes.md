@@ -182,7 +182,7 @@ would make free erase work but would split curved shapes (ellipse, rounded box) 
 ## Hold to snap (shape recognition)
 
 With the pen tool, **hold the pen still at the end of a stroke** for `shapeSnapDelay` seconds and the ink
-becomes the line, rectangle or ellipse it looks like; the rest of the gesture then scales it until the pen
+becomes the line, rectangle, triangle, ellipse or polyline it looks like; the rest of the gesture then scales it until the pen
 lifts. A **scratch-out** (back and forth over something) erases what it was drawn over instead - held,
 or, by default, as soon as the pen lifts (below). The
 delay is 0.5-1.5 s, 0 turns it off (default 0.8), and is in Preferences > Shapes plus the Pen and Shape
@@ -283,8 +283,12 @@ were all refused. 240 Hz sampling by itself cost nothing.
   The add is ended as its own action before the params change, so sync sends the snapped shape first.
 - **Mapping:** line -> `SHAPE_LINE`; axis-aligned rectangle -> `SHAPE_BOX`; a tilted one -> closed
   `SHAPE_POLYLINE` (a box cannot rotate); circle or axis-aligned ellipse -> `SHAPE_ELLIPSE`; a tilted
-  ellipse -> closed `SHAPE_CURVE` at tightness 1 through 8 points on it. The shape tool's arrowhead and
-  rounding toggles are *not* applied - they are armed for the shape tool, not for handwriting.
+  ellipse -> closed `SHAPE_CURVE` at tightness 1 through 8 points on it; triangle -> closed
+  `SHAPE_POLYLINE` of 3 points (not angle snapped); open polyline -> open `SHAPE_POLYLINE`, each point
+  angle snapped to the one before it (`snapRecognizedAngleAt`, so a square root's top turns horizontal).
+  The shape tool's arrowhead and rounding toggles are *not* applied - they are armed for the shape tool,
+  not for handwriting. An open polyline's last point follows the pen after the snap, like a line's end
+  (`scaleSnapShape`), so a square root's top can be drawn out; closed shapes scale.
 - **Scratch-out** erases every element whose bbox *centre* is inside the scratch-out's hull (an overlap
   test would take strokes it merely grazed), through `Selection::doSelect()` so locked and hidden layers
   are respected, as two undo steps (the scribble as ink, then the erase - see above). Images are never taken. It happens the moment the hold fires; the rest
@@ -299,6 +303,47 @@ time past the delay (the suite runs with `shapeSnapDelay` 0, so the wall-clock t
 Mutation-tested: no second history step, always two, no scaling, a scratch-out that erases nothing, one
 that erases by overlap, and ignoring the delay each fail it. The real timer path was checked live with
 `agent-pointer stroke ... @1200` (see agent-display in CLAUDE.md).
+
+### Triangles and open polylines
+
+Two more kinds, each with its own preference (`shapeSnapTriangle`, `shapeSnapPolyline`, both on;
+Preferences > Shapes, Pen Settings, Shape Settings), passed to `recognizeHold(stroke, triangles,
+polylines)`.
+
+- **Triangle** is a candidate inside `recognize()`'s closed branch (`fitTriangle()`): the three strongest
+  turning peaks, sides fitted to their trimmed middles by the quad's own side fit (`fitLoopSide()`,
+  factored out of `fitQuad()` unchanged), corners where they meet. It competes with quad and ellipse on
+  residual, and has three gates of its own, each found in the lab's "other" class: no fourth peak over
+  half the third's turn; the loop must enclose 0.75-1.3 of the triangle's area; and `triangleMaxErr`
+  0.06 and at most `triangleMaxEllipseRatio` 0.5 of the ellipse's error (whether or not the ellipse was
+  refused). Without the last two, one lobe of a figure 8 (a teardrop) became a triangle - 31 of them;
+  drawn triangles fit at 0.006-0.038 and under 0.19 of the ellipse, teardrops at ~0.09 and ~0.9.
+- **Open polyline** (`recognizePolyline()` / `fitPolyline()`) is *not* in `recognize()`: `recognizeHold()`
+  runs it after the strict pass and **before the loose one**, because the loose line tolerance takes a
+  square root sign for a sloppy line (rms 0.09 < 0.11). Corners: Ramer-Douglas-Peucker on the stroke
+  resampled to 256 points, tolerance 3.5% of the larger bbox side (min 1.5 units), then the weakest vertex
+  is dropped while it turns under 30 degrees, and segments shorter than max(6 units, 4% of the arc) are
+  dropped at an end (a hook) or merged inside (a chamfered corner). 2-6 segments. A stroke whose end comes
+  back within 15% of its arc length of the start is left to the closed fits.
+- **Straightness is what keeps curves out.** RDP splits any curve into chords, and the thinning leaves a
+  few long curved segments; so each segment's middle (15% trimmed at corners) must be straight: a
+  parabola fitted across it in the segment line's frame may bow at most 3% of the middle's length + 0.8
+  units, and RMS from the line at most 3% + 0.4. An arc of 20 degrees already bows 4.4%; measured, every
+  curve tried bows 5.2% or more (sine waves, a 60-120 degree arc, a cursive loop), a square root sign
+  with sides bowed 5% of their length still passes, 8% does not. Corners are where adjacent segment lines
+  meet (must turn >= 24 degrees, lie within 35% of the shorter segment + 2 units of the drawn corner),
+  ends are the drawn ends projected onto their line.
+- Held letters made of straight strokes (Z, N, V) do become polylines - the hold is the request.
+  Lab, both suites, "other" class: polylines come only from chevrons and zigzags, triangles from
+  triangles (and 1 wander); every gated class (line, square, circle, ellipse, scribble) is unchanged to
+  the stroke. `evaluate` now has `tri`/`poly` columns.
+
+`shapetest.cpp`'s `testShapeRecognition()` pins: square root (plain, rounded corners, half size) and an L
+-> polyline with vertices where drawn; triangle (overshooting, and rounded started mid-side) -> triangle;
+five curves are neither, and get the same kind with both new kinds switched off; line, rectangle and
+rounded rectangle unchanged; each preference off removes its kind. The positive cases fail against the
+old recognizer (it made the square roots loose lines and the triangles nothing); the curve cases fail
+with the straightness test disabled. The standalone command now also compiles `shaperec.cpp`.
 
 ## 45 degree angle snap
 
