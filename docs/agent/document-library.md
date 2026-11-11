@@ -231,6 +231,43 @@ the rows plainly if it is ever called while detached. Repro in agent-display (ri
 open the browser, right-click a card > Manage Tags > Done, back, reopen the browser, right-click >
 Manage Tags.
 
+# Manage Tags popup (`docTagsPopup`)
+
+A search box and a checkbox per tag, toggled live. Three bugs, three causes:
+
+- **A tap on its empty parts closed it.** The popup is a child of the card it was opened on, and a
+  press nobody inside the popup took (padding, the header gap, between rows) bubbled on through
+  `SvgGui::sendEvent()` past the popup to the card's Button, whose press handler calls
+  `closeMenus()` - and whose release could open the notebook. Fixed in **ugui** (`sendEvent()`): while a
+  menu or popup is open, bubbling stops at the top of that modal layer and the event is swallowed there.
+  The card, the grid's ScrollWidget (which also took wheel turns over the popup and scrolled the grid
+  under it) and the window are outside the popup and no longer see what happens inside it. Repro was with
+  the mouse in agent-display: Manage Tags, click the empty strip between the title and the search box.
+- **The list could not scroll.** There was no scrolling at all: the list stopped at 10 rows with a "type
+  to search" hint, and in a short window those 10 rows plus the chrome were already taller than the
+  screen, so the last rows (and the popup's end) were out of reach. Now every tag is in `docTagsRows`,
+  and `showDocTagsRows()` makes widgets for the rows that fit `docTagsListMaxHeight()` (window height
+  less the popup's chrome, at most 440) from `docTagsFirstRow` on. The list's `eventFilter` moves that
+  window: three rows per wheel notch; a finger or the pen drags it a row per row pitch once it has moved
+  12 px (before that it is an ordinary tap on a checkbox; once a drag, the checkbox is sent
+  OUTSIDE_PRESSED and the list takes the press over, so the release makes no click). The row pitch is
+  measured from the rows last shown, **in logical units** (the UI is scaled: bounds are ~1.3x the
+  agent-display's pixels, so a pitch read off a screenshot is wrong). A `ScrollWidget` was tried first
+  and dropped: nested in this popup, which lives inside the grid's own ScrollWidget, it got the right
+  size but drew its rows clipped to a sliver. Search and reopening start at the top; a chevron keeps the
+  position.
+- **After typing a search, taps on tags did nothing for a while (iPad).** Not stale layout: SDL shifts
+  the whole view up on iOS to keep the focused text box clear of the keyboard, and back down the moment
+  the keyboard hides, unanimated, while touches are read in the shifted view. A tap on a checkbox moves
+  focus off the search box (CheckBox is focusable), which hid the keyboard *between the press and the
+  release*: the release arrived the keyboard overlap higher, outside the checkbox, so no click. Once the
+  keyboard was gone, taps worked again - the "waiting". Fixed in **ugui** (`SvgGui::layoutAndDraw()`):
+  starting, stopping or moving the text input (`SDL_StartTextInput` / `SDL_StopTextInput` /
+  `SDL_SetTextInputRect`) waits while a finger or the pen is down. The input rect is also re-sent when
+  the focused box moves (the popup reflowing as it filters moved the box, and SDL kept shifting for the
+  old position). Not reproducible in agent-display (no touch, no soft keyboard); verify on the iPad:
+  Manage Tags on a card low on the screen, type in the search, tap a tag - it must toggle at once.
+
 # Following the window size (browser)
 
 `TagDocList` is a modal `Window` of its own with no `sdlWindow`, sized to the main window once in `setup()`.
