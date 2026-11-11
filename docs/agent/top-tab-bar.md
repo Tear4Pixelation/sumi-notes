@@ -248,7 +248,7 @@ inf/NaN for good. Fixed in ugui (a zero-size node is only moved), pinned by
 
 - No close button on inactive tabs or anywhere in the library's bar (as designed, but it means the
   library cannot close tabs).
-- Tabs cannot be reordered or dragged onto the canvas from the bar (the sidebar's Tabs view could; in
-  mode 2 that view is gone).
+- The library's bar cannot reorder tabs; the editor's can, drags them onto the canvas, and opens a tab
+  menu (Rename, Manage Tags) on a second tap of the active tab - editor-tabs.md.
 - The library's bar has no overflow menu.
 - View icon is a placeholder (reicon eye-scan).

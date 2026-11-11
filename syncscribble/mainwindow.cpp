@@ -1207,6 +1207,15 @@ void MainWindow::detachButtons(const Widget* owner)
 // The overflow popup holds the toolbar's auto-hidden items, so there is only one; it lives under the
 //  button that opens it (an ArrowPopup is positioned relative to its parent) and moves when the other one
 //  - toolbar or top bar - is pressed.  Opened on press, like a menu.
+void MainWindow::showTabMenu(const std::string& path)
+{
+  if(!topBar || !topBar->isVisible())
+    return;
+  tabMenuPath = path;
+  if(topBar->hostPopup(tabMenu, path))
+    openAutoClosePopup(tabMenu);
+}
+
 void MainWindow::hostOverflowPopup(Button* btn)
 {
   if(!overflowPopup->parent())
@@ -1543,12 +1552,54 @@ void MainWindow::setupUI(ScribbleApp* a)
     ScribbleApp::postDeferred([this](){ app->openDocument(); });
   };
   topBar->onTab = [this](const std::string& path){
+    // a tap on the tab whose menu that same press closed (an outside press) only closes it
+    SvgGui* gui = topBar->window() ? topBar->window()->gui() : NULL;
+    if(gui && (gui->lastClosedMenu == tabMenu || gui->lastClosedMenu == tabTagsPopup))
+      return;
     ScribbleApp::postDeferred([this, path](){
       int idx = app->tabs.find(path);
-      if(idx >= 0 && idx != app->activeTabIndex())
+      if(idx < 0)
+        return;
+      // the active tab tapped again: its menu
+      if(idx == app->activeTabIndex())
+        showTabMenu(path);
+      else
         app->switchToTab(idx);
     });
   };
+  // dragged along the bar: reorder; off it onto the canvas: a split (ScribbleApp::dropTabOnCanvas, the same
+  //  path as the sidebar's Tabs rows).  The drop may run a save prompt, so not from RowDrag's timer.
+  topBar->onMoveTab = [this](int from, int to){ app->moveTab(from, to); };
+  topBar->onDragTabOutside = [this](int idx, Point pos){ app->previewTabDrop(pos); };
+  topBar->onDropTabOutside = [this](int idx, Point pos){
+    if(idx < 0 || idx >= app->tabs.size())
+      return;
+    std::string path = app->tabs[idx].path;
+    ScribbleApp::postDeferred([this, path, pos](){
+      int now = app->tabs.find(path);
+      if(now >= 0)
+        app->dropTabOnCanvas(now, pos);
+    });
+  };
+  // the tab menu: the library's document menu, cut to what makes sense for the open document
+  tabMenu = createArrowPopup(Menu::VERT_LEFT);
+  tabMenu->addItem(_("Rename"), NULL, [this](){
+    std::string path = tabMenuPath;
+    closeAutoClosePopup(tabMenu);
+    ScribbleApp::postDeferred([this, path](){
+      int idx = app->tabs.find(path);
+      if(idx >= 0)
+        app->renameTab(idx);
+    });
+  });
+  tabMenu->addItem(_("Manage Tags..."), NULL, [this](){
+    // as the library's Manage Tags: the menu closes and the checklist opens on the same tab
+    closeAutoClosePopup(tabMenu);
+    if(topBar->hostPopup(tabTagsPopup, tabMenuPath))
+      openTabTags();
+  });
+  setupAutoClosePopup(tabMenu);
+  tabTagsPopup = TagMenu::createNotebookTagsPopup(&openTabTags);
   topBar->onCloseTab = [this](const std::string& path){
     ScribbleApp::postDeferred([this, path](){
       int idx = app->tabs.find(path);

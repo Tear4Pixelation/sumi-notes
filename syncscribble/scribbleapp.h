@@ -235,8 +235,12 @@ public:
   //  library when it was the last
   bool closeTab(int idx);
   void moveTab(int from, int to);
-  // a tab row dragged out of the sidebar and released over a pane at `pos` (window coordinates): onto
-  //  the existing pane of a split, or - unsplit - into a new pane on the edge nearest the drop
+  // the tab menu's Rename (the active tab tapped again): the library's prompt; an open document is saved
+  //  under the new name, keeping its undo history
+  bool renameTab(int idx);
+  // a tab dragged out of the sidebar or the top bar and released over a pane at `pos` (window
+  //  coordinates): onto the existing pane of a split, or - unsplit - into a new pane on the edge nearest
+  //  the drop.  The active tab too: unsplit, both panes then show its document
   bool dropTabOnCanvas(int idx, Point pos);
   // feedback while dragging: highlight what dropTabOnCanvas would do at `pos`; NaN hides it
   void previewTabDrop(Point pos);
