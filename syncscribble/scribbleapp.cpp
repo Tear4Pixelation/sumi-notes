@@ -548,6 +548,8 @@ void ScribbleApp::loadConfig()
   // ... except PDF page backgrounds, which keep the resolution they were imported at (pdfImportDPI)
   SvgWriter::NO_RESAMPLE_CLASS = PdfImport::BACKGROUND_CLASS;
   Element::ERASE_IMAGES = cfg->Bool("eraseOnImage");
+  // applied at render time to every highlighter stroke (highlighter.md); reloadConfig() repaints the docs
+  Element::HIGHLIGHTER_OPACITY = std::min(std::max(cfg->Int("highlighterOpacity"), 10), 100)/100.0f;
   // this should really be per-document, but stick here for now while we consider auto-detecting value
   Page::BLANK_Y_RULING = cfg->Float("blankYRuling");
 #if PLATFORM_ANDROID

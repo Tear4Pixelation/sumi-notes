@@ -279,6 +279,15 @@ public:
   static bool FORCE_NORMAL_DRAW;
   // a marker stroke saved before markers were written with comp-op multiply: drawn multiplied anyway
   static bool isLegacyMarker(const SvgNode* node);
+  // Highlighter (docs/agent/highlighter.md): a marker stroke is drawn at HIGHLIGHTER_OPACITY (the
+  //  highlighterOpacity preference) whatever opacity its file carries; the stored opacity is only the
+  //  fallback other viewers and older versions see.  Recognized by HIGHLIGHTER_CLASS, comp-op multiply
+  //  (only markers write it) or isLegacyMarker().
+  static float HIGHLIGHTER_OPACITY;
+  static const char* HIGHLIGHTER_CLASS;
+  static bool isHighlighter(const SvgNode* node);
+  // makes a new stroke or shape a highlighter: class, comp-op multiply and the fallback opacity
+  static void markHighlighter(SvgNode* node);
   static const char* STROKE_PEN_CLASS;
   static const char* FLAT_PEN_CLASS;
   static const char* ROUND_PEN_CLASS;

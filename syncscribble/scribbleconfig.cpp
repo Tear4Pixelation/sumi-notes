@@ -278,6 +278,9 @@ void ScribbleConfig::init()
   cfgF["marginLeft"] = 100.0f;
   // > 0 draws the ruling as dots of this radius (see PageProperties::dotRadius)
   cfgF["dotRadius"] = 0.0f;
+  // percent: every highlighter stroke is drawn at this opacity, whatever its file says (highlighter.md);
+  //  65 is the marker's look from before it was a setting (MARKER_ALPHA 165/255)
+  cfg["highlighterOpacity"] = 65;
 
   // ruling to be used by ruled selector on blank pages
   cfgF["blankYRuling"] = 60;

@@ -1514,7 +1514,7 @@ Element* ScribbleArea::createShapeElement(const ShapeParams& params)
   // a marker multiplies like its freehand strokes (StrokeBuilder::create()), so a Draw Lines highlighter
   //  or a snapped marker shape over a PDF page or scan leaves the print dark - see pen-and-tools.md
   if(pen->hasFlag(ScribblePen::DRAW_UNDER))
-    svgPath->setAttr<int>("comp-op", Painter::CompOp_Multiply);
+    Element::markHighlighter(svgPath);
   Element* shape = new Element(svgPath);
   shape->setShapeParams(params);
   return shape;

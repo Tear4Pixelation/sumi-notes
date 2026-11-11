@@ -57,6 +57,11 @@ kernel `uinput`, which is seat-global, and a headless cage
   thumbnails"), and 16 of 17 failing uniformly is that, not 16 regressions - the
   document content matched for every fixture, only the embedded thumbnail image
   differed.
+- **Xwayland crashes with several displays up.** With 3+ other agents' sessions running, a new cage's
+  Xwayland died at start (`glamor0: GL error: GL_OUT_OF_MEMORY`, then SIGSEGV) and took the app with it
+  ("X connection to :N broken", no `Tests completed`), every retry. Prefixing the call with
+  `XWAYLAND_NO_GLAMOR=1` (Xwayland's own env switch; only Xwayland drops GL, the app still renders on the
+  GPU) made `test` and `run` work at once (Nov 2026).
 - **Leak detection is off for `test`.** ASan reports ~2.2 MB leaked entirely
   inside NVIDIA's GL driver and libdbus, and worse, its exitcode (1) masks the
   thumbnail count. `AGENT_DISPLAY_ASAN_LEAKS=1` restores it.
