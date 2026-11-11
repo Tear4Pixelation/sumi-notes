@@ -40,6 +40,7 @@ SOURCES = \
   documentlist.cpp \
   tagstore.cpp \
   tagdoclist.cpp \
+  searchfield.cpp \
   doclibrary.cpp \
   filepicker.cpp \
   notefulfile.cpp \

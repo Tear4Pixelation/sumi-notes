@@ -1,4 +1,5 @@
 #include "sidebar.h"
+#include "searchfield.h"
 
 #include "mainwindow.h"
 #include "scribbleapp.h"
@@ -334,9 +335,9 @@ void Sidebar::createUI()
   )", sbPad, sbSearchH, sbCorner, sbCorner, sbPad);
   std::unique_ptr<SvgNode> searchProto(loadSVGFragment(searchSvg.c_str()));
   searchRow = new Widget(searchProto->clone());
-  searchEdit = createTextEdit(-1);  // -1 = hfill, so it fills the row
-  searchEdit->onChanged = [this](const char* s){ searchQuery = s; rebuildList(); };
-  searchRow->selectFirst(".sb-search-box")->addWidget(searchEdit);
+  SearchField search = createSearchField("", [this](const char* s){ searchQuery = s; rebuildList(); });
+  searchEdit = search.edit;
+  searchRow->selectFirst(".sb-search-box")->addWidget(search.widget);
   searchRow->setVisible(false);
   panelContent->addWidget(searchRow);
 

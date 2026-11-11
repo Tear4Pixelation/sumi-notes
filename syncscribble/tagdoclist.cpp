@@ -1,4 +1,5 @@
 #include "tagdoclist.h"
+#include "searchfield.h"
 #include "cover.h"
 
 #include "scribbleapp.h"
@@ -1606,11 +1607,10 @@ void TagDocList::createUI()
   tagSearchRow->node->setAttribute("box-anchor", "hfill");
   tagSearchRow->node->setAttribute("layout", "box");
   tagSearchRow->setMargins(16, 0, 0, 0);
-  tagSearchEdit = createTextEdit(-1);  // -1 = hfill, so it fills the row's width
-  tagSearchEdit->setEmptyText(_("Search tags"));
-  tagSearchEdit->onChanged = [this](const char* s){ tagSearchQuery = s; rebuildTagTree(); };
+  SearchField tagSearch = createSearchField(_("Search tags"), [this](const char* s){ tagSearchQuery = s; rebuildTagTree(); });
+  tagSearchEdit = tagSearch.edit;
   tagSearchEdit->setMargins(8, 12, 8, 12);
-  tagSearchRow->addWidget(tagSearchEdit);
+  tagSearchRow->addWidget(tagSearch.widget);
   sidebarContent->addWidget(tagSearchRow);
 
   tagTreeView = new Widget(new SvgG());
@@ -1671,11 +1671,10 @@ void TagDocList::createUI()
   Widget* docSearchBox = new Widget(new SvgG());
   docSearchBox->node->setAttribute("box-anchor", "hfill");
   docSearchBox->node->setAttribute("layout", "box");
-  docSearchEdit = createTextEdit(-1);
-  docSearchEdit->setEmptyText(_("Search documents"));
-  docSearchEdit->onChanged = [this](const char* s){ docSearchQuery = s; rebuildDocGrid(); };
+  SearchField docSearch = createSearchField(_("Search documents"), [this](const char* s){ docSearchQuery = s; rebuildDocGrid(); });
+  docSearchEdit = docSearch.edit;
   docSearchEdit->setMargins(8, 12, 8, 12);
-  docSearchBox->addWidget(docSearchEdit);
+  docSearchBox->addWidget(docSearch.widget);
   docSearchRow->addWidget(docSearchBox);
 
   Widget* docFilterBtn = new Widget(new SvgG());
@@ -2005,11 +2004,10 @@ void TagDocList::createUI()
   docTagsHeader->addWidget(docTagsDoneBtn);
   docTagsPopup->addWidget(docTagsHeader);
 
-  docTagsSearchEdit = createTextEdit(-1);
-  docTagsSearchEdit->setEmptyText(_("Search tags"));
-  docTagsSearchEdit->onChanged = [this](const char* s){ docTagsSearchQuery = s; rebuildDocTagsList(); };
+  SearchField docTagsSearch = createSearchField(_("Search tags"), [this](const char* s){ docTagsSearchQuery = s; rebuildDocTagsList(); });
+  docTagsSearchEdit = docTagsSearch.edit;
   docTagsSearchEdit->setMargins(8, 12, 8, 12);
-  docTagsPopup->addWidget(docTagsSearchEdit);
+  docTagsPopup->addWidget(docTagsSearch.widget);
 
   docTagsList = new Widget(new SvgG());
   docTagsList->node->setAttribute("box-anchor", "hfill");
