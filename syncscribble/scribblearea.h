@@ -1,4 +1,5 @@
 #pragma once
+#include <chrono>
 
 #include "scribbleview.h"
 #include "document.h"
@@ -462,6 +463,18 @@ protected:
   int flashPageNum = -1;
   int flashTicks = 0;  // frames left of the pulse animation, counting down
   Timer* flashTimer = NULL;
+  // Ephemeral pen: finished strokes fade out after the pen lifts (docs/agent/pen-and-tools.md).  Owned here,
+  //  never on the page or in undo; drawn by drawScreen() with a render opacity.
+  std::vector<Element*> fadeStrokes;
+  int fadePageNum = -1;
+  Timer* fadeTimer = NULL;
+  std::chrono::steady_clock::time_point fadeStart;
+  bool fadeRunning = false;
+  void fadeEphemeral(Element* stroke);  // pen up: add the stroke and fade everything
+  void reviveEphemeral();               // pen down: back to full opacity until the next lift
+  void clearEphemeral();
+  float ephemeralAlpha() const;
+  void dirtyEphemeral();
   RulingRegionParams regionHandleStart;
   Point regionHandleStartPos;
   Point regionHandleStartHandle;
