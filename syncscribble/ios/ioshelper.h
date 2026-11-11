@@ -33,6 +33,7 @@ extern void iosPickDocument(long mode);
 // the system document picker, for any file (FilePicker in filepicker.cpp); results go to filePicked()
 extern void iosPickFile(int requestId, const char* exts);
 extern void iosExportFile(int requestId, const char* path);
+extern void iosShareFile(int requestId, const char* path);
 
 enum PickerMode_t { iosOpenDocMode = 0, iosUpdateDocMode, iosChooseDocMode, iosInsertDocMode,
     iosSaveAsMode, iosExportPdfMode, iosConflictSaveMode };

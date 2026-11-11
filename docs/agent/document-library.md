@@ -102,6 +102,11 @@ wasm and a Linux desktop with none of the dialogs below.
   that file to `ACTION_CREATE_DOCUMENT` / the export picker - so mobile **Save As saves a copy** and the
   document stays in the library (iOS without the library keeps `iosSaveAs`). This also made Export PDF
   work on iOS, where it used to do nothing.
+  **iOS exports share instead of picking:** `saveFile()` hands the staged file to `iosShareFile()` (a
+  `UIActivityViewController`, popover anchored for iPad; its Save to Files covers the old picker) and deletes
+  the staged file in the completion handler; `onDone` gets the path if shared, "" if dismissed. Covers Export
+  PDF, page-set PDF/SVGZ, PNG (single) and screenshot. Save As passes `shareOnIOS = false` and keeps the export
+  picker, since it needs a folder. Untested on device (PNG sets already used `iosSendFiles`).
 
 Gaps: only the Linux implementation has run; the Windows, macOS, Android and iOS code was written
 without a compiler for those platforms. New strings are untranslated.

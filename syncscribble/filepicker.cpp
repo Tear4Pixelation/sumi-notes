@@ -522,7 +522,8 @@ void openFile(const char* title, const char* exts, PickedFn onPicked)
 #endif
 }
 
-void saveFile(const char* title, const std::string& suggestedName, const char* exts, WriteFn write, PickedFn onDone)
+void saveFile(const char* title, const std::string& suggestedName, const char* exts, WriteFn write, PickedFn onDone,
+    bool shareOnIOS)
 {
 #if PLATFORM_MOBILE
   // written first, then handed to the system, which copies it wherever the user picks
@@ -535,7 +536,10 @@ void saveFile(const char* title, const std::string& suggestedName, const char* e
     return;
   }
 #if PLATFORM_IOS
-  iosExportFile(requestId, staged.c_str());
+  if(shareOnIOS)
+    iosShareFile(requestId, staged.c_str());
+  else
+    iosExportFile(requestId, staged.c_str());
 #else
   AndroidHelper::exportFile(requestId, staged.c_str(), suggestedName.c_str());
 #endif
