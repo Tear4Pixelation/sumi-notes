@@ -1686,7 +1686,8 @@ void LassoSelector::addPoint(Dim x, Dim y)
 
   lasso.closeSubpath();
   lassoBBox.rectUnion(Point(x, y));
-  selection->doSelect();
+  if(!simple)
+    selection->doSelect();
   bgDirty = true;
   checkCollision = false;
 }
@@ -1843,13 +1844,30 @@ void LassoSelector::drawBG(Painter* painter)
     return;
   painter->save();
   painter->translate(selection->transform.xoffset(), selection->transform.yoffset());
+  if(simple) {
+    // just the trail, dotted (the closing segment back to the start is left out), in the selection color;
+    //  NonScalingStroke makes the dash lengths screen pixels, and the array must outlive the draw call
+    static float simpleDashes[3] = {4, 4, -1};
+    Path2D trail;
+    for(size_t ii = 0; ii + 1 < lasso.points.size(); ++ii)
+      trail.addPoint(lasso.points[ii].x, lasso.points[ii].y);
+    if(trail.size() < 2) {
+      painter->restore();
+      return;
+    }
+    painter->setFillBrush(Color::NONE);
+    painter->setStroke(bgStroke, 1.5, Painter::RoundCap, Painter::RoundJoin);
+    painter->setVectorEffect(Painter::NonScalingStroke);
+    painter->setDashArray(simpleDashes);
+    painter->drawPath(trail);
+    painter->setDashArray(NULL);
+    painter->restore();
+    return;
+  }
   painter->setFillBrush(bgFill);
-  // dashed border looks better, but is much, much slower, on both Qt and Android
-  //painter->setDashCount(1);
   painter->setStroke(bgStroke, 1, Painter::SquareCap, Painter::BevelJoin);
   painter->setVectorEffect(Painter::NonScalingStroke);
   painter->drawPath(lasso);
-  //painter->setDashCount(0);
   painter->restore();
 }
 

@@ -551,6 +551,18 @@ its middle, so a small area across it would miss. The lasso's quick "no change" 
 lasso only changes inside the triangle it tests. Tested by `ScribbleTest::selectTouchingTest()`
 (mutation-checked: dropping the segment tests fails it). The new string is untranslated.
 
+# Simple lasso
+
+Pref `simpleLasso` (default on; config dialog "User Interface" and the Selection Settings quick-settings
+popup, `res_ui.cpp` / `mainwindow.cpp`). The live fill and live selection preview confused users mid-gesture, so
+with it on `LassoSelector::simple` (set at press from `cfg->Bool("simpleLasso")`) makes the lasso draw only the
+dotted trail (`drawBG`: no fill, no closing segment, dashes `{4,4}` in screen pixels via `NonScalingStroke`, the
+selection `bgStroke` colour - blue on light paper, yellow on dark) and `addPoint()` skip `doSelect()`. The
+selection is computed once on release by `finish()`, called from the `MODE_SELECTLASSO` release case before the
+`count()` check. `finish()` must run: the quick "no change" path in `selectHit` trusts the stale live state, which
+in simple mode is empty. Off keeps the old filled live preview. `bgStroke` is the existing selection colour
+(`Selector` ctor), not a theme token - there is no token for it yet.
+
 # Reflow (ruled insert space)
 
 **Ruled insert space is one tool whose drag picks the direction** (`MODE_INSSPACEAUTO`, action

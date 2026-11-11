@@ -109,6 +109,8 @@ const char* prefInfoXML = R"#(
       title="Top tab bar" description="Open documents as tabs along the top of the window" />
   <pref name="popupToolbar" type="bool" group="User Interface"
       title="Popup selection tools" description="Show floating toolbar when selection is made" />
+  <pref name="simpleLasso" type="bool" group="User Interface"
+      title="Simple lasso" description="Draw the lasso as a dotted line only, with no fill and no live preview of the selection" />
   <!-- pref name="scrollerLocation" type="int" group="User Interface"
       enum="Right;Left" title="Scrollbar position" description="" / -->
   <pref name="autoHideScroller" type="bool" group="User Interface"

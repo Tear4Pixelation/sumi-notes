@@ -30,6 +30,8 @@ void ScribbleConfig::init()
   cfg["historyHintDone"] = 0;
   // show floating toolbar when selection is made
   cfg["popupToolbar"] = 1;
+  // lasso drawn as a dotted line only, selection computed on release
+  cfg["simpleLasso"] = 1;
   // automatically enlarge page if strokes added near or beyond edge?
   cfg["growDown"] = 1;
   cfg["growRight"] = 0;

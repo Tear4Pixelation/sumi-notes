@@ -3765,6 +3765,7 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
     currSelection = new Selection(currPage);
     lassoSelector = new LassoSelector(currSelection, 0.5/mZoom);
     lassoSelector->touching = scribbleDoc->scribbleMode->selectTouching;
+    lassoSelector->simple = cfg->Bool("simpleLasso");
     lassoSelector->addPoint(pos.x, pos.y);
     break;
   case MODE_SELECTPATH:
@@ -4531,6 +4532,8 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
     }
     break;
   case MODE_SELECTLASSO:
+    if(lassoSelector->simple)
+      lassoSelector->finish();  // the selection is only computed now
     gestureRegion = lassoSelector->path();
     if(currSelection->count() > 0) {
       // replace lasso selector with rect selector
