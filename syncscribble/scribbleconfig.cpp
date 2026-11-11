@@ -36,6 +36,9 @@ void ScribbleConfig::init()
   cfg["growDown"] = 1;
   cfg["growRight"] = 0;
   cfg["growWithPen"] = 1;
+  // display only: pages out of focus are shown without their empty end in the vertical layout
+  //  (ScribbleArea::updateCollapsedPages(), docs/agent/paper.md)
+  cfg["collapsePageEnds"] = 0;
   // reflow w/ insert space tool ... always does live reflow now
   cfg["reflow"] = 1;
   cfg["separatorEndsReflow"] = 1;
@@ -330,6 +333,8 @@ void ScribbleConfig::init()
   cfgF["wheelZoomSpeed"] = 1.0f;
   // minimum word break size, as fraction of Y ruling
   cfgF["minWordSep"] = 0.3f;  // = 12/40
+  // empty ruled lines (or 40 unit steps on unruled paper) kept below the lowest stroke when a page grows
+  cfgF["growExtraLines"] = 2.5f;
   // border size for pan from edge
   cfgF["panBorder"] = 10;
   // palm rejection threshold (platform reported major axis of touch in Dim units); 140 works well for recent iPad

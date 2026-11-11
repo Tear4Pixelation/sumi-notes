@@ -153,6 +153,10 @@ const char* prefInfoXML = R"#(
       title="Auto grow page right" description="Allow page width to increase" />
   <pref name="growWithPen" type="bool" group="General"
       title="Grow page with strokes" description="Writing near edge of page will enlarge page" />
+  <pref name="growExtraLines" type="float" min="0" max="20" step="0.5" group="General"
+      title="Empty lines below writing" description="Ruled lines kept free below the lowest stroke when a page grows" />
+  <pref name="collapsePageEnds" type="bool" group="General"
+      title="Collapse page ends while scrolling (experimental)" description="Pages out of focus hide their empty end; the page you stop on opens to full size" />
   <pref name="eraseOnImage" type="bool" group="General"
       title="Apply free eraser to images" description="Allow free erase tool to act on images" />
   <pref name="highlighterOpacity" type="int" group="General"

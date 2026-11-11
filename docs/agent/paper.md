@@ -148,3 +148,51 @@ Like Add Page, the popup opens on press (a popup shown on release is closed by t
 
 The chooser (recent row + grid) is a `LayoutChooser` that the Add Page popup and `chooseLayout()` (a dialog,
 used by Convert to Subpage - ruling-regions.md) both host; they differ only in what a pick and a close do.
+
+# Page growth: empty lines below the writing
+
+`ScribbleArea::growPage()` grows a page (`growDown`/`growRight`) when ink comes within the trigger of its
+edge, to the end of the line holding the lowest content plus **`growExtraLines`** empty lines (config,
+float, default 2.5 - the old hard coded `GROW_EXTRA`; "Empty lines below writing" in Preferences >
+General). Unruled pages count 40 unit steps (`GROW_STEP`) as lines. The trigger keeps its old ratio to the
+kept lines (`GROW_TRIGGER/GROW_EXTRA` = 1.625/2.5), so the defaults behave exactly as before and fewer kept
+lines also wait longer before growing. `heightForContent()` is the one formula, shared with the collapsed
+height below. Expand Down / Expand Right and Insert Space still use the constants.
+
+# Collapsed page ends (experimental, `collapsePageEnds`, default off)
+
+In the vertical layout, pages that are not in focus are laid out and drawn only down to
+`heightForContent(content bottom)` - what the page would be had it just grown for its lowest ink - so a
+document of mostly empty page ends scrolls tight. **Display only**: no page is resized, nothing goes in
+the undo history, saving, export, sync, thumbnails and the sidebar see the full page.
+
+- **Layout**: every layout function (`getPageOrigin()`, `dimToPageNum()`, `updateContentDim()`,
+  `keepPageAtMiddle()`, `drawImage()`) uses `pageLayoutHeight(page)` instead of `Page::height()`; it reads
+  `collapsedHeights` (by `Page::uid`), so the layout changes only when `updateCollapsedPages()` rebuilds it.
+  `Page::draw(..., shownHeight)` clips the page at that height (bottom only) and puts the drop shadow
+  there. `drawThumbnail()` sets `fullPageLayout` (and the current page origin to match) so the saved
+  thumbnail is the whole page.
+- **Focus** = the page at the middle of the view (`dominantPageNum()`, the current page). After the view
+  has not moved for `FOCUS_EXPAND_DWELL_MS` (700 ms; every pan restarts the timer, and it waits while a
+  finger is down, a fling runs or any edit is in progress) that page joins `expandedPages`. A press that
+  starts any tool other than pan expands the pressed page at once (anchored on itself, so the press stays
+  where it was on the page). An expanded page collapses again only once **no part of it is in the view**
+  (and it is not the page being edited) - a visible page never shrinks.
+- **Never moving the viewport**: `updateCollapsedPages(anchor)` records the anchor page's origin (the
+  page in focus, or the page being expanded), rebuilds the map, and pans by the anchor's origin change, so
+  pages above changing size (one collapsing as it scrolls off the top) do not move what is on screen.
+  Expanding the page in focus moves nothing above its end: only what is below it is pushed down (the page's
+  hidden end appears there), which is the point. Then `repaintAll()` + `invalidateLayer()`: the canvas
+  layer (canvas-layer.md) must not be shifted after a layout change, it is redrawn whole.
+- **Which pages collapse**: not those with an image background (a PDF or scan is the size of its image),
+  not one whose content is unknown. A loaded page is measured (`getBBox()`, cached in `pageExtents` by uid
+  and `revision`); an unloaded page uses its cached measurement, and one never measured is loaded only
+  when within a view height of the view (it would be loaded to be drawn anyway). An empty page collapses to
+  one line plus the kept lines.
+- `updateCollapsedPages()` runs from `doPan()` (every scroll frame - O(pages) with a hash lookup each,
+  cheap next to drawing) and `pageSizeChanged()`; turning the option off (or another view mode) expands
+  everything the same anchored way.
+
+Open: the horizontal layout does not collapse widths; zoom to fit height judges the full page; a pan
+cancelled mid gesture (`panZoomCancel()`) returns to its start in document coordinates, which a collapse
+during that gesture shifted.
