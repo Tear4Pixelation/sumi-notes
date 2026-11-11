@@ -5174,6 +5174,70 @@ int ScribbleTest::shapeSnapTest()
       "a held rectangle should snap to a box");
   ie(0, 0, 0, pen, release);
 
+  // a polyline through `verts`, about 3 units between samples, then held at the end
+  auto drawThrough = [&](const std::vector<Point>& verts) {
+    bool first = true;
+    for(size_t seg = 0; seg + 1 < verts.size(); ++seg) {
+      int steps = std::max(1, int(verts[seg].dist(verts[seg+1])/3));
+      for(int i = 0; i < steps; ++i) {
+        Point pt = verts[seg] + (verts[seg+1] - verts[seg])*(i/Dim(steps));
+        ie(pt.x, pt.y, 0, pen, first ? press : 0);
+        first = false;
+      }
+    }
+    hold(verts.back().x, verts.back().y);
+  };
+  const std::vector<Point> triangle = {{350, 200}, {450, 380}, {250, 380}, {350, 200}, {355, 209}};
+  const std::vector<Point> sqrtSign = {{200, 300}, {215, 330}, {245, 220}, {450, 220}};
+
+  // a held triangle snaps to a closed three point polyline
+  begin(0.8f);
+  drawThrough(triangle);
+  fire();
+  check(scribbleArea->snapActive && scribbleArea->currStroke->shapeParams().id == SHAPE_POLYLINE
+      && (scribbleArea->snapParams.flags & SHAPEFLAG_CLOSED) && scribbleArea->snapParams.points.size() == 3,
+      "a held triangle should snap to a closed 3 point polyline");
+  ie(0, 0, 0, pen, release);
+  check(page->strokeCount() == 1 && lastElement()->isShape(), "the triangle should be committed as a shape");
+
+  // a held square root sign snaps to an open polyline, its top horizontal, and its end follows the pen
+  begin(0.8f);
+  drawThrough(sqrtSign);
+  fire();
+  check(scribbleArea->snapActive && scribbleArea->currStroke->shapeParams().id == SHAPE_POLYLINE
+      && !(scribbleArea->snapParams.flags & SHAPEFLAG_CLOSED) && scribbleArea->snapParams.points.size() == 4,
+      "a held square root should snap to an open 4 point polyline");
+  if(scribbleArea->snapParams.points.size() == 4) {
+    const std::vector<Point>& pts = scribbleArea->snapParams.points;
+    check(std::abs(pts[3].y - pts[2].y) < 1E-6, "the square root's top should be snapped horizontal");
+    Point sqrtEnd = pts[3];
+    ie(520, 220, 0, pen);
+    ie(0, 0, 0, pen, release);
+    shape = lastElement();
+    check(shape && shape->isShape() && shape->shapeParams().points.back().x > sqrtEnd.x + 30,
+        "the square root's end should follow the pen after the snap");
+  }
+  else
+    ie(0, 0, 0, pen, release);
+
+  // each kind can be switched off
+  begin(0.8f);
+  scribbleDoc->cfg->set("shapeSnapPolyline", false);
+  drawThrough(sqrtSign);
+  fire();
+  check(!scribbleArea->snapActive || scribbleArea->currStroke->shapeParams().id != SHAPE_POLYLINE,
+      "with polyline snapping off a square root is not a polyline");
+  ie(0, 0, 0, pen, release);
+  scribbleDoc->cfg->set("shapeSnapPolyline", true);
+  begin(0.8f);
+  scribbleDoc->cfg->set("shapeSnapTriangle", false);
+  drawThrough(triangle);
+  fire();
+  check(!scribbleArea->snapActive || scribbleArea->currStroke->shapeParams().id != SHAPE_POLYLINE,
+      "with triangle snapping off a triangle is not a polyline");
+  ie(0, 0, 0, pen, release);
+  scribbleDoc->cfg->set("shapeSnapTriangle", true);
+
   // without the hold, or with snapping turned off, a stroke stays ink
   begin(0.8f);
   drawCircle();

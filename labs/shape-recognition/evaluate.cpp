@@ -235,8 +235,8 @@ bool summarize(const char* title, std::vector<Outcome>& outcomes, Gates gates)
 {
   bool gated = gates != Gates::None;
   printf("\n%s\n", title);
-  printf("  %-9s %5s %8s   %5s %5s %7s %5s %5s   %-28s %s\n", "class", "n", "correct", "line", "quad",
-      "ellipse", "scrib", "none", "position err % median/p90/max", "naive corners");
+  printf("  %-9s %5s %8s   %5s %5s %7s %5s %5s %5s %5s   %-28s %s\n", "class", "n", "correct", "line", "quad",
+      "ellipse", "scrib", "tri", "poly", "none", "position err % median/p90/max", "naive corners");
   bool pass = true;
   for(const char* label : LABELS) {
     int total = 0, correct = 0;
@@ -282,8 +282,9 @@ bool summarize(const char* title, std::vector<Outcome>& outcomes, Gates gates)
           if(out.stroke->label == label && out.posErr > gate->second)
             out.gateFail = true;
     }
-    printf("  %-9s %5d %7.1f%%   %5d %5d %7d %5d %5d   %-28s %s%s\n", label, total, accuracy*100,
-        got[Kind::Line], got[Kind::Quad], got[Kind::Ellipse], got[Kind::Scribble], got[Kind::None], posText,
+    printf("  %-9s %5d %7.1f%%   %5d %5d %7d %5d %5d %5d %5d   %-28s %s%s\n", label, total, accuracy*100,
+        got[Kind::Line], got[Kind::Quad], got[Kind::Ellipse], got[Kind::Scribble], got[Kind::Triangle],
+        got[Kind::Polyline], got[Kind::None], posText,
         naiveText, verdict.c_str());
     int shown = 0;
     for(const Outcome& out : outcomes)
