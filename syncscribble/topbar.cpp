@@ -5,6 +5,8 @@
 #include "scribbleapp.h"
 #include "scribbledoc.h"
 #include "touchwidgets.h"
+#include "rowdrag.h"
+#include <algorithm>
 #include "usvg/svgpainter.h"
 #include "ulib/fileutil.h"
 #include "ulib/stringutil.h"
@@ -70,6 +72,8 @@ svg.window.light { --tab-active: #D0D0D0; }  /* tokens.json canvas-background (t
 .topbar-home .topbar-icon-fill { display: none; }
 .topbar-home.checked .topbar-icon-fill { display: block; }
 .topbar-home.checked .topbar-icon-outline { display: none; }
+.topbar-tab.dragging > .topbar-btn-bg { fill: var(--tab-active); fill-opacity: 0.5; }
+.topbar-tab.drop-target > .topbar-btn-bg { stroke: var(--checked); stroke-width: 2; }
 .topbar-close-bg { fill: none; }
 .topbar-close.hovered > .topbar-close-bg { fill: var(--dark); fill-opacity: 0.4; }
 .topbar-close.pressed > .topbar-close-bg { fill: var(--dark); fill-opacity: 0.7; }
@@ -143,7 +147,40 @@ TopBar::TopBar(bool library) : Widget(new SvgG()), inLibrary(library)
     overflowBtn = createIconButton(":/icons/ic_menu_overflow.svg", m.overflowIconSize, _("Menu"));
     overflowBtn->setMargins(0, 0, 0, m.barGap);
     row->addWidget(overflowBtn);
+
+    // tabs are dragged along the bar to reorder them, and off it onto the canvas to open a split - the
+    //  same RowDrag as the sidebar's Tabs view (editor-tabs.md), which this bar replaces in the editor.
+    //  "Outside" is off the bar altogether; the tabs live in no ScrollWidget, so any direction picks one up
+    tabDrag.reset(new RowDrag(this));
+    tabDrag->canDrop = [](int src, int dst){ return src != dst && dst != RowDrag::ROOT; };
+    tabDrag->onDrop = [this](int src, int dst){ if(onMoveTab) onMoveTab(src, dst); };
+    tabDrag->onDragOutside = [this](int src, Point pos){ if(onDragTabOutside) onDragTabOutside(src, pos); };
+    tabDrag->onDropOutside = [this](int src, Point pos){ if(onDropTabOutside) onDropTabOutside(src, pos); };
   }
+}
+
+TopBar::~TopBar() {}
+
+Button* TopBar::tabButton(const std::string& path) const
+{
+  ScribbleApp* app = ScribbleApp::app;
+  int idx = app ? app->tabs.find(path) : -1;
+  // cells are built in tab order; a tab list changed since the last rebuild has no reliable cell yet
+  if(idx < 0 || idx >= int(cells.size()) || cells[idx].fullTitle != FSPath(path).baseName())
+    return NULL;
+  return cells[idx].btn;
+}
+
+bool TopBar::hostPopup(ArrowPopup* popup, const std::string& path)
+{
+  Button* btn = tabButton(path);
+  if(!btn)
+    return false;
+  popup->removeFromParent();
+  btn->addWidget(popup);
+  if(std::find(hostedPopups.begin(), hostedPopups.end(), popup) == hostedPopups.end())
+    hostedPopups.push_back(popup);
+  return true;
 }
 
 void TopBar::setTopPadding(Dim pad)
@@ -277,6 +314,14 @@ void TopBar::rebuild(bool force)
   //  by a timer, so by now nothing is dispatching to a tab being deleted
   // a window not shown yet (setupUI) has no SvgGui: gui() is NULL there
   SvgGui* gui = window() ? window()->gui() : NULL;
+  // popups pointing at a tab (the editor's tab menu) are not the bar's to delete
+  for(ArrowPopup* popup : hostedPopups) {
+    if(popup->isVisible())
+      closeAutoClosePopup(popup);
+    popup->removeFromParent();
+  }
+  if(tabDrag)
+    tabDrag->clear();
   if(gui)
     gui->deleteContents(tabsRow);
   else {
@@ -292,6 +337,8 @@ void TopBar::rebuild(bool force)
     if(idx > 0)
       cell.btn->setMargins(0, 0, 0, metrics().tabGap);
     tabsRow->addWidget(cell.btn);
+    if(tabDrag)
+      tabDrag->addRow(cell.btn, idx);
     cells.push_back(cell);
   }
   homeBtn->setChecked(inLibrary);

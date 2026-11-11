@@ -39,6 +39,9 @@ public:
   //  bars cannot drift apart
   static Button* createSelectBarButton(const char* iconPath, const char* tooltip);
   TagDocList(const char* root);
+  // the Rename Document dialog: where `path` should move to, or an empty path if cancelled, unchanged or
+  //  taken (the last one says so)
+  static FSPath askRenamePath(const FSPath& path);
   ~TagDocList() override;
 
   std::string selectedFile;

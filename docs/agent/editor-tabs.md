@@ -95,6 +95,60 @@ event put the debug build seconds behind a slow drag. The preview (`MainWindow::
 top = `H21`, bottom = `H12`) and shows the tab there; split, it replaces the document of the pane under the
 point. All four edges and the onto-a-pane case were driven in agent-display.
 
+**From the top bar** (mode 2, the default, where the sidebar's Tabs view is gone): `TopBar` (editor bar
+only) has its own `RowDrag` over the tab buttons, owner = the bar, so "outside" means off the bar. Along the
+bar = reorder (`onMoveTab` -> `moveTab`; `.dragging` / `.drop-target` styling in `TopBar::stylesheet`); off it
+= the same `previewTabDrop` / `dropTabOnCanvas` as the sidebar, the drop sent through `postDeferred` because
+a split onto an existing pane can run a save prompt (top-tab-bar.md, State). The tabs are in no ScrollWidget,
+so any direction picks one up. `rebuild()` calls `tabDrag->clear()` before deleting the cells.
+
+**The active tab works too.** Unsplit, `toggleSplitView` opens the second pane on the active document
+(`openSplit` -> `addArea`) and `showTabInArea` returns at once (`prev == next`), so both panes show it -
+nothing special was needed beyond the top bar making the drag possible.
+
+**Where the second view opens.** `addArea()` puts a new pane at the document's active pane's position, but
+`showTabInArea` then restored `tabs[idx].view`, captured when the document last *left* a pane - stale
+while another pane is showing it, so dropping a shown document onto the other pane of a split (or picking it
+there through the library) opened at an old page. Now a document another pane shows takes that pane's
+current view (page, position, zoom: `viewOf(next->activeArea)`); a background tab still gets its own saved
+view, which is where it was last read.
+
+**Trap: a pane opened by the drop has no size yet.** Unsplit, the second pane is hidden until
+`toggleSplitView`, so `addArea`/`restoreView` position it before its first layout, and that layout landed it
+on page 1 (seen: the active tab dragged out from page 3 opened the new pane at page 1). `dropTabOnCanvas`
+therefore re-applies the view from a 1 ms timer on the pane's widget, after the layout, and then
+`refreshUI`s the document: the page number had not changed since `addArea` set it, so `setPageNum` sent no
+`PageNumChange` and the pane's page label kept saying 1.
+
+Verified in agent-display (fixture: three 5-page documents, page N with N bars): active tab dragged from page
+3 to the right edge -> split, both panes page 3; split with Bravo on the right, left on Alpha page 4, Alpha's
+tab dropped on the right pane -> right shows Alpha page 4 (4 / 5); unsplit, background Charlie dropped on the
+bottom half -> horizontal split, Charlie below.
+
+## Tab menu (the active tab tapped again)
+
+`MainWindow::onTab`: a tap on the active tab opens `tabMenu` (ArrowPopup, the library's document-menu style)
+with **Rename** and **Manage Tags...**, pointing at the tab (`TopBar::hostPopup`). Hosted popups are closed and
+detached by `TopBar::rebuild()` before the cells are deleted, so they outlive the tabs. A tap whose press
+closed the menu (`gui->lastClosedMenu`) only closes it, as the toolbar's tag button does.
+
+- **Rename** = `ScribbleApp::renameTab`: the library's prompt, factored out as `TagDocList::askRenamePath`
+  (dialog, unchanged name = cancel, "already exists"). The library's own Rename then closes the document
+  (`closeDocs`) and moves the file; for an open tab that would close the tab being renamed, so instead the
+  document is **saved under the new name** (`Document::save` retargets its stream, as OPEN_COPY relies on) and
+  the old file removed; undo history stays in memory, the persisted one is written under the new name and the
+  old entry deleted. An unloaded tab is just moved (`moveFile` + `UndoPersist::documentMoved`).
+- **Manage Tags...** = the toolbar tag button's popup (`TagMenu`) opened straight on its Whole Notebook
+  checklist (`TagMenu::createNotebookTagsPopup`): ticks go through `ScribbleDoc::setDocTags` on the open
+  document. The library's Manage Tags popup was not reused: it rewrites the file on disk
+  (`TagDocList::setDocumentTags` -> `rewriteDocument`), which under an open document is either reverted by its
+  next save or reloaded over its undo history. The two checklists are the same shape.
+
+Verified in agent-display: tap active tab -> menu under it; Manage Tags -> Tag Notebook checklist on the tab,
+a tag created there ticked and written to the document (`tags` in the file after the rename's save); Rename
+-> the library's Rename Document dialog, Alpha -> Delta: tab, file and window follow, document still open and
+saved, 5 pages kept, old file gone.
+
 ## Tests
 
 `scribbletest/tabstest.cpp` (`runTabTests()`, standalone command in its header): neighbour on close, move
@@ -109,6 +163,10 @@ insert ignoring the anchor, idle ignoring the veto, parse keeping empty entries.
   switching to the normal sidebar in one press.
 - A whiteboard document left in the background and saved on exit gets no thumbnail; deleting a closed tab's
   document that has a sync session relies on `closeDocument()`'s disconnect, as `newDocument()` did.
+- The tab menu's Rename leaves the old path in the library's tag index (`TagStore`) until the library next
+  rescans; the library's own Rename removes it at once. Recent Documents keeps the old path too.
+- Top bar tab drags were driven with the mouse only; a pen/finger drag on a tab goes through the same
+  RowDrag press/motion path but was not run.
 - iOS outside library mode (UIDocument streams) has no tabs (`tabsEnabled()`): old single-document code path.
 - Touch/pen drags of tab rows go through ugui's `draggable` path, read but not driven (agent-pointer is a mouse).
 - The `.drop-target`/`.dragging` row feedback rules that `sidebar.md` describes are uncommitted work in

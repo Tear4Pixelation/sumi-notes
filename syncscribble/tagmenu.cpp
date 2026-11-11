@@ -211,11 +211,10 @@ void State::done()
   ScribbleApp::app->activeArea()->startTagPlacement(toPlace, todo);
 }
 
-Button* createTagButton()
+// both views of the popup; the state is owned by the lambdas on its widgets
+static ArrowPopup* createTagPopup(const std::shared_ptr<State>& state)
 {
-  Button* btn = createToolbutton(SvgGui::useFile(":/icons/ic_tag.svg"), _("Tags"));
   ArrowPopup* popup = createArrowPopup(Menu::VERT_LEFT);
-  auto state = std::make_shared<State>();
   state->popup = popup;
 
   // first view: what the tags are for.  Both views are built once and only their visibility changes, since
@@ -272,6 +271,14 @@ Button* createTagButton()
   popup->addWidget(state->tagsView);
 
   setupAutoClosePopup(popup);
+  return popup;
+}
+
+Button* createTagButton()
+{
+  Button* btn = createToolbutton(SvgGui::useFile(":/icons/ic_tag.svg"), _("Tags"));
+  auto state = std::make_shared<State>();
+  ArrowPopup* popup = createTagPopup(state);
   btn->addWidget(popup);
   setupTooltip(btn, _("Tag this page or notebook"));
 
@@ -292,6 +299,18 @@ Button* createTagButton()
     return true;
   });
   return btn;
+}
+
+ArrowPopup* createNotebookTagsPopup(std::function<void()>* open)
+{
+  auto state = std::make_shared<State>();
+  ArrowPopup* popup = createTagPopup(state);
+  *open = [state](){
+    state->showChoice();  // (re)reads the tag index - the choice view itself is skipped below
+    openAutoClosePopup(state->popup);
+    state->showTags(false);
+  };
+  return popup;
 }
 
 }  // namespace TagMenu

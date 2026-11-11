@@ -197,6 +197,13 @@ public:
   Widget* overflowRow = NULL;
   // the overflow popup is one widget that moves to whichever button opens it (toolbar or top bar)
   void hostOverflowPopup(Button* btn);
+  // the active tab tapped again: Rename and Manage Tags for its document (editor-tabs.md), and the
+  //  notebook tag checklist Manage Tags opens (TagMenu); both point at the tab (TopBar::hostPopup)
+  ArrowPopup* tabMenu = NULL;
+  ArrowPopup* tabTagsPopup = NULL;
+  std::function<void()> openTabTags;
+  std::string tabMenuPath;  // the tab the menu was opened on
+  void showTabMenu(const std::string& path);
   ArrowPopup* menuWhiteboard;
   Button* menuWhiteboardBtn;
   Button* undoRedoBtn;

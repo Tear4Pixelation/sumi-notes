@@ -14,6 +14,8 @@
 #include "mainwindow.h"
 #include "sidebar.h"
 #include "tagdoclist.h"
+#include "undopersist.h"
+#include "ulib/fileutil.h"
 #include <algorithm>
 
 bool ScribbleApp::tabsEnabled() const
@@ -145,6 +147,11 @@ bool ScribbleApp::showTabInArea(int idx, ScribbleArea* area)
   std::string path = tabs[idx].path;
   TabViewState view = tabs[idx].view;
   TabViewState prevView = (prev && prev->document) ? viewOf(area) : TabViewState();
+  // A document another pane is showing (a split, or the tab dragged onto the canvas) opens where that
+  //  pane is now: the tab's own view was captured when the document last left a pane, so it is stale
+  //  while the document is being read elsewhere - it reopened the second pane at an old page.
+  if(next && next->nViews > 0 && next->activeArea && next->document)
+    view = viewOf(next->activeArea);
   bool fresh = !next;
   if(fresh)
     next = new ScribbleDoc(this, cfg, scribbleMode);
@@ -276,6 +283,49 @@ bool ScribbleApp::closeTab(int idx)
   return true;
 }
 
+// The tab menu's Rename: the library's prompt (TagDocList::askRenamePath), but an open document is not
+//  moved - it is saved under the new name and the old file removed.  Document::save() retargets the
+//  document's stream to the new file, so it keeps its undo history and pages; moving the file under it
+//  would leave its stream on the old name (and Windows cannot move an open file at all).  The library's
+//  own Rename closes the document instead (closeDocs), which here would close the tab being renamed.
+bool ScribbleApp::renameTab(int idx)
+{
+  if(idx < 0 || idx >= tabs.size())
+    return false;
+  std::string path = tabs[idx].path;
+  FSPath newPath = TagDocList::askRenamePath(FSPath(path));
+  if(newPath.isEmpty())
+    return false;
+  idx = tabs.find(path);  // the dialog ran an event loop
+  if(idx < 0)
+    return false;
+  ScribbleDoc* doc = tabs[idx].doc;
+  if(doc && doc->document) {
+    doc->checkAndClearErrors(true);
+    if(!doc->saveDocument(newPath.c_str(), Document::SAVE_FORCE)) {
+      removeFile(newPath.path);
+      messageBox(Error, _("Rename Document"), fstring(_("Unable to rename \"%s\"."), FSPath(path).baseName().c_str()));
+      return false;
+    }
+    removeFile(path);
+    UndoPersist::documentDeleted(path);  // saveDocument() wrote the history under the new name
+  }
+  else {
+    // an unloaded tab is just a file
+    if(!moveFile(FSPath(path), newPath)) {
+      messageBox(Error, _("Rename Document"), fstring(_("Unable to rename \"%s\"."), FSPath(path).baseName().c_str()));
+      return false;
+    }
+    UndoPersist::documentMoved(path, newPath.path);
+  }
+  tabs[idx].path = newPath.path;
+  if(doc && doc == activeDoc())
+    onLoadFile(newPath.path);
+  updateSplitLabels();
+  refreshUI(activeDoc(), UIState::SetDoc);
+  return true;
+}
+
 void ScribbleApp::moveTab(int from, int to)
 {
   tabs.move(from, to);
@@ -335,6 +385,11 @@ bool ScribbleApp::dropTabOnCanvas(int idx, Point pos)
   Rect bounds = target->widget->node->bounds();
   DropEdge edge = nearestDropEdge(bounds.left, bounds.top, bounds.width(), bounds.height(), pos.x, pos.y);
   std::string path = tabs[idx].path;
+  // where the new pane should open: a document already shown (the active tab dragged out) where it is
+  //  being read, any other at its tab's own view (where it was last read)
+  ScribbleDoc* shownDoc = tabs[idx].doc && tabs[idx].doc->nViews > 0 ? tabs[idx].doc : NULL;
+  TabViewState paneView = shownDoc && shownDoc->activeArea && shownDoc->document ?
+      viewOf(shownDoc->activeArea) : tabs[idx].view;
   // opens the second pane on the active document and makes it the active pane; the tab then replaces it
   //  there, so nothing is left to save - the active document stays in the first pane
   win->toggleSplitView(splitStateForEdge(edge));
@@ -343,8 +398,22 @@ bool ScribbleApp::dropTabOnCanvas(int idx, Point pos)
   if(win->splitState <= 0 || scribbleAreas.size() < 2)
     return false;
   int now = tabs.find(path);
-  if(now < 0 || !showTabInArea(now, scribbleAreas[1]))
+  ScribbleArea* pane = scribbleAreas[1];
+  if(now < 0 || !showTabInArea(now, pane))
     return false;
+  // showTabInArea() / addArea() put the pane there already, but the pane had no size yet (hidden until
+  //  now), and its first layout landed it on page 1 - so the view is applied again once it is laid out
+  if(paneView.isValid() && pane->widget) {
+    gui->setTimer(1, pane->widget, [this, pane, paneView](){
+      if(pane->scribbleDoc && pane->scribbleDoc->document) {
+        pane->restoreView(paneView.pagenum, Point(paneView.x, paneView.y), paneView.zoom);
+        // the pane's page label: its page number may not have changed since the UI last read it, as
+        //  addArea() had already set it, so nothing else refreshes it
+        refreshUI(pane->scribbleDoc, UIState::SetDoc);
+      }
+      return 0;
+    });
+  }
   onLoadFile(activeDoc()->fileName());
   return true;
 }

@@ -1396,20 +1396,30 @@ void TagDocList::changeCover(const FSPath& path)
   rebuildDocGrid();
 }
 
-void TagDocList::renameDoc(const FSPath& path)
+// The Rename Document prompt, shared with the editor's tab menu (ScribbleApp::renameTab), which renames an
+//  open document by saving it under the new name rather than moving the file
+FSPath TagDocList::askRenamePath(const FSPath& path)
 {
-  closeAllContextPopups();
   TagNameDialog dialog(_("Rename Document"), path.baseName().c_str());
   int res = Application::execDialog(&dialog);
   std::string name = dialog.getName();
-  if(res != Dialog::ACCEPTED || name.empty())
-    return;
+  if(res != Dialog::ACCEPTED || name.empty() || name == path.baseName())
+    return FSPath();
   FSPath newPath = path.parent().child(name + "." + path.extension());
   if(newPath.exists()) {
     ScribbleApp::messageBox(ScribbleApp::Error, _("Rename Document"),
         fstring(_("\"%s\" already exists."), newPath.fileName().c_str()));
-    return;
+    return FSPath();
   }
+  return newPath;
+}
+
+void TagDocList::renameDoc(const FSPath& path)
+{
+  closeAllContextPopups();
+  FSPath newPath = askRenamePath(path);
+  if(newPath.isEmpty())
+    return;
   ScribbleApp::app->closeDocs(path);
   if(!moveFile(path, newPath)) {
     ScribbleApp::messageBox(ScribbleApp::Error, _("Rename Document"),

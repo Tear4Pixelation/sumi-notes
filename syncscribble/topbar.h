@@ -10,10 +10,13 @@
 #include "ugui/widgets.h"
 #include "basics.h"
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
 class AutoAdjContainer;
+class ArrowPopup;
+class RowDrag;
 
 class TopBar : public Widget
 {
@@ -23,6 +26,7 @@ public:
 
   // inLibrary: the library's bar - home is the active "tab", and there is no overflow button
   explicit TopBar(bool inLibrary);
+  ~TopBar() override;
 
   // rebuilds the tab buttons if the tabs, the active one or a title changed since last time (always with
   //  force); cheap enough to call from every MainWindow::refreshUI().  Once the window is shown, the
@@ -41,6 +45,18 @@ public:
   std::function<void()> onHome;
   std::function<void(const std::string& path)> onTab;
   std::function<void(const std::string& path)> onCloseTab;
+  // The editor's bar only: a tab dragged along the bar onto another (reorder), or off the bar - pos in
+  //  window coordinates, NaN once it is back over the bar - and released there (onto the canvas: a split).
+  //  Indices are into ScribbleApp::tabs.  The drop callbacks run from a timer; defer anything modal.
+  std::function<void(int from, int to)> onMoveTab;
+  std::function<void(int idx, Point pos)> onDragTabOutside;
+  std::function<void(int idx, Point pos)> onDropTabOutside;
+
+  // the button of the tab for `path`, NULL if it has none (a popup anchors on it: hostPopup)
+  Button* tabButton(const std::string& path) const;
+  // Parents `popup` to the tab for `path`, so it points at that tab; false if there is none.  A rebuild
+  //  closes and detaches every hosted popup before deleting the tabs, so the popup outlives them.
+  bool hostPopup(ArrowPopup* popup, const std::string& path);
 
   // the bar's CSS, added to the window stylesheet by createStylesheet() (resources.cpp)
   static const char* stylesheet;
@@ -68,6 +84,8 @@ private:
   Widget* tabsRow = NULL;
   AutoAdjContainer* tabsAdj = NULL;
   std::vector<TabCell> cells;
+  std::vector<ArrowPopup*> hostedPopups;
+  std::unique_ptr<RowDrag> tabDrag;  // editor only
   std::string shownState;
   bool forcePending = false;
   Dim topPad = 0;
