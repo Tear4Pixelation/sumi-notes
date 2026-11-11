@@ -155,6 +155,9 @@ const char* prefInfoXML = R"#(
       title="Grow page with strokes" description="Writing near edge of page will enlarge page" />
   <pref name="eraseOnImage" type="bool" group="General"
       title="Apply free eraser to images" description="Allow free erase tool to act on images" />
+  <pref name="highlighterOpacity" type="int" group="General"
+      enum="Light (65%);Medium (75%);Strong (85%);Nearly opaque (95%)" enumvals="65;75;85;95"
+      title="Highlighter opacity" description="How strongly highlighter strokes color the paper; they stay under the ink and text" />
   <pref name="viewMode" type="int" group="General"
       enum="Single page;Vertical scrolling;Horizontal scrolling"
       title="View mode" description="" />

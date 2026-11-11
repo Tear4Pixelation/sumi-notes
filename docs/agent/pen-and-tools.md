@@ -95,6 +95,9 @@ paper unchanged.
   it too (`notefulimport.cpp`). An attribute rather than a rule because it is per stroke, travels
   through undo, sync, copy/paste and selection recolor for free (recolor only touches fill), and
   reaches export. Stylus Labs Write reads it and ignores it (`setCompOp()` there skips multiply).
+  Since the highlighter preference, all of it is set by `Element::markHighlighter()` (class, comp-op,
+  fallback opacity) and the marker's translucency is applied when drawing - see
+  [highlighter.md](highlighter.md).
 - **Every path that makes a marker element must set it.** Shapes are built by
   `ScribbleArea::createShapeElement()`, not `StrokeBuilder`, so a **Draw Lines highlighter** line and
   a marker stroke turned into a shape by **hold-to-snap** were source-over until Nov 2026: under the

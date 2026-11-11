@@ -104,16 +104,16 @@ static Element* shapeElement(const Noteful::Shape& shape)
     }
   }
   svgPath->setAttr<color_t>("fill", Color::NONE);
-  // Noteful stores a highlighter's colour opaque and makes it translucent when drawing; imported at
-  //  the alpha of Sumi's own marker (ScribbleMode's highlightPen), or it paints over the words it marks
-  double rgba[4] = {shape.rgba[0], shape.rgba[1], shape.rgba[2], shape.rgba[3]*(shape.highlighter ? 0.5 : 1)};
+  // Noteful stores a highlighter's colour opaque and makes it translucent when drawing; so does Sumi now:
+  //  markHighlighter() below writes the fallback opacity and drawing uses the highlighterOpacity preference
+  double rgba[4] = {shape.rgba[0], shape.rgba[1], shape.rgba[2], shape.rgba[3]};
   setSvgStrokeColor(svgPath, toColor(rgba));
   svgPath->setAttr<float>("stroke-width", float(shape.width*NOTEFUL_SCALE));
   svgPath->setAttr<int>("stroke-linecap", Painter::RoundCap);
   svgPath->setAttr<int>("stroke-linejoin", Painter::RoundJoin);
-  // and it multiplies, as Sumi's marker does (StrokeBuilder::create())
+  // and it multiplies, as Sumi's marker does (StrokeBuilder::create()), and is a highlighter (highlighter.md)
   if(shape.highlighter)
-    svgPath->setAttr<int>("comp-op", Painter::CompOp_Multiply);
+    Element::markHighlighter(svgPath);
   // no pen class, as for Sumi's own shapes: a pen class would have toPenPoints() reinterpret the path
   //  as variable-width pen geometry
   return new Element(svgPath);

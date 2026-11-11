@@ -81,9 +81,10 @@ StrokeBuilder* StrokeBuilder::create(const ScribblePen& pen)
     builder = new FilledStrokeBuilder(pen);
   else
     builder = new StrokedStrokeBuilder(pen);
-  // a marker multiplies, so the text under it stays as dark as it was - see pen-and-tools.md
+  // a marker multiplies, so the text under it stays as dark as it was - see pen-and-tools.md - and is
+  //  drawn at the highlighterOpacity preference whatever its color (highlighter.md)
   if(pen.hasFlag(ScribblePen::DRAW_UNDER))
-    builder->element->node->setAttr<int>("comp-op", Painter::CompOp_Multiply);
+    Element::markHighlighter(builder->element->node);
   return builder;
 }
 

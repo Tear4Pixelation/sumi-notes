@@ -516,10 +516,12 @@ int ScribbleTest::notefulImportTest()
   // bottom: the 3 point, flag-2 and four pressure strokes, the ellipse, the triangle and the highlighter;
   //  top: the 4 point stroke, the last box stroke and the line
   check(onBottom == 9 && onTop == 3, "each element on its layer");
-  // Noteful stores a highlighter opaque: imported at the marker's alpha, under the ink of its layer
+  // Noteful stores a highlighter opaque: imported as a highlighter (drawn at the highlighterOpacity
+  //  preference, which is also its fallback opacity - highlighter.md), under the ink of its layer
   //  (the bottom one, so first on the page) although it comes last among the elements
   Element* first = grid->children().begin() != grid->children().end() ? *grid->children().begin() : NULL;
-  check(first && first->layer() == LayerList::DEFAULT_LAYER && fabs(first->node->getFloatAttr("stroke-opacity", 1) - 0.5) < 0.01,
+  check(first && first->layer() == LayerList::DEFAULT_LAYER && Element::isHighlighter(first->node)
+      && fabs(first->node->getFloatAttr("stroke-opacity", 1) - Element::HIGHLIGHTER_OPACITY) < 0.01,
       "highlighter translucent and under the ink");
   int pressureStrokes = 0;
   for(Element* s : grid->children())
@@ -3893,6 +3895,96 @@ int ScribbleTest::markerBlendTest()
   return nbad;
 }
 
+// A highlighter stays a highlighter whatever its color (docs/agent/highlighter.md): Change Color on a
+//  selected marker stroke used to write the swatch's opaque alpha into fill-opacity, so it came out solid.
+//  Its translucency is now the highlighterOpacity preference, applied when drawing.
+int ScribbleTest::highlighterTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: highlighter: %s\n", what); }
+  };
+  float savedOpacity = Element::HIGHLIGHTER_OPACITY;
+  Element::HIGHLIGHTER_OPACITY = 0.65f;
+
+  scribbleDoc->newDocument();
+  Page* page = scribbleArea->currPage;
+  scribbleMode->setMode(MODE_STROKE);
+  scribbleDoc->app->setPen(ScribblePen(Color(255, 64, 224, 165), 30,
+      ScribblePen::TIP_CHISEL | ScribblePen::DRAW_UNDER));
+  ie(120, 160, 0, pen, press);  ie(400, 160, 0, pen);  ie(0, 0, 0, pen, release);
+  auto onlyStroke = [&]() {
+    Element* last = NULL;
+    for(Element* s : page->children()) { last = s; }
+    return last;
+  };
+  Element* marker = onlyStroke();
+  check(marker != NULL, "a marker stroke was drawn");
+  if(!marker) {
+    Element::HIGHLIGHTER_OPACITY = savedOpacity;
+    return nbad;
+  }
+  check(marker->node->hasClass(Element::HIGHLIGHTER_CLASS), "a marker stroke carries the highlighter class");
+  check(Element::isHighlighter(marker->node), "a marker stroke is a highlighter");
+  check(std::abs(marker->node->getFloatAttr("fill-opacity", 1) - 0.65f) < 0.01f,
+      "the file keeps the opacity it was drawn at, for other viewers");
+
+  Color drawnColor = marker->node->getColorAttr("fill").opaque();  // the theme may have snapped the pen
+  Rect box = marker->bbox();
+  Point onPaper(box.center().x, box.center().y);
+  auto sample = [&]() {
+    Image image = ScribbleDoc::renderPageThumbnail(page, int(page->width()));
+    const unsigned char* px = image.constBytes() + (size_t(onPaper.y)*image.width + size_t(onPaper.x))*4;
+    return Color(px[0], px[1], px[2], px[3]);
+  };
+
+  // recolor through the selection, as the selection menu's Change Color does, with an opaque ink color
+  scribbleDoc->doCommand(ID_SELALL);
+  check(scribbleArea->currSelection && scribbleArea->currSelection->count() == 1, "the marker is selected");
+  size_t stepsBefore = scribbleDoc->history->undoSteps();
+  scribbleArea->setStrokeProperties(StrokeProperties(Color(0, 0, 255), -1), true);
+  scribbleDoc->clearSelection();
+  scribbleMode->setMode(MODE_STROKE);
+  marker = onlyStroke();
+  check(scribbleDoc->history->undoSteps() == stepsBefore + 1, "a recolor is one undo step");
+  check(marker && Element::isHighlighter(marker->node), "a recolored marker is still a highlighter");
+  check(marker && marker->node->getFloatAttr("fill-opacity", 1) < 1, "a recolor keeps the fallback opacity");
+  check(marker && marker->node->getColorAttr("fill").opaque() == Color(0, 0, 255), "a recolor takes the color");
+  // blue multiplied over white paper: opaque leaves no red at all, 65% leaves about a third
+  Color recolored = sample();
+  check(recolored.red() > 60 && recolored.blue() > 200, "a recolored marker is drawn translucent");
+
+  // the opacity is the preference's, applied when drawing: nothing in the file changes
+  Element::HIGHLIGHTER_OPACITY = 0.95f;
+  marker->node->invalidate(false);
+  Color strong = sample();
+  check(strong.red() < recolored.red() - 30, "a higher highlighter opacity draws the stroke stronger");
+
+  // a marker an older version had already made opaque by a recolor (comp-op multiply, fill-opacity 1) and
+  //  one from before comp-op (chisel + translucent) both draw at the preference too
+  Element::HIGHLIGHTER_OPACITY = 0.65f;
+  marker->node->removeClass(Element::HIGHLIGHTER_CLASS);
+  marker->node->setAttr<float>("fill-opacity", 1);
+  marker->node->invalidate(false);
+  check(sample().red() > 60, "a marker made opaque by an old recolor is drawn translucent again");
+  marker->node->removeAttr("comp-op");
+  marker->node->setAttr<float>("fill-opacity", 0.4f);
+  marker->node->invalidate(false);
+  check(Element::isLegacyMarker(marker->node) && std::abs(int(sample().red()) - int(recolored.red())) < 12,
+      "a pre-multiply marker is drawn at the preference, not its stored alpha");
+
+  // undo puts the old color back, still a highlighter
+  marker->node->setAttr<int>("comp-op", Painter::CompOp_Multiply);
+  marker->node->addClass(Element::HIGHLIGHTER_CLASS);
+  scribbleDoc->doUndoRedo(false);
+  marker = onlyStroke();
+  check(marker && marker->node->getColorAttr("fill").opaque() == drawnColor, "undo restores the color");
+  check(marker && Element::isHighlighter(marker->node), "undo leaves a highlighter");
+
+  Element::HIGHLIGHTER_OPACITY = savedOpacity;
+  return nbad;
+}
+
 // The layer table and the theme as undo steps and on the sync wire.  Undo items *are* the sync
 //  protocol, so each edit is checked three ways: it is one undo step, undo and redo restore it, and
 //  what it serializes reproduces the edit when fed back through ScribbleSync::processItem() - the
@@ -7169,6 +7261,7 @@ void ScribbleTest::runAll(bool runsynctest)
   nUnitFailed += pdfImportTest();
   nUnitFailed += layerTest();
   nUnitFailed += markerBlendTest();
+  nUnitFailed += highlighterTest();
   nUnitFailed += selectTouchingTest();
   nUnitFailed += twoFingerTapTest();
   nUnitFailed += penCancelTest();

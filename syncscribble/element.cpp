@@ -17,6 +17,9 @@ const char* Element::CHISEL_PEN_CLASS = "write-chisel-pen";
 const char* Element::RULING_REGION_CLASS = "write-ruling-region";
 const char* Element::PAGE_TAG_CLASS = "write-pagetag";
 const char* Element::TAPE_CLASS = "write-tape";
+// the look of the marker before this was a setting: MARKER_ALPHA 165/255 (markercolor.h)
+float Element::HIGHLIGHTER_OPACITY = 0.65f;
+const char* Element::HIGHLIGHTER_CLASS = "write-highlighter";
 const ScribbleTransform Element::NO_TRANSFORM{};
 const ShapeParams Element::NO_SHAPE{};
 const RulingRegionParams Element::NO_REGION{};
@@ -191,6 +194,20 @@ static bool applyProperties(const StrokeProperties& props, SvgNode* node)
     //return true; ... let's also set style on container
   }
 
+  // a recolor takes a highlighter's color, never its translucency: the new color is usually an opaque
+  //  ink swatch, and writing its alpha made the stroke solid in other viewers and (before the render-time
+  //  opacity) here too.  Its fallback opacity is kept, or set if it had none (docs/agent/highlighter.md)
+  bool highlighter = Element::isHighlighter(node);
+  float fillOpacity = node->getFloatAttr("fill-opacity", 1), strokeOpacity = node->getFloatAttr("stroke-opacity", 1);
+  auto keepHighlighterOpacity = [&]() {
+    if(!highlighter)
+      return;
+    if(node->getColorAttr("fill", Color::NONE) != Color::NONE)
+      node->setAttr<float>("fill-opacity", fillOpacity < 1 ? fillOpacity : Element::HIGHLIGHTER_OPACITY);
+    if(node->getColorAttr("stroke", Color::NONE) != Color::NONE)
+      node->setAttr<float>("stroke-opacity", strokeOpacity < 1 ? strokeOpacity : Element::HIGHLIGHTER_OPACITY);
+  };
+
   if(props.color.alpha() > 0) {
     // do not set if current color is none or not set
     if(node->getColorAttr("fill", Color::NONE) != Color::NONE)
@@ -202,6 +219,8 @@ static bool applyProperties(const StrokeProperties& props, SvgNode* node)
     setSvgFillColor(node, props.fillColor);
   if(props.strokeColor.isValid())
     setSvgStrokeColor(node, props.strokeColor);
+  if(props.color.alpha() > 0 || props.fillColor.isValid() || props.strokeColor.isValid())
+    keepHighlighterOpacity();
   Dim sw = node->getFloatAttr("stroke-width", 0);
   if(props.width > 0 && sw > 0) {
     Dim avgScale = node->hasTransform() ? node->getTransform().avgScale() : 1;
@@ -1511,6 +1530,32 @@ bool Element::isLegacyMarker(const SvgNode* node)
       && node->getFloatAttr("fill-opacity", 1) < 1;
 }
 
+// Three generations of marker stroke, all drawn the same way (docs/agent/highlighter.md): the class
+//  (written since highlighterOpacity), comp-op multiply alone (written only for markers - StrokeBuilder,
+//  Draw Lines/snapped shapes, Noteful import - including ones a recolor had already made opaque), and the
+//  pre-multiply chisel stroke.  Recognized here rather than rewritten on load, so opening a document
+//  neither dirties it nor costs an undo step.
+bool Element::isHighlighter(const SvgNode* node)
+{
+  if(node->hasClass(HIGHLIGHTER_CLASS))
+    return true;
+  if(const SvgAttr* compOp = node->getAttr("comp-op"))
+    return compOp->intVal() == Painter::CompOp_Multiply;
+  return isLegacyMarker(node);
+}
+
+// the stored opacity is the fallback for other SVG viewers and older versions (which have no setting):
+//  it is what this app showed when the stroke was made
+void Element::markHighlighter(SvgNode* node)
+{
+  node->addClass(HIGHLIGHTER_CLASS);
+  node->setAttr<int>("comp-op", Painter::CompOp_Multiply);
+  if(node->getColorAttr("fill", Color::NONE) != Color::NONE)
+    node->setAttr<float>("fill-opacity", HIGHLIGHTER_OPACITY);
+  if(node->getColorAttr("stroke", Color::NONE) != Color::NONE)
+    node->setAttr<float>("stroke-opacity", HIGHLIGHTER_OPACITY);
+}
+
 void Element::applyStyle(SvgPainter* svgp) const
 {
   Painter* painter = svgp->p;
@@ -1532,8 +1577,14 @@ void Element::applyStyle(SvgPainter* svgp) const
       svgp->extraState().strokeOpacity *= avgScale*avgScale;
   }
 
-  if(painter->compOp() == Painter::CompOp_SrcOver && isLegacyMarker(node))
-    painter->setCompOp(Painter::CompOp_Multiply);
+  // a highlighter's translucency is the preference's, not the file's (docs/agent/highlighter.md); set
+  //  after SvgPainter read fill-/stroke-opacity, and only for this node (the state is pushed per node)
+  if(isHighlighter(node)) {
+    if(painter->compOp() == Painter::CompOp_SrcOver)
+      painter->setCompOp(Painter::CompOp_Multiply);
+    SvgPainter::ExtraState& state = svgp->extraState();
+    state.fillOpacity = state.strokeOpacity = HIGHLIGHTER_OPACITY;
+  }
 
   // selection draw style must be applied to every graphic node individually, so we must ascend to see if any
   //  parent is selected; valid dirtyRect indicates we are drawing, as opposed to calculating bounds

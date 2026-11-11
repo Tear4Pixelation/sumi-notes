@@ -61,6 +61,7 @@ public:
   // layers must undo both the layer and the restacking it caused
   int layerTest();
   int markerBlendTest();
+  int highlighterTest();
   // Select Touching: rect and lasso select take what they touch, including a stroke crossed with none of
   //  its points inside; off, only what lies entirely inside
   int selectTouchingTest();
