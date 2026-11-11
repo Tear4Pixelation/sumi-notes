@@ -344,6 +344,17 @@ five curves are neither, and get the same kind with both new kinds switched off;
 rounded rectangle unchanged; each preference off removes its kind. The positive cases fail against the
 old recognizer (it made the square roots loose lines and the triangles nothing); the curve cases fail
 with the straightness test disabled. The standalone command now also compiles `shaperec.cpp`.
+In the app, `ScribbleTest::shapeSnapTest()` drives a triangle and a square root through `ScribbleInput`
+and fires the hold: closed 3-point / open 4-point `SHAPE_POLYLINE`, the root's top exactly horizontal,
+its end following the pen, and each preference off removing its kind.
+
+Live check (Nov 2026, agent display, mouse via `agent-pointer stroke ... @1500`): a held line snapped,
+but in the same sessions the hold then stopped firing for every later stroke, line included (no
+`snapStroke()` call - `recordShapeStrokes` wrote nothing), so the square root and triangle could not be
+shown live. Looks like the timer thread stalling (`SvgGui` timer thread waits for the main loop after
+each TIMER event), not the recognizer; not investigated. With several agent displays on the GPU,
+Xwayland's glamor fails with GL_OUT_OF_MEMORY; `XWAYLAND_NO_GLAMOR=1` in front of `agent-display.sh
+test` got the in-app suite through.
 
 ## 45 degree angle snap
 
