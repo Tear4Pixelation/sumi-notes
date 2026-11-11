@@ -220,6 +220,19 @@ private:
   ArrowPopup* docTagsPopup;
   TextEdit* docTagsSearchEdit;
   Widget* docTagsList;
+  // the Manage Tags list scrolls by showing a window of its rows - see rebuildDocTagsList()
+  std::vector<std::pair<std::string, int>> docTagsRows;  // every row: tag id, depth
+  int docTagsFirstRow = 0;
+  real docTagsRowPitch = 39;  // measured from the rows shown (showDocTagsRows()); about this until then
+  real docTagsWheelRows = 0;  // wheel movement short of a whole row, kept for the next wheel event
+  enum { DOCTAGS_NO_DRAG, DOCTAGS_DRAG_PRESSED, DOCTAGS_DRAGGING } docTagsDrag = DOCTAGS_NO_DRAG;
+  real docTagsDragStartY = 0;
+  int docTagsDragStartRow = 0;
+  Widget* docTagsDragTarget = NULL;  // what the finger pressed, unpressed when the press becomes a drag
+  real docTagsListMaxHeight() const;
+  int docTagsVisibleRows() const;
+  void showDocTagsRows();
+  bool scrollDocTags(int rows);
   std::string docTagsSearchQuery;
   std::set<std::string> docTagsExpandedTags;  // mirrors expandedTags, but for the tree in docTagsList
   FSPath contextMenuDocPath;

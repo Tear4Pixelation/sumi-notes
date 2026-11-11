@@ -56,6 +56,8 @@ static constexpr int SIDEBAR_WIDTH = 260;
 static constexpr int SIDEBAR_PAD_LEFT = 24, SIDEBAR_PAD_RIGHT = 24;
 static constexpr int TAG_LIST_BLEED_LEFT = 12, TAG_LIST_BLEED_RIGHT = 18;
 static constexpr int TAG_ROW_LEFT = 0, TAG_ROW_RIGHT = 4, TAG_ROW_INDENT = 16;
+// vertical margin of a tag tree row (createTagRow) and of a createNavRow() row (All Documents, pinned tags)
+static constexpr int TAG_ROW_MARGIN_V = 6, NAV_ROW_MARGIN_V = 14;
 
 TagDocList::TagDocList(const char* root) : Window(createWindowNode(tagDocListWindowSVG)), tagStore("")
 {
@@ -150,7 +152,7 @@ Widget* TagDocList::createNavRow(const char* iconPath, const char* title)
   std::unique_ptr<SvgNode> proto(loadSVGFragment(rowProtoSVG));
   Button* row = new Button(proto->clone());
   row->node->addClass("tag-row");
-  row->node->setAttribute("margin", "14 12 14 12");
+  row->node->setAttribute("margin", fstring("%d 12 %d 12", NAV_ROW_MARGIN_V, NAV_ROW_MARGIN_V).c_str());
   row->selectFirst(".title")->setText(title);
   SvgUse* icon = new SvgUse(Rect::wh(24, 24), "", SvgGui::useFile(iconPath));
   icon->addClass("icon");
@@ -204,7 +206,7 @@ Widget* TagDocList::createTagRow(const std::string& tagId, int depth, bool pinne
 
   Button* row = new Button(proto->clone());
   row->node->addClass("tag-row");
-  row->node->setAttribute("margin", fstring("6 %d 6 %d", TAG_ROW_RIGHT, TAG_ROW_LEFT + depth*TAG_ROW_INDENT).c_str());
+  row->node->setAttribute("margin", fstring("%d %d %d %d", TAG_ROW_MARGIN_V, TAG_ROW_RIGHT, TAG_ROW_MARGIN_V, TAG_ROW_LEFT + depth*TAG_ROW_INDENT).c_str());
   row->selectFirst(".title")->setText(tagNode->name.c_str());
   row->setChecked(activeTags.count(tagId) > 0);
 
@@ -355,11 +357,21 @@ void TagDocList::rebuildTagTree()
     gui()->deleteContents(tagTreeView, ".listitem");
     gui()->deleteContents(pinnedTagsView, ".listitem");
   }
+  // A pinned row keeps createNavRow()'s 14px outer margins only on the outside of the list: the first
+  //  row's top (the gap below All Documents) and the last row's bottom (the gap above sep2). Between
+  //  two pinned rows it takes a tree row's 6 + 6, so the pinned list is spaced like the tag list below.
+  std::vector<Widget*> pinnedRows;
   for(const std::string& id : pinnedTagIds()) {
     if(Widget* row = createTagRow(id, 0, true)) {
       pinnedTagsView->addWidget(row);
       elideNavRowTitle(row);
+      pinnedRows.push_back(row);
     }
+  }
+  for(size_t i = 0; i < pinnedRows.size(); ++i) {
+    int top = i == 0 ? NAV_ROW_MARGIN_V : TAG_ROW_MARGIN_V;
+    int bottom = i + 1 == pinnedRows.size() ? NAV_ROW_MARGIN_V : TAG_ROW_MARGIN_V;
+    pinnedRows[i]->node->setAttribute("margin", fstring("%d 12 %d 12", top, bottom).c_str());
   }
 
   std::function<void(const std::string&, int)> appendRecursive = [&](const std::string& id, int depth){
@@ -1165,6 +1177,7 @@ void TagDocList::showDocTagsPopup(const FSPath& path, Widget* cell)
   // rebuildDocTagsList() deleting rows of a detached popup crashed - see its comment
   docTagsPopup->removeFromParent();
   cell->addWidget(docTagsPopup);
+  docTagsFirstRow = 0;
   rebuildDocTagsList();
   openAutoClosePopup(docTagsPopup);
 }
@@ -1243,17 +1256,68 @@ Widget* TagDocList::createDocTagRow(const std::string& tagId, int depth,
 // contextMenuDocPath's own current tags. Toggling a checkbox writes straight through to the
 // document - see setDocumentTags()'s comment for why there's no separate "apply" step - so the
 // popup's own Done button only ever needs to close it, never commit anything.
-// The popup has no ancestor to hand it real screen bounds the way the sidebar's own tag tree does
-// (see rebuildTagTree() and its ScrollWidget below in createUI()), so unlike that tree, this list
-// cannot simply grow and let a ScrollWidget clip it - a popup taller than the window pushed its own
-// Done button and search box off-screen and broke hit-testing for outside-click-to-close, which read
-// as a crash once a project grew past a handful of tags (every click then landed "outside" a popup
-// whose own controls were no longer reachable). Capping the row count and pointing at search instead
-// keeps the popup's own height bounded and predictable without needing a scrollable sub-region here.
-static const int DOC_TAGS_MAX_ROWS = 10;
+// Every tag is listed (docTagsRows), but only the rows that fit docTagsListMaxHeight() exist as
+// widgets, from docTagsFirstRow on; the wheel and a finger drag move that window (see the list's
+// eventFilter in createUI()). It used to cap the list at 10 rows with a "type to search" hint and no
+// way to scroll, and in a short window those 10 rows already pushed the popup's end off the screen.
+// Not a ScrollWidget: one nested in this popup, which itself lives in the grid's ScrollWidget, sized
+// itself right but drew its rows clipped to a sliver (docs/agent/document-library.md, Manage Tags).
+
+// The tallest the Manage Tags list may get: the window less the popup's own chrome (header, search
+//  box, padding, arrow, a little room off the screen edge), and never so tall that a long tag list turns
+//  the popup into a wall. A popup that still does not fit above or below its cell goes beside it
+//  (calcAlignedOffset()) and is kept on screen by SvgGui::layoutAndDraw().
+real TagDocList::docTagsListMaxHeight() const
+{
+  static constexpr real CHROME_HEIGHT = 180, MAX_HEIGHT = 440, MIN_HEIGHT = 120;
+  real available = winBounds().height() - CHROME_HEIGHT;
+  return std::max(MIN_HEIGHT, std::min(MAX_HEIGHT, available));
+}
 
 void TagDocList::rebuildDocTagsList()
 {
+  docTagsRows.clear();
+  if(!contextMenuDocPath.isEmpty()) {
+    if(docTagsSearchQuery.empty()) {
+      std::function<void(const std::string&, int)> appendRecursive = [&](const std::string& id, int depth){
+        const TagNode* tagNode = tagStore.tag(id);
+        if(!tagNode)
+          return;
+        docTagsRows.emplace_back(id, depth);
+        if(docTagsExpandedTags.count(id))
+          for(const std::string& childId : tagNode->childIds)
+            appendRecursive(childId, depth + 1);
+      };
+      for(const std::string& id : tagStore.rootTagIds())
+        appendRecursive(id, 0);
+    }
+    else {
+      std::string query = toLower(docTagsSearchQuery);
+      for(const auto& pair : tagStore.allTags()) {
+        if(toLower(pair.second.name).find(query) != std::string::npos)
+          docTagsRows.emplace_back(pair.first, 0);
+      }
+    }
+  }
+  showDocTagsRows();
+}
+
+// How many rows fit docTagsListMaxHeight(), at the row pitch measured from the rows last shown
+int TagDocList::docTagsVisibleRows() const
+{
+  return std::max(1, int(docTagsListMaxHeight()/docTagsRowPitch));
+}
+
+// (Re)creates the row widgets for docTagsRows[docTagsFirstRow, + docTagsVisibleRows())
+void TagDocList::showDocTagsRows()
+{
+  // the pitch (row height plus margins), measured from two laid out rows before they go
+  std::vector<Widget*> oldRows = docTagsList->select(".doctag-row");
+  if(oldRows.size() >= 2) {
+    real pitch = oldRows[1]->node->bounds().top - oldRows[0]->node->bounds().top;
+    if(pitch > 1)
+      docTagsRowPitch = pitch;
+  }
   // SvgGui::deleteWidget() -> onHideWidget() dereferences widget->window() unconditionally, and a row
   // of a detached docTagsPopup (rebuildDocGrid() detaches it) has no window: build 121 crashed on the
   // iPad at null+0x78 that way, on Manage Tags after the browser had been reopened. A detached popup
@@ -1269,53 +1333,26 @@ void TagDocList::rebuildDocTagsList()
   if(contextMenuDocPath.isEmpty())
     return;
 
+  int visible = docTagsVisibleRows();
+  int total = int(docTagsRows.size());
+  docTagsFirstRow = std::max(0, std::min(docTagsFirstRow, total - visible));
   std::vector<std::string> currentTags = ScribbleDoc::extractDocTags(contextMenuDocPath.c_str());
-  int shown = 0;
-  bool truncated = false;
-
-  if(docTagsSearchQuery.empty()) {
-    std::function<void(const std::string&, int)> appendRecursive = [&](const std::string& id, int depth){
-      if(shown >= DOC_TAGS_MAX_ROWS) {
-        truncated = true;
-        return;
-      }
-      Widget* row = createDocTagRow(id, depth, currentTags);
-      if(!row)
-        return;
+  for(int i = docTagsFirstRow; i < std::min(total, docTagsFirstRow + visible); ++i) {
+    if(Widget* row = createDocTagRow(docTagsRows[i].first, docTagsRows[i].second, currentTags))
       docTagsList->addWidget(row);
-      ++shown;
-      const TagNode* tagNode = tagStore.tag(id);
-      if(tagNode && docTagsExpandedTags.count(id))
-        for(const std::string& childId : tagNode->childIds)
-          appendRecursive(childId, depth + 1);
-    };
-    for(const std::string& id : tagStore.rootTagIds())
-      appendRecursive(id, 0);
   }
-  else {
-    std::string query = toLower(docTagsSearchQuery);
-    for(const auto& pair : tagStore.allTags()) {
-      if(toLower(pair.second.name).find(query) == std::string::npos)
-        continue;
-      if(shown >= DOC_TAGS_MAX_ROWS) {
-        truncated = true;
-        continue;
-      }
-      Widget* row = createDocTagRow(pair.first, 0, currentTags);
-      if(row) {
-        docTagsList->addWidget(row);
-        ++shown;
-      }
-    }
-  }
+}
 
-  if(truncated) {
-    Widget* hint = new Widget(createTextNode(_("More tags - type to search")));
-    hint->node->addClass("weak");
-    hint->node->setAttribute("font-size", "12");
-    hint->node->setAttribute("margin", "8 0 0 0");
-    docTagsList->addWidget(hint);
-  }
+// Moves the Manage Tags list by `rows` (positive: further down the list); false if already at that end
+bool TagDocList::scrollDocTags(int rows)
+{
+  int last = std::max(0, int(docTagsRows.size()) - docTagsVisibleRows());
+  int first = std::max(0, std::min(docTagsFirstRow + rows, last));
+  if(first == docTagsFirstRow)
+    return false;
+  docTagsFirstRow = first;
+  showDocTagsRows();
+  return true;
 }
 
 // The only place a document's own tags are written back to disk - everywhere else (extractDocTags())
@@ -2007,7 +2044,7 @@ void TagDocList::createUI()
 
   docTagsSearchEdit = createTextEdit(-1);
   docTagsSearchEdit->setEmptyText(_("Search tags"));
-  docTagsSearchEdit->onChanged = [this](const char* s){ docTagsSearchQuery = s; rebuildDocTagsList(); };
+  docTagsSearchEdit->onChanged = [this](const char* s){ docTagsSearchQuery = s; docTagsFirstRow = 0; rebuildDocTagsList(); };
   docTagsSearchEdit->setMargins(8, 12, 8, 12);
   docTagsPopup->addWidget(docTagsSearchEdit);
 
@@ -2017,6 +2054,61 @@ void TagDocList::createUI()
   docTagsList->node->setAttribute("flex-direction", "column");
   docTagsList->node->setAttribute("width", "280");
   docTagsList->setMargins(8, 12, 0, 12);
+  // Scrolling, by moving the window of rows that exist (showDocTagsRows()): the wheel moves it three rows
+  //  a notch; a finger (or the pen) moves it a row per row pitch dragged, once the drag passes a small
+  //  threshold - until then the press is a tap on a checkbox like any other, and once it is a drag the
+  //  checkbox gives the press up without a click. A filter, not a handler: the press goes to the row
+  //  under the finger first, and a handler here would only ever see what the rows left unhandled.
+  docTagsList->eventFilter = [this](SvgGui* gui, Widget* target, SDL_Event* event){
+    static constexpr real DRAG_THRESHOLD = 12;
+    if(event->type == SDL_MOUSEWHEEL) {
+      // wheel.y is in 1/120 notches (SvgGui::sdlMouseEvent()); wheel up shows the rows above
+      docTagsWheelRows += event->wheel.y/120.0 * 3;
+      int rows = int(docTagsWheelRows);  // toward zero, the rest carries over to the next event
+      docTagsWheelRows -= rows;
+      if(rows != 0)
+        scrollDocTags(-rows);
+      return true;
+    }
+    if(event->type == SDL_FINGERDOWN && event->tfinger.fingerId == SDL_BUTTON_LMASK
+        && event->tfinger.touchId != SDL_TOUCH_MOUSEID) {
+      docTagsDrag = DOCTAGS_DRAG_PRESSED;
+      docTagsDragStartY = event->tfinger.y;
+      docTagsDragStartRow = docTagsFirstRow;
+      docTagsDragTarget = target;
+      return false;  // on to the row: a tap stays a tap
+    }
+    if(docTagsDrag == DOCTAGS_NO_DRAG)
+      return false;
+    if(event->type == SDL_FINGERMOTION) {
+      real dy = event->tfinger.y - docTagsDragStartY;
+      if(docTagsDrag == DOCTAGS_DRAG_PRESSED) {
+        if(std::abs(dy) < DRAG_THRESHOLD)
+          return false;
+        docTagsDrag = DOCTAGS_DRAGGING;
+        // the row's checkbox took the press: unpress it (Button drops "pressed" on OUTSIDE_PRESSED) and take
+        //  the press over, so the release goes to the list (which ignores it) instead of making a click
+        for(Widget* pressed = docTagsDragTarget; pressed && pressed != docTagsList; pressed = pressed->parent())
+          pressed->sdlUserEvent(gui, SvgGui::OUTSIDE_PRESSED, 0, event, NULL);
+        docTagsDragTarget = NULL;  // rows are recreated as the list moves
+        gui->pressedWidget = docTagsList;
+      }
+      int rows = int(std::round(-dy/docTagsRowPitch));
+      if(docTagsDragStartRow + rows != docTagsFirstRow)
+        scrollDocTags(docTagsDragStartRow + rows - docTagsFirstRow);
+      return true;
+    }
+    if(event->type == SDL_FINGERUP || event->type == SvgGui::OUTSIDE_PRESSED) {
+      bool dragged = docTagsDrag == DOCTAGS_DRAGGING;
+      docTagsDrag = DOCTAGS_NO_DRAG;
+      docTagsDragTarget = NULL;
+      if(dragged && event->type == SDL_FINGERUP) {
+        gui->pressedWidget = NULL;  // this filter keeps the release from SvgGui::sendEvent(), which clears it
+        return true;
+      }
+    }
+    return false;
+  };
   docTagsPopup->addWidget(docTagsList);
   setupAutoClosePopup(docTagsPopup);
 
