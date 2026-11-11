@@ -512,6 +512,50 @@ edge, ink diagonally past the eraser's end, and where the free eraser's cut land
 `scribbletest/erasetest.cpp` (`runEraseTests()`). Against the old code the edge checks of both erasers,
 the diagonal check of the free eraser and the cut position fail.
 
+## The ruled stroke eraser takes what path select takes
+
+The **default eraser is the ruled stroke eraser** (`MODE_ERASERULED`, `loadModes()`; `greedyRuledErase`
+on), not `MODE_ERASESTROKE`, and it never went through the capsule test above: it was a `RuledSelector`
+over the x range the pointer had covered on the pointer's line. `overlapRuled()` takes a stroke shorter
+than 1.75 lines only if its **com** is on that line and its box reaches that x range, with no radius at
+all. So ink right under the eraser was left when it belonged to the next line by its centre (a descender, a
+tall letter crossed low), or when the pointer stopped with its edge on the ink, and a tap erased nothing
+on press - while path select (`PathSelector`, radius `PATHSELECT_RADIUS` = `ERASESTROKE_RADIUS`) took it.
+That was "sometimes very hard to delete a stroke".
+
+Now there is **one hit test for every tool that takes whole strokes from under the pointer**: `SweepHit`
+(`selection.h`), the capsule from the previous pointer position to this one against the ink
+(`isNearSegment()`), with its exact bounds cull. `PathSelector` (path select, stroke eraser) holds one; the
+ruled eraser's `RuledSelector` holds one too (`useSweep`, set by `sweepTo()` on press, `sweep.advance()`
+before every `selectRuled()` on move) and `selectHit()` is **sweep OR ruled range**. The ruled range is
+kept, so sweeping into the left margin still takes whole lines and a quick pass along a line still takes
+everything between the extremes; the sweep ignores `sameRulingOnly` (ink under the eraser is erased
+whatever ruling it belongs to, as path select selects it). `cannotHit()` is "both cull it"; before the
+first `selectRuled()` there is no range (`rangeSet`), so only the sweep can hit.
+
+Not changed: the free erasers cut rather than take, and keep their own clipping above.
+
+## Scratch-out: by length inside the hull
+
+A scratch-out (`ScratchOutSelector` in `scribblearea.cpp`, held and lift) took an element when its **bbox
+centre** lay inside the scratch-out's convex hull. A long stroke scratched over half its length (centre
+outside) survived; a big stroke around the scratch-out (centre inside, no ink under it) was erased. Now the
+measure is **the fraction of the element's flattened path length inside the hull**
+(`ScribbleArea::scratchOutOverlap()`, `addLengthInside()` in `erasegeom.*`): the same flattened ink path
+select tests (outline for a filled pen stroke including closing edges, centre line for a stroked path, a
+group summed over its children, text by its box outline), cut at the hull's edges, each piece judged by
+its midpoint. A path with no length (a tapped dot) is all in or all out by its point. The element is
+erased when the fraction is **above `ScribbleArea::SCRATCHOUT_MIN_OVERLAP` (0.02)**; at or below it the
+scratch-out only grazed it and it stays. Length, not point count, because pen points are dense in curves
+and sparse on straight runs. Images are still never taken; locked/hidden layers are still kept out by
+`doSelect()`.
+
+Tested by `ScribbleTest::eraseLikeSelectTest()`: each ruled-eraser case runs path select and then the
+ruled eraser with the same motion over the same ink and requires the same result (next-line ink, edge
+stop, tap, clear pass), then a lift scratch-out over a stroke wholly under it, a long line 15% under it, a
+ring around it and a line it grazes (0.6%). Against the old code the next-line, edge-stop and tap checks
+and the long-line and ring checks fail (verified). The length measure is checked standalone in `erasetest.cpp`.
+
 # Element memory
 
 Per-stroke state that ordinary ink never has lives in `Element::Extra` behind one pointer (`m_extra`):

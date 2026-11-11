@@ -594,6 +594,12 @@ protected:
 public:
   // radius of the free eraser, in screen units; settable from the eraser options row
   static Dim ERASEFREE_RADIUS;
+  // a scratch-out erases a stroke when more than this fraction of the stroke's length lies inside the
+  //  scratch-out's hull; at or below it the stroke was only grazed and is left (pen-and-tools.md)
+  static constexpr Dim SCRATCHOUT_MIN_OVERLAP = 0.02;
+  // the fraction (0..1) of s's length inside `polygon` (page coordinates): flattened path length, so a
+  //  filled pen stroke counts its outline, a stroked path its centre line; a group sums its children
+  static Dim scratchOutOverlap(Element* s, const std::vector<Point>& polygon);
 protected:
   static const Dim PATHSELECT_RADIUS;
   static const Dim MIN_LASSO_POINT_DIST;

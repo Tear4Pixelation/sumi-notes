@@ -162,6 +162,30 @@ protected:
 
 };
 
+// The path select tool's hit test: the capsule of `radius` swept from the previous pointer position to this
+//  one, against the ink (erasegeom.h).  It is the one hit test of every tool that takes whole strokes from
+//  under the pointer - path select, the stroke eraser and the ruled stroke eraser - so anything path select
+//  would take, the erasers take too (pen-and-tools.md, "Eraser hit test").
+class SweepHit
+{
+public:
+  // moves the capsule on to end at `pos` (a first call is a dot); fetches what cannotHit() needs once
+  void advance(Point pos, Dim radius, const Selection* selection);
+  bool active() const { return !selPos.isNaN(); }
+  bool hits(Element* s) const;
+  // exact cull: true only if hits(s) is certainly false
+  bool cannotHit(Element* s) const;
+  Dim radius() const { return selRadius; }
+
+private:
+  Point selPos = Point(NaN, NaN);
+  Point selPrev = Point(NaN, NaN);
+  Dim selRadius = 0;
+  // for cannotHit(): the elements' parent and its totalTransform(), fetched once per advance()
+  const SvgNode* cullParent = NULL;
+  Transform2D cullParentTf;
+};
+
 class PathSelector : public Selector
 {
 public:
@@ -175,13 +199,7 @@ public:
 
 private:
   Path2D path;
-
-  Point selPos = Point(NaN, NaN);
-  Point selPrev = Point(NaN, NaN);
-  Dim selRadius;
-  // for cannotHit(): the elements' parent and its totalTransform(), fetched once per selectPath()
-  const SvgNode* cullParent = NULL;
-  Transform2D cullParentTf;
+  SweepHit sweep;
 };
 
 class RectSelector : public Selector
@@ -373,6 +391,13 @@ public:
   // a ruled gesture acts only on ink of its own ruling (region or page); display-only callers that just
   //  want "what is on this line" (the bookmark list) turn it off
   bool sameRulingOnly = true;
+  // the ruled eraser only: also take whatever the pointer's capsule touches (path select's hit test), so
+  //  the eraser never misses ink that is under it but belongs to another line by its centre, or lies just
+  //  past the x the pointer reached.  Moved on by sweepTo() / sweep.advance() before each selectRuled().
+  bool useSweep = false;
+  SweepHit sweep;
+  // runs the selection with only the capsule moved (the press, before there is a ruled range)
+  void sweepTo(Point pos, Dim radius);
 
   RuledSelector(Selection* _sel, ColMode cm = COL_NORMAL) : Selector(_sel), selMode(SEL_CONTAINED),
       colMode(cm), selRange(MAX_DIM, MAX_DIM, MIN_DIM, MIN_DIM, 0, 0) {}
@@ -400,6 +425,9 @@ public:
 
 private:
   RuledRange selRange;
+  // false until the first selectRuled(): the default range is empty with a zero line pitch
+  bool rangeSet = false;
+  bool ruledCannotHit(Element* s) const;
 };
 
 // Note that a base class (here, Selector) destructor must be virtual if any derived classes so much as

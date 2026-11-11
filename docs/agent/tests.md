@@ -22,7 +22,8 @@ step - see [screenshot.md](screenshot.md#tests).
 
 The eraser geometry (segment distance, capsule against a path's segments / stroke width / filled inside,
 the capsule polygon's round ends) is tested the same way in `scribbletest/erasetest.cpp`
-(`runEraseTests()`; command in its header); both erasers end to end in `ScribbleTest::eraserHitTest()` -
+(`runEraseTests()`; command in its header); both erasers end to end in `ScribbleTest::eraserHitTest()`, the ruled eraser against path select and the
+scratch-out's length measure in `ScribbleTest::eraseLikeSelectTest()` -
 see [pen-and-tools.md](pen-and-tools.md#eraser-hit-test-stroke-and-free-eraser).
 
 The smart scale layout ([smart-scale.md](smart-scale.md)) is tested the same way in

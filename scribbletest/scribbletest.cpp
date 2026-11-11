@@ -5739,6 +5739,134 @@ int ScribbleTest::eraserHitTest()
   return nbad;
 }
 
+// The default eraser is the ruled stroke eraser, which took a stroke only if the stroke's centre was on the
+//  pointer's line and its box reached the x the pointer had reached - so ink right under the eraser was
+//  left whenever it belonged to the next line or the pointer stopped at its edge, while path select (the
+//  same capsule test the stroke eraser uses) took it.  Each case runs path select, then the ruled eraser,
+//  over the same ink with the same motion: whatever was selected must be erased.  The scratch-out took
+//  ink by its box's centre; it now takes it by the fraction of its length inside the hull.  Against the
+//  old code the "next line", "edge" and "tap" checks and both scratch-out "length" checks fail.
+int ScribbleTest::eraseLikeSelectTest()
+{
+  int nbad = 0;
+  auto check = [&](bool ok, const char* what) {
+    if(!ok) { ++nbad; printf("FAIL: erase like select: %s\n", what); }
+  };
+  auto at = [&](Point pagept, int ev) {
+    Point scr = scribbleArea->dimToScreen(scribbleArea->pageDimToDim(pagept));
+    ie(scr.x, scr.y, 0, pen, ev);
+  };
+  Page* page = NULL;
+  auto polyline = [&](const std::vector<Point>& pts, Dim width) {
+    SvgPath* node = new SvgPath();
+    node->path()->moveTo(pts.front());
+    for(size_t ii = 1; ii < pts.size(); ++ii)
+      node->path()->lineTo(pts[ii]);
+    node->setAttr<color_t>("fill", Color::NONE);
+    setSvgStrokeColor(node, Color::BLACK);
+    node->setAttr<float>("stroke-width", width);
+    node->setAttr<int>("stroke-linecap", Painter::RoundCap);
+    node->addClass(Element::STROKE_PEN_CLASS);
+    Element* s = new Element(node);
+    page->addStroke(s);
+    return s;
+  };
+  auto fresh = [&]() {
+    scribbleDoc->newDocument();
+    page = scribbleArea->currPage;
+  };
+  auto sweep = [&](int mode, Point from, Point to) {
+    scribbleMode->setMode(mode);
+    at(from, press);
+    at(to, INPUTEVENT_MOVE);
+    at(to, release);
+  };
+  auto contains = [&](Element* target) {
+    for(Element* s : page->children())
+      if(s == target) return true;
+    return false;
+  };
+
+  scribbleDoc->cfg->set("greedyRuledErase", 1);
+  const Dim r = ScribbleArea::ERASESTROKE_RADIUS/scribbleArea->mZoom;
+  const Dim halfWidth = 1;
+  struct Case { const char* name; std::vector<Point> ink; Point from, to; };
+  fresh();
+  const RulingFrame frame = page->pageFrame();
+  const Dim pitch = frame.yrulingOr(Page::BLANK_Y_RULING);
+  auto onLine = [&](int line, Dim fraction, Dim x) {
+    return frame.toPage(Point(x, frame.yForLine(line, Page::BLANK_Y_RULING) + fraction*pitch));
+  };
+  const Dim edgeX = 400 - halfWidth - 0.6*r;
+  const Case cases[] = {
+    // a short upright stroke from line 6 into line 7, its centre on line 6, crossed in line 7
+    {"crossing the part of a stroke on the next line", {onLine(6, 0.3, 400), onLine(6, 1.5, 400)},
+        onLine(6, 1.3, 360), onLine(6, 1.3, 440)},
+    // an upright stroke reached only with the eraser's edge, the pointer stopping short of it
+    {"stopping with the eraser's edge on a stroke", {onLine(6, 0.3, 400), onLine(6, 0.8, 400)},
+        onLine(6, 0.5, 340), onLine(6, 0.5, edgeX)},
+    // a tap on a stroke
+    {"tapping a stroke", {onLine(6, 0.5, 380), onLine(6, 0.5, 420)}, onLine(6, 0.5, 400), onLine(6, 0.5, 400)},
+    // and one clear of the ink, which neither may take
+    {"passing clear of a stroke", {onLine(6, 0.3, 400), onLine(6, 0.8, 400)},
+        onLine(6, 0.5, 340), onLine(6, 0.5, 400 - halfWidth - 1.5*r)},
+  };
+  for(const Case& testcase : cases) {
+    char what[200];
+    fresh();
+    polyline(testcase.ink, 2*halfWidth);
+    sweep(MODE_SELECTPATH, testcase.from, testcase.to);
+    bool selected = scribbleArea->currSelection && scribbleArea->currSelection->count() > 0;
+    fresh();
+    polyline(testcase.ink, 2*halfWidth);
+    sweep(MODE_ERASERULED, testcase.from, testcase.to);
+    bool erased = page->strokeCount() == 0;
+    snprintf(what, sizeof(what), "%s: the ruled eraser erases what path select selects (selected %d, erased %d)",
+        testcase.name, selected, erased);
+    check(selected == erased, what);
+    bool clear = std::strcmp(testcase.name, "passing clear of a stroke") == 0;
+    snprintf(what, sizeof(what), "%s: path select %s it", testcase.name, clear ? "does not take" : "takes");
+    check(selected != clear, what);
+  }
+
+  // scratch-out on lift: 8 passes over x 200..380, y 285..349 (page units at zoom ~1; the recognizer works
+  //  in screen pixels, as in shapeSnapTest())
+  fresh();
+  scribbleDoc->cfg->set("shapeSnapDelay", 0.8f);
+  scribbleDoc->cfg->set("liftScratchOut", 1);
+  scribbleDoc->cfg->set("liftScratchOutLevel", 2);
+  scribbleMode->setMode(MODE_STROKE);
+  scribbleDoc->app->setPen(ScribblePen(Color::BLACK, 2, ScribblePen::TIP_ROUND));
+  // half of it under the scribble, its middle (and box centre) far outside: 90 of 610 inside
+  Element* longLine = polyline({Point(290, 317), Point(900, 317)}, 2);
+  // a ring around the scribble: its box centre is inside, none of its ink
+  std::vector<Point> ringPts;
+  for(int ii = 0; ii <= 48; ++ii) {
+    Dim angle = 2*M_PI*ii/48;
+    ringPts.push_back(Point(290 + 200*std::cos(angle), 317 + 200*std::sin(angle)));
+  }
+  Element* ring = polyline(ringPts, 2);
+  // grazed: 3 of 513 inside, under the threshold
+  Element* grazed = polyline({Point(377, 300), Point(890, 300)}, 2);
+  // a short stroke wholly under it
+  Element* word = polyline({Point(260, 300), Point(320, 305)}, 2);
+  for(int pass = 0; pass < 8; ++pass) {
+    for(int ii = 0; ii <= 20; ++ii) {
+      Dim frac = ii/Dim(20);
+      Dim x = pass % 2 ? 380 - 180*frac : 200 + 180*frac;
+      at(Point(x, 285 + 8*pass + 8*frac), pass == 0 && ii == 0 ? press : INPUTEVENT_MOVE);
+    }
+  }
+  at(Point(200, 349), release);
+  check(!contains(word), "scratch-out: a stroke wholly under it is erased");
+  check(!contains(longLine), "scratch-out: a long stroke with 15% of its length under it is erased (length, not box centre)");
+  check(contains(ring), "scratch-out: a ring around it, with none of its length under it, is left (length, not box centre)");
+  check(contains(grazed), "scratch-out: a stroke it grazes (under 2% of its length) is left");
+
+  scribbleDoc->newDocument();
+  return nbad;
+}
+
 // Ruling regions (rulingregion.h).  runRegionTests() in regiontest.cpp covers the geometry; this is
 //  everything that needs a document.  The region used is tilted on purpose: an unrotated region would let
 //  every check pass against code that only ever looked at page y.
@@ -7350,6 +7478,7 @@ void ScribbleTest::runAll(bool runsynctest)
   nUnitFailed += strokeSimplifyTest();
   nUnitFailed += shapeSnapTest();
   nUnitFailed += eraserHitTest();
+  nUnitFailed += eraseLikeSelectTest();
   nUnitFailed += interactCullTest();
   nUnitFailed += rulingRegionTest();
   nUnitFailed += subpageTest();
