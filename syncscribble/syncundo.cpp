@@ -175,7 +175,7 @@ void RegionChangedItem::swapParams()
 {
   RulingRegionParams temp = s->regionParams();
   s->setRegionParams(params);
-  s->rebuildRegion(page->props.color, page->props.ruleColor);
+  s->rebuildRegion(page->props.color, page->regionRuleColor());
   params = temp;
   // a resized region can now be bigger or smaller than an image of its layer
   page->restackRegionsFor(s);

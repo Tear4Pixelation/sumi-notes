@@ -1239,7 +1239,7 @@ Element* ScribbleArea::addRulingRegion(const Rect& r)
   Dim yr = currPage->yruling() > 0 ? currPage->yruling() : Page::BLANK_Y_RULING;
   RulingRegionParams params = RulingRegionParams::fromRect(r, currPage->xruling(), yr, currPage->props.dotRadius,
       currPage->props.staff);
-  Element* region = Element::createRulingRegion(params, currPage->props.color, currPage->props.ruleColor);
+  Element* region = Element::createRulingRegion(params, currPage->props.color, currPage->regionRuleColor());
   scribbleDoc->startAction(currPageNum);
   currPage->addStroke(region);
   scribbleDoc->endAction();
@@ -3631,7 +3631,7 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
         params.xRuling = yr;
         params.sanitize();
       }
-      regionInProgress = Element::createRulingRegion(params, currPage->props.color, currPage->props.ruleColor);
+      regionInProgress = Element::createRulingRegion(params, currPage->props.color, currPage->regionRuleColor());
       break;
     }
     int shapeid = drawLinesGesture ? int(SHAPE_LINE) : scribbleDoc->scribbleMode->shapeId;

@@ -235,7 +235,7 @@ another ruling, so there is room around it for notes.
 Known gaps: page-level ruled insert space does not move regions below it (vertical/horizontal insert space
 do); content pushed past a region's edge by ruled insert space leaves it; a corner drag can make a
 self-intersecting outline; the hover cursor for a relative-width marker uses the page's line height; regions
-on PDF/scan pages keep the colors `setTheme()` leaves on those pages; no detection of a scan's lines yet
+on PDF/scan pages take the default new-page rule color (see Patch line color on image pages); no detection of a scan's lines yet
 (`quaddetect`'s Hough pass could fill pitch and angle). Tested by `ScribbleTest::rulingRegionTest()`
 (mutation-tested, see the file) and `runRegionTests()`.
 
@@ -243,3 +243,14 @@ on PDF/scan pages keep the colors `setTheme()` leaves on those pages; no detecti
   tool (whose last shape - e.g. the box - used to be left active, so the next stroke drew a rectangle):
   `MODE_DRAWSHAPE` release calls `app->setMode(MODE_STROKE)` together with clearing `drawRegion`/`drawAxes`.
   Only done for a kept region; a discarded sliver leaves the tool armed.
+
+## Patch line color on image pages
+
+PDF import creates its pages with a placeholder rule color (`Color::BLUE`), and `setTheme()` skips
+image-background pages (`isCustomRuling`), so a patch built from `props.ruleColor` there came out an odd
+opaque blue instead of the line color a new page has. Fix: patch colors go through `Page::regionRuleColor()`
+- the page's own `props.ruleColor`, except on a custom-ruling page where it is `Document::themeRuleColor`,
+cfg's `ruleColor` (the default ruling color of a new page; the theme writes it too). `ScribbleDoc::syncPageRuleColor()` keeps that
+field current (called from `loadConfig()`, so it is set at open before any lazily loaded page builds a
+region, and from `setTheme()` after it writes `ruleColor`), and `setTheme()` calls `refreshRegions()` on image pages. Every `rebuildRegion` / `createRulingRegion`
+call site uses it. Night mode is untouched: it is a render-time `ColorMap` over whatever color the region has.

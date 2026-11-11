@@ -217,7 +217,14 @@ RulingFrame Page::gestureFrame(Point pos, Dim nearLines) const
 void Page::refreshRegions()
 {
   for(Element* s : regions())
-    s->rebuildRegion(props.color, props.ruleColor);
+    s->rebuildRegion(props.color, regionRuleColor());
+}
+
+Color Page::regionRuleColor() const
+{
+  if(isCustomRuling && document && document->themeRuleColor != Color::NONE)
+    return document->themeRuleColor;
+  return props.ruleColor;
 }
 
 // The problem with MAX(...) is that bbox gets updated when dragging a selection
@@ -1056,7 +1063,7 @@ void Page::onAddStroke(Element* s)
   //  it is not writing, so it takes no part in the page's time range
   if(s->isRulingRegion()) {
     if(loadStatus == LOAD_OK)
-      s->rebuildRegion(props.color, props.ruleColor);
+      s->rebuildRegion(props.color, regionRuleColor());
     return;
   }
   // update timestamp range
