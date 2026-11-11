@@ -940,3 +940,21 @@ Every numeric field in the app is a `createTextSpinBox()`; the fixes live in the
   three with its floating-bar tokens (`.imagecrop-bar` in `screenshot.cpp`). `PenToolbar::stylesheet` is gone.
 - Not verified here: the iPad behaviour (keyboard/popup). The cause of the popup closing was not
   found in the code; the fix removes the trigger (the button tap no longer starts text input).
+
+# Ephemeral pen fades out
+
+An ephemeral stroke is never added to the page (no document edit, no undo item). It used to be deleted at
+pen up; now `ScribbleArea::fadeEphemeral()` (scribblearea.cpp, near `flashPageTags`) keeps it in
+`fadeStrokes` and `drawScreen()` paints those with `painter->setOpacity(ephemeralAlpha())`, after the
+in-progress stroke. They are an overlay like the stroke itself, so they are not part of the canvas layer
+(canvas-layer.md); the fade only has to dirty the strokes' bboxes (`dirtyEphemeral()`) and `reqRepaint()` each
+timer tick (16 ms).
+
+- Pen up: every stroke in the list fades together, 800 ms smoothstep, clock `fadeStart` (time based, so
+  frame rate does not change the length). Another lift restarts the clock for all of them.
+- Pen down with an ephemeral pen (`reviveEphemeral()`): timer cancelled, alpha back to 1, strokes stay
+  until the next lift. Not a per-stroke timer, so strokes drawn quickly in a row fade as one.
+- Overlapping strokes each take the alpha (no group layer), so overlaps are slightly denser while fading.
+- Known limits: the list lives on the `ScribbleArea` that drew it, so a second view of the same document shows
+  the stroke vanish at the lift; strokes are in one page's coordinates, so lifting on another page clears
+  the earlier ones; the timer has no owning widget (like `flashTimer`).

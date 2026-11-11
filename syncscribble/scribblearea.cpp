@@ -1477,6 +1477,73 @@ void ScribbleArea::flashPageTags(const std::vector<std::string>& tagIds)
   });
 }
 
+// Ephemeral pen: after a lift every ephemeral stroke fades out together; a new stroke while they fade brings
+//  them all back to full opacity until the next lift.  Opacity only - no document edit, no undo item.
+static const int EPHEMERAL_FADE_MS = 800;
+static const int EPHEMERAL_FADE_FRAME_MS = 16;
+
+float ScribbleArea::ephemeralAlpha() const
+{
+  if(!fadeRunning)
+    return 1.0f;
+  using namespace std::chrono;
+  float elapsed = duration<float, std::milli>(steady_clock::now() - fadeStart).count();
+  float progress = std::min(elapsed/EPHEMERAL_FADE_MS, 1.0f);
+  return 1.0f - progress*progress*(3.0f - 2.0f*progress);  // smoothstep
+}
+
+void ScribbleArea::dirtyEphemeral()
+{
+  for(Element* stroke : fadeStrokes)
+    dirtyScreen(stroke->bbox());
+  reqRepaint();
+}
+
+void ScribbleArea::clearEphemeral()
+{
+  if(fadeTimer) {
+    ScribbleApp::gui->removeTimer(fadeTimer);
+    fadeTimer = NULL;
+  }
+  fadeRunning = false;
+  dirtyEphemeral();
+  for(Element* stroke : fadeStrokes)
+    stroke->deleteNode();
+  fadeStrokes.clear();
+}
+
+void ScribbleArea::reviveEphemeral()
+{
+  if(fadeTimer) {
+    ScribbleApp::gui->removeTimer(fadeTimer);
+    fadeTimer = NULL;
+  }
+  if(fadeRunning) {
+    fadeRunning = false;
+    dirtyEphemeral();
+  }
+}
+
+void ScribbleArea::fadeEphemeral(Element* stroke)
+{
+  if(fadePageNum != currPageNum)
+    clearEphemeral();  // strokes are in page coordinates of one page
+  fadePageNum = currPageNum;
+  fadeStrokes.push_back(stroke);
+  fadeStart = std::chrono::steady_clock::now();
+  fadeRunning = true;
+  dirtyEphemeral();
+  fadeTimer = ScribbleApp::gui->setTimer(EPHEMERAL_FADE_FRAME_MS, NULL, fadeTimer, [this]() {
+    if(ephemeralAlpha() <= 0.0f || !fadeRunning) {
+      fadeTimer = NULL;  // a timer returning 0 is removed by the GUI
+      clearEphemeral();
+      return 0;
+    }
+    dirtyEphemeral();
+    return EPHEMERAL_FADE_FRAME_MS;
+  });
+}
+
 void ScribbleArea::editShapeAfterDraw(Element* shape)
 {
   if(!shape || !shape->isShape() || !cfg->Bool("shapeEditAfterDraw"))
@@ -3612,6 +3679,8 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
       }
     }
     scribbleDoc->strokeBuilder = builder;
+    if(currPen()->hasFlag(ScribblePen::EPHEMERAL))
+      reviveEphemeral();
     scribbleDoc->updateCurrStroke(builder->getDirty());  // necessary for single point stroke to show up
     startShapeSnap(pos);
     break;
@@ -4432,7 +4501,13 @@ void ScribbleArea::doReleaseEvent(const InputEvent& event)
     delete scribbleDoc->strokeBuilder;  // we now own the stroke
     scribbleDoc->strokeBuilder = NULL;
     // discard stroke if entirely off page
-    if(!currPage->rect().intersects(currStroke->bbox()) || currPen()->hasFlag(ScribblePen::EPHEMERAL)) {
+    if(currPen()->hasFlag(ScribblePen::EPHEMERAL)) {
+      Element* faded = currStroke;
+      currStroke = NULL;
+      fadeEphemeral(faded);
+      break;
+    }
+    if(!currPage->rect().intersects(currStroke->bbox())) {
       // no more growing page w/ off-page strokes - interferes w/ ghost page
       scribbleDoc->updateCurrStroke(currStroke->bbox());  //dirtyScreen(currStroke->bbox());
       currStroke->deleteNode();
@@ -5478,6 +5553,19 @@ void ScribbleArea::drawScreen(Painter* painter, const Rect& dirty)
       painter->setDarkBackdrop(Page::drawsDark(painter, strokePage->color()));
     //scribbleDoc->strokeBuilder->draw(painter, Rect());
     SvgPainter(painter).drawNode(scribbleDoc->strokeBuilder->getElement()->node);
+    painter->restore();
+  }
+  if(!fadeStrokes.empty() && fadePageNum >= 0 && fadePageNum < numPages()) {
+    painter->save();
+    if(fadePageNum != currPageNum) {
+      Point origin = getPageOrigin(fadePageNum);
+      painter->translate(origin.x - currPageXOrigin, origin.y - currPageYOrigin);
+    }
+    if(Page* fadePage = page(fadePageNum))
+      painter->setDarkBackdrop(Page::drawsDark(painter, fadePage->color()));
+    painter->setOpacity(ephemeralAlpha());
+    for(Element* stroke : fadeStrokes)
+      SvgPainter(painter).drawNode(stroke->node);
     painter->restore();
   }
   // currStroke is used for Add Bookmark and for the in-progress drag-gesture shape; a marker's shape
