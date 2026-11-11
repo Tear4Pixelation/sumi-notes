@@ -392,19 +392,21 @@ bool Page::hasTape() const
   return false;
 }
 
-void Page::draw(Painter* painter, const Rect& dirty, bool rulelines)
+void Page::draw(Painter* painter, const Rect& dirty, bool rulelines, Dim shownHeight)
 {
+  bool collapsed = shownHeight >= 0 && shownHeight < props.height;
+  Dim shadowHeight = collapsed ? shownHeight : props.height;
   // draw red border around page if it failed to load
   ensureLoaded(false);  // skip memory check in case it is slow on some platforms
   if(loadStatus != LOAD_OK)
     painter->fillRect(Rect::ltrb(-10, -10, width()+10, height()+10), Color::RED);
   // draw drop shadow
-  if(enableDropShadow && (!dirty.isValid() || !rect().contains(dirty))) {
+  if(enableDropShadow && (!dirty.isValid() || collapsed || !rect().contains(dirty))) {
     // UI decoration, not document: night mode would flip the black shadow into a white glow
     painter->save();
     painter->setColorMap(NULL);
     const Dim d = 4;  // was 6 for non-gradient version
-    Gradient grad = Gradient::box(-2, -2, props.width+4, props.height+4, 0, 2*d);  // 2 == d-2
+    Gradient grad = Gradient::box(-2, -2, props.width+4, shadowHeight+4, 0, 2*d);  // 2 == d-2
     grad.coordMode = Gradient::userSpaceOnUseMode;
     //grad.setObjectBBox(Rect::ltwh(d, props.height, props.width, d));
     grad.addStop(0, Color(Color::BLACK).setAlphaF(1));
@@ -416,11 +418,16 @@ void Page::draw(Painter* painter, const Rect& dirty, bool rulelines)
     //painter->drawRect(Rect::ltwh(-2*d, -2*d, props.width + 4*d, 2*d));
     //painter->drawRect(Rect::ltwh(-2*d, 0, 2*d, props.height));
     // right and bottom only:
-    painter->drawRect(Rect::ltwh(0, props.height, props.width + 2*d, 2*d));
-    painter->drawRect(Rect::ltwh(props.width, 0, 2*d, props.height));
+    painter->drawRect(Rect::ltwh(0, shadowHeight, props.width + 2*d, 2*d));
+    painter->drawRect(Rect::ltwh(props.width, 0, 2*d, shadowHeight));
     // Painter has pointer to Gradient, so we must clear before it is destroyed
     painter->setFillBrush(Color::NONE);
     painter->restore();
+  }
+  if(collapsed) {
+    painter->save();
+    // only the bottom is cut: ink past the page's sides or top is drawn as it would be on a full page
+    painter->clipRect(Rect::ltrb(-props.width, -props.height, 2*props.width, shownHeight));
   }
   // no ruling group means no page BG, so draw white BG manually
   if(!ruleNode)
@@ -449,6 +456,8 @@ void Page::draw(Painter* painter, const Rect& dirty, bool rulelines)
 
   if(isSelected && !Element::FORCE_NORMAL_DRAW)  //docElement()->selection())
     painter->fillRect(rect(), Color(props.color.luma() > 127 ? Color::BLUE : Color::YELLOW).setAlphaF(0.4f));
+  if(collapsed)
+    painter->restore();
 }
 
 bool Page::saveSVG(IOStream& file, Dim x, Dim y)

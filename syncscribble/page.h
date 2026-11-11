@@ -130,7 +130,9 @@ public:
   // an image in the rule layer: an imported PDF or Noteful page, a scanned page
   bool hasImageBackground() const;
   Color color() const { return props.color; }
-  void draw(Painter* painter, const Rect& dirty, bool rulelines = true);
+  // shownHeight >= 0 (unscaled page units) draws only the top of the page, its drop shadow at that height:
+  //  a collapsed page end (ScribbleArea::updateCollapsedPages()); the page itself is unchanged
+  void draw(Painter* painter, const Rect& dirty, bool rulelines = true, Dim shownHeight = -1);
   // whether paper of this color comes out dark through the painter's color map (night mode) - where a
   //  marker's multiply would hide it, so it is drawn as screen (Painter::setDarkBackdrop())
   static bool drawsDark(const Painter* painter, Color paper);

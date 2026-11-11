@@ -29,6 +29,9 @@ public:
   int getViewWidth() const { return screenRect.right; }
   int getViewHeight() const { return screenRect.bottom; }
   void repaintAll(bool imagedirty = true);
+  // the layout under the view changed (pages moved relative to each other): the next frame draws the whole
+  //  canvas layer again instead of shifting it
+  void invalidateLayer() { layerValid = false; }
 
   virtual void doPressEvent(const InputEvent& event) {}
   virtual void doMoveEvent(const InputEvent& event) {}

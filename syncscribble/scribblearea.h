@@ -7,6 +7,8 @@
 #include "nightmode.h"
 #include "smartscale.h"
 #include "strokebuilder.h"  // StrokePoint, for the Draw Lines samples
+#include <unordered_map>
+#include <unordered_set>
 
 struct Timer;
 class Menu;
@@ -57,7 +59,7 @@ class ScribbleArea : public ScribbleView
   friend class MainWindow;  // the tap-paste action (actionTapPaste)
 public:
   ScribbleArea();
-  //~ScribbleArea();
+  ~ScribbleArea() override;
 
   void loadConfig(ScribbleConfig* _cfg) override;
   Page* getCurrPage() const { return currPage; }
@@ -235,6 +237,22 @@ protected:
 
   void updateContentDim();
   bool updateHorzPanLock();
+
+  // Collapsed page ends (docs/agent/paper.md): with collapsePageEnds in the vertical layout, a page that
+  //  is not in focus is laid out and drawn only down to growExtraLines empty lines below its lowest
+  //  content - display only, the page keeps its size.  pageLayoutHeight() is the height every layout
+  //  function uses in place of Page::height()
+  Dim pageLayoutHeight(const Page* pg) const;
+  // the height a page grown for content ending at `bottom` (page units, unscaled) has: the line holding
+  //  `bottom` plus growExtraLines empty lines.  growPage() and the collapsed height share it
+  Dim heightForContent(const Page* pg, Dim bottom) const;
+  // rebuild which pages are collapsed, keeping `anchorPage` (default: the page at the middle of the view)
+  //  where it is on screen; a change to the layout pans to compensate and redraws the whole view
+  void updateCollapsedPages(int anchorPage = -1);
+  // show `pagenum` at full height (until it leaves the view), anchored on itself
+  void expandPage(int pagenum);
+  void scheduleFocusExpand();
+  bool collapseActive() const { return collapsePageEnds && viewMode == VIEWMODE_VERT; }
   // the page at the middle of the view, which becomes the current page on a scroll or zoom (doPan())
   int dominantPageNum() const;
   void drawThumbnail(Image* dest);
@@ -379,6 +397,19 @@ protected:
   // horizontal scroll limits before updateHorzPanLock() pins them at or below fit width
   Dim freeMinOriginX = 0;
   Dim freeMaxOriginX = 0;
+
+  // empty lines kept below the lowest content when a page grows (config growExtraLines)
+  Dim growExtraLines = 2.5;
+  // collapsed page ends (updateCollapsedPages()); all keyed by Page::uid
+  bool collapsePageEnds = false;
+  std::unordered_map<unsigned int, Dim> collapsedHeights;  // laid out height of each collapsed page
+  std::unordered_set<unsigned int> expandedPages;  // shown at full height until they leave the view
+  struct PageExtent { unsigned int revision; Dim bottom; bool imageBackground; };
+  std::unordered_map<unsigned int, PageExtent> pageExtents;  // measured content, kept while unloaded
+  Timer* focusExpandTimer = NULL;
+  bool updatingCollapse = false;
+  bool fullPageLayout = false;  // thumbnails: lay out every page at full height
+  static constexpr int FOCUS_EXPAND_DWELL_MS = 700;
 
   // we'll only display one page at a time for now (like OneNote)
   int currPageNum = INT_MAX;

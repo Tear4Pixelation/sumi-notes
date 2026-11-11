@@ -40,6 +40,12 @@ ScribbleArea::ScribbleArea() : ScribbleView()
   scribbleInput->enableHoverEvents = true;
 }
 
+ScribbleArea::~ScribbleArea()
+{
+  if(focusExpandTimer && ScribbleApp::gui)
+    ScribbleApp::gui->removeTimer(focusExpandTimer);
+}
+
 // Members that are affected by config values get set here.  Right now, these are just config values that are
 //  accessed very frequently and so "cached"
 void ScribbleArea::loadConfig(ScribbleConfig* _cfg)
@@ -48,6 +54,10 @@ void ScribbleArea::loadConfig(ScribbleConfig* _cfg)
   pageSpacing = cfg->Float("pageSpacing");
   viewMode = (viewmode_t)cfg->Int("viewMode");
   centerPages = cfg->Bool("centerPages");
+  growExtraLines = std::max(Dim(0), Dim(cfg->Float("growExtraLines", 2.5f)));
+  collapsePageEnds = cfg->Bool("collapsePageEnds");
+  if(!collapsePageEnds)
+    expandedPages.clear();
   reflowWordSep = cfg->Float("minWordSep", 0.3f);
   selColMode = RuledSelector::ColMode(cfg->Int("columnDetectMode"));
   RuledSelector::separatorEndsSection = cfg->Bool("separatorEndsReflow");
@@ -140,6 +150,10 @@ void ScribbleArea::reset()
   placingPressed = false;
   todoPressed = NULL;
   currPage = NULL;
+  // collapsed page ends: the next document starts with every page collapsed except the one in focus
+  expandedPages.clear();
+  collapsedHeights.clear();
+  pageExtents.clear();
 }
 
 Page* ScribbleArea::page(int n) const
@@ -174,6 +188,12 @@ void ScribbleArea::drawThumbnail(Image* dest)
   Dim scale = std::max(dirty.width()/thumbPage->width(), dirty.height()/thumbPage->height());
   dirty.right /= scale;
   dirty.bottom /= scale;
+  // a thumbnail shows the whole page, never a collapsed end: lay out at full heights until it is drawn
+  fullPageLayout = true;
+  Point savedCurrOrigin(currPageXOrigin, currPageYOrigin);  // drawImage()'s current page shortcut uses it
+  Point fullCurrOrigin = getPageOrigin(currPageNum);
+  currPageXOrigin = fullCurrOrigin.x;
+  currPageYOrigin = fullCurrOrigin.y;
   Point dimpos = getPageOrigin(viewMode == VIEWMODE_SINGLE ? currPageNum : pagenum);
   dirty.translate(dimpos.x, dimpos.y);
   // this doesn't handle split view case in general!
@@ -185,6 +205,9 @@ void ScribbleArea::drawThumbnail(Image* dest)
   // draw page number
   thumbpaint.restore();
   Element::FORCE_NORMAL_DRAW = false;
+  fullPageLayout = false;
+  currPageXOrigin = savedCurrOrigin.x;
+  currPageYOrigin = savedCurrOrigin.y;
   // saveThumbnail == 2 for tests to hide page number
   /*if(cfg->Int("saveThumbnail") != 2) {
     dirty = thumbpaint.getSize();
@@ -208,7 +231,7 @@ Point ScribbleArea::getPageOrigin(int pagenum) const
     if(centerPages)
       origin.x = (contentWidth - p->width())/2;
     for(int ii = 0; ii < pagenum; ii++)
-      origin.y += page(ii)->height() + pageSpacing;
+      origin.y += pageLayoutHeight(page(ii)) + pageSpacing;
   }
   else if(viewMode == VIEWMODE_HORZ) {
     if(centerPages)
@@ -296,7 +319,7 @@ void ScribbleArea::keepPageAtMiddle(int pagenum)
   // the page owns the gap after it (dimToPageNum()); stay a pixel inside, as the limits are floating point
   Dim inset = 1/mScale;
   Dim start = (horz ? origin.x : origin.y) + inset;
-  Dim end = (horz ? origin.x + page(pagenum)->width() : origin.y + page(pagenum)->height()) + pageSpacing - inset;
+  Dim end = (horz ? origin.x + page(pagenum)->width() : origin.y + pageLayoutHeight(page(pagenum))) + pageSpacing - inset;
   Dim pos = horz ? middle.x : middle.y;
   Dim target = std::max(start, std::min(pos, end));
   // panning by +d moves the content by d on screen, so the document point at the middle moves by -d
@@ -410,6 +433,14 @@ void ScribbleArea::doPan(Dim dx, Dim dy)
   // the pages now in view may lock (or unlock) sideways panning; pan by 0 to clamp to the new limits
   if(updateHorzPanLock())
     ScribbleView::doPan(0, 0);
+  // collapsed page ends: pages that left the view collapse again (the view compensates), and the page
+  //  in focus expands once the view rests
+  if(!updatingCollapse && collapseActive()) {
+    updateCollapsedPages();
+    scheduleFocusExpand();
+  }
+  else if(!updatingCollapse && !collapsedHeights.empty())
+    updateCollapsedPages();  // turned off or another view mode: back to full pages
   if(viewMode == VIEWMODE_SINGLE || (currMode != MODE_NONE && currMode != MODE_PAN))
     return;
 
@@ -440,6 +471,9 @@ void ScribbleArea::pageSizeChanged()
   repaintAll();
   updateContentDim();
   ScribbleView::pageSizeChanged();
+  // a page that grew, shrank, appeared or was loaded can change what is collapsed (ScribbleView's
+  //  doPan(0, 0) above usually ran it already; this covers a view that did not pan)
+  updateCollapsedPages();
   Point origin = getPageOrigin(currPageNum);
   currPageXOrigin = origin.x;
   currPageYOrigin = origin.y;
@@ -554,14 +588,160 @@ void ScribbleArea::growPage(Rect bbox, Dim maxdx, Dim maxdy, bool pending, bool 
   Dim newheight = -1;
   Dim xstep = currPage->xruling() > 0 ? currPage->xruling() : GROW_STEP;
   Dim ystep = currPage->yruling() > 0 ? currPage->yruling() : GROW_STEP;
-  if(cfg->Bool("growDown") && currPage->height() - bbox.bottom < GROW_TRIGGER*ystep)
-    newheight = ystep * (int)(bbox.bottom/ystep + 1) + GROW_EXTRA*ystep;
-  if(cfg->Bool("growRight") && currPage->width() - bbox.right < GROW_TRIGGER*xstep)
-    newwidth = xstep * (int)(bbox.right/xstep + 1) + GROW_EXTRA*xstep;
+  // growExtraLines empty lines stay below the lowest content (right of the rightmost); the trigger keeps
+  //  its old ratio to them (1.625 of 2.5 lines), so fewer kept lines also grow the page later
+  Dim trigger = GROW_TRIGGER/GROW_EXTRA*growExtraLines;
+  if(cfg->Bool("growDown") && currPage->height() - bbox.bottom < trigger*ystep)
+    newheight = heightForContent(currPage, bbox.bottom);
+  if(cfg->Bool("growRight") && currPage->width() - bbox.right < trigger*xstep)
+    newwidth = xstep * (int)(bbox.right/xstep + 1) + growExtraLines*xstep;
   if(maxdx >= 0) newwidth = std::min(currPage->width() + maxdx, newwidth);
   if(maxdy >= 0) newheight = std::min(currPage->height() + maxdy, newheight);
   if(newheight > currPage->height() || newwidth > currPage->width())
     setPageDims(newwidth, newheight, pending);
+}
+
+Dim ScribbleArea::heightForContent(const Page* pg, Dim bottom) const
+{
+  Dim ystep = pg->yruling() > 0 ? pg->yruling() : GROW_STEP;
+  return ystep * (int)(bottom/ystep + 1) + growExtraLines*ystep;
+}
+
+// Collapsed page ends (docs/agent/paper.md, "Collapsed page ends").  Display only: nothing here touches a
+//  page, its size or the undo history - the layout (getPageOrigin(), dimToPageNum(), updateContentDim(),
+//  drawImage()) asks pageLayoutHeight() instead of Page::height(), and saving, export, sync and the
+//  sidebar never see it.
+Dim ScribbleArea::pageLayoutHeight(const Page* pg) const
+{
+  if(collapsedHeights.empty() || fullPageLayout || viewMode != VIEWMODE_VERT)
+    return pg->height();
+  auto it = collapsedHeights.find(pg->uid);
+  return it == collapsedHeights.end() ? pg->height() : std::min(it->second, pg->height());
+}
+
+// Which pages are collapsed: every page except those in expandedPages, a page with an image background
+//  (a PDF or scan is the size of its image) and a page whose content is not known yet (not loaded and
+//  far from the view - measuring it would load it; it is measured once it comes within a view height).
+//  An expanded page goes back to collapsed once no part of it is in the view, unless it is being edited.
+//  Every change is applied around `anchorPage`: its origin is kept on screen by panning by however much
+//  the pages above it changed, so what is on screen does not move.  Only the anchor page itself and the
+//  pages below it can move on screen, and only when the anchor page changes height (an expansion pushes
+//  what is below it down).
+void ScribbleArea::updateCollapsedPages(int anchorPage)
+{
+  bool active = collapseActive() && widget;
+  if(updatingCollapse || (!active && collapsedHeights.empty()))
+    return;
+  int npages = numPages();
+  if(npages < 1) {
+    collapsedHeights.clear();
+    return;
+  }
+  updatingCollapse = true;
+  if(anchorPage < 0)
+    anchorPage = dominantPageNum();
+  anchorPage = std::max(0, std::min(anchorPage, npages - 1));
+  Dim oldAnchorY = getPageOrigin(anchorPage).y;
+  // the first layout after a document opens (or the option is turned on) keeps the page in focus whole,
+  //  rather than collapsing it under the reader and expanding it again a moment later
+  if(active && collapsedHeights.empty() && expandedPages.empty())
+    expandedPages.insert(page(anchorPage)->uid);
+
+  std::unordered_map<unsigned int, Dim> heights;
+  std::unordered_map<unsigned int, PageExtent> extents;
+  if(active) {
+    Rect view = screenToDim(screenRect);
+    Dim margin = view.height();  // pages this close to the view are measured even if that loads them
+    bool editing = currMode != MODE_NONE && currMode != MODE_PAN;
+    Dim top = 0;
+    for(int ii = 0; ii < npages; ++ii) {
+      Page* pg = page(ii);
+      Dim shown = pageLayoutHeight(pg);
+      bool inview = top < view.bottom && top + shown + pageSpacing > view.top;
+      bool nearview = top < view.bottom + margin && top + shown > view.top - margin;
+      top += shown + pageSpacing;
+      if(expandedPages.count(pg->uid)) {
+        if(inview || (editing && ii == currPageNum))
+          continue;
+        expandedPages.erase(pg->uid);
+      }
+      // content bottom: measured on a loaded page, remembered while it is unloaded (an unloaded page
+      //  cannot change, so its revision still matches)
+      auto known = pageExtents.find(pg->uid);
+      bool measured = false;
+      PageExtent extent = {0, 0, false};
+      if(pg->loadStatus == Page::LOAD_OK || (nearview && pg->ensureLoaded(false))) {
+        if(known != pageExtents.end() && known->second.revision == pg->revision)
+          extent = known->second;
+        else {
+          Rect bbox = pg->getBBox();
+          extent = {pg->revision, bbox.isValid() ? bbox.bottom : 0, pg->hasImageBackground()};
+        }
+        measured = true;
+      }
+      else if(known != pageExtents.end() && known->second.revision == pg->revision) {
+        extent = known->second;
+        measured = true;
+      }
+      if(!measured)
+        continue;
+      extents[pg->uid] = extent;
+      if(extent.imageBackground)
+        continue;
+      Dim collapsed = pg->scaleFactor*heightForContent(pg, extent.bottom);
+      if(collapsed < pg->height())
+        heights[pg->uid] = collapsed;
+    }
+  }
+  pageExtents.swap(extents);
+  bool changed = heights != collapsedHeights;
+  collapsedHeights.swap(heights);
+  if(changed) {
+    Dim newAnchorY = getPageOrigin(anchorPage).y;
+    updateContentDim();
+    // panning by +d moves the content down by d on screen; the anchor page moved down by new - old
+    ScribbleView::doPan(0, (oldAnchorY - newAnchorY)*mScale);
+    Point origin = getPageOrigin(currPageNum);
+    currPageXOrigin = origin.x;
+    currPageYOrigin = origin.y;
+    // the whole layout below the first changed page moved: redraw everything, the canvas layer included
+    repaintAll();
+    invalidateLayer();
+    ScribbleView::pageSizeChanged();  // scroll limits and scroller
+  }
+  updatingCollapse = false;
+}
+
+void ScribbleArea::expandPage(int pagenum)
+{
+  if(!collapseActive() || pagenum < 0 || pagenum >= numPages())
+    return;
+  Page* pg = page(pagenum);
+  if(expandedPages.insert(pg->uid).second && collapsedHeights.count(pg->uid)) {
+    updateCollapsedPages(pagenum);
+    doRefresh();
+  }
+}
+
+// the page in focus - the one at the middle of the view, the current page (dominantPageNum()) - expands
+//  once the view has stayed put for FOCUS_EXPAND_DWELL_MS; every pan restarts the wait
+void ScribbleArea::scheduleFocusExpand()
+{
+  if(!collapseActive() || !ScribbleApp::gui || !widget)
+    return;
+  focusExpandTimer = ScribbleApp::gui->setTimer(FOCUS_EXPAND_DWELL_MS, NULL, focusExpandTimer, [this]() {
+    if(!collapseActive()) {
+      focusExpandTimer = NULL;
+      return 0;
+    }
+    // still scrolling (a finger down, a fling) or in the middle of an edit, which must not see the
+    //  pages move: look again later
+    if(currMode != MODE_NONE || flingV.x != 0 || flingV.y != 0)
+      return FOCUS_EXPAND_DWELL_MS;
+    focusExpandTimer = NULL;  // returning 0 removes it
+    expandPage(dominantPageNum());
+    return 0;
+  });
 }
 
 void ScribbleArea::setStrokeProperties(const StrokeProperties& props, bool undoable)
@@ -2076,7 +2256,7 @@ int ScribbleArea::dimToPageNum(const Point& pos) const
   unsigned int npages = numPages();
   if(viewMode == VIEWMODE_VERT) {
     for(unsigned int ii = 0; ii < npages; ii++) {
-      d += page(ii)->height() + pageSpacing;
+      d += pageLayoutHeight(page(ii)) + pageSpacing;
       if(d > pos.y)
         return ii;
     }
@@ -3532,6 +3712,10 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
   }
   else if(currMode != MODE_PAN && currMode != MODE_NONE && currMode != MODE_PAGESEL)
     scribbleDoc->clearSelection();
+  // a collapsed page is shown whole as soon as it is written on, anchored on itself so the press stays
+  //  where it is on the page (pos is in page coordinates)
+  if(currMode != MODE_PAN && currMode != MODE_NONE && collapseActive())
+    expandPage(currPageNum);
   Page* selsource = currPage;
 
   // process any recent strokes
@@ -5121,7 +5305,7 @@ void ScribbleArea::updateContentDim()
     break;
   case VIEWMODE_VERT:
     for(int ii = 0; ii < numPages(); ii++) {
-      contentHeight += page(ii)->height() + pageSpacing;
+      contentHeight += pageLayoutHeight(page(ii)) + pageSpacing;
       // TODO: this should be based on visible pages, not all pages!
       contentWidth = std::max(contentWidth, page(ii)->width());
     }
@@ -5348,15 +5532,17 @@ void ScribbleArea::drawImage(Painter* painter, const Rect& dirty)
 
   // handle special case of dirty rect limited to current page
   Rect pagedirty = dimToPageDim(dirty);
+  Dim currshown = pageLayoutHeight(currPage);
   if(viewMode == VIEWMODE_SINGLE ||
-     Rect::ltwh(0, 0, currPage->width() + pageSpacing, currPage->height() + pageSpacing).contains(pagedirty)) {
+     Rect::ltwh(0, 0, currPage->width() + pageSpacing, currshown + pageSpacing).contains(pagedirty)) {
     painter->save();
     painter->translate(currPageXOrigin, currPageYOrigin);
     if(currPage->scaleFactor != 1) {
       painter->scale(currPage->scaleFactor);
       pagedirty = Transform2D::scaling(1/currPage->scaleFactor).mult(pagedirty);
     }
-    currPage->draw(painter, pagedirty);
+    currPage->draw(painter, pagedirty, true,
+        currshown < currPage->height() ? currshown/currPage->scaleFactor : -1);
     drawWatermark(painter, currPage, pagedirty);
     painter->restore();
     return;
@@ -5368,7 +5554,8 @@ void ScribbleArea::drawImage(Painter* painter, const Rect& dirty)
     bool ghost = ii == numPages();
     Page* pg = ghost ? scribbleDoc->ghostPage.get() : page(ii);
     if(!pg) break;  // a read-only ScribbleArea, e.g., has no ghost page
-    if((viewMode == VIEWMODE_VERT && h + pg->height() > dirty.top)
+    Dim shown = ghost ? pg->height() : pageLayoutHeight(pg);  // collapsed page end: updateCollapsedPages()
+    if((viewMode == VIEWMODE_VERT && h + shown > dirty.top)
        || (viewMode == VIEWMODE_HORZ && w + pg->width() > dirty.left))  {
       // account for page centering
       if(!centerPages) {}
@@ -5388,12 +5575,12 @@ void ScribbleArea::drawImage(Painter* painter, const Rect& dirty)
       }
       if(ghost)
         painter->setOpacity(0.25);
-      pg->draw(painter, pagedirty);
+      pg->draw(painter, pagedirty, true, shown < pg->height() ? shown/pg->scaleFactor : -1);
       drawWatermark(painter, pg, pagedirty);
       painter->restore();
     }
     if(viewMode == VIEWMODE_VERT)
-      h += pg->height() + pageSpacing;
+      h += shown + pageSpacing;
     else if(viewMode == VIEWMODE_HORZ)
       w += pg->width() + pageSpacing;
     if((viewMode == VIEWMODE_VERT && h > dirty.bottom) || (viewMode == VIEWMODE_HORZ && w > dirty.right))
