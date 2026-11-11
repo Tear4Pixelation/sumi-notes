@@ -1,4 +1,5 @@
 #include "tagmenu.h"
+#include "searchfield.h"
 
 #include <algorithm>
 #include <functional>
@@ -247,11 +248,10 @@ Button* createTagButton()
   header->addWidget(doneBtn);
   state->tagsView->addWidget(header);
 
-  state->searchEdit = createTextEdit(-1);
-  state->searchEdit->setEmptyText(_("Find or create a tag"));
+  SearchField search = createSearchField(_("Find or create a tag"), [state](const char* s){ state->query = s; state->rebuildList(); });
+  state->searchEdit = search.edit;
   state->searchEdit->setMargins(4, 12, 6, 12);
   setMinWidth(state->searchEdit, 240);
-  state->searchEdit->onChanged = [state](const char* s){ state->query = s; state->rebuildList(); };
   // Enter takes the query as a tag - picking the existing one of that name, or making it
   state->searchEdit->addHandler([state](SvgGui*, SDL_Event* event){
     if(event->type == SDL_KEYDOWN && (event->key.keysym.sym == SDLK_RETURN || event->key.keysym.sym == SDLK_KP_ENTER)) {
@@ -260,7 +260,7 @@ Button* createTagButton()
     }
     return false;
   });
-  state->tagsView->addWidget(state->searchEdit);
+  state->tagsView->addWidget(search.widget);
   state->tagList = createColumn({}, "", "", "left");
   state->tagList->setMargins(0, 12, 8, 12);
   state->tagsView->addWidget(state->tagList);

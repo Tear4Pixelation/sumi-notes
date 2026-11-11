@@ -1,4 +1,5 @@
 #include "newdocdialog.h"
+#include "searchfield.h"
 
 #include "ugui/colorwidgets.h"
 #include "scribbleapp.h"
@@ -113,11 +114,10 @@ CreateNotebookDialog::CreateNotebookDialog(const char* initialName, TagStore* st
       "</g>"));
   addTagsBtn->setText(_("+ Add tags"));
   tagsPopup = createArrowPopup(Menu::VERT_LEFT);
-  tagSearchEdit = createTextEdit(-1);
-  tagSearchEdit->setEmptyText(_("Find or create a tag"));
+  SearchField tagSearch = createSearchField(_("Find or create a tag"), [this](const char* s){ tagQuery = s; rebuildTagList(); });
+  tagSearchEdit = tagSearch.edit;
   tagSearchEdit->setMargins(6, 8, 4, 8);
   setMinWidth(tagSearchEdit, 220);
-  tagSearchEdit->onChanged = [this](const char* s){ tagQuery = s; rebuildTagList(); };
   // Enter takes the query as a tag - picking the existing one of that name, or making it
   tagSearchEdit->addHandler([this](SvgGui*, SDL_Event* event){
     if(event->type == SDL_KEYDOWN && (event->key.keysym.sym == SDLK_RETURN || event->key.keysym.sym == SDLK_KP_ENTER)) {
@@ -126,7 +126,7 @@ CreateNotebookDialog::CreateNotebookDialog(const char* initialName, TagStore* st
     }
     return false;
   });
-  tagsPopup->addWidget(tagSearchEdit);
+  tagsPopup->addWidget(tagSearch.widget);
   tagList = createColumn({}, "", "", "left");
   tagList->setMargins(2, 8, 6, 8);
   tagsPopup->addWidget(tagList);
