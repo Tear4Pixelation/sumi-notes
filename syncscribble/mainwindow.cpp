@@ -2039,7 +2039,7 @@ void MainWindow::createToolBars()
     {"ic_menu_switch_back.svg", "Switch Back", "Returns to the previous tool after one selection."} })));
   selectRow->addWidget(createStretch());
   selectRow->addWidget(smallFloatBtn(createToolSettingsButton("Selection Settings",
-      {"popupToolbar", "columnDetectMode"})));
+      {"popupToolbar", "simpleLasso", "columnDetectMode"})));
   floatRow(selectRow);
 
   Toolbar* shapeRow = createToolbar();

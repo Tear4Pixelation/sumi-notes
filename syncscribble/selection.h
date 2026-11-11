@@ -413,10 +413,14 @@ class LassoSelector : public Selector
 public:
   // take everything the lasso touches rather than only what it encloses
   bool touching = false;
+  // "Simple lasso" (simpleLasso pref): while drawing, only a dotted trail - no fill, no live selection;
+  //  the owner calls finish() on release to select what the lasso encloses
+  bool simple = false;
 
   LassoSelector(Selection* sel, Dim simplify = 0);
   //void selectRect(Dim x0, Dim y0, Dim x1, Dim y1);
   void addPoint(Dim x, Dim y);
+  void finish() { checkCollision = false; selection->doSelect(); }
   bool selectHit(Element* s) override;
   //void shrink();
   Rect getBGBBox() override;
