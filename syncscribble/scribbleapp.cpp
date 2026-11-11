@@ -2814,7 +2814,7 @@ bool ScribbleApp::doSaveAs()
   std::string src = doc->fileName();
   FilePicker::saveFile(_("Save As"), FSPath(src).fileName(), FSPath(src).extension().c_str(),
       [src](const std::string& dest){ return copyFile(FSPath(src), FSPath(dest)); },
-      [this](const std::string& dest){ if(!dest.empty()) showNotify(_("Saved a copy"), 1); });
+      [this](const std::string& dest){ if(!dest.empty()) showNotify(_("Saved a copy"), 1); }, false);
   return true;
 }
 #else

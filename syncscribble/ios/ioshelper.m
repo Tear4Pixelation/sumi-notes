@@ -1089,6 +1089,26 @@ void iosPickFile(int requestId, const char* exts)
   presentFilePicker([[FilePickerController alloc] initForOpeningContentTypes:types asCopy:NO], requestId);
 }
 
+// Export: the share sheet (which offers Save to Files) instead of the export picker. The staged file in
+//  tmp/export is removed once the sheet is done; the sheet's activities have read or copied it by then.
+void iosShareFile(int requestId, const char* path)
+{
+  NSString* pathString = @(path);
+  NSURL* fileurl = [NSURL fileURLWithPath:pathString];
+  UIActivityViewController* shareActivity =
+      [[UIActivityViewController alloc] initWithActivityItems:@[fileurl] applicationActivities:nil];
+  shareActivity.completionWithItemsHandler = ^(UIActivityType activityType, BOOL completed,
+      NSArray* returnedItems, NSError* activityError) {
+    [[NSFileManager defaultManager] removeItemAtPath:pathString error:nil];
+    filePicked(requestId, completed ? pathString.UTF8String : NULL);
+  };
+  // needed for iPad: a popover without an anchor throws
+  UIView* topView = sdlViewController.view;
+  shareActivity.popoverPresentationController.sourceView = topView;
+  shareActivity.popoverPresentationController.sourceRect = CGRectMake(topView.bounds.size.width/2, 0, 0, 0);
+  [sdlViewController presentViewController:shareActivity animated:YES completion:nil];
+}
+
 void iosExportFile(int requestId, const char* path)
 {
   NSURL* url = [NSURL fileURLWithPath:@(path)];

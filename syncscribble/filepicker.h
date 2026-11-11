@@ -29,9 +29,11 @@ void openFile(const char* title, const char* exts, PickedFn onPicked);
 // Asks where to save, then has write() produce the file. On desktop write() gets the destination itself;
 //  on Android and iOS it fills a temporary file, which the system's export dialog then copies where the
 //  user chooses - nothing there keeps referring to the destination afterwards. onDone (optional) gets
-//  the destination, or "" if cancelled or the write failed.
+//  the destination, or "" if cancelled or the write failed. On iOS exports open the share sheet (which
+//  offers Save to Files) and onDone gets the staged path if shared; shareOnIOS = false keeps the document
+//  picker (Save As, where the user chooses a folder).
 void saveFile(const char* title, const std::string& suggestedName, const char* exts, WriteFn write,
-    PickedFn onDone = PickedFn());
+    PickedFn onDone = PickedFn(), bool shareOnIOS = true);
 
 #if !PLATFORM_MOBILE
 // Desktop only, synchronous: the destination chosen in the system's save dialog, or "". Save As needs
