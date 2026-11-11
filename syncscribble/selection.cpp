@@ -871,17 +871,19 @@ static bool isNearSegment(Point a, Point b, Dim radius, SvgNode* node)
   return capsuleHitsPath(a, b, radius, flat, halfWidth, filled);
 }
 
-bool PathSelector::selectHit(Element* s)
+bool SweepHit::hits(Element* s) const
 {
-  return isNearSegment(selPrev, selPos, selRadius, s->node);
+  return active() && isNearSegment(selPrev, selPos, selRadius, s->node);
 }
 
 // Exact: true only if isNearSegment() returns false at its first test, the bounds cull - the same test on
 //  the same values, run before the layer check, with the stroked path's totalTransform() made from the
 //  parent's, fetched once per event (computed as totalTransform() computes it, so bit-identical) instead of
 //  walking every element's parents.  Filled ink (the pens' outlines) needs neither: its half width is 0.
-bool PathSelector::cannotHit(Element* s)
+bool SweepHit::cannotHit(Element* s) const
 {
+  if(!active())
+    return true;
   const SvgNode* node = s->node;
   if(!cullParent || node->parent() != cullParent)
     return false;
@@ -894,24 +896,39 @@ bool PathSelector::cannotHit(Element* s)
   return !node->bounds().pad(halfWidth + 1).intersects(Rect::corners(selPrev, selPos).pad(selRadius));
 }
 
-void PathSelector::selectPath(Point p, Dim radius)
+void SweepHit::advance(Point pos, Dim radius, const Selection* selection)
 {
   selRadius = radius;
-  path.addPoint(p);
   // one capsule from the previous position to this one: sampling points along the way instead (as this
   //  once did, radius/2 apart) tests circles, which is slower and still has gaps at their edges
-  selPrev = selPos.isNaN() ? p : selPos;
-  selPos = p;
+  selPrev = selPos.isNaN() ? pos : selPos;
+  selPos = pos;
   cullParent = selection->sourceNode ? selection->sourceNode->node : NULL;
   cullParentTf = cullParent ? cullParent->totalTransform() : Transform2D();
-  // (only selectPath() runs doSelect() with this selector, so the two are always fresh there)
+}
+
+bool PathSelector::selectHit(Element* s)
+{
+  return sweep.hits(s);
+}
+
+bool PathSelector::cannotHit(Element* s)
+{
+  return sweep.cannotHit(s);
+}
+
+void PathSelector::selectPath(Point p, Dim radius)
+{
+  path.addPoint(p);
+  // (only selectPath() runs doSelect() with this selector, so the cull's values are always fresh there)
+  sweep.advance(p, radius, selection);
   selection->doSelect();
   bgDirty = true;
 }
 
 Rect PathSelector::getBGBBox()
 {
-  return path.empty() ? Rect() : selection->transform.mult(path.controlPointRect().pad(selRadius));
+  return path.empty() ? Rect() : selection->transform.mult(path.controlPointRect().pad(sweep.radius()));
 }
 
 // RectSelection class
@@ -1343,6 +1360,13 @@ static bool overlapRuled(const RuledRange& range, Element* s)
 //  moved outside its box.  A group is decided by its children, whose coms can be anywhere: never culled.
 bool RuledSelector::cannotHit(Element* s)
 {
+  // before the first selectRuled() only the sweep can hit; without a sweep, the old conservative answer
+  bool ruledCannot = rangeSet ? ruledCannotHit(s) : useSweep;
+  return ruledCannot && (!useSweep || sweep.cannotHit(s));
+}
+
+bool RuledSelector::ruledCannotHit(Element* s) const
+{
   const RuledRange& r = selRange;
   if(s->isMultiStroke() || !(r.yruling > 0))
     return false;
@@ -1364,6 +1388,12 @@ bool RuledSelector::cannotHit(Element* s)
 
 bool RuledSelector::selectHit(Element* s)
 {
+  // the ruled eraser takes everything under the pointer as path select would, whatever line or ruling the
+  //  ink belongs to
+  if(useSweep && sweep.hits(s))
+    return true;
+  if(!rangeSet)
+    return false;
   // ink belongs to the ruling it was written on: a ruled gesture in a region acts on that region's ink
   //  only, and one on the page's ruling leaves every region's ink alone
   if(sameRulingOnly && selRange.frame.region != selection->page->regionAt(s->com()))
@@ -1403,6 +1433,7 @@ void RuledSelector::selectRuled(Dim x0, int line0, Dim x1, int line1)
   const RulingFrame& f = selection->ruling;
   selRange = RuledRange(x0, f.yForLine(line0, Page::BLANK_Y_RULING), x1, f.yForLine(line1 + 1, Page::BLANK_Y_RULING),
       f.xRuling, f.yrulingOr(Page::BLANK_Y_RULING), f);
+  rangeSet = true;
   // if stops are present, add to range
   if(line0 >= 0 && line1 >= 0 && line0 < int(lstops.size())) {
     if(line1 >= int(rstops.size())) {
@@ -1431,9 +1462,17 @@ void RuledSelector::selectRuled(Dim x0, int line0, Dim x1, int line1)
   bgDirty = true;
 }
 
+void RuledSelector::sweepTo(Point pos, Dim radius)
+{
+  useSweep = true;
+  sweep.advance(pos, radius, selection);
+  selection->doSelect();
+}
+
 void RuledSelector::selectRuled(const RuledRange& range)
 {
   selRange = range;
+  rangeSet = true;
   selection->doSelect();
   bgDirty = true;
 }
@@ -1832,7 +1871,7 @@ void PathSelector::drawBG(Painter* painter)
   painter->save();
   painter->translate(selection->transform.xoffset(), selection->transform.yoffset());
   painter->setFillBrush(Color::NONE);
-  painter->setStroke(bgFill, selRadius*2, Painter::RoundCap, Painter::RoundJoin);
+  painter->setStroke(bgFill, sweep.radius()*2, Painter::RoundCap, Painter::RoundJoin);
   painter->drawPath(path);
   painter->restore();
 }

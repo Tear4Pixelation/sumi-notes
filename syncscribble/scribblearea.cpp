@@ -8,6 +8,7 @@
 #include "scribblewidget.h"
 #include "strokebuilder.h"
 #include "shaperec.h"
+#include "erasegeom.h"
 #include <fstream>
 
 
@@ -1631,32 +1632,67 @@ static int shapeSnapDelayMs(ScribbleConfig* cfg)
   return delay > 0 ? int(1000*std::min(Dim(1.5), std::max(Dim(0.5), delay)) + 0.5) : 0;
 }
 
-// Erases what a scratch-out was drawn over: every element whose bbox centre lies inside the scratch-out's
-//  hull.  An overlap test would also take strokes the scratch-out merely grazed.  Going through
-//  Selection::doSelect() is what keeps locked and hidden layers out of reach.
+// Erases what a scratch-out was drawn over: every element of which more than SCRATCHOUT_MIN_OVERLAP of its
+//  length lies inside the scratch-out's hull (scratchOutOverlap()).  It used to take an element only if its
+//  bbox centre was inside, which left a long stroke scratched out over half its length (centre outside)
+//  and took a big stroke around the scratch-out (centre inside, ink nowhere near).  The small threshold is
+//  what still leaves the strokes it merely grazed.  Going through Selection::doSelect() is what keeps
+//  locked and hidden layers out of reach.
+static void addNodeLengthInside(LengthInside& acc, SvgNode* node, const std::vector<Point>& polygon)
+{
+  if(node->asContainerNode()) {
+    for(SvgNode* child : node->asContainerNode()->children())
+      addNodeLengthInside(acc, child, polygon);
+    return;
+  }
+  if(node->type() == SvgNode::IMAGE)
+    return;
+  if(node->type() != SvgNode::PATH) {
+    // text and the like: its box's outline
+    addLengthInside(acc, Path2D().addRect(node->bounds()), true, polygon);
+    return;
+  }
+  // the ink as path select sees it (isNearSegment() in selection.cpp): flattened, in page coordinates; a
+  //  filled pen stroke is its outline, a stroked one its centre line
+  const Path2D& path = *static_cast<SvgPath*>(node)->path();
+  Path2D flat = path.isSimple() ? path : path.toFlat();
+  Transform2D tf = node->totalTransform();
+  if(!tf.isIdentity())
+    flat.transform(tf);
+  bool filled = node->getColorAttr("fill", Color::NONE) != Color::NONE || node->hasClass(Element::TAPE_CLASS);
+  addLengthInside(acc, flat, filled, polygon);
+}
+
+Dim ScribbleArea::scratchOutOverlap(Element* s, const std::vector<Point>& polygon)
+{
+  LengthInside acc;
+  addNodeLengthInside(acc, s->node, polygon);
+  return acc.fraction();
+}
+
 class ScratchOutSelector : public Selector
 {
 public:
-  ScratchOutSelector(Selection* sel, const std::vector<Point>& area) : Selector(sel), polygon(area) {}
+  ScratchOutSelector(Selection* sel, const std::vector<Point>& area) : Selector(sel), polygon(area)
+  {
+    for(const Point& pt : polygon)
+      hullBox.rectUnion(pt);
+    hullBox.pad(1);
+  }
 
   bool selectHit(Element* s) override
   {
     if(s->node->type() == SvgNode::IMAGE)
       return false;  // an image under a scratch-out is far more likely background than the target
-    Point center = s->bbox().center();
-    bool inside = false;
-    for(size_t i = 0, prev = polygon.size() - 1; i < polygon.size(); prev = i++) {
-      const Point& pt0 = polygon[prev];
-      const Point& pt1 = polygon[i];
-      if((pt1.y > center.y) != (pt0.y > center.y)
-          && center.x < pt0.x + (center.y - pt0.y)*(pt1.x - pt0.x)/(pt1.y - pt0.y))
-        inside = !inside;
-    }
-    return inside;
+    return ScribbleArea::scratchOutOverlap(s, polygon) > ScribbleArea::SCRATCHOUT_MIN_OVERLAP;
   }
+
+  // nothing of an element whose box misses the hull's box can be inside the hull
+  bool cannotHit(Element* s) override { return !s->bbox().pad(1).intersects(hullBox); }
 
 private:
   std::vector<Point> polygon;
+  Rect hullBox;
 };
 
 void ScribbleArea::startShapeSnap(Point pos)
@@ -3727,6 +3763,9 @@ void ScribbleArea::doPressEvent(const InputEvent& event)
     ruledSelector = new RuledSelector(tempSelection, selColMode);
     if(cfg->Bool("greedyRuledErase"))
       ruledSelector->selMode = RuledSelector::SEL_OVERLAP;
+    // and whatever is under the eraser, by path select's hit test: a tap erases what it is on, as path
+    //  select selects it (the ruled range alone needs a stroke's centre on the pointer's line)
+    ruledSelector->sweepTo(pos, ERASESTROKE_RADIUS/mZoom);
     eraseCurrLine = prevLine;
     eraseXmax = lx;
     eraseXmin = lx;
@@ -3905,6 +3944,8 @@ void ScribbleArea::doMoveEvent(const InputEvent& event)
     pathSelector->selectPath(pos, ERASESTROKE_RADIUS/mZoom);
     break;
   case MODE_ERASERULED:
+    // the capsule moves on first; the selectRuled() below runs the selection with both
+    ruledSelector->sweep.advance(pos, ERASESTROKE_RADIUS/mZoom, tempSelection);
     if(lx < marginLeft) {
       // behave like select ruled if cursor in left margin - allows for very fast erasing
       ruledSelector->selectRuled(eraseXmin, eraseCurrLine, lx, line);

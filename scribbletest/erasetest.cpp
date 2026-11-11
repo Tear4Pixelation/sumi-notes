@@ -91,6 +91,39 @@ int runEraseTests()
   eraseCheck(!pointInPolygon(poly, Point(108, 8)), "the capsule's end is round: its corner is not inside");
   eraseCheck(pointInPolygon(poly, Point(50, 9.9)), "the capsule's side is inside");
 
+  // the scratch-out's overlap measure: the fraction of a path's length inside a polygon
+  const std::vector<Point> hull = {Point(0, 0), Point(100, 0), Point(100, 100), Point(0, 100)};
+  auto fractionOf = [&](const std::vector<Point>& pts, bool closed) {
+    Path2D path;
+    for(size_t ii = 0; ii < pts.size(); ++ii) {
+      if(ii == 0) path.moveTo(pts[ii]); else path.lineTo(pts[ii]);
+    }
+    LengthInside acc;
+    addLengthInside(acc, path, closed, hull);
+    return acc.fraction();
+  };
+  // a long line ending in the square's middle: a sixth of it inside, its middle (and start) outside
+  eraseCheck(std::abs(fractionOf({Point(-250, 50), Point(50, 50)}, false) - 1.0/6) < 1E-9,
+      "a line from far left of a square to its middle is 1/6 inside");
+  eraseCheck(std::abs(fractionOf({Point(50, -100), Point(50, 200)}, false) - 1.0/3) < 1E-9,
+      "a line across a square, three times as long, is a third inside");
+  // a ring around the square: its centre is the square's, none of its length inside
+  std::vector<Point> ring;
+  for(int ii = 0; ii <= 64; ++ii) {
+    Dim angle = 2*M_PI*ii/64;
+    ring.push_back(Point(50 + 200*std::cos(angle), 50 + 200*std::sin(angle)));
+  }
+  eraseCheck(fractionOf(ring, false) == 0, "a ring around a square has nothing inside it");
+  // a closed outline counts its closing edge: a box half in the square
+  eraseCheck(std::abs(fractionOf({Point(50, 10), Point(150, 10), Point(150, 20), Point(50, 20)}, true) - 0.5) < 1E-9,
+      "a closed box straddling the edge is half inside");
+  // a tap: no length, judged by its point
+  eraseCheck(fractionOf({Point(30, 30), Point(30, 30)}, false) == 1, "a dot inside is all inside");
+  eraseCheck(fractionOf({Point(130, 30)}, false) == 0, "a dot outside is not inside");
+  // through two corners
+  eraseCheck(std::abs(fractionOf({Point(-50, -50), Point(150, 150)}, false) - 0.5) < 1E-9,
+      "a diagonal through two corners is half inside");
+
   return nEraseChecksFailed;
 }
 

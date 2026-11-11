@@ -184,7 +184,8 @@ would make free erase work but would split curved shapes (ellipse, rounded box) 
 With the pen tool, **hold the pen still at the end of a stroke** for `shapeSnapDelay` seconds and the ink
 becomes the line, rectangle or ellipse it looks like; the rest of the gesture then scales it until the pen
 lifts. A **scratch-out** (back and forth over something) erases what it was drawn over instead - held,
-or, by default, as soon as the pen lifts (below). The
+or, by default, as soon as the pen lifts (below); what counts as "drawn over" (more than 2% of a stroke's
+length inside the scratch-out's hull) is in [pen-and-tools.md](pen-and-tools.md#scratch-out-by-length-inside-the-hull). The
 delay is 0.5-1.5 s, 0 turns it off (default 0.8), and is in Preferences > Shapes plus the Pen and Shape
 Settings buttons. The recognizer is `syncscribble/shaperec.*` (+ `shaperecgeom.h`); its tuning, test set
 and gates live in `labs/shape-recognition/`, whose `make test` compiles **this** copy - run it after

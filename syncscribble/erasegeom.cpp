@@ -90,3 +90,70 @@ std::vector<Point> capsulePolygon(Point a, Point b, Dim radius, int capSegs)
   }
   return poly;
 }
+
+static Dim segLength(Point s0, Point s1) { return std::sqrt(dot2(s1 - s0, s1 - s0)); }
+
+// length of segment s0-s1 inside the polygon: cut it where it crosses the polygon's edges and test the
+//  middle of each piece
+static Dim segmentLengthInside(Point s0, Point s1, const std::vector<Point>& polygon)
+{
+  Point dir = s1 - s0;
+  Dim len = segLength(s0, s1);
+  if(len <= 0)
+    return 0;
+  std::vector<Dim> cuts = {0, 1};
+  for(size_t ii = 0, prev = polygon.size() - 1; ii < polygon.size(); prev = ii++) {
+    Point edge = polygon[ii] - polygon[prev];
+    Dim denom = cross2(dir, edge);
+    if(denom == 0)
+      continue;  // parallel: the pieces either side are tested by their middles anyway
+    Point offset = polygon[prev] - s0;
+    Dim along = cross2(offset, edge)/denom;  // parameter on the segment
+    Dim onEdge = cross2(offset, dir)/denom;  // parameter on the polygon's edge
+    if(along > 0 && along < 1 && onEdge >= 0 && onEdge <= 1)
+      cuts.push_back(along);
+  }
+  std::sort(cuts.begin(), cuts.end());
+  Dim inside = 0;
+  for(size_t ii = 1; ii < cuts.size(); ++ii) {
+    if(cuts[ii] - cuts[ii-1] <= 0)
+      continue;
+    if(pointInPolygon(polygon, s0 + (0.5*(cuts[ii-1] + cuts[ii]))*dir))
+      inside += (cuts[ii] - cuts[ii-1])*len;
+  }
+  return inside;
+}
+
+void addLengthInside(LengthInside& acc, const Path2D& path, bool closed, const std::vector<Point>& polygon)
+{
+  if(polygon.size() < 3)
+    return;
+  auto addSegment = [&](Point s0, Point s1) {
+    acc.total += segLength(s0, s1);
+    acc.inside += segmentLengthInside(s0, s1, polygon);
+  };
+  const int count = path.size();
+  int subpathStart = 0;
+  auto endSubpath = [&](int end) {
+    if(closed && end - subpathStart > 2)
+      addSegment(path.point(end - 1), path.point(subpathStart));
+    Dim length = 0;
+    for(int ii = subpathStart + 1; ii < end; ++ii)
+      length += segLength(path.point(ii-1), path.point(ii));
+    if(end > subpathStart && length <= 0) {
+      ++acc.dots;
+      if(pointInPolygon(polygon, path.point(subpathStart)))
+        ++acc.dotsInside;
+    }
+  };
+  for(int ii = 0; ii < count; ++ii) {
+    if(ii > 0 && path.command(ii) == Path2D::MoveTo) {
+      endSubpath(ii);
+      subpathStart = ii;
+    }
+    else if(ii > 0)
+      addSegment(path.point(ii-1), path.point(ii));
+  }
+  if(count > 0)
+    endSubpath(count);
+}
