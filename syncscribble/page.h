@@ -124,6 +124,9 @@ public:
   RulingFrame regionFrame(Element* region) const;
   // re-color every region from the page's paper and rule colors (theme change, invert, load)
   void refreshRegions();
+  // the rule color a Paper Patch is drawn in: the page's own, except on a page with no ruling of its own
+  //  (custom/image background) where it is the theme's, as the default ruling of a new page
+  Color regionRuleColor() const;
   Dim xruling() const { return props.xRuling; }
   Dim marginLeft() const { return props.marginLeft; }
   Rect rect() const { return Rect::ltwh(0, 0, width(), height()); }

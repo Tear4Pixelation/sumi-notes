@@ -184,6 +184,7 @@ public:
   //  this is how the add-page menu inserts a page with a ruling chosen for that page alone
   Page* generatePage(int where, const PageProperties* props = NULL) const;
   void updateGhostPage();
+  void syncPageRuleColor();
   void newPage(int where = INT_MAX, const PageProperties* props = NULL);
   void insertPage(Page* page, int where = INT_MAX);
   // Convert to Subpage: page `pagenum` becomes a Paper Patch (or, on a PDF/scan page, an image) with its

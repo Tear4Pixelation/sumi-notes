@@ -47,6 +47,9 @@ public:
   //  clipping, a thumbnail read) gets the default single layer.
   LayerList layers;
   int dirtyCount = 0;  // managed just as Page.dirtyCount
+  // The default ruling color for new pages (cfg ruleColor), set by ScribbleDoc. Image-background pages (PDF, scan) have no ruling of their
+  //  own, so the rule color they store is a placeholder; Paper Patch lines on them use this instead.
+  Color themeRuleColor = Color::NONE;
   int autoSaveSerialNum = 0;
   pugi::xml_document xmldoc;
 

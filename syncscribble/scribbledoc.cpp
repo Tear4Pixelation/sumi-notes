@@ -274,6 +274,14 @@ int ScribbleDoc::moveSelToLayer(int id)
   return nmoved;
 }
 
+// the default ruling color of a new page (cfg "ruleColor") is also what Paper Patch lines on a page with no
+//  ruling of its own use (Page::regionRuleColor)
+void ScribbleDoc::syncPageRuleColor()
+{
+  if(document)
+    document->themeRuleColor = Color::fromArgb(cfg->Int("ruleColor"));
+}
+
 void ScribbleDoc::loadConfig(bool refresh)
 {
   // the layer table is stored in the document config, so this - the one point every cfg swap passes
@@ -285,6 +293,7 @@ void ScribbleDoc::loadConfig(bool refresh)
   //  change to the global prefs can move the recipe too, so this is the one place the cached palette
   //  has to be dropped
   paletteValid = false;
+  syncPageRuleColor();
   // a different document can carry a different theme, so the swatches follow it; guarded because
   //  loadConfig() also runs while the app is still being constructed
   if(app && app->penToolbar)
@@ -950,7 +959,7 @@ bool ScribbleDoc::convertToSubpage(int pagenum, const PageProperties& props)
         frame.dotRadius, frame.staff);
     params.origin = frame.origin;
     params.sanitize();
-    addShifted(Element::createRulingRegion(params, orig->props.color, orig->props.ruleColor), bottomlayer);
+    addShifted(Element::createRulingRegion(params, orig->props.color, orig->regionRuleColor()), bottomlayer);
   }
   // then the content in document order, each on its own layer: added after the patch or image, so ink on the
   //  bottom layer stays over them, and regions already on the page restack over the new patch as usual
@@ -1231,6 +1240,7 @@ void ScribbleDoc::setTheme(const PaletteRecipe& recipe, bool applyPages, bool gl
   // the recipe is also the source of the page defaults, so a page added later matches the theme
   cfg->set("pageColor", int(pal.paper.argb()));
   cfg->set("ruleColor", int(pal.rule.argb()));
+  syncPageRuleColor();
   // Accents are part of the theme too (COLORS_SPEC.md §10.3): a bookmark or link in some unrelated
   //  blue is the one thing on the page that ignores the palette.  These were global-only; writing
   //  them to the document config as well is what resolves the inconsistency the spec flagged, and
@@ -1254,8 +1264,10 @@ void ScribbleDoc::setTheme(const PaletteRecipe& recipe, bool applyPages, bool gl
     for(Page* page : document->pages) {
       // Pages whose background is an image - PDF import, document scan - are skipped: their paper is
       //  the image, so recoloring underneath it does nothing visible and only dirties the page.
-      if(page->isCustomRuling)
+      if(page->isCustomRuling) {
+        page->refreshRegions();  // patches there follow the new theme rule color via regionRuleColor()
         continue;
+      }
       PageProperties props = page->getProperties();
       props.color = pal.paper;
       props.ruleColor = pal.rule;
